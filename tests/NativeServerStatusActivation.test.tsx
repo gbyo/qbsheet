@@ -21,10 +21,9 @@ describe('native server status activation', () => {
       .mockImplementationOnce(() => second.promise);
     const { useNativeServerStatus } = await import('../src/director/server/useNativeServerStatus');
 
-    const { result, rerender, unmount } = renderHook(
-      ({ active }) => useNativeServerStatus({ active }),
-      { initialProps: { active: true } },
-    );
+    const { result, rerender, unmount } = renderHook(({ active }) => useNativeServerStatus({ active }), {
+      initialProps: { active: true },
+    });
 
     await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
     expect(result.current.loading).toBe(true);
