@@ -101,6 +101,16 @@
   white-space: nowrap;
 }
 
+/* Explicit column alignment belongs to the column definition instead of
+   one-off cell classes in individual views. */
+.director-table [data-align='center'] {
+  text-align: center;
+}
+
+.director-table [data-align='right'] {
+  text-align: right;
+}
+
 .director-cell-nowrap {
   white-space: nowrap;
 }
@@ -129,6 +139,7 @@
    menu — never a toolbar. */
 .director-cell-actions {
   width: 1%;
+  text-align: right;
   white-space: nowrap;
 }
 
