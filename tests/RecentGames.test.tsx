@@ -107,6 +107,31 @@ describe('Recent Games operational ledger', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
+  test('shows a retry failure and leaves the action available', async () => {
+    const onRetry = vi.fn(async () => {
+      throw new Error('network unavailable');
+    });
+    render(
+      <RecentGames
+        records={[record({ serverDelivery: 'pending' })]}
+        onRetry={onRetry}
+        canRetry={() => true}
+      />,
+    );
+
+    const retry = screen.getByRole('button', { name: 'Retry sending result' });
+    await act(async () => {
+      fireEvent.click(retry);
+    });
+
+    expect(
+      await screen.findByRole('alert', {
+        name: '',
+      }),
+    ).toHaveTextContent('That result could not be retried. Check the connection and try again.');
+    expect(retry).toBeEnabled();
+  });
+
   test('offers the file again as a quiet named button on every row, without the word again', () => {
     const onDownload = vi.fn(() => true);
     render(
