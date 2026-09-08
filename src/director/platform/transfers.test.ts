@@ -26,9 +26,7 @@ describe('native transfer volume enumeration', () => {
     const overlapping = fileSystem.listVolumes();
 
     expect(invoke).toHaveBeenCalledTimes(1);
-    first.resolve([
-      { mountPoint: '/Volumes/FIRST', name: 'First drive', removable: true, readOnly: false },
-    ]);
+    first.resolve([{ mountPoint: '/Volumes/FIRST', name: 'First drive', removable: true, readOnly: false }]);
     await expect(initial).resolves.toEqual([
       { mountPoint: '/Volumes/FIRST', name: 'First drive', removable: true, readOnly: false },
     ]);
