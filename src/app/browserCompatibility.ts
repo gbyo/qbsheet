@@ -1,6 +1,7 @@
-export function isSafariBrowser(userAgent: string = navigator.userAgent): boolean {
+export function isSafariBrowser(userAgent?: string): boolean {
+  const resolvedUserAgent = userAgent ?? (typeof navigator === 'undefined' ? '' : navigator.userAgent);
   return (
-    /Safari\//.test(userAgent) &&
-    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|Opera|Firefox|FxiOS)\//.test(userAgent)
+    /Safari\//.test(resolvedUserAgent) &&
+    !/(?:Chrome|Chromium|CriOS|Edg|EdgiOS|OPR|Opera|Firefox|FxiOS)\//.test(resolvedUserAgent)
   );
 }
