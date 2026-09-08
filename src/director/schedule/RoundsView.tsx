@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   availableTimeZones,
   isoToZonedDateTimeInput,
@@ -17,8 +17,36 @@ import {
   type TournamentTimelineEvent,
 } from '../domain';
 import type { DirectorController, NewTimelineEventInput } from '../state/useDirectorController';
-import { Button, FormField } from '../components/Controls';
-import { DirectorMenu } from '../components/DirectorMenu';
+import {
+  ActionMenu,
+  Button,
+  Callout,
+  DateField,
+  Diagnostics,
+  Dialog,
+  DialogSection,
+  Field,
+  FieldGrid,
+  MenuItem,
+  MultiSelect,
+  Page,
+  PageHeader,
+  Progress,
+  ReorderHandle,
+  ReorderNotice,
+  ReorderToggle,
+  Select,
+  StateLabel,
+  SummaryItem,
+  SummaryList,
+  TextArea,
+  TextInput,
+  TimeField,
+  useConfirm,
+  useDragReorder,
+  useReorderMode,
+  type SelectOption,
+} from '../components';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
@@ -52,22 +80,9 @@ export function RoundsView({
   const tournament = state.tournament;
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [showQuickAdd, setShowQuickAdd] = useState(false);
-  const quickAddOpenerRef = useRef<HTMLElement | null>(null);
+  const reorder = useReorderMode();
+  const confirmAction = useConfirm();
 
-  const quickAddEvent = (type: TimelineEventType) => {
-    const title = timelineEventTypeLabel(type);
-    if (controller.addTimelineEvent({ type, title, visibility: 'public' })) {
-      onAnnounce(`${title} added at the end of the day. Reorder it with the move buttons.`);
-    } else {
-      onAnnounce(
-        errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`),
-      );
-    }
-    setShowQuickAdd(false);
-  };
-  // The tournament day in its explicit persisted order. Timestamps never decide
-  // placement; see `packages/tournament-domain/src/dayOrder.ts`.
   const orderedItems: OrderedDayItem[] = useMemo(
     () => orderDayItems(state.rounds, state.timeline),
     [state.rounds, state.timeline],
@@ -85,103 +100,132 @@ export function RoundsView({
       state.timeline.some((event) => event.scheduledStart || event.scheduledEnd),
     [state.rounds, state.timeline],
   );
+
+  const moveItem = (item: OrderedDayItem, delta: number) => {
+    const direction = delta < 0 ? 'up' : 'down';
+    controller.moveDayItem(item.id, direction);
+    const label = item.kind === 'round' && item.round ? item.round.name : (item.event?.title ?? 'Item');
+    onAnnounce(`${label} moved ${direction === 'up' ? 'earlier' : 'later'} in the tournament day.`);
+  };
+
+  const drag = useDragReorder((from, to) => {
+    const item = orderedItems[from];
+    if (!item) return;
+    const direction = to < from ? 'up' : 'down';
+    for (let index = 0; index < Math.abs(to - from); index += 1) {
+      controller.moveDayItem(item.id, direction);
+    }
+    const label = item.kind === 'round' && item.round ? item.round.name : (item.event?.title ?? 'Item');
+    onAnnounce(`${label} moved to position ${to + 1}.`);
+  });
+
+  const quickAddEvent = (type: TimelineEventType) => {
+    const title = timelineEventTypeLabel(type);
+    if (controller.addTimelineEvent({ type, title, visibility: 'public' })) {
+      onAnnounce(`${title} added at the end of the day. Use Reorder when you want to change its position.`);
+    } else {
+      onAnnounce(errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`));
+    }
+  };
+
   if (!tournament) {
     return (
-      <>
-        <div className="director-workspace-header">
-          <div>
-            <h1>Tournament day</h1>
-            <p className="director-workspace-sub">A tournament is required before the day can be planned.</p>
-          </div>
-        </div>
-        <p className="director-empty-copy">Create a tournament from the Overview page first.</p>
-      </>
+      <Page>
+        <PageHeader title="Tournament day" description="A tournament is required before the day can be planned." />
+        <Callout tone="info" title="No tournament open">
+          Create a tournament from Overview before planning rounds and day events.
+        </Callout>
+      </Page>
     );
   }
 
   return (
-    <>
-      <div className="director-workspace-header">
-        <div>
-          <h1>Tournament day</h1>
-          <p className="director-workspace-sub">
-            {activeRound
-              ? `${activeRound.name} ${activeRound.status === 'closed' ? 'complete' : activeRound.status === 'released' ? `active · ${activeAccepted} of ${activeGames.length} results in` : 'ready'}`
-              : roundCount === 0
-                ? 'No rounds yet — generate the plan from Format, or add a round.'
-                : `${roundCount} round${roundCount === 1 ? '' : 's'} planned`}
-            {hasTimes ? ` · ${timeZoneLabel(tournament.timeZone)}` : ''}
-          </p>
-        </div>
-        <div className="director-workspace-actions">
-          <Button
-            variant="primary"
-            icon="plus"
-            onClick={() => {
-              const result = controller.generateSchedule();
-              onAnnounce(
-                result.generated
-                  ? 'Round added at the end of the day.'
-                  : errorNotice(result.conflicts.join(' ') || 'The round could not be generated.'),
-              );
-            }}
-          >
-            Add round
-          </Button>
-          <span
-            ref={(node) => {
-              quickAddOpenerRef.current = node;
-            }}
-          >
+    <Page>
+      <PageHeader
+        title="Tournament day"
+        description={
+          activeRound
+            ? `${activeRound.name} ${activeRound.status === 'closed' ? 'complete' : activeRound.status === 'released' ? `active · ${activeAccepted} of ${activeGames.length} results in` : 'ready'}${hasTimes ? ` · ${timeZoneLabel(tournament.timeZone)}` : ''}`
+            : roundCount === 0
+              ? 'No rounds yet. Add the first round when the format is ready.'
+              : `${roundCount} round${roundCount === 1 ? '' : 's'} planned${hasTimes ? ` · ${timeZoneLabel(tournament.timeZone)}` : ''}`
+        }
+        actions={
+          <>
             <Button
-              variant="secondary"
-              aria-haspopup="menu"
-              aria-expanded={showQuickAdd}
-              onClick={() => setShowQuickAdd((open) => !open)}
+              variant="primary"
+              icon="plus"
+              onClick={() => {
+                const result = controller.generateSchedule();
+                onAnnounce(
+                  result.generated
+                    ? 'Round added at the end of the day.'
+                    : errorNotice(result.conflicts.join(' ') || 'The round could not be generated.'),
+                );
+              }}
             >
-              Add event
+              Add round
             </Button>
-          </span>
-          {showQuickAdd && (
-            <DirectorMenu
+            <ActionMenu
               label="Add day event"
-              openerRef={quickAddOpenerRef}
-              onClose={() => setShowQuickAdd(false)}
+              triggerLabel="Add event"
+              triggerVariant="secondary"
+              triggerIcon="plus"
             >
-              {quickEventTypes.map((type) => (
-                <button key={type} role="menuitem" type="button" onClick={() => quickAddEvent(type)}>
-                  {timelineEventTypeLabel(type)}
-                </button>
-              ))}
-              <button
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  setShowQuickAdd(false);
-                  setEditingId(null);
-                  setShowForm(true);
-                }}
-              >
-                Other event…
-              </button>
-            </DirectorMenu>
-          )}
-        </div>
-      </div>
+              {(close) => (
+                <>
+                  {quickEventTypes.map((type) => (
+                    <MenuItem
+                      key={type}
+                      onSelect={() => {
+                        close();
+                        quickAddEvent(type);
+                      }}
+                    >
+                      {timelineEventTypeLabel(type)}
+                    </MenuItem>
+                  ))}
+                  <MenuItem
+                    icon="edit"
+                    onSelect={() => {
+                      close();
+                      setEditingId(null);
+                      setShowForm(true);
+                    }}
+                  >
+                    Other event…
+                  </MenuItem>
+                </>
+              )}
+            </ActionMenu>
+            <ReorderToggle
+              active={reorder.active}
+              onToggle={reorder.toggle}
+              disabled={orderedItems.length < 2}
+              label="Reorder day"
+            />
+          </>
+        }
+      />
+
+      {reorder.active && <ReorderNotice />}
+
       {orderedItems.length === 0 ? (
-        <p className="director-empty-copy">
-          No rounds or day events have been planned yet. Use your format plan to generate rounds, then insert
-          lunch or breaks where the day needs them.
-        </p>
+        <Callout tone="info" title="The tournament day is empty">
+          Add a round, then insert lunch, breaks, check-in, awards, or another event where the day needs them.
+        </Callout>
       ) : (
-        <ol className="director-day-sequence">
+        <SummaryList ariaLabel="Tournament day" className="director-day-sequence">
           {orderedItems.map((item, index) => {
-            const moveProps = {
-              position: index + 1,
-              total: orderedItems.length,
-              onMoveUp: () => controller.moveDayItem(item.id, 'up'),
-              onMoveDown: () => controller.moveDayItem(item.id, 'down'),
-            };
+            const reorderControl = reorder.active ? (
+              <ReorderHandle
+                label={item.kind === 'round' && item.round ? item.round.name : (item.event?.title ?? 'day item')}
+                index={index}
+                count={orderedItems.length}
+                onMove={(delta) => moveItem(item, delta)}
+                {...drag.handlers(index)}
+              />
+            ) : null;
             return item.kind === 'round' && item.round ? (
               <RoundWorkspaceRow
                 transfers={transfers}
@@ -193,31 +237,37 @@ export function RoundsView({
                 onAnnounce={onAnnounce}
                 navigationTarget={navigationTarget}
                 onClearNavigationTarget={onClearNavigationTarget}
-                {...moveProps}
+                reorderControl={reorderControl}
               />
             ) : item.event ? (
               <TimelineEventRow
                 key={item.id}
                 state={state}
                 event={item.event}
+                reorderControl={reorderControl}
                 onEdit={() => {
                   setEditingId(item.id);
                   setShowForm(true);
                 }}
-                onDelete={() => {
-                  if (!confirm(`Remove “${item.event?.title}” from the day?`)) return;
+                onDelete={async () => {
+                  const approved = await confirmAction({
+                    title: `Remove “${item.event?.title}”?`,
+                    consequence: 'The event will be removed from the tournament-day sequence. Rounds and results are not changed.',
+                    confirmLabel: 'Remove event',
+                    tone: 'danger',
+                  });
+                  if (!approved) return;
                   if (controller.removeTimelineEvent(item.id)) onAnnounce(`${item.event?.title} removed.`);
-                  else
-                    onAnnounce(errorNotice('The schedule event was not removed; review the Director error.'));
+                  else onAnnounce(errorNotice('The schedule event was not removed; review the Director error.'));
                 }}
-                {...moveProps}
               />
             ) : null;
           })}
-        </ol>
+        </SummaryList>
       )}
+
       {showForm && (
-        <TimelineEventForm
+        <TimelineEventDialog
           key={editingId ?? 'new'}
           state={state}
           event={editingId ? state.timeline.find((entry) => entry.id === editingId) : undefined}
@@ -229,15 +279,14 @@ export function RoundsView({
           }}
         />
       )}
-    </>
+    </Page>
   );
 }
 
-/** Friendly operational wording; the storage state machine stays out of the normal path. */
 function friendlyRoundStatus(status: string, accepted: number, total: number): string {
-  if (status === 'closed') return 'complete';
-  if (status === 'released') return `active · ${accepted} of ${total} results in`;
-  return total > 0 ? `${total} game${total === 1 ? '' : 's'} · ready` : 'ready';
+  if (status === 'closed') return 'Complete';
+  if (status === 'released') return `Active · ${accepted} of ${total} results in`;
+  return total > 0 ? `${total} game${total === 1 ? '' : 's'} · Ready` : 'Ready';
 }
 
 function gameLabel(state: DirectorState, game: DirectorState['scheduledGames'][number]): string {
@@ -257,10 +306,7 @@ function RoundWorkspaceRow({
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
-  position,
-  total,
-  onMoveUp,
-  onMoveDown,
+  reorderControl,
 }: {
   transfers?: TransfersRuntime;
   state: DirectorState;
@@ -270,37 +316,23 @@ function RoundWorkspaceRow({
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
-  position: number;
-  total: number;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  reorderControl?: React.ReactNode;
 }) {
-  const [assigningPacket, setAssigningPacket] = useState(false);
-  const [assigningRooms, setAssigningRooms] = useState(false);
-  const [roomDraft, setRoomDraft] = useState<Record<string, string | null>>({});
-  const [movingGameId, setMovingGameId] = useState<string | null>(null);
-  const [moveRoomId, setMoveRoomId] = useState('');
-  const [moveInProgress, setMoveInProgress] = useState(false);
-  const [moveFailure, setMoveFailure] = useState<string | null>(null);
-  const [choosingDrive, setChoosingDrive] = useState(false);
-  const driveOpenerRef = useRef<HTMLElement | null>(null);
-  const drives = transfers?.native
-    ? state.transfers.locations.filter(
-        (location) => location.kind === 'removable-drive' && location.connected && !location.readOnly,
-      )
-    : [];
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [packetOpen, setPacketOpen] = useState(false);
+  const [roomsOpen, setRoomsOpen] = useState(false);
+  const [moveOpen, setMoveOpen] = useState(false);
+  const [usbOpen, setUsbOpen] = useState(false);
+  const [plannedTimeOpen, setPlannedTimeOpen] = useState(false);
+  const [recoveryOpen, setRecoveryOpen] = useState(false);
   const games = state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye);
   const returned = state.submissions.filter(
     (submission) =>
       (submission.status === 'review' || submission.status === 'received') &&
       state.games.some((game) => game.id === submission.gameId && game.roundId === round.id),
   );
-  const openResults = () =>
-    onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id });
   const accepted = games.filter((game) => game.status === 'accepted').length;
   const unresolved = games.filter((game) => game.status !== 'accepted' && game.status !== 'cancelled').length;
   const packetName = round.packetId
@@ -328,26 +360,21 @@ function RoundWorkspaceRow({
   const highlighted = highlightedCurrent || highlightedLegacy;
   const isActive = round.status === 'released';
   const isComplete = round.status === 'closed';
-  const roomMoveOptions = games
-    .filter((game) => game.roomId !== null && game.status !== 'cancelled')
-    .map((game) => {
-      const destinations = state.rooms.filter(
-        (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
-      );
-      const blocker =
-        destinations.length > 0
-          ? null
-          : (state.rooms
-              .filter((room) => room.id !== game.roomId)
-              .map((room) => releasedGameRoomMoveBlocker(state, game.id, room.id))
-              .find((reason): reason is string => Boolean(reason)) ??
-            'No safe destination room is currently available.');
-      return { game, destinations, blocker };
-    });
-  const selectedRoomMove =
-    roomMoveOptions.find((entry) => entry.game.id === movingGameId) ??
-    roomMoveOptions.find((entry) => entry.blocker === null) ??
-    roomMoveOptions[0];
+  const drives = transfers?.native
+    ? state.transfers.locations.filter(
+        (location) => location.kind === 'removable-drive' && location.connected && !location.readOnly,
+      )
+    : [];
+  const canMoveGame =
+    isActive &&
+    games.some(
+      (game) =>
+        game.roomId !== null &&
+        game.status !== 'cancelled' &&
+        state.rooms.some(
+          (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
+        ),
+    );
 
   const start = () => {
     setStarting(true);
@@ -360,6 +387,7 @@ function RoundWorkspaceRow({
       })
       .finally(() => setStarting(false));
   };
+
   const finish = () => {
     setFinishing(true);
     setFailure(null);
@@ -369,454 +397,635 @@ function RoundWorkspaceRow({
     setFinishing(false);
   };
 
-  const openRoomMove = () => {
-    const first = roomMoveOptions.find((entry) => entry.blocker === null) ?? roomMoveOptions[0];
-    setMovingGameId(first?.game.id ?? null);
-    setMoveRoomId(first?.destinations[0]?.id ?? '');
-    setMoveFailure(null);
-  };
+  const primaryAction = isComplete ? (
+    <Button
+      variant="secondary"
+      onClick={() => onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id })}
+    >
+      View results
+    </Button>
+  ) : isActive && unresolved === 0 && games.length > 0 ? (
+    <Button variant="primary" icon="check" disabled={finishing} onClick={finish}>
+      {finishing ? 'Finishing…' : 'Finish round'}
+    </Button>
+  ) : isActive ? (
+    <Button
+      variant="primary"
+      onClick={() => onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id })}
+    >
+      Open results
+    </Button>
+  ) : (
+    <Button variant="primary" icon="play" disabled={starting} onClick={start}>
+      {starting ? 'Starting…' : 'Start round'}
+    </Button>
+  );
+
+  const statusState = isComplete ? 'complete' : isActive ? 'active' : 'ready';
+  const summary = [
+    packetName ? `Packet ${packetName}` : games.length > 0 ? 'No packet assigned' : null,
+    roomNames.length > 0
+      ? `${roomNames.length} room${roomNames.length === 1 ? '' : 's'} · ${roomNames.slice(0, 3).join(', ')}${roomNames.length > 3 ? '…' : ''}`
+      : state.rooms.length > 0 && games.length > 0
+        ? 'Rooms not yet assigned'
+        : null,
+    round.scheduledStart ? `Planned ${formatTimestamp(round.scheduledStart, timeZone)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
-    <li
-      tabIndex={-1}
-      data-director-navigation-id={round.id}
-      className={`director-round${isActive ? ' is-active' : ''}${isComplete ? ' is-complete' : ''}${highlighted ? ' is-navigation-target' : ''}`}
-      aria-current={isActive ? 'step' : undefined}
-    >
-      <span className="director-round-number" aria-hidden="true">
-        {String(round.number).padStart(2, '0')}
-      </span>
-      <div className="director-round-main">
-        <div className="director-round-title-row">
-          <strong data-director-navigation-focus tabIndex={-1}>
-            {round.name}
-          </strong>
-          <span className="director-round-status">
-            {friendlyRoundStatus(round.status, accepted, games.length)}
-          </span>
-        </div>
-        <p className="director-round-context">
-          {[
-            packetName ? `Packet: ${packetName}` : games.length > 0 ? 'No packet assigned' : null,
-            roomIds.length > 0
-              ? `${roomIds.length} room${roomIds.length === 1 ? '' : 's'}${roomNames.length > 0 ? ` · ${roomNames.slice(0, 3).join(', ')}${roomNames.length > 3 ? '…' : ''}` : ''}`
-              : state.rooms.length > 0
-                ? 'Rooms not yet assigned'
-                : null,
-            round.scheduledStart ? `Planned ${formatTimestamp(round.scheduledStart, timeZone)}` : null,
-          ]
-            .filter(Boolean)
-            .join(' · ') || 'Pairings and delivery appear here once the round has games.'}
-        </p>
-        {!isComplete && unresolved > 0 && isActive && (
-          <p className="director-round-progress">
-            <button type="button" className="director-inline-action" onClick={openResults}>
-              {unresolved} result{unresolved === 1 ? '' : 's'} outstanding · Open Results
-            </button>
-          </p>
-        )}
-        {returned.length > 0 && (
-          <p className="director-round-progress">
-            <button type="button" className="director-inline-action" onClick={openResults}>
-              {returned.length} result{returned.length === 1 ? '' : 's'} returned · Review
-            </button>
-          </p>
-        )}
-        {failure && (
-          <p className="director-round-failure" role="alert">
-            {failure}{' '}
-            <button
-              type="button"
-              className="director-inline-action"
-              onClick={() => {
-                setFailure(null);
-                setShowAdvanced(true);
-              }}
-            >
-              Show recovery options
-            </button>
-          </p>
-        )}
-        <div className="director-round-actions">
-          {!isComplete && !isActive && (
-            <Button variant="primary" icon="play" disabled={starting} onClick={start}>
-              {starting ? `Starting ${round.name}…` : `Start ${round.name}`}
-            </Button>
-          )}
-          {isActive && unresolved === 0 && games.length > 0 && (
-            <Button variant="primary" icon="chevron" disabled={finishing} onClick={finish}>
-              {finishing ? `Finishing ${round.name}…` : `Finish ${round.name}`}
-            </Button>
-          )}
-          {packetName == null && !isComplete && !isActive && (
-            <Button
-              variant="quiet"
-              onClick={() =>
-                state.packets.some((packet) => !packet.retired)
-                  ? setAssigningPacket((value) => !value)
-                  : onNavigate('packets')
-              }
-            >
-              Assign packet
-            </Button>
-          )}
-          {games.some((game) => game.roomId === null) &&
-            !isComplete &&
-            !isActive &&
-            state.rooms.length > 0 && (
-              <Button
-                variant="quiet"
-                onClick={() => {
-                  setRoomDraft(Object.fromEntries(games.map((game) => [game.id, game.roomId])));
-                  setAssigningRooms((value) => !value);
-                }}
-              >
-                Assign rooms
-              </Button>
-            )}
-          {isActive && (
-            <Button variant="quiet" onClick={openResults}>
-              Open results
-            </Button>
-          )}
-          {isActive && roomMoveOptions.length > 0 && (
-            <Button variant="quiet" onClick={openRoomMove}>
-              Move game
-            </Button>
-          )}
-          {!isComplete &&
-            games.some((game) => game.status !== 'cancelled') &&
-            drives.length > 0 &&
-            transfers && (
-              <span
-                ref={(node) => {
-                  driveOpenerRef.current = node;
-                }}
-              >
-                <Button
-                  variant="secondary"
-                  disabled={drives.every((drive) => transfers.isOperationActive(prepareOperation(drive.id)))}
-                  aria-haspopup={drives.length > 1 ? 'menu' : undefined}
-                  aria-expanded={drives.length > 1 ? choosingDrive : undefined}
-                  onClick={() => {
-                    if (drives.length === 1)
-                      void transfers.prepareTo(drives[0].id, { kind: 'round', roundId: round.id });
-                    else setChoosingDrive((value) => !value);
+    <SummaryItem
+      id={`round-${round.id}`}
+      className={highlighted ? 'is-navigation-target' : ''}
+      selected={isActive}
+      title={
+        <strong
+          data-director-navigation-id={round.id}
+          data-director-navigation-focus
+          tabIndex={-1}
+        >
+          {round.name}
+        </strong>
+      }
+      status={<StateLabel state={statusState} label={friendlyRoundStatus(round.status, accepted, games.length)} />}
+      summary={summary || 'Pairings and delivery appear here once the round has games.'}
+      actions={
+        <div className="director-actions">
+          {reorderControl}
+          {primaryAction}
+          <ActionMenu label={`${round.name} actions`} triggerLabel={`${round.name} actions`}>
+            {(close) => (
+              <>
+                {!isActive && !isComplete && (
+                  <MenuItem
+                    icon="file"
+                    onSelect={() => {
+                      close();
+                      setPacketOpen(true);
+                    }}
+                  >
+                    {packetName ? 'Change packet…' : 'Assign packet…'}
+                  </MenuItem>
+                )}
+                {!isActive && !isComplete && games.length > 0 && state.rooms.length > 0 && (
+                  <MenuItem
+                    icon="rooms"
+                    onSelect={() => {
+                      close();
+                      setRoomsOpen(true);
+                    }}
+                  >
+                    Assign rooms…
+                  </MenuItem>
+                )}
+                {canMoveGame && (
+                  <MenuItem
+                    icon="rooms"
+                    onSelect={() => {
+                      close();
+                      setMoveOpen(true);
+                    }}
+                  >
+                    Move game…
+                  </MenuItem>
+                )}
+                {drives.length > 0 && transfers && !isComplete && (
+                  <MenuItem
+                    icon="usb"
+                    onSelect={() => {
+                      close();
+                      setUsbOpen(true);
+                    }}
+                  >
+                    Put round on USB…
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon="clock"
+                  disabled={isActive || isComplete}
+                  onSelect={() => {
+                    close();
+                    setPlannedTimeOpen(true);
                   }}
                 >
-                  Put {round.name} on USB
-                </Button>
-                {choosingDrive && (
-                  <DirectorMenu
-                    label={`USB for ${round.name}`}
-                    openerRef={driveOpenerRef}
-                    onClose={() => setChoosingDrive(false)}
-                  >
-                    {drives.map((drive) => (
-                      <button
-                        key={drive.id}
-                        type="button"
-                        role="menuitem"
-                        disabled={transfers.isOperationActive(prepareOperation(drive.id))}
-                        onClick={() => {
-                          setChoosingDrive(false);
-                          void transfers.prepareTo(drive.id, { kind: 'round', roundId: round.id });
-                        }}
-                      >
-                        {drive.label}
-                      </button>
-                    ))}
-                  </DirectorMenu>
-                )}
-              </span>
-            )}
-          <DayMoveButtons
-            label={round.name}
-            position={position}
-            total={total}
-            onMoveUp={onMoveUp}
-            onMoveDown={onMoveDown}
-          />
-          <button
-            type="button"
-            className="director-inline-action"
-            aria-expanded={showAdvanced}
-            onClick={() => setShowAdvanced((open) => !open)}
-          >
-            {showAdvanced ? 'Hide details' : isComplete ? 'Details' : 'Details & recovery'}
-          </button>
-        </div>
-        {assigningPacket && !isActive && !isComplete && (
-          <FormField label={`Packet for ${round.name}`}>
-            <select
-              value={round.packetId ?? ''}
-              onChange={(event) => {
-                void controller.setRoundPacket(round.id, event.target.value || null).then((saved) => {
-                  if (saved) {
-                    setAssigningPacket(false);
-                    onAnnounce(`Packet assigned to ${round.name}.`);
-                  } else onAnnounce(errorNotice('The packet could not be assigned.'));
-                });
-              }}
-            >
-              <option value="">Choose packet</option>
-              {state.packets
-                .filter((packet) => !packet.retired)
-                .map((packet) => (
-                  <option key={packet.id} value={packet.id}>
-                    {packet.name}
-                  </option>
-                ))}
-            </select>
-          </FormField>
-        )}
-        {assigningRooms && !isActive && !isComplete && (
-          <div className="director-round-advanced">
-            {games
-              .filter((game) => game.status !== 'cancelled')
-              .map((game) => (
-                <FormField
-                  key={game.id}
-                  label={`${state.teams.find((team) => team.id === game.leftTeamId)?.displayName} vs ${state.teams.find((team) => team.id === game.rightTeamId)?.displayName}`}
+                  Planned time…
+                </MenuItem>
+                <MenuItem
+                  icon="upload"
+                  onSelect={() => {
+                    close();
+                    onNavigate('transfers');
+                  }}
                 >
-                  <select
-                    value={roomDraft[game.id] ?? ''}
-                    onChange={(event) =>
-                      setRoomDraft((draft) => ({ ...draft, [game.id]: event.target.value || null }))
-                    }
-                  >
-                    <option value="">No room</option>
-                    {state.rooms
-                      .filter((room) => roomIsAssignable(state, room.id) || room.id === game.roomId)
-                      .map((room) => {
-                        const assignable = roomIsAssignable(state, room.id);
-                        return (
-                          <option key={room.id} value={room.id} disabled={!assignable}>
-                            {room.name}
-                            {!assignable ? ' — currently not assignable' : ''}
-                          </option>
-                        );
-                      })}
-                  </select>
-                </FormField>
-              ))}
+                  Assignment files
+                </MenuItem>
+                <MenuItem
+                  icon="settings"
+                  onSelect={() => {
+                    close();
+                    setRecoveryOpen(true);
+                  }}
+                >
+                  Advanced recovery…
+                </MenuItem>
+              </>
+            )}
+          </ActionMenu>
+        </div>
+      }
+    >
+      {isActive && games.length > 0 && (
+        <Progress value={accepted} max={games.length} label={`${accepted} of ${games.length} results accepted`} />
+      )}
+      {returned.length > 0 && (
+        <Callout
+          tone="warning"
+          title={`${returned.length} result${returned.length === 1 ? '' : 's'} need review`}
+          actions={
             <Button
-              onClick={() => {
-                void controller.assignRoundRooms(round.id, roomDraft).then((saved) => {
-                  if (saved) {
-                    setAssigningRooms(false);
-                    onAnnounce(`Rooms assigned to ${round.name}.`);
-                  } else
-                    onAnnounce(
-                      errorNotice('Rooms could not be assigned; choose available rooms without duplicates.'),
-                    );
-                });
-              }}
+              variant="quiet"
+              onClick={() => onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id })}
             >
-              Save rooms
+              Review results
             </Button>
-            <Button variant="quiet" onClick={() => setAssigningRooms(false)}>
-              Cancel
+          }
+        />
+      )}
+      {failure && (
+        <Callout
+          tone="danger"
+          title="Round operation failed"
+          actions={
+            <Button variant="quiet" onClick={() => setRecoveryOpen(true)}>
+              Open recovery
             </Button>
-          </div>
-        )}
-        {movingGameId && isActive && selectedRoomMove && (
-          <div className="director-round-advanced">
-            <FormField label={`Game to move in ${round.name}`}>
-              <select
-                value={selectedRoomMove.game.id}
-                onChange={(event) => {
-                  const next = roomMoveOptions.find((entry) => entry.game.id === event.target.value);
-                  setMovingGameId(next?.game.id ?? null);
-                  setMoveRoomId(next?.destinations[0]?.id ?? '');
-                  setMoveFailure(null);
-                }}
-              >
-                {roomMoveOptions.map(({ game, blocker }) => (
-                  <option key={game.id} value={game.id} disabled={blocker !== null}>
-                    {gameLabel(state, game)}
-                    {blocker ? ` — ${blocker}` : ''}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Destination room">
-              <select
-                value={moveRoomId}
-                disabled={selectedRoomMove.blocker !== null || selectedRoomMove.destinations.length === 0}
-                onChange={(event) => setMoveRoomId(event.target.value)}
-              >
-                <option value="">Choose room</option>
-                {selectedRoomMove.destinations.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <p className="director-muted">
-              Only rooms that are available and free of unresolved game or scorer work are listed.
-            </p>
-            {selectedRoomMove.blocker && (
-              <p className="director-round-failure" role="alert">
-                {selectedRoomMove.blocker}
-              </p>
-            )}
-            {moveFailure && (
-              <p className="director-round-failure" role="alert">
-                {moveFailure}
-              </p>
-            )}
-            <div className="director-row-actions">
-              <Button
-                disabled={
-                  moveInProgress ||
-                  selectedRoomMove.blocker !== null ||
-                  selectedRoomMove.destinations.length === 0 ||
-                  !moveRoomId
-                }
-                onClick={() => {
-                  setMoveInProgress(true);
-                  setMoveFailure(null);
-                  void controller
-                    .moveReleasedGame(selectedRoomMove.game.id, moveRoomId)
-                    .then((result) => {
-                      onAnnounce(result.ok ? result.summary : errorNotice(result.reason ?? result.summary));
-                      if (result.ok) {
-                        setMovingGameId(null);
-                        setMoveRoomId('');
-                      } else setMoveFailure(result.reason ?? result.summary);
-                    })
-                    .finally(() => setMoveInProgress(false));
-                }}
-              >
-                {moveInProgress ? 'Moving game…' : 'Change room'}
-              </Button>
-              <Button
-                variant="quiet"
-                onClick={() => {
-                  setMovingGameId(null);
-                  setMoveRoomId('');
-                  setMoveFailure(null);
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-        {showAdvanced && (
-          <RoundAdvancedDetails
-            state={state}
-            roundId={round.id}
-            roundName={round.name}
-            controller={controller}
-            onNavigate={onNavigate}
-            onAnnounce={onAnnounce}
-          />
-        )}
-      </div>
-    </li>
+          }
+        >
+          {failure}
+        </Callout>
+      )}
+
+      {packetOpen && (
+        <RoundPacketDialog
+          state={state}
+          round={round}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setPacketOpen(false)}
+        />
+      )}
+      {roomsOpen && (
+        <RoundRoomsDialog
+          state={state}
+          round={round}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setRoomsOpen(false)}
+        />
+      )}
+      {moveOpen && (
+        <MoveGameDialog
+          state={state}
+          round={round}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setMoveOpen(false)}
+        />
+      )}
+      {usbOpen && transfers && (
+        <RoundUsbDialog
+          round={round}
+          drives={drives}
+          transfers={transfers}
+          onAnnounce={onAnnounce}
+          onClose={() => setUsbOpen(false)}
+        />
+      )}
+      {plannedTimeOpen && (
+        <RoundPlannedTimeDialog
+          state={state}
+          round={round}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setPlannedTimeOpen(false)}
+        />
+      )}
+      {recoveryOpen && (
+        <RoundRecoveryDialog
+          state={state}
+          roundId={round.id}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setRecoveryOpen(false)}
+        />
+      )}
+    </SummaryItem>
   );
 }
 
-function RoundAdvancedDetails({
+function RoundPacketDialog({
+  state,
+  round,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  round: DirectorState['rounds'][number];
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const [packetId, setPacketId] = useState(round.packetId ?? '');
+  const options: SelectOption[] = state.packets
+    .filter((packet) => !packet.retired)
+    .map((packet) => ({ value: packet.id, label: packet.name, detail: packet.source || undefined }));
+  return (
+    <Dialog
+      title={`Packet for ${round.name}`}
+      description="Choose the packet this round should use."
+      onClose={onClose}
+      onSubmit={() => {
+        void controller.setRoundPacket(round.id, packetId || null).then((saved) => {
+          if (saved) {
+            onAnnounce(`Packet assignment for ${round.name} updated.`);
+            onClose();
+          } else onAnnounce(errorNotice('The packet could not be assigned.'));
+        });
+      }}
+      submitLabel="Save packet"
+    >
+      <Field
+        label="Packet"
+        render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={packetId}
+            options={[{ value: '', label: 'No packet' }, ...options]}
+            onChange={setPacketId}
+          />
+        )}
+      />
+    </Dialog>
+  );
+}
+
+function RoundRoomsDialog({
+  state,
+  round,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  round: DirectorState['rounds'][number];
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const games = state.scheduledGames.filter(
+    (game) => game.roundId === round.id && !game.bye && game.status !== 'cancelled',
+  );
+  const [draft, setDraft] = useState<Record<string, string | null>>(
+    Object.fromEntries(games.map((game) => [game.id, game.roomId])),
+  );
+  return (
+    <Dialog
+      title={`Rooms for ${round.name}`}
+      description="Each competitive game needs a room. Unavailable rooms remain visible only when they are already assigned to that game."
+      size="lg"
+      onClose={onClose}
+      onSubmit={() => {
+        void controller.assignRoundRooms(round.id, draft).then((saved) => {
+          if (saved) {
+            onAnnounce(`Rooms assigned to ${round.name}.`);
+            onClose();
+          } else onAnnounce(errorNotice('Rooms could not be assigned; choose available rooms without duplicates.'));
+        });
+      }}
+      submitLabel="Save rooms"
+    >
+      <FieldGrid>
+        {games.map((game) => {
+          const options: SelectOption[] = [
+            { value: '', label: 'No room' },
+            ...state.rooms
+              .filter((room) => roomIsAssignable(state, room.id) || room.id === game.roomId)
+              .map((room) => ({
+                value: room.id,
+                label: room.name,
+                detail: room.location || undefined,
+                disabled: !roomIsAssignable(state, room.id) && room.id !== game.roomId,
+              })),
+          ];
+          return (
+            <Field
+              key={game.id}
+              label={gameLabel(state, game)}
+              render={({ id, describedBy }) => (
+                <Select
+                  id={id}
+                  ariaDescribedBy={describedBy}
+                  value={draft[game.id] ?? ''}
+                  options={options}
+                  onChange={(value) => setDraft((current) => ({ ...current, [game.id]: value || null }))}
+                />
+              )}
+            />
+          );
+        })}
+      </FieldGrid>
+    </Dialog>
+  );
+}
+
+function MoveGameDialog({
+  state,
+  round,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  round: DirectorState['rounds'][number];
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const choices = state.scheduledGames
+    .filter((game) => game.roundId === round.id && !game.bye && game.roomId !== null && game.status !== 'cancelled')
+    .map((game) => ({
+      game,
+      destinations: state.rooms.filter(
+        (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
+      ),
+    }))
+    .filter((entry) => entry.destinations.length > 0);
+  const [gameId, setGameId] = useState(choices[0]?.game.id ?? '');
+  const selected = choices.find((entry) => entry.game.id === gameId) ?? choices[0];
+  const [roomId, setRoomId] = useState(selected?.destinations[0]?.id ?? '');
+  const [moving, setMoving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  return (
+    <Dialog
+      title={`Move a game in ${round.name}`}
+      description="Only rooms that are available and free of unresolved scorer work are offered."
+      onClose={onClose}
+      onSubmit={() => {
+        if (!selected || !roomId) return;
+        setMoving(true);
+        setFailure(null);
+        void controller
+          .moveReleasedGame(selected.game.id, roomId)
+          .then((result) => {
+            onAnnounce(result.ok ? result.summary : errorNotice(result.reason ?? result.summary));
+            if (result.ok) onClose();
+            else setFailure(result.reason ?? result.summary);
+          })
+          .finally(() => setMoving(false));
+      }}
+      submitLabel={moving ? 'Moving…' : 'Change room'}
+      submitDisabled={moving || !selected || !roomId}
+    >
+      {failure && <Callout tone="danger">{failure}</Callout>}
+      <Field
+        label="Game"
+        render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={selected?.game.id ?? ''}
+            options={choices.map((entry) => ({ value: entry.game.id, label: gameLabel(state, entry.game) }))}
+            onChange={(value) => {
+              const next = choices.find((entry) => entry.game.id === value);
+              setGameId(value);
+              setRoomId(next?.destinations[0]?.id ?? '');
+              setFailure(null);
+            }}
+          />
+        )}
+      />
+      <Field
+        label="Destination room"
+        render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={roomId}
+            options={(selected?.destinations ?? []).map((room) => ({
+              value: room.id,
+              label: room.name,
+              detail: room.location || undefined,
+            }))}
+            onChange={setRoomId}
+          />
+        )}
+      />
+    </Dialog>
+  );
+}
+
+function RoundUsbDialog({
+  round,
+  drives,
+  transfers,
+  onAnnounce,
+  onClose,
+}: {
+  round: DirectorState['rounds'][number];
+  drives: DirectorState['transfers']['locations'];
+  transfers: TransfersRuntime;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const writable = drives.filter((drive) => drive.kind === 'removable-drive' && drive.connected && !drive.readOnly);
+  const [driveId, setDriveId] = useState(writable[0]?.id ?? '');
+  const active = driveId ? transfers.isOperationActive(prepareOperation(driveId)) : false;
+  return (
+    <Dialog
+      title={`Put ${round.name} on USB`}
+      description="Choose the connected writable drive for this round's assignment files."
+      onClose={onClose}
+      onSubmit={() => {
+        if (!driveId) return;
+        void transfers.prepareTo(driveId, { kind: 'round', roundId: round.id });
+        onAnnounce(`${round.name} assignment files are being prepared for USB.`);
+        onClose();
+      }}
+      submitLabel={active ? 'Preparing…' : 'Prepare USB'}
+      submitDisabled={!driveId || active}
+    >
+      <Field
+        label="Drive"
+        render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={driveId}
+            options={writable.map((drive) => ({ value: drive.id, label: drive.label, detail: drive.path || undefined }))}
+            onChange={setDriveId}
+          />
+        )}
+      />
+    </Dialog>
+  );
+}
+
+function RoundPlannedTimeDialog({
+  state,
+  round,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  round: DirectorState['rounds'][number];
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const timeZone = state.tournament?.timeZone ?? 'UTC';
+  const initial = splitLocalDateTime(isoToZonedDateTimeInput(round.scheduledStart, timeZone));
+  const [date, setDate] = useState(initial.date);
+  const [time, setTime] = useState(initial.time);
+  return (
+    <Dialog
+      title={`Planned time for ${round.name}`}
+      description={`Times are interpreted in ${timeZoneLabel(timeZone)}.`}
+      onClose={onClose}
+      onSubmit={() => {
+        const local = joinLocalDateTime(date, time);
+        const iso = local ? zonedDateTimeInputToIso(local, timeZone) : null;
+        if (local && !iso) {
+          onAnnounce(errorNotice('That local time does not exist in the tournament timezone.'));
+          return;
+        }
+        if (controller.setRoundScheduledStart(round.id, iso)) {
+          onAnnounce(`${round.name} planned time updated.`);
+          onClose();
+        } else onAnnounce(errorNotice('The planned time was not saved; review the Director error.'));
+      }}
+      submitLabel="Save planned time"
+    >
+      <FieldGrid>
+        <Field
+          label="Date"
+          optional
+          render={({ id, describedBy }) => (
+            <DateField id={id} aria-describedby={describedBy} value={date} onChange={(event) => setDate(event.target.value)} />
+          )}
+        />
+        <Field
+          label="Time"
+          optional
+          render={({ id, describedBy }) => (
+            <TimeField id={id} aria-describedby={describedBy} value={time} onChange={(event) => setTime(event.target.value)} />
+          )}
+        />
+      </FieldGrid>
+    </Dialog>
+  );
+}
+
+function RoundRecoveryDialog({
   state,
   roundId,
-  roundName,
   controller,
-  onNavigate,
   onAnnounce,
+  onClose,
 }: {
   state: DirectorState;
   roundId: string;
-  roundName: string;
   controller: DirectorController;
-  onNavigate: Navigate;
   onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
 }) {
+  const confirmAction = useConfirm();
   const round = state.rounds.find((entry) => entry.id === roundId);
-  const timeZone = state.tournament?.timeZone ?? 'UTC';
-  const [value, setValue] = useState(isoToZonedDateTimeInput(round?.scheduledStart, timeZone));
   if (!round) return null;
-  const saveTime = () => {
-    const iso = value ? zonedDateTimeInputToIso(value, timeZone) : null;
-    if (value && !iso) {
-      onAnnounce(errorNotice('That local time does not exist in the tournament timezone.'));
-      return;
-    }
-    if (controller.setRoundScheduledStart(round.id, iso)) onAnnounce(`${round.name} planned time updated.`);
-    else onAnnounce(errorNotice('The planned time was not saved; review the Director error.'));
-  };
   const games = state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye);
   return (
-    <div className="director-round-advanced">
-      <p className="director-round-advanced-note">
-        Recovery transitions. The normal workflow is Start and Finish above; these exist for repair and
-        diagnostics.
-      </p>
-      <div className="director-row-actions">
-        <span className="director-muted">
-          Internal state: {round.status} · revision {round.revision}
-        </span>
-        {round.status === 'planned' && (
-          <Button
-            variant="quiet"
-            onClick={() => {
-              const prepared = controller.prepareRound(round.id);
-              onAnnounce(
-                prepared
-                  ? `${roundName} prepared.`
-                  : errorNotice(`${roundName} could not be prepared; review the schedule first.`),
-              );
-            }}
-          >
-            Prepare
-          </Button>
-        )}
-        {round.status === 'prepared' && (
-          <Button
-            variant="quiet"
-            onClick={() => {
-              const released = controller.releaseRound(round.id);
-              onAnnounce(
-                released
-                  ? `${roundName} released.`
-                  : errorNotice(
-                      'The round is not ready to release; review the Director error and room assignments.',
-                    ),
-              );
-            }}
-          >
-            Release
-          </Button>
-        )}
-        {round.status === 'released' && (
-          <Button
-            variant="quiet"
-            onClick={() => {
-              const closed = controller.closeRound(round.id);
-              onAnnounce(
-                closed
-                  ? `${roundName} closed.`
-                  : errorNotice(`${roundName} could not close; accept or cancel every game first.`),
-              );
-            }}
-          >
-            Close
-          </Button>
-        )}
+    <Dialog
+      title={`Advanced recovery — ${round.name}`}
+      description="Use these controls only to repair an interrupted or inconsistent tournament state. Normal operation uses Start and Finish."
+      size="lg"
+      onClose={onClose}
+      cancelLabel="Done"
+    >
+      <Callout tone="warning" title="Recovery controls bypass the normal round workflow">
+        Verify the round, room assignments, and returned results before changing the internal state manually.
+      </Callout>
+      <Diagnostics
+        standalone={false}
+        defaultOpen
+        items={[
+          { term: 'Internal state', value: round.status },
+          { term: 'Revision', value: round.revision },
+          { term: 'Competitive games', value: games.length },
+        ]}
+      />
+      <DialogSection title="State repair">
+        <div className="director-actions">
+          {round.status === 'planned' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const prepared = controller.prepareRound(round.id);
+                onAnnounce(
+                  prepared
+                    ? `${round.name} prepared.`
+                    : errorNotice(`${round.name} could not be prepared; review the schedule first.`),
+                );
+              }}
+            >
+              Prepare
+            </Button>
+          )}
+          {round.status === 'prepared' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const released = controller.releaseRound(round.id);
+                onAnnounce(
+                  released
+                    ? `${round.name} released.`
+                    : errorNotice('The round is not ready to release; review room assignments first.'),
+                );
+              }}
+            >
+              Release
+            </Button>
+          )}
+          {round.status === 'released' && (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                const closed = controller.closeRound(round.id);
+                onAnnounce(
+                  closed ? `${round.name} closed.` : errorNotice(`${round.name} could not close; resolve every game first.`),
+                );
+              }}
+            >
+              Close
+            </Button>
+          )}
+        </div>
+      </DialogSection>
+      <DialogSection title="Remove round" description="Removal also removes the round's games and dependent result records.">
         <Button
           variant="danger"
           onClick={async () => {
-            // Removing a round discards its games, submissions, protests and any accepted
-            // results, for a closed round as much as a planned one. Say so before asking.
-            if (
-              !confirm(
-                `Remove ${round.name}, its games and any accepted results? A recovery point will be created first.`,
-              )
-            )
-              return;
+            const approved = await confirmAction({
+              title: `Remove ${round.name}?`,
+              body: 'A recovery point will be created before removal.',
+              consequence: 'The round, its games, submissions, protests, and any accepted results will be removed from the current tournament state.',
+              confirmLabel: 'Remove round',
+              tone: 'danger',
+            });
+            if (!approved) return;
             try {
               const removed = await removeRoundFlexibly(controller, round.id);
               onAnnounce(
@@ -824,6 +1033,7 @@ function RoundAdvancedDetails({
                   ? `${round.name} removed. Restore it from Settings → Recovery if needed.`
                   : errorNotice('The round was not removed; review the Director error.'),
               );
+              if (removed) onClose();
             } catch (reason: unknown) {
               onAnnounce(
                 errorNotice(
@@ -835,64 +1045,10 @@ function RoundAdvancedDetails({
             }
           }}
         >
-          Remove round
+          Remove round…
         </Button>
-        <Button variant="quiet" icon="upload" onClick={() => onNavigate('transfers')}>
-          Assignment files
-        </Button>
-      </div>
-      <div className="director-round-advanced-grid">
-        <FormField label={`Planned start for ${round.name}`}>
-          <input
-            type="datetime-local"
-            value={value}
-            disabled={round.status === 'released' || round.status === 'closed'}
-            onChange={(event) => setValue(event.target.value)}
-            onBlur={saveTime}
-          />
-        </FormField>
-        <p className="director-muted">
-          {games.length} competitive game{games.length === 1 ? '' : 's'}
-          {round.releasedAt ? ` · released ${formatTimestamp(round.releasedAt, timeZone)}` : ''}
-          {round.startedAt ? ` · started ${formatTimestamp(round.startedAt, timeZone)}` : ''}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function DayMoveButtons({
-  label,
-  position,
-  total,
-  onMoveUp,
-  onMoveDown,
-}: {
-  label: string;
-  position: number;
-  total: number;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-}) {
-  return (
-    <div className="director-row-actions" role="group" aria-label={`Reorder ${label}`}>
-      <Button
-        variant="quiet"
-        disabled={position <= 1}
-        aria-label={`Move ${label} earlier`}
-        onClick={onMoveUp}
-      >
-        ↑ Up
-      </Button>
-      <Button
-        variant="quiet"
-        disabled={position >= total}
-        aria-label={`Move ${label} later`}
-        onClick={onMoveDown}
-      >
-        ↓ Down
-      </Button>
-    </div>
+      </DialogSection>
+    </Dialog>
   );
 }
 
@@ -901,76 +1057,61 @@ function TimelineEventRow({
   event,
   onEdit,
   onDelete,
-  position,
-  total,
-  onMoveUp,
-  onMoveDown,
+  reorderControl,
 }: {
   state: DirectorState;
   event: TournamentTimelineEvent;
   onEdit: () => void;
-  onDelete: () => void;
-  position: number;
-  total: number;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
+  onDelete: () => Promise<void>;
+  reorderControl?: React.ReactNode;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
   const location = event.roomId
     ? (state.rooms.find((room) => room.id === event.roomId)?.name ?? event.roomId)
     : event.location;
+  const time = [
+    event.scheduledStart ? formatTimestamp(event.scheduledStart, timeZone) : null,
+    event.scheduledStart && event.scheduledEnd ? `– ${formatTimestamp(event.scheduledEnd, timeZone)}` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
   return (
-    <li className="director-day-event">
-      <span className="director-day-event-marker" aria-hidden="true">
-        {timelineEventTypeLabel(event.type).slice(0, 1)}
-      </span>
-      <div className="director-round-main">
-        <div className="director-round-title-row">
-          <strong>{event.title}</strong>
-          <span className="director-round-status">
-            {timelineEventTypeLabel(event.type)}
-            {location ? ` · ${location}` : ''}
-          </span>
-        </div>
-        {event.description ? <p className="director-round-context">{event.description}</p> : null}
-        <div className="director-round-actions">
-          <DayMoveButtons
-            label={event.title}
-            position={position}
-            total={total}
-            onMoveUp={onMoveUp}
-            onMoveDown={onMoveDown}
-          />
-          <Button variant="quiet" icon="edit" onClick={onEdit}>
+    <SummaryItem
+      title={<strong>{event.title}</strong>}
+      status={<StateLabel state="scheduled" label={timelineEventTypeLabel(event.type)} />}
+      summary={[time, location, event.description].filter(Boolean).join(' · ') || 'Day event'}
+      actions={
+        <div className="director-actions">
+          {reorderControl}
+          <Button variant="secondary" icon="edit" onClick={onEdit}>
             Edit
           </Button>
-          <Button variant="quiet" icon="x" onClick={onDelete}>
-            Remove
-          </Button>
+          <ActionMenu label={`${event.title} actions`} triggerLabel={`${event.title} actions`}>
+            {(close) => (
+              <MenuItem
+                icon="trash"
+                tone="danger"
+                onSelect={() => {
+                  close();
+                  void onDelete();
+                }}
+              >
+                Remove event…
+              </MenuItem>
+            )}
+          </ActionMenu>
         </div>
-        <p className="director-muted">
-          {[
-            event.scheduledStart ? formatTimestamp(event.scheduledStart, timeZone) : null,
-            event.scheduledStart && event.scheduledEnd
-              ? `– ${formatTimestamp(event.scheduledEnd, timeZone)}`
-              : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')}
-        </p>
-      </div>
-    </li>
+      }
+    />
   );
 }
 
-const eventTypeOptions: Array<{ value: TimelineEventType; label: string }> = timelineEventTypes.map(
-  (type) => ({
-    value: type,
-    label: timelineEventTypeLabel(type),
-  }),
-);
+const eventTypeOptions: SelectOption<TimelineEventType>[] = timelineEventTypes.map((type) => ({
+  value: type,
+  label: timelineEventTypeLabel(type),
+}));
 
-function TimelineEventForm({
+function TimelineEventDialog({
   state,
   event,
   controller,
@@ -984,16 +1125,23 @@ function TimelineEventForm({
   onClose: () => void;
 }) {
   const timeZone = state.tournament?.timeZone ?? 'UTC';
+  const initialStart = splitLocalDateTime(isoToZonedDateTimeInput(event?.scheduledStart, timeZone));
+  const initialEnd = splitLocalDateTime(isoToZonedDateTimeInput(event?.scheduledEnd, timeZone));
   const [type, setType] = useState<TimelineEventType>(event?.type ?? 'custom');
   const [title, setTitle] = useState(event?.title ?? '');
   const [description, setDescription] = useState(event?.description ?? '');
-  const [start, setStart] = useState(isoToZonedDateTimeInput(event?.scheduledStart, timeZone));
-  const [end, setEnd] = useState(isoToZonedDateTimeInput(event?.scheduledEnd, timeZone));
+  const [startDate, setStartDate] = useState(initialStart.date);
+  const [startTime, setStartTime] = useState(initialStart.time);
+  const [endDate, setEndDate] = useState(initialEnd.date);
+  const [endTime, setEndTime] = useState(initialEnd.time);
   const [visibility, setVisibility] = useState<TimelineVisibility>(event?.visibility ?? 'public');
   const [roomId, setRoomId] = useState(event?.roomId ?? '');
   const [location, setLocation] = useState(event?.location ?? '');
   const [teamIds, setTeamIds] = useState<string[]>(event?.teamIds ?? []);
+
   const save = () => {
+    const start = joinLocalDateTime(startDate, startTime);
+    const end = joinLocalDateTime(endDate, endTime);
     const scheduledStart = start ? zonedDateTimeInputToIso(start, timeZone) : null;
     const scheduledEnd = end ? zonedDateTimeInputToIso(end, timeZone) : null;
     if (start && !scheduledStart) {
@@ -1002,6 +1150,10 @@ function TimelineEventForm({
     }
     if (end && !scheduledEnd) {
       onAnnounce(errorNotice('The event end is not a valid time in the tournament timezone.'));
+      return;
+    }
+    if (!title.trim()) {
+      onAnnounce(errorNotice('Enter an event title first.'));
       return;
     }
     const input: NewTimelineEventInput = {
@@ -1015,9 +1167,7 @@ function TimelineEventForm({
       location,
       teamIds,
     };
-    const saved = event
-      ? controller.updateTimelineEvent(event.id, input)
-      : controller.addTimelineEvent(input);
+    const saved = event ? controller.updateTimelineEvent(event.id, input) : controller.addTimelineEvent(input);
     if (!saved) {
       onAnnounce(errorNotice('The schedule event could not be saved; review the Director error.'));
       return;
@@ -1025,128 +1175,164 @@ function TimelineEventForm({
     onAnnounce(event ? `${title.trim()} updated.` : `${title.trim()} added to the schedule.`);
     onClose();
   };
+
   return (
-    <section className="director-panel director-form-panel" aria-label={event ? 'Edit event' : 'New event'}>
-      <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">{event ? 'Edit event' : 'New event'}</p>
-          <h2>Schedule details</h2>
-        </div>
-        <Button variant="quiet" icon="x" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-      <div className="director-panel-body">
-        <form
-          onSubmit={(eventObject) => {
-            eventObject.preventDefault();
-            save();
-          }}
-        >
-          <div className="director-form-grid director-form-grid-three">
-            <FormField label="Event type">
-              <select
-                value={type}
-                onChange={(eventObject) => setType(eventObject.target.value as TimelineEventType)}
-              >
-                {eventTypeOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Title">
-              <input value={title} onChange={(eventObject) => setTitle(eventObject.target.value)} required />
-            </FormField>
-            <FormField label="Visibility">
-              <select
-                value={visibility}
-                onChange={(eventObject) => setVisibility(eventObject.target.value as TimelineVisibility)}
-              >
-                <option value="public">Public</option>
-                <option value="staff">Staff</option>
-                <option value="hidden">Hidden</option>
-              </select>
-            </FormField>
-          </div>
-          <div className="director-form-grid director-form-grid-two">
-            <FormField label={`Start (${timeZone})`}>
-              <input
-                type="datetime-local"
-                value={start}
-                onChange={(eventObject) => setStart(eventObject.target.value)}
-              />
-            </FormField>
-            <FormField label={`End (${timeZone})`}>
-              <input
-                type="datetime-local"
-                value={end}
-                onChange={(eventObject) => setEnd(eventObject.target.value)}
-              />
-            </FormField>
-            <FormField label="Room">
-              <select value={roomId} onChange={(eventObject) => setRoomId(eventObject.target.value)}>
-                <option value="">No numbered room</option>
-                {state.rooms.map((room) => (
-                  <option key={room.id} value={room.id}>
-                    {room.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="Other location">
-              <input
-                value={location}
-                onChange={(eventObject) => setLocation(eventObject.target.value)}
-                placeholder="Lobby, auditorium…"
-              />
-            </FormField>
-          </div>
-          <FormField label="Description">
-            <textarea
-              className="director-textarea"
-              rows={2}
-              value={description}
-              onChange={(eventObject) => setDescription(eventObject.target.value)}
+    <Dialog
+      title={event ? `Edit ${event.title}` : 'Add day event'}
+      description={`Times use ${timeZoneLabel(timeZone)}. Leave Target teams empty for the whole tournament.`}
+      size="lg"
+      onClose={onClose}
+      onSubmit={save}
+      submitLabel={event ? 'Save changes' : 'Add event'}
+    >
+      <FieldGrid>
+        <Field
+          label="Event type"
+          render={({ id, describedBy }) => (
+            <Select
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={type}
+              options={eventTypeOptions}
+              onChange={setType}
             />
-          </FormField>
-          <fieldset className="director-resource-role-field">
-            <legend>Target teams</legend>
-            <div className="director-check-group">
-              {state.teams
-                .filter((team) => team.status !== 'dropped')
-                .map((team) => (
-                  <label className="director-check-row" key={team.id}>
-                    <input
-                      type="checkbox"
-                      checked={teamIds.includes(team.id)}
-                      onChange={(eventObject) =>
-                        setTeamIds((current) =>
-                          eventObject.target.checked
-                            ? [...current, team.id]
-                            : current.filter((id) => id !== team.id),
-                        )
-                      }
-                    />
-                    <span>{team.displayName}</span>
-                  </label>
-                ))}
-            </div>
-            <small>Leave every team unchecked to target the whole tournament.</small>
-          </fieldset>
-          <div className="director-row-actions">
-            <Button variant="primary" type="submit">
-              {event ? 'Save changes' : 'Add event'}
-            </Button>
-            <Button variant="quiet" onClick={onClose}>
-              Cancel
-            </Button>
-          </div>
-        </form>
-      </div>
-    </section>
+          )}
+        />
+        <Field
+          label="Title"
+          render={({ id, describedBy, invalid }) => (
+            <TextInput
+              id={id}
+              aria-describedby={describedBy}
+              invalid={invalid}
+              required
+              value={title}
+              onChange={(eventObject) => setTitle(eventObject.target.value)}
+            />
+          )}
+        />
+        <Field
+          label="Visibility"
+          render={({ id, describedBy }) => (
+            <Select<TimelineVisibility>
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={visibility}
+              options={[
+                { value: 'public', label: 'Public' },
+                { value: 'staff', label: 'Staff' },
+                { value: 'hidden', label: 'Hidden' },
+              ]}
+              onChange={setVisibility}
+            />
+          )}
+        />
+        <Field
+          label="Room"
+          optional
+          render={({ id, describedBy }) => (
+            <Select
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={roomId}
+              options={[
+                { value: '', label: 'No numbered room' },
+                ...state.rooms.map((room) => ({ value: room.id, label: room.name, detail: room.location || undefined })),
+              ]}
+              onChange={setRoomId}
+            />
+          )}
+        />
+      </FieldGrid>
+      <DialogSection title="Timing">
+        <FieldGrid>
+          <Field
+            label="Start date"
+            optional
+            render={({ id, describedBy }) => (
+              <DateField id={id} aria-describedby={describedBy} value={startDate} onChange={(eventObject) => setStartDate(eventObject.target.value)} />
+            )}
+          />
+          <Field
+            label="Start time"
+            optional
+            render={({ id, describedBy }) => (
+              <TimeField id={id} aria-describedby={describedBy} value={startTime} onChange={(eventObject) => setStartTime(eventObject.target.value)} />
+            )}
+          />
+          <Field
+            label="End date"
+            optional
+            render={({ id, describedBy }) => (
+              <DateField id={id} aria-describedby={describedBy} value={endDate} onChange={(eventObject) => setEndDate(eventObject.target.value)} />
+            )}
+          />
+          <Field
+            label="End time"
+            optional
+            render={({ id, describedBy }) => (
+              <TimeField id={id} aria-describedby={describedBy} value={endTime} onChange={(eventObject) => setEndTime(eventObject.target.value)} />
+            )}
+          />
+        </FieldGrid>
+      </DialogSection>
+      <Field
+        label="Other location"
+        optional
+        render={({ id, describedBy }) => (
+          <TextInput
+            id={id}
+            aria-describedby={describedBy}
+            value={location}
+            onChange={(eventObject) => setLocation(eventObject.target.value)}
+            placeholder="Lobby, auditorium…"
+          />
+        )}
+      />
+      <Field
+        label="Description"
+        optional
+        render={({ id, describedBy }) => (
+          <TextArea
+            id={id}
+            aria-describedby={describedBy}
+            rows={3}
+            value={description}
+            onChange={(eventObject) => setDescription(eventObject.target.value)}
+          />
+        )}
+      />
+      <Field
+        label="Target teams"
+        hint="No selection means the whole tournament."
+        render={({ id, describedBy }) => (
+          <MultiSelect
+            id={id}
+            ariaDescribedBy={describedBy}
+            values={teamIds}
+            options={state.teams
+              .filter((team) => team.status !== 'dropped')
+              .map((team) => ({ value: team.id, label: team.displayName }))}
+            onChange={setTeamIds}
+            allLabel="Everybody"
+            searchPlaceholder="Filter teams…"
+          />
+        )}
+      />
+    </Dialog>
   );
+}
+
+function splitLocalDateTime(value: string): { date: string; time: string } {
+  if (!value) return { date: '', time: '' };
+  const [date = '', time = ''] = value.split('T');
+  return { date, time: time.slice(0, 5) };
+}
+
+function joinLocalDateTime(date: string, time: string): string {
+  if (!date && !time) return '';
+  if (!date || !time) return '';
+  return `${date}T${time}`;
 }
 
 function formatTimestamp(value: string, timeZone: string): string {
