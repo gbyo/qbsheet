@@ -261,13 +261,7 @@ export function SettingsView({
               <div className="director-panel-heading">
                 <div>
                   <p className="director-eyebrow">Storage</p>
-                  <h2>
-                    {controller.repositoryKind === 'tauri-sqlite'
-                      ? 'SQLite'
-                      : controller.repositoryKind === 'indexeddb'
-                        ? 'IndexedDB'
-                        : 'Memory'}
-                  </h2>
+                  <h2>Tournament data</h2>
                 </div>
                 <StateLabel
                   state={controller.error ? 'help' : 'finished'}
@@ -285,8 +279,14 @@ export function SettingsView({
                     </dd>
                   </div>
                   <div>
-                    <dt>Schema</dt>
-                    <dd>Director v{state.schemaVersion}</dd>
+                    <dt>Durability</dt>
+                    <dd>
+                      {controller.repositoryKind === 'tauri-sqlite'
+                        ? 'Saved on this device'
+                        : controller.repositoryKind === 'indexeddb'
+                          ? 'Saved in this browser'
+                          : 'Session only'}
+                    </dd>
                   </div>
                 </dl>
                 {controller.error && <p className="director-error-copy">{controller.error}</p>}
@@ -330,10 +330,10 @@ export function SettingsView({
             </p>
             <p className="director-muted">
               {controller.repositoryKind === 'tauri-sqlite'
-                ? 'Stored in the local SQLite database. Keep a portable archive separately for loss of the computer or disk.'
+                ? 'Saved on this device. Keep a portable archive separately for loss of the computer or disk.'
                 : controller.repositoryKind === 'memory'
-                  ? 'Memory only: recovery points disappear when this session ends.'
-                  : 'Stored in this browser profile. Clearing browser data removes both the tournament and its recovery points.'}
+                  ? 'Session only: recovery points disappear when this session ends.'
+                  : 'Saved in this browser profile. Clearing browser data removes both the tournament and its recovery points.'}
             </p>
             {(controller.checkpoints ?? []).length === 0 ? (
               <p>No recovery points yet.</p>
@@ -471,9 +471,14 @@ export function SettingsView({
           </div>
           <PanelBody>
             <p>
-              Director schema v{state.schemaVersion} · {controller.repositoryKind}. If support is needed,
-              export diagnostics from the desktop app without sending private tournament content unless
-              requested.
+              Director schema v{state.schemaVersion} · Storage engine:{' '}
+              {controller.repositoryKind === 'tauri-sqlite'
+                ? 'SQLite'
+                : controller.repositoryKind === 'indexeddb'
+                  ? 'IndexedDB'
+                  : 'Memory'}
+              . If support is needed, export diagnostics from the desktop app without sending private
+              tournament content unless requested.
             </p>
           </PanelBody>
         </section>
