@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   currentPhase,
   formatGenerationAvailability,
@@ -9,8 +9,36 @@ import {
   type PhaseKind,
 } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, FormField, PanelBody, StateLabel } from '../components/Controls';
-import { PageHeader } from '../components/PageHeader';
+import {
+  ActionMenu,
+  AdvancedSection,
+  Button,
+  Callout,
+  Checkbox,
+  CheckboxGroup,
+  Dialog,
+  DialogSection,
+  EmptyState,
+  Field,
+  FieldGrid,
+  MenuItem,
+  MultiSelect,
+  NumberInput,
+  Page,
+  PageHeader,
+  Panel,
+  ReorderHandle,
+  ReorderNotice,
+  ReorderToggle,
+  Select,
+  StateLabel,
+  SummaryItem,
+  SummaryList,
+  TextInput,
+  useConfirm,
+  useReorderMode,
+  type SelectOption,
+} from '../components';
 import type { SectionId } from '../app/navigation';
 import { poolName, recommendPoolSizes } from '@qbsheet/tournament-core';
 import { errorNotice, type AnnounceInput } from '../notices';
@@ -30,627 +58,84 @@ export function FormatView({
 }) {
   const formatId = state.tournament?.formatId;
   const format = formatId ? state.formats.find((entry) => entry.id === formatId) : undefined;
-  const roundsDraftKey = format ? `${format.id}|${format.roundsPerTeam ?? ''}` : '';
-  const [roundsDraftState, setRoundsDraftState] = useState(() => ({
-    key: roundsDraftKey,
-    value: format?.roundsPerTeam?.toString() ?? '',
-    dirty: false,
-  }));
-  const roundsPerTeam =
-    roundsDraftState.key === roundsDraftKey
-      ? roundsDraftState.value
-      : format && roundsDraftState.dirty && roundsDraftState.key.startsWith(`${format.id}|`)
-        ? roundsDraftState.value
-        : (format?.roundsPerTeam?.toString() ?? '');
-  const rules = state.tournament?.rules;
-  const acceptedResultCount = state.games.filter((game) => game.status === 'accepted').length;
-  const scoringValuesLocked = acceptedResultCount > 0;
-  const [showMoreRules, setShowMoreRules] = useState(false);
-  const scoringRuleDraftKey = scoringRuleKey(state.tournament?.id, rules);
-  const [scoringRuleDraftState, setScoringRuleDraftState] = useState(() => ({
-    key: scoringRuleDraftKey,
-    values: scoringRuleDraftsFor(rules),
-  }));
-  const scoringRuleDrafts =
-    scoringRuleDraftState.key === scoringRuleDraftKey
-      ? scoringRuleDraftState.values
-      : scoringRuleDraftsFor(rules);
-  const updateScoringRuleDrafts = (
-    update: (current: ReturnType<typeof scoringRuleDraftsFor>) => ReturnType<typeof scoringRuleDraftsFor>,
-  ) => {
-    setScoringRuleDraftState({
-      key: scoringRuleDraftKey,
-      values: update(scoringRuleDrafts),
-    });
-  };
-  // Nullable scoring fields (second tiers, overrides) treat a blank input as
-  // "unused" rather than zero: a missing power mark is not a 0-point power.
-  const nullableScoringKeys: ReadonlySet<ScoringRuleKey> = new Set([
-    'superpowerValue',
-    'powerValue',
-    'negValue',
-    'maximumTossupCount',
-    'minimumBonusParts',
-    'maximumBonusScore',
-    'bonusDivisor',
-  ]);
-  const commitScoringRule = (key: ScoringRuleKey, label: string): void => {
-    const raw = scoringRuleDrafts[key].trim();
-    if (!raw) {
-      if (!nullableScoringKeys.has(key)) {
-        onAnnounce(errorNotice(`${label} must be a number.`));
-        return;
-      }
-      const cleared = controller.updateRules({
-        [key]: null,
-      } as Partial<NonNullable<DirectorState['tournament']>['rules']>);
-      if (!cleared) {
-        onAnnounce(errorNotice('Scoring rule was not saved; review the Director error.'));
-      }
-      return;
-    }
-    const value = Number(raw);
-    if (!Number.isFinite(value)) {
-      onAnnounce(errorNotice(`${label} must be a finite number.`));
-      return;
-    }
-    if (
-      !controller.updateRules({ [key]: value } as Partial<NonNullable<DirectorState['tournament']>['rules']>)
-    ) {
-      onAnnounce(errorNotice(`${label} was not saved; review the Director error.`));
-    }
-  };
-  const commitRoundsPerTeam = (): void => {
-    if (!format) return;
-    const raw = roundsPerTeam.trim();
-    const value = raw ? Number(raw) : null;
-    if ((value !== null && !Number.isInteger(value)) || (value !== null && (value < 1 || value > 99))) {
-      onAnnounce(
-        errorNotice('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.'),
-      );
-      setRoundsDraftState({
-        key: roundsDraftKey,
-        value: format.roundsPerTeam?.toString() ?? '',
-        dirty: false,
-      });
-      return;
-    }
-    if (!controller.updateFormat({ roundsPerTeam: value })) {
-      onAnnounce(errorNotice('Rounds per team was not saved; review the Director error.'));
-      setRoundsDraftState({
-        key: roundsDraftKey,
-        value: format.roundsPerTeam?.toString() ?? '',
-        dirty: false,
-      });
-      return;
-    }
-    setRoundsDraftState({
-      key: `${format.id}|${value ?? ''}`,
-      value: value?.toString() ?? '',
-      dirty: false,
-    });
-  };
   const phase = currentPhase(state);
-  // Progressive disclosure: one ordinary stage is the tournament itself, so
-  // stage settings and the stage list stay hidden until a second stage exists.
   const visiblePhases = state.phases.filter((entry) => !entry.archived);
   const singleStage = visiblePhases.length <= 1;
-  const generation = formatGenerationAvailability(state);
-  const scheduleCount = state.rounds.filter((round) => round.phaseId === phase?.id).length;
-  const formatTypeLocked = state.rounds.length > 0;
-  const [showPhaseForm, setShowPhaseForm] = useState(false);
-  const [newPhaseName, setNewPhaseName] = useState('');
-  const [newPhaseKind, setNewPhaseKind] = useState<PhaseKind>('playoff');
-  if (!format)
+  const [scoringOpen, setScoringOpen] = useState(false);
+  const [addPhaseOpen, setAddPhaseOpen] = useState(false);
+
+  if (!format) {
     return (
-      <>
-        <PageHeader
-          eyebrow="Plan"
-          title="Format"
-          description="A tournament is required before its format can be configured."
-        />
-        <section className="director-panel">
-          <PanelBody>
-            <p className="director-empty-copy">Create a tournament from the Overview page first.</p>
-          </PanelBody>
-        </section>
-      </>
+      <Page>
+        <PageHeader title="Format" description="A tournament is required before its format can be configured." />
+        <EmptyState title="No tournament format" description="Create a tournament from Overview first." />
+      </Page>
     );
+  }
+
+  const confirmedTeams = state.teams.filter((team) => team.status === 'confirmed').length;
+  const acceptedResultCount = state.games.filter((game) => game.status === 'accepted').length;
+  const generation = formatGenerationAvailability(state);
+  const formatKey = [
+    format.id,
+    format.kind,
+    format.roundsPerTeam ?? '',
+    format.avoidRematches,
+    format.avoidSameOrganization,
+    format.allowByes,
+    format.name,
+  ].join('|');
+
   return (
-    <>
+    <Page>
       <PageHeader
-        eyebrow="Plan"
         title="Format"
-        description="A reusable format controls stages, rounds, advancement, and tiebreakers."
+        description={`${format.name} · ${confirmedTeams} confirmed team${confirmedTeams === 1 ? '' : 's'}`}
         actions={
-          <Button
-            variant="primary"
-            icon="play"
-            disabled={!generation.supported || format.kind === 'custom'}
-            onClick={() => {
-              const result = controller.generateSchedule();
-              if (result.generated) {
-                onAnnounce(
-                  result.conflicts.length
-                    ? `Round generated with warnings: ${result.conflicts.join(' ')}`
-                    : 'Round generated locally; saving now.',
-                );
-                onNavigate('schedule');
-              } else {
-                onAnnounce(
-                  errorNotice(
-                    result.conflicts.join(' ') ||
-                      'No round was generated; review the format and confirmed teams first.',
-                  ),
-                );
-              }
-            }}
-          >
-            Generate next round
+          <Button variant="secondary" icon="chevron" onClick={() => onNavigate('schedule')}>
+            Open tournament day
           </Button>
         }
       />
-      <div className="director-page-stack">
-        <RecommendedPlan
-          state={state}
-          controller={controller}
-          onNavigate={onNavigate}
-          onAnnounce={onAnnounce}
-        />
-        <section className="director-panel director-format-recommendation">
-          <div>
-            <p className="director-eyebrow">Current plan</p>
-            <h2>{format.name}</h2>
-            <p>
-              {formatDescription(format.kind)} ·{' '}
-              {state.teams.filter((team) => team.status === 'confirmed').length} confirmed teams ·{' '}
-              {state.rooms.length} rooms · {state.packets.length} packets
-            </p>
-          </div>
-          <StateLabel
-            state={format.editable ? 'confirmed' : 'warning'}
-            label={format.editable ? 'Editable' : 'Imported'}
-          />
-        </section>
-        <div className="director-two-column">
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Format settings</p>
-                <h2>Pairing rules</h2>
-              </div>
-            </div>
-            <PanelBody>
-              <div className="director-form-grid director-form-grid-two">
-                <FormField label="Format">
-                  <select
-                    value={format.kind}
-                    disabled={formatTypeLocked || !format.editable}
-                    onChange={(event) =>
-                      controller.updateFormat({
-                        kind: event.target.value as typeof format.kind,
-                        name: formatName(event.target.value),
-                      })
-                    }
-                  >
-                    <option value="round-robin">Round robin</option>
-                    <option value="double-round-robin">Double round robin</option>
-                    <option value="pools">Preliminary pools</option>
-                    <option value="playoff-pools">Playoff pools</option>
-                    <option value="single-elimination">Single elimination</option>
-                    <option value="swiss">Swiss / power matching</option>
-                    <option value="custom">Custom / manual</option>
-                  </select>
-                  {formatTypeLocked && <small>Format type is locked after the first generated round.</small>}
-                </FormField>
-                <FormField
-                  label="Rounds per team"
-                  hint="Set a maximum for this stage; leave blank for no fixed limit."
-                >
-                  <input
-                    type="number"
-                    min="1"
-                    max="99"
-                    disabled={!format.editable}
-                    value={roundsPerTeam}
-                    onChange={(event) =>
-                      setRoundsDraftState({ key: roundsDraftKey, value: event.target.value, dirty: true })
-                    }
-                    onBlur={commitRoundsPerTeam}
-                  />
-                </FormField>
-              </div>
-              <div className="director-check-group">
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={format.avoidRematches}
-                    disabled={!format.editable}
-                    onChange={(event) => controller.updateFormat({ avoidRematches: event.target.checked })}
-                  />
-                  <span>Avoid rematches when possible</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={format.avoidSameOrganization}
-                    disabled={!format.editable}
-                    onChange={(event) =>
-                      controller.updateFormat({ avoidSameOrganization: event.target.checked })
-                    }
-                  />
-                  <span>Avoid same-school pairings when possible</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={format.allowByes}
-                    disabled={!format.editable}
-                    onChange={(event) => controller.updateFormat({ allowByes: event.target.checked })}
-                  />
-                  <span>Allow explicit byes for odd fields</span>
-                </label>
-              </div>
-              <p className="director-panel-footnote" role={generation.supported ? undefined : 'alert'}>
-                {generation.message}
-              </p>
-            </PanelBody>
-          </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Scoring rules</p>
-                <h2>QBSheet rules</h2>
-              </div>
-              <span className="director-muted">
-                {controller.error
-                  ? 'Save needs attention'
-                  : controller.saving
-                    ? 'Saving changes…'
-                    : state.metadata.lastSavedAt
-                      ? 'Saved locally'
-                      : 'Not saved yet'}
-              </span>
-            </div>
-            <PanelBody>
-              <div className="director-row-actions" role="group" aria-label="Rule presets">
-                {scoringRulePresets.map((preset) => (
-                  <span key={preset.id} title={preset.description}>
-                    <Button
-                      variant="quiet"
-                      disabled={scoringValuesLocked}
-                      onClick={() => {
-                        if (!controller.updateRules({ ...preset.rules })) {
-                          onAnnounce(
-                            errorNotice(`${preset.name} was not applied; review the Director error.`),
-                          );
-                          return;
-                        }
-                        onAnnounce(`${preset.name} rules applied. Adjust any field afterward.`);
-                      }}
-                    >
-                      {preset.name}
-                    </Button>
-                  </span>
-                ))}
-              </div>
-              {scoringValuesLocked && (
-                <p className="director-panel-footnote" role="note">
-                  Scoring values are locked: {acceptedResultCount} accepted result
-                  {acceptedResultCount === 1 ? '' : 's'} already use{acceptedResultCount === 1 ? 's' : ''}{' '}
-                  them. Overtime, timers, lightning, bouncebacks, and tiebreakers stay editable.
-                </p>
-              )}
-              <div className="director-form-grid">
-                <FormField label="Tossup value">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.tossupValue}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        tossupValue: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('tossupValue', 'Tossup value')}
-                  />
-                </FormField>
-                <FormField label="Power value" hint="Blank means no power mark.">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.powerValue}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        powerValue: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('powerValue', 'Power value')}
-                  />
-                </FormField>
-                <FormField label="Neg value" hint="Blank means no interrupt penalty.">
-                  <input
-                    type="number"
-                    max="0"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.negValue}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        negValue: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('negValue', 'Neg value')}
-                  />
-                </FormField>
-                <FormField label="Bonus value">
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.bonusValue}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        bonusValue: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('bonusValue', 'Bonus value')}
-                  />
-                </FormField>
-                <FormField label="Tossups">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.tossupCount}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        tossupCount: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('tossupCount', 'Tossups')}
-                  />
-                </FormField>
-                <FormField label="Bonus parts">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.bonusParts}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        bonusParts: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('bonusParts', 'Bonus parts')}
-                  />
-                </FormField>
-                <FormField label="Maximum active players">
-                  <input
-                    type="number"
-                    min="1"
-                    step="1"
-                    disabled={scoringValuesLocked}
-                    value={scoringRuleDrafts.maximumActivePlayers}
-                    onChange={(event) =>
-                      updateScoringRuleDrafts((current) => ({
-                        ...current,
-                        maximumActivePlayers: event.target.value,
-                      }))
-                    }
-                    onBlur={() => commitScoringRule('maximumActivePlayers', 'Maximum active players')}
-                  />
-                </FormField>
-              </div>
-              <div className="director-row-actions">
-                <Button variant="quiet" onClick={() => setShowMoreRules((current) => !current)}>
-                  {showMoreRules ? 'Fewer scoring rules' : 'More scoring rules'}
-                </Button>
-              </div>
-              {showMoreRules && (
-                <div className="director-form-grid">
-                  <FormField label="Superpower value" hint="Blank means no second tier.">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={scoringValuesLocked}
-                      value={scoringRuleDrafts.superpowerValue}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          superpowerValue: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('superpowerValue', 'Superpower value')}
-                    />
-                  </FormField>
-                  <FormField label="Maximum tossups" hint="Blank means regulation ends at Tossups.">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={scoringValuesLocked}
-                      value={scoringRuleDrafts.maximumTossupCount}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          maximumTossupCount: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('maximumTossupCount', 'Maximum tossups')}
-                    />
-                  </FormField>
-                  <FormField
-                    label="Minimum bonus parts"
-                    hint="Blank means every bonus has Bonus parts. Smaller means irregular bonuses."
-                  >
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={scoringValuesLocked}
-                      value={scoringRuleDrafts.minimumBonusParts}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          minimumBonusParts: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('minimumBonusParts', 'Minimum bonus parts')}
-                    />
-                  </FormField>
-                  <FormField label="Maximum bonus score" hint="Blank means Bonus value times Bonus parts.">
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      disabled={scoringValuesLocked}
-                      value={scoringRuleDrafts.maximumBonusScore}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          maximumBonusScore: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('maximumBonusScore', 'Maximum bonus score')}
-                    />
-                  </FormField>
-                  <FormField label="Bonus divisor" hint="Blank means one bonus part.">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={scoringValuesLocked}
-                      value={scoringRuleDrafts.bonusDivisor}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          bonusDivisor: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('bonusDivisor', 'Bonus divisor')}
-                    />
-                  </FormField>
-                  <FormField label="Overtime tossups" hint="1 is sudden death.">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={scoringRuleDrafts.overtimeTossupCount}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          overtimeTossupCount: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('overtimeTossupCount', 'Overtime tossups')}
-                    />
-                  </FormField>
-                  <FormField label="Lightning rounds per team">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={scoringRuleDrafts.lightningCountPerTeam}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          lightningCountPerTeam: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('lightningCountPerTeam', 'Lightning rounds per team')}
-                    />
-                  </FormField>
-                  <FormField label="Lightning divisor">
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={scoringRuleDrafts.lightningDivisor}
-                      onChange={(event) =>
-                        updateScoringRuleDrafts((current) => ({
-                          ...current,
-                          lightningDivisor: event.target.value,
-                        }))
-                      }
-                      onBlur={() => commitScoringRule('lightningDivisor', 'Lightning divisor')}
-                    />
-                  </FormField>
-                </div>
-              )}
-              <div className="director-check-group">
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.useBonuses ?? true}
-                    disabled={scoringValuesLocked}
-                    onChange={(event) => controller.updateRules({ useBonuses: event.target.checked })}
-                  />
-                  <span>Use bonuses</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.bouncebacks ?? false}
-                    onChange={(event) => controller.updateRules({ bouncebacks: event.target.checked })}
-                  />
-                  <span>Allow bouncebacks</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.overtime ?? true}
-                    onChange={(event) => controller.updateRules({ overtime: event.target.checked })}
-                  />
-                  <span>Use overtime when tied</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.overtimeBonuses ?? false}
-                    onChange={(event) => controller.updateRules({ overtimeBonuses: event.target.checked })}
-                  />
-                  <span>Overtime tossups earn bonuses</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.timed ?? false}
-                    onChange={(event) => controller.updateRules({ timed: event.target.checked })}
-                  />
-                  <span>Use timed regulation</span>
-                </label>
-                <label className="director-check-row">
-                  <input
-                    type="checkbox"
-                    checked={state.tournament?.rules.lightning ?? false}
-                    onChange={(event) => controller.updateRules({ lightning: event.target.checked })}
-                  />
-                  <span>Enable lightning</span>
-                </label>
-              </div>
-              <p className="director-panel-footnote">
-                Timed regulation is carried to the scorer as a moderator-controlled clock. Regulation minutes
-                remains a planning value; it never changes the scorer’s actual end-of-regulation decision.
-              </p>
-            </PanelBody>
-          </section>
-        </div>
-        {(format.kind === 'custom' || format.kind === 'swiss') && phase && (
+
+      <RecommendedPlan state={state} controller={controller} onNavigate={onNavigate} onAnnounce={onAnnounce} />
+
+      <FormatBasics
+        key={formatKey}
+        state={state}
+        format={format}
+        controller={controller}
+        generationMessage={generation.message}
+        generationSupported={generation.supported}
+        onAnnounce={onAnnounce}
+      />
+
+      <Panel
+        title="Scoring"
+        description={scoringSummary(state)}
+        actions={
+          <Button variant="secondary" icon="edit" onClick={() => setScoringOpen(true)}>
+            Edit scoring rules
+          </Button>
+        }
+      >
+        {acceptedResultCount > 0 && (
+          <Callout tone="info" title="Core scoring values are locked">
+            {acceptedResultCount} accepted result{acceptedResultCount === 1 ? '' : 's'} already use these values. Overtime, timers, lightning, bouncebacks, and tiebreakers remain editable.
+          </Callout>
+        )}
+      </Panel>
+
+      {format.kind === 'pools' || format.kind === 'playoff-pools' ? (
+        phase && <PoolConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
+      ) : null}
+
+      {(format.kind === 'custom' || format.kind === 'swiss') && phase && (
+        <AdvancedSection
+          label={format.kind === 'swiss' ? 'Manual power-pairing override' : 'Manual round builder'}
+          hint="Use when the format intentionally requires director-controlled pairings."
+          icon="settings"
+        >
           <ManualRoundBuilder
             state={state}
             controller={controller}
@@ -658,165 +143,471 @@ export function FormatView({
             onNavigate={onNavigate}
             onAnnounce={onAnnounce}
           />
-        )}
-        {(format.kind === 'pools' || format.kind === 'playoff-pools') && phase && (
-          <PoolConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
-        )}
-        {phase && !singleStage && (
-          <PhaseConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
-        )}
-        {rules && <TiebreakerConfiguration rules={rules} controller={controller} onAnnounce={onAnnounce} />}
-        <section className="director-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">{singleStage ? 'Tournament plan' : 'Stages'}</p>
-              <h2>{singleStage ? 'Single stage' : 'Plan sequence'}</h2>
-            </div>
-            <Button
-              variant="quiet"
-              onClick={() => {
-                const next = !showPhaseForm;
-                setShowPhaseForm(next);
-                if (next) {
-                  setNewPhaseName(singleStage ? 'Playoffs' : `Stage ${state.phases.length + 1}`);
-                  setNewPhaseKind('playoff');
-                }
-              }}
-            >
-              {showPhaseForm ? 'Close' : singleStage ? 'Add playoff stage' : 'Add stage'}
-            </Button>
-          </div>
-          <PanelBody>
-            {showPhaseForm && (
-              <form
-                className="director-phase-add-form"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  controller.addPhase(
-                    newPhaseName.trim() || (singleStage ? 'Playoffs' : `Stage ${state.phases.length + 1}`),
-                    newPhaseKind,
-                  );
-                  setShowPhaseForm(false);
-                  setNewPhaseName('');
-                  onAnnounce('Stage added locally; saving now.');
-                }}
-              >
-                <FormField label="Stage name">
-                  <input
-                    value={newPhaseName}
-                    onChange={(event) => setNewPhaseName(event.target.value)}
-                    placeholder="Playoffs"
-                  />
-                </FormField>
-                <FormField label="Stage type">
-                  <select
-                    value={newPhaseKind}
-                    onChange={(event) => setNewPhaseKind(event.target.value as PhaseKind)}
-                  >
-                    <option value="preliminary">Preliminary</option>
-                    <option value="playoff">Playoff</option>
-                    <option value="final">Final</option>
-                    <option value="placement">Placement</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </FormField>
-                <Button variant="secondary" type="submit">
-                  Save stage
-                </Button>
-              </form>
-            )}
-            {singleStage ? (
-              <StageSummary state={state} />
-            ) : state.phases.length === 0 ? (
-              <p className="director-empty-copy">No stages configured.</p>
-            ) : (
-              <ol className="director-phase-list">
-                {state.phases.map((entry) => (
-                  <li key={entry.id}>
-                    <span className="director-leader-rank">{entry.order}</span>
-                    <div>
-                      <strong>{entry.name}</strong>
-                      <small>
-                        {entry.kind} ·{' '}
-                        {state.rounds.filter((round) => entry.roundIds.includes(round.id)).length} generated
-                        round
-                        {state.rounds.filter((round) => entry.roundIds.includes(round.id)).length === 1
-                          ? ''
-                          : 's'}
-                      </small>
-                    </div>
-                    <StateLabel
-                      state={entry.archived ? 'archived' : entry.status}
-                      label={entry.archived ? 'archived' : entry.status}
-                    />
-                    <Button
-                      variant={entry.id === state.tournament?.currentPhaseId ? 'secondary' : 'quiet'}
-                      disabled={entry.archived}
-                      onClick={() => {
-                        controller.selectPhase(entry.id);
-                        onAnnounce(
-                          entry.status === 'complete'
-                            ? `${entry.name} selected for review; it is complete.`
-                            : `${entry.name} selected for the next generated round.`,
-                        );
-                      }}
-                    >
-                      {entry.status === 'complete'
-                        ? 'Review'
-                        : entry.id === state.tournament?.currentPhaseId
-                          ? 'Current'
-                          : 'Use'}
-                    </Button>
-                    <Button
-                      variant="quiet"
-                      onClick={() => {
-                        if (
-                          !entry.archived &&
-                          !confirm(`Archive ${entry.name}? Its rounds will remain historical.`)
-                        ) {
-                          return;
-                        }
-                        if (controller.setPhaseArchived(entry.id, !entry.archived)) {
-                          onAnnounce(
-                            `${entry.name} ${entry.archived ? 'reopened' : 'archived'}; history was retained.`,
-                          );
-                        } else {
-                          onAnnounce(
-                            errorNotice(`${entry.name} was not changed; review the Director error.`),
-                          );
-                        }
-                      }}
-                    >
-                      {entry.archived ? 'Reopen' : 'Archive'}
-                    </Button>
-                  </li>
-                ))}
-              </ol>
-            )}
-            {!singleStage && (
-              <p className="director-panel-footnote">
-                {scheduleCount
-                  ? `${scheduleCount} round${scheduleCount === 1 ? '' : 's'} already generated. New format changes affect future rounds only.`
-                  : 'Generate a round after adding teams and rooms.'}
-              </p>
-            )}
-          </PanelBody>
-        </section>
-      </div>
-    </>
+        </AdvancedSection>
+      )}
+
+      <AdvancedSection
+        label={singleStage ? 'Stages & advancement' : `Stages & advancement · ${visiblePhases.length} stages`}
+        hint={singleStage ? 'A one-stage tournament does not need stage concepts unless the field later splits.' : 'Configure the selected stage, advancement, carryover, and stage sequence.'}
+        icon="format"
+        defaultOpen={!singleStage}
+      >
+        <div className="director-stack">
+          {phase && !singleStage && (
+            <PhaseConfiguration state={state} phase={phase} controller={controller} onAnnounce={onAnnounce} />
+          )}
+          <StageSequence
+            state={state}
+            controller={controller}
+            singleStage={singleStage}
+            onAdd={() => setAddPhaseOpen(true)}
+            onAnnounce={onAnnounce}
+          />
+        </div>
+      </AdvancedSection>
+
+      {state.tournament?.rules && (
+        <AdvancedSection
+          label="Standings & tiebreakers"
+          hint="The ordered criteria used for standings and advancement."
+          icon="standings"
+        >
+          <TiebreakerConfiguration
+            rules={state.tournament.rules}
+            controller={controller}
+            onAnnounce={onAnnounce}
+          />
+        </AdvancedSection>
+      )}
+
+      {scoringOpen && state.tournament?.rules && (
+        <ScoringRulesDialog
+          state={state}
+          rules={state.tournament.rules}
+          controller={controller}
+          acceptedResultCount={acceptedResultCount}
+          onAnnounce={onAnnounce}
+          onClose={() => setScoringOpen(false)}
+        />
+      )}
+      {addPhaseOpen && (
+        <AddPhaseDialog
+          nextIndex={state.phases.length + 1}
+          playoffDefault={singleStage}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setAddPhaseOpen(false)}
+        />
+      )}
+    </Page>
   );
 }
 
-function StageSummary({ state }: { state: DirectorState }) {
-  const roundCount = state.rounds.length;
-  const poolCount = state.pools.filter((pool) => !pool.archived).length;
-  const rounds = `${roundCount} round${roundCount === 1 ? '' : 's'}`;
-  const pools = poolCount === 0 ? 'no pools' : `${poolCount} pool${poolCount === 1 ? '' : 's'}`;
+function FormatBasics({
+  state,
+  format,
+  controller,
+  generationMessage,
+  generationSupported,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  format: DirectorState['formats'][number];
+  controller: DirectorController;
+  generationMessage: string;
+  generationSupported: boolean;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const locked = state.rounds.length > 0;
+  const [kind, setKind] = useState(format.kind);
+  const [roundsPerTeam, setRoundsPerTeam] = useState(format.roundsPerTeam?.toString() ?? '');
+  const [avoidRematches, setAvoidRematches] = useState(format.avoidRematches);
+  const [avoidSameOrganization, setAvoidSameOrganization] = useState(format.avoidSameOrganization);
+  const [allowByes, setAllowByes] = useState(format.allowByes);
+
+  const save = () => {
+    const raw = roundsPerTeam.trim();
+    const rounds = raw === '' ? null : Number(raw);
+    if (rounds !== null && (!Number.isInteger(rounds) || rounds < 1 || rounds > 99)) {
+      onAnnounce(errorNotice('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.'));
+      return;
+    }
+    const saved = controller.updateFormat({
+      kind,
+      name: formatName(kind),
+      roundsPerTeam: rounds,
+      avoidRematches,
+      avoidSameOrganization,
+      allowByes,
+    });
+    onAnnounce(saved ? `${formatName(kind)} settings saved.` : errorNotice('Format settings were not saved; review the Director error.'));
+  };
+
+  const formatOptions: SelectOption<typeof format.kind>[] = [
+    { value: 'round-robin', label: 'Round robin', detail: 'Everyone meets on a deterministic rotation.' },
+    { value: 'double-round-robin', label: 'Double round robin', detail: 'The rotation repeats with rematch tracking.' },
+    { value: 'pools', label: 'Preliminary pools', detail: 'Divide the field into preliminary groups.' },
+    { value: 'playoff-pools', label: 'Playoff pools', detail: 'Group qualifiers for a later stage.' },
+    { value: 'single-elimination', label: 'Single elimination', detail: 'One loss removes a team from the bracket.' },
+    { value: 'swiss', label: 'Swiss / power matching', detail: 'Pair teams with similar records.' },
+    { value: 'custom', label: 'Custom / manual', detail: 'The director controls pairings.' },
+  ];
+
   return (
-    <p className="director-empty-copy">
-      {rounds} · {pools}. Add a playoff stage when the field splits; rounds, pools, and advancement stay
-      editable.
-    </p>
+    <Panel
+      title="Tournament structure"
+      description={`${formatDescription(format.kind)}. Changes here affect future rounds only.`}
+      actions={<StateLabel state={format.editable ? 'ready' : 'warning'} label={format.editable ? 'Editable' : 'Imported'} />}
+    >
+      <FieldGrid>
+        <Field
+          label="Format"
+          hint={locked ? 'Format type is locked after the first generated round.' : undefined}
+          render={({ id, describedBy }) => (
+            <Select
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={kind}
+              options={formatOptions}
+              disabled={locked || !format.editable}
+              onChange={setKind}
+            />
+          )}
+        />
+        <Field label="Rounds per team" hint="Leave blank for no fixed limit.">
+          <NumberInput
+            min={1}
+            max={99}
+            value={roundsPerTeam}
+            disabled={!format.editable}
+            onChange={(event) => setRoundsPerTeam(event.target.value)}
+          />
+        </Field>
+      </FieldGrid>
+      <CheckboxGroup legend="Pairing preferences" hint="Director applies these when possible; hard schedule constraints still win.">
+        <Checkbox checked={avoidRematches} disabled={!format.editable} label="Avoid rematches when possible" onChange={setAvoidRematches} />
+        <Checkbox checked={avoidSameOrganization} disabled={!format.editable} label="Avoid same-school pairings when possible" onChange={setAvoidSameOrganization} />
+        <Checkbox checked={allowByes} disabled={!format.editable} label="Allow explicit byes for odd fields" onChange={setAllowByes} />
+      </CheckboxGroup>
+      <div className="director-form-actions">
+        <span className={generationSupported ? 'director-text-meta' : 'director-text-warning'}>{generationMessage}</span>
+        <Button variant="primary" disabled={!format.editable} onClick={save}>Save format</Button>
+      </div>
+    </Panel>
+  );
+}
+
+function ScoringRulesDialog({
+  state,
+  rules,
+  controller,
+  acceptedResultCount,
+  onAnnounce,
+  onClose,
+}: {
+  state: DirectorState;
+  rules: NonNullable<DirectorState['tournament']>['rules'];
+  controller: DirectorController;
+  acceptedResultCount: number;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const locked = acceptedResultCount > 0;
+  const [values, setValues] = useState(() => scoringRuleDraftsFor(rules));
+  const [booleans, setBooleans] = useState(() => ({
+    useBonuses: rules.useBonuses,
+    bouncebacks: rules.bouncebacks,
+    overtime: rules.overtime,
+    overtimeBonuses: rules.overtimeBonuses,
+    timed: rules.timed,
+    lightning: rules.lightning,
+  }));
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  const setValue = (key: ScoringRuleKey, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  const nullable = new Set<ScoringRuleKey>([
+    'superpowerValue', 'powerValue', 'negValue', 'maximumTossupCount', 'minimumBonusParts',
+    'maximumBonusScore', 'bonusDivisor',
+  ]);
+  const parse = (key: ScoringRuleKey, label: string): number | null | undefined => {
+    const raw = values[key].trim();
+    if (!raw) {
+      if (nullable.has(key)) return null;
+      onAnnounce(errorNotice(`${label} must be a number.`));
+      return undefined;
+    }
+    const value = Number(raw);
+    if (!Number.isFinite(value)) {
+      onAnnounce(errorNotice(`${label} must be a finite number.`));
+      return undefined;
+    }
+    return value;
+  };
+
+  const save = () => {
+    const labels: Record<ScoringRuleKey, string> = {
+      tossupValue: 'Tossup value', superpowerValue: 'Superpower value', powerValue: 'Power value', negValue: 'Neg value',
+      bonusValue: 'Bonus value', tossupCount: 'Tossups', maximumTossupCount: 'Maximum tossups', bonusParts: 'Bonus parts',
+      minimumBonusParts: 'Minimum bonus parts', maximumBonusScore: 'Maximum bonus score', bonusDivisor: 'Bonus divisor',
+      overtimeTossupCount: 'Overtime tossups', lightningCountPerTeam: 'Lightning rounds per team', lightningDivisor: 'Lightning divisor',
+      maximumActivePlayers: 'Maximum active players',
+    };
+    const parsed = {} as Record<ScoringRuleKey, number | null>;
+    for (const key of Object.keys(labels) as ScoringRuleKey[]) {
+      const value = parse(key, labels[key]);
+      if (value === undefined) return;
+      parsed[key] = value;
+    }
+    const changes: Partial<typeof rules> = {
+      overtimeTossupCount: parsed.overtimeTossupCount as number,
+      lightningCountPerTeam: parsed.lightningCountPerTeam as number,
+      lightningDivisor: parsed.lightningDivisor as number,
+      bouncebacks: booleans.bouncebacks,
+      overtime: booleans.overtime,
+      overtimeBonuses: booleans.overtimeBonuses,
+      timed: booleans.timed,
+      lightning: booleans.lightning,
+    };
+    if (!locked) {
+      Object.assign(changes, {
+        tossupValue: parsed.tossupValue,
+        superpowerValue: parsed.superpowerValue,
+        powerValue: parsed.powerValue,
+        negValue: parsed.negValue,
+        bonusValue: parsed.bonusValue,
+        tossupCount: parsed.tossupCount,
+        maximumTossupCount: parsed.maximumTossupCount,
+        bonusParts: parsed.bonusParts,
+        minimumBonusParts: parsed.minimumBonusParts,
+        maximumBonusScore: parsed.maximumBonusScore,
+        bonusDivisor: parsed.bonusDivisor,
+        maximumActivePlayers: parsed.maximumActivePlayers,
+        useBonuses: booleans.useBonuses,
+      });
+    }
+    if (!controller.updateRules(changes)) {
+      onAnnounce(errorNotice('Scoring rules were not saved; review the Director error.'));
+      return;
+    }
+    onAnnounce('Scoring rules saved.');
+    onClose();
+  };
+
+  const applyPreset = (preset: (typeof scoringRulePresets)[number]) => {
+    const merged = { ...rules, ...preset.rules };
+    setValues(scoringRuleDraftsFor(merged));
+    setBooleans({
+      useBonuses: merged.useBonuses,
+      bouncebacks: merged.bouncebacks,
+      overtime: merged.overtime,
+      overtimeBonuses: merged.overtimeBonuses,
+      timed: merged.timed,
+      lightning: merged.lightning,
+    });
+  };
+
+  return (
+    <Dialog
+      title="Scoring rules"
+      description="Choose a preset or edit the values. Nothing changes until Save."
+      size="xl"
+      onClose={onClose}
+      onSubmit={save}
+      submitLabel="Save scoring rules"
+    >
+      {locked && (
+        <Callout tone="info" title="Core values are locked">
+          Accepted results already use the tournament's tossup, bonus, and roster-size values. Operational options remain editable.
+        </Callout>
+      )}
+      <DialogSection title="Preset">
+        <div className="director-actions">
+          {scoringRulePresets.map((preset) => (
+            <Button key={preset.id} variant="secondary" disabled={locked} onClick={() => applyPreset(preset)} title={preset.description}>
+              {preset.name}
+            </Button>
+          ))}
+        </div>
+      </DialogSection>
+      <DialogSection title="Core scoring">
+        <FieldGrid>
+          <NumberRule label="Tossup value" value={values.tossupValue} disabled={locked} onChange={(value) => setValue('tossupValue', value)} />
+          <NumberRule label="Power value" hint="Blank means no power mark." value={values.powerValue} disabled={locked} onChange={(value) => setValue('powerValue', value)} />
+          <NumberRule label="Neg value" hint="Blank means no interrupt penalty." value={values.negValue} disabled={locked} onChange={(value) => setValue('negValue', value)} />
+          <NumberRule label="Bonus value" value={values.bonusValue} disabled={locked} onChange={(value) => setValue('bonusValue', value)} />
+          <NumberRule label="Tossups" value={values.tossupCount} disabled={locked} onChange={(value) => setValue('tossupCount', value)} />
+          <NumberRule label="Bonus parts" value={values.bonusParts} disabled={locked} onChange={(value) => setValue('bonusParts', value)} />
+          <NumberRule label="Maximum active players" value={values.maximumActivePlayers} disabled={locked} onChange={(value) => setValue('maximumActivePlayers', value)} />
+        </FieldGrid>
+        <Checkbox checked={booleans.useBonuses} disabled={locked} label="Use bonuses" onChange={(useBonuses) => setBooleans((current) => ({ ...current, useBonuses }))} />
+      </DialogSection>
+      <DialogSection title="Game flow">
+        <CheckboxGroup legend="Options" columns>
+          <Checkbox checked={booleans.bouncebacks} label="Allow bouncebacks" onChange={(bouncebacks) => setBooleans((current) => ({ ...current, bouncebacks }))} />
+          <Checkbox checked={booleans.overtime} label="Use overtime when tied" onChange={(overtime) => setBooleans((current) => ({ ...current, overtime }))} />
+          <Checkbox checked={booleans.overtimeBonuses} label="Overtime tossups earn bonuses" onChange={(overtimeBonuses) => setBooleans((current) => ({ ...current, overtimeBonuses }))} />
+          <Checkbox checked={booleans.timed} label="Use timed regulation" onChange={(timed) => setBooleans((current) => ({ ...current, timed }))} />
+          <Checkbox checked={booleans.lightning} label="Enable lightning" onChange={(lightning) => setBooleans((current) => ({ ...current, lightning }))} />
+        </CheckboxGroup>
+        <FieldGrid>
+          <NumberRule label="Overtime tossups" value={values.overtimeTossupCount} onChange={(value) => setValue('overtimeTossupCount', value)} />
+          <NumberRule label="Lightning rounds per team" value={values.lightningCountPerTeam} onChange={(value) => setValue('lightningCountPerTeam', value)} />
+          <NumberRule label="Lightning divisor" value={values.lightningDivisor} onChange={(value) => setValue('lightningDivisor', value)} />
+        </FieldGrid>
+      </DialogSection>
+      <Button variant="quiet" onClick={() => setShowAdvanced((value) => !value)}>
+        {showAdvanced ? 'Hide uncommon scoring fields' : 'Show uncommon scoring fields'}
+      </Button>
+      {showAdvanced && (
+        <DialogSection title="Uncommon scoring fields">
+          <FieldGrid>
+            <NumberRule label="Superpower value" hint="Blank means no second tier." value={values.superpowerValue} disabled={locked} onChange={(value) => setValue('superpowerValue', value)} />
+            <NumberRule label="Maximum tossups" hint="Blank means regulation ends at Tossups." value={values.maximumTossupCount} disabled={locked} onChange={(value) => setValue('maximumTossupCount', value)} />
+            <NumberRule label="Minimum bonus parts" value={values.minimumBonusParts} disabled={locked} onChange={(value) => setValue('minimumBonusParts', value)} />
+            <NumberRule label="Maximum bonus score" value={values.maximumBonusScore} disabled={locked} onChange={(value) => setValue('maximumBonusScore', value)} />
+            <NumberRule label="Bonus divisor" value={values.bonusDivisor} disabled={locked} onChange={(value) => setValue('bonusDivisor', value)} />
+          </FieldGrid>
+        </DialogSection>
+      )}
+    </Dialog>
+  );
+}
+
+function NumberRule({
+  label,
+  hint,
+  value,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <Field label={label} hint={hint}>
+      <NumberInput value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </Field>
+  );
+}
+
+function AddPhaseDialog({
+  nextIndex,
+  playoffDefault,
+  controller,
+  onAnnounce,
+  onClose,
+}: {
+  nextIndex: number;
+  playoffDefault: boolean;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState(playoffDefault ? 'Playoffs' : `Stage ${nextIndex}`);
+  const [kind, setKind] = useState<PhaseKind>('playoff');
+  return (
+    <Dialog
+      title={playoffDefault ? 'Add playoff stage' : 'Add stage'}
+      description="A second stage is only needed when the field or rules change."
+      onClose={onClose}
+      onSubmit={() => {
+        controller.addPhase(name.trim() || (playoffDefault ? 'Playoffs' : `Stage ${nextIndex}`), kind);
+        onAnnounce('Stage added locally; saving now.');
+        onClose();
+      }}
+      submitLabel="Add stage"
+    >
+      <Field label="Stage name"><TextInput value={name} onChange={(event) => setName(event.target.value)} /></Field>
+      <Field label="Stage type" render={({ id, describedBy }) => (
+        <Select<PhaseKind>
+          id={id}
+          ariaDescribedBy={describedBy}
+          value={kind}
+          options={phaseKindOptions}
+          onChange={setKind}
+        />
+      )} />
+    </Dialog>
+  );
+}
+
+function StageSequence({
+  state,
+  controller,
+  singleStage,
+  onAdd,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  singleStage: boolean;
+  onAdd: () => void;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const confirmAction = useConfirm();
+  const phases = [...state.phases].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
+  return (
+    <Panel
+      title={singleStage ? 'Tournament stage' : 'Stage sequence'}
+      description={singleStage ? `${state.rounds.length} round${state.rounds.length === 1 ? '' : 's'}. Add a stage only when the field later splits.` : 'Select the stage whose future rounds you are configuring.'}
+      actions={<Button variant="secondary" icon="plus" onClick={onAdd}>{singleStage ? 'Add playoff stage' : 'Add stage'}</Button>}
+      flush
+    >
+      <SummaryList ariaLabel="Tournament stages">
+        {phases.map((entry) => (
+          <SummaryItem
+            key={entry.id}
+            title={<strong>{entry.name}</strong>}
+            status={<StateLabel state={entry.archived ? 'archived' : entry.status} label={entry.archived ? 'Archived' : entry.status} />}
+            summary={`${phaseKindLabel(entry.kind)} · ${state.rounds.filter((round) => entry.roundIds.includes(round.id)).length} generated round${state.rounds.filter((round) => entry.roundIds.includes(round.id)).length === 1 ? '' : 's'}`}
+            actions={
+              <div className="director-actions">
+                <Button
+                  variant={entry.id === state.tournament?.currentPhaseId ? 'secondary' : 'quiet'}
+                  disabled={entry.archived}
+                  onClick={() => {
+                    controller.selectPhase(entry.id);
+                    onAnnounce(entry.status === 'complete' ? `${entry.name} selected for review; it is complete.` : `${entry.name} selected for future configuration.`);
+                  }}
+                >
+                  {entry.status === 'complete' ? 'Review' : entry.id === state.tournament?.currentPhaseId ? 'Current' : 'Select'}
+                </Button>
+                <ActionMenu label={`${entry.name} actions`} triggerLabel={`${entry.name} actions`}>
+                  {(close) => (
+                    <MenuItem
+                      icon={entry.archived ? 'undo' : 'trash'}
+                      tone={entry.archived ? 'default' : 'danger'}
+                      onSelect={() => {
+                        close();
+                        void (async () => {
+                          if (!entry.archived) {
+                            const approved = await confirmAction({
+                              title: `Archive ${entry.name}?`,
+                              consequence: 'Its rounds and results remain historical, but the stage will no longer be used for future scheduling.',
+                              confirmLabel: 'Archive stage',
+                              tone: 'danger',
+                            });
+                            if (!approved) return;
+                          }
+                          if (controller.setPhaseArchived(entry.id, !entry.archived)) {
+                            onAnnounce(`${entry.name} ${entry.archived ? 'reopened' : 'archived'}; history was retained.`);
+                          } else onAnnounce(errorNotice(`${entry.name} was not changed; review the Director error.`));
+                        })();
+                      }}
+                    >
+                      {entry.archived ? 'Reopen stage' : 'Archive stage…'}
+                    </MenuItem>
+                  )}
+                </ActionMenu>
+              </div>
+            }
+          />
+        ))}
+      </SummaryList>
+    </Panel>
   );
 }
 
@@ -832,47 +623,33 @@ function PhaseConfiguration({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const rules = state.tournament?.rules;
-  const draftKey = phaseConfigurationKey(phase);
-  const [draftState, setDraftState] = useState(() => ({
-    key: draftKey,
-    values: phaseDraftFor(phase),
-  }));
-  const draft =
-    draftState.key === draftKey
-      ? draftState.values
-      : draftState.key.startsWith(`${phase.id}|`)
-        ? reconcilePhaseDraft(draftState.values, phase)
-        : phaseDraftFor(phase);
-  const setDraft = (update: (current: PhaseDraft) => PhaseDraft): void => {
-    setDraftState({ key: draftKey, values: update(draft) });
-  };
-  const advancementEnabled = draft.advancementDirty
-    ? draft.advancementEnabled
-    : phase.advancementRule !== null;
-  const qualifiersPerPool = draft.advancementDirty
-    ? draft.qualifiersPerPool
-    : String(phase.advancementRule?.qualifiersPerPool ?? 1);
-  const wildcards = draft.advancementDirty ? draft.wildcards : String(phase.advancementRule?.wildcards ?? 0);
-  const manualOverrideAllowed = draft.advancementDirty
-    ? draft.manualOverrideAllowed
-    : (phase.advancementRule?.manualOverrideAllowed ?? false);
+  const key = phaseConfigurationKey(phase);
+  const [draft, setDraft] = useState(() => phaseDraftFor(phase));
+  const [draftKey, setDraftKey] = useState(key);
+  if (draftKey !== key && !draft.nameDirty && !draft.kindDirty && !draft.carryoverDirty && !draft.advancementDirty) {
+    setDraft(phaseDraftFor(phase));
+    setDraftKey(key);
+  }
+  const acceptedResults = state.games.some(
+    (game) => game.roundId && phase.roundIds.includes(game.roundId) && game.status === 'accepted',
+  );
+  const preview = phase.advancementRule && acceptedResults ? previewAdvancement(state, phase) : null;
+
   const save = () => {
-    const rawQualifiers = qualifiersPerPool.trim();
     let advancementRule: AdvancementRule | null = null;
-    if (advancementEnabled) {
-      const qualifiers = Number(rawQualifiers);
-      if (!rawQualifiers || !Number.isInteger(qualifiers) || qualifiers < 1) {
+    if (draft.advancementEnabled) {
+      const qualifiers = Number(draft.qualifiersPerPool);
+      const wildcardCount = draft.wildcards.trim() === '' ? 0 : Number(draft.wildcards);
+      if (!Number.isInteger(qualifiers) || qualifiers < 1) {
         onAnnounce(errorNotice('Qualifiers per pool must be a positive whole number.'));
         return;
       }
-      const rawWildcards = wildcards.trim();
-      const wildcardCount = rawWildcards === '' ? 0 : Number(rawWildcards);
       if (!Number.isInteger(wildcardCount) || wildcardCount < 0) {
         onAnnounce(errorNotice('Wildcards must be zero or a positive whole number.'));
         return;
       }
       const tiebreakers = phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [];
-      if (tiebreakers.length === 0) {
+      if (!tiebreakers.length) {
         onAnnounce(errorNotice('Configure at least one standings tiebreaker before enabling advancement.'));
         return;
       }
@@ -880,7 +657,7 @@ function PhaseConfiguration({
         qualifiersPerPool: qualifiers,
         wildcards: wildcardCount,
         tiebreakers: [...tiebreakers],
-        manualOverrideAllowed,
+        manualOverrideAllowed: draft.manualOverrideAllowed,
       };
     }
     const updated = controller.updatePhase(phase.id, {
@@ -893,214 +670,57 @@ function PhaseConfiguration({
       onAnnounce(errorNotice('Stage changes were not saved; review the Director error.'));
       return;
     }
-    setDraftState({
-      key: draftKey,
-      values: {
-        name: draft.name.trim(),
-        kind: draft.kind,
-        carryover: draft.carryover,
-        advancementEnabled,
-        qualifiersPerPool: rawQualifiers,
-        wildcards: wildcards.trim(),
-        manualOverrideAllowed,
-        nameDirty: false,
-        kindDirty: false,
-        carryoverDirty: false,
-        advancementDirty: false,
-      },
-    });
+    setDraft((current) => ({ ...current, nameDirty: false, kindDirty: false, carryoverDirty: false, advancementDirty: false }));
+    setDraftKey(phaseConfigurationKey({ ...phase, name: draft.name.trim(), kind: draft.kind, carryover: draft.carryover, advancementRule }));
     onAnnounce(`${draft.name.trim()} stage settings updated.`);
   };
-  const acceptedResults = state.games.some(
-    (game) => game.roundId && phase.roundIds.includes(game.roundId) && game.status === 'accepted',
-  );
-  const preview = phase.advancementRule && acceptedResults ? previewAdvancement(state, phase) : null;
+
   return (
-    <section className="director-panel">
-      <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">Selected stage</p>
-          <h2>Stage settings</h2>
-        </div>
-        <StateLabel state={phase.status} label={phase.status} />
-      </div>
-      <PanelBody>
-        <div className="director-form-grid director-form-grid-three">
-          <FormField label="Stage name">
-            <input
-              value={draft.name}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, name: event.target.value, nameDirty: true }))
-              }
-            />
-          </FormField>
-          <FormField
-            label="Stage type"
-            hint={phase.roundIds.length > 0 ? 'Type is locked after the first generated round.' : undefined}
-          >
-            <select
-              value={draft.kind}
-              disabled={phase.roundIds.length > 0}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  kind: event.target.value as PhaseKind,
-                  kindDirty: true,
-                }))
-              }
-            >
-              <option value="preliminary">Preliminary</option>
-              <option value="playoff">Playoff</option>
-              <option value="final">Final</option>
-              <option value="placement">Placement</option>
-              <option value="custom">Custom</option>
-            </select>
-          </FormField>
-          <label className="director-check-row director-phase-carryover-field">
-            <input
-              type="checkbox"
-              checked={draft.carryover}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  carryover: event.target.checked,
-                  carryoverDirty: true,
-                }))
-              }
-            />
-            <span>Carry over prior stage results</span>
-          </label>
-        </div>
-        <div className="director-phase-advancement">
-          <div>
-            <p className="director-eyebrow">Advancement</p>
-            <p className="director-panel-description">
-              Configure who qualifies from this stage. Director previews the decision; move teams into the
-              next stage after review.
-            </p>
-          </div>
-          <label className="director-check-row">
-            <input
-              type="checkbox"
-              checked={advancementEnabled}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  advancementEnabled: event.target.checked,
-                  advancementDirty: true,
-                }))
-              }
-            />
-            <span>Use an advancement rule</span>
-          </label>
-          {advancementEnabled && (
-            <div className="director-form-grid director-form-grid-two">
-              <FormField
-                label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from stage'}
-                hint="The first team is the highest-ranked qualifier."
-              >
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={qualifiersPerPool}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      qualifiersPerPool: event.target.value,
-                      advancementDirty: true,
-                    }))
-                  }
-                />
-              </FormField>
-              {phase.poolIds.length > 0 && (
-                <FormField
-                  label="Best remaining teams"
-                  hint="Wildcards: top remaining teams across pools after the per-pool qualifiers."
-                >
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={wildcards}
-                    onChange={(event) =>
-                      setDraft((current) => ({
-                        ...current,
-                        wildcards: event.target.value,
-                        advancementDirty: true,
-                      }))
-                    }
-                  />
-                </FormField>
-              )}
-              <label className="director-check-row director-phase-override-field">
-                <input
-                  type="checkbox"
-                  checked={manualOverrideAllowed}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      manualOverrideAllowed: event.target.checked,
-                      advancementDirty: true,
-                    }))
-                  }
-                />
-                <span>Allow director override for unresolved ties</span>
-              </label>
-            </div>
-          )}
-        </div>
-        {preview && (
-          <div className="director-advancement-preview" aria-live="polite">
-            <div className="director-panel-heading director-panel-heading-compact">
-              <div>
-                <p className="director-eyebrow">Advancement preview</p>
-                <h3>
-                  {preview.qualifiers.length} qualifier{preview.qualifiers.length === 1 ? '' : 's'}
-                </h3>
-              </div>
-              <StateLabel
-                state={preview.unresolved.length > 0 ? 'warning' : 'ready'}
-                label={preview.unresolved.length > 0 ? 'Decision needed' : 'Ranked'}
-              />
-            </div>
-            <ul className="director-compact-list">
-              {preview.qualifiers.map((team) => (
-                <li key={team.id}>
-                  {team.displayName}
-                  {preview.wildcards.some((wildcard) => wildcard.id === team.id) ? ' (wildcard)' : ''}
-                </li>
-              ))}
-            </ul>
-            {preview.unresolved.map((tie) => (
-              <p className="director-error-copy" key={tie.teamIds.join('|')}>
-                {tie.reason} {tie.teamIds.map((teamId) => teamLabel(state, teamId)).join(' · ')}
-              </p>
-            ))}
-            <small className="director-table-subtext">{preview.explanation.at(-1)}</small>
-          </div>
-        )}
-        {preview && (
-          <AdvancementCommit
-            state={state}
-            sourcePhaseId={phase.id}
-            preview={preview}
-            controller={controller}
-            onAnnounce={onAnnounce}
+    <Panel title={`Selected stage · ${phase.name}`} description="These settings apply only when a tournament has multiple stages.">
+      <FieldGrid>
+        <Field label="Stage name"><TextInput value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value, nameDirty: true }))} /></Field>
+        <Field label="Stage type" hint={phase.roundIds.length > 0 ? 'Locked after the first generated round.' : undefined} render={({ id, describedBy }) => (
+          <Select<PhaseKind>
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={draft.kind}
+            options={phaseKindOptions}
+            disabled={phase.roundIds.length > 0}
+            onChange={(kind) => setDraft((current) => ({ ...current, kind, kindDirty: true }))}
           />
-        )}
-        {phase.advancementRule && !acceptedResults && (
-          <p className="director-panel-footnote">
-            Accept at least one result in this stage to populate the advancement preview.
-          </p>
-        )}
-        <div className="director-row-actions director-phase-save-actions">
-          <Button variant="secondary" onClick={save}>
-            Save stage settings
-          </Button>
+        )} />
+      </FieldGrid>
+      <Checkbox checked={draft.carryover} label="Carry over prior-stage results" onChange={(carryover) => setDraft((current) => ({ ...current, carryover, carryoverDirty: true }))} />
+      <Checkbox
+        checked={draft.advancementEnabled}
+        label="Use an advancement rule"
+        hint="Director previews the qualifiers before they are committed to the next stage."
+        onChange={(advancementEnabled) => setDraft((current) => ({ ...current, advancementEnabled, advancementDirty: true }))}
+      />
+      {draft.advancementEnabled && (
+        <div className="director-inset">
+          <FieldGrid>
+            <Field label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from stage'}>
+              <NumberInput min={1} value={draft.qualifiersPerPool} onChange={(event) => setDraft((current) => ({ ...current, qualifiersPerPool: event.target.value, advancementDirty: true }))} />
+            </Field>
+            {phase.poolIds.length > 0 && (
+              <Field label="Best remaining teams" hint="Wildcards across pools.">
+                <NumberInput min={0} value={draft.wildcards} onChange={(event) => setDraft((current) => ({ ...current, wildcards: event.target.value, advancementDirty: true }))} />
+              </Field>
+            )}
+          </FieldGrid>
+          <Checkbox checked={draft.manualOverrideAllowed} label="Allow director override for unresolved ties" onChange={(manualOverrideAllowed) => setDraft((current) => ({ ...current, manualOverrideAllowed, advancementDirty: true }))} />
         </div>
-      </PanelBody>
-    </section>
+      )}
+      {preview && (
+        <Callout tone={preview.unresolved.length > 0 ? 'warning' : 'info'} title={`${preview.qualifiers.length} proposed qualifier${preview.qualifiers.length === 1 ? '' : 's'}`}>
+          {preview.qualifiers.map((team) => team.displayName).join(' · ')}
+        </Callout>
+      )}
+      {preview && <AdvancementCommit state={state} sourcePhaseId={phase.id} preview={preview} controller={controller} onAnnounce={onAnnounce} />}
+      {phase.advancementRule && !acceptedResults && <p className="director-text-meta">Accept at least one result in this stage to populate the advancement preview.</p>}
+      <div className="director-form-actions"><Button variant="primary" onClick={save}>Save stage settings</Button></div>
+    </Panel>
   );
 }
 
@@ -1113,8 +733,9 @@ function TiebreakerConfiguration({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const move = (index: number, direction: -1 | 1) => {
-    const targetIndex = index + direction;
+  const reorder = useReorderMode();
+  const move = (index: number, delta: number) => {
+    const targetIndex = index + delta;
     if (targetIndex < 0 || targetIndex >= rules.tiebreakers.length) return;
     const next = [...rules.tiebreakers];
     const current = next[index];
@@ -1123,65 +744,29 @@ function TiebreakerConfiguration({
     next[index] = target;
     next[targetIndex] = current;
     if (controller.updateRules({ tiebreakers: next })) {
-      onAnnounce(
-        `${tiebreakerLabel(current)} moved ${direction < 0 ? 'up' : 'down'} in the standings order.`,
-      );
-    } else {
-      onAnnounce(errorNotice('The tiebreaker order was not saved; review the Director error.'));
-    }
+      onAnnounce(`${tiebreakerLabel(current)} moved ${delta < 0 ? 'earlier' : 'later'} in the standings order.`);
+    } else onAnnounce(errorNotice('The tiebreaker order was not saved; review the Director error.'));
   };
   return (
-    <section className="director-panel">
-      <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">Standings</p>
-          <h2>Tiebreaker order</h2>
-        </div>
-        <span className="director-muted">First criterion wins</span>
-      </div>
-      <PanelBody>
-        <p className="director-panel-description">
-          This order drives standings, advancement previews, and the published results table.
-        </p>
-        <ol className="director-tiebreaker-list">
-          {rules.tiebreakers.map((tiebreaker, index) => (
-            <li key={tiebreaker}>
-              <span className="director-leader-rank">{index + 1}</span>
-              <div>
-                <strong>{tiebreakerLabel(tiebreaker)}</strong>
-                <small>{tiebreakerDescription(tiebreaker)}</small>
-              </div>
-              <div className="director-tiebreaker-actions">
-                <button
-                  type="button"
-                  className="director-icon-button"
-                  aria-label={`Move ${tiebreakerLabel(tiebreaker)} up`}
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="director-icon-button"
-                  aria-label={`Move ${tiebreakerLabel(tiebreaker)} down`}
-                  disabled={index === rules.tiebreakers.length - 1}
-                  onClick={() => move(index, 1)}
-                >
-                  ↓
-                </button>
-              </div>
-            </li>
-          ))}
-        </ol>
-        {rules.tiebreakers.includes('playoff') && (
-          <p className="director-panel-footnote">
-            Playoff results are retained for the audit trail, but Director does not use them to rank teams
-            automatically yet.
-          </p>
-        )}
-      </PanelBody>
-    </section>
+    <Panel
+      title="Tiebreaker order"
+      description="The first criterion that separates tied teams wins."
+      actions={<ReorderToggle active={reorder.active} onToggle={reorder.toggle} label="Reorder criteria" disabled={rules.tiebreakers.length < 2} />}
+      flush
+    >
+      {reorder.active && <ReorderNotice />}
+      <SummaryList ariaLabel="Tiebreaker order">
+        {rules.tiebreakers.map((tiebreaker, index) => (
+          <SummaryItem
+            key={tiebreaker}
+            title={<strong>{index + 1}. {tiebreakerLabel(tiebreaker)}</strong>}
+            summary={tiebreakerDescription(tiebreaker)}
+            actions={reorder.active ? <ReorderHandle label={tiebreakerLabel(tiebreaker)} index={index} count={rules.tiebreakers.length} onMove={(delta) => move(index, delta)} /> : undefined}
+          />
+        ))}
+      </SummaryList>
+      {rules.tiebreakers.includes('playoff') && <p className="director-text-meta">Playoff results stay in the audit trail but are not ranked automatically yet.</p>}
+    </Panel>
   );
 }
 
@@ -1200,12 +785,7 @@ function ManualRoundBuilder({
 }) {
   const teams = state.teams
     .filter((team) => team.status === 'confirmed')
-    .sort(
-      (left, right) =>
-        (left.seed ?? 9999) - (right.seed ?? 9999) ||
-        left.displayName.localeCompare(right.displayName) ||
-        left.id.localeCompare(right.id),
-    );
+    .sort((left, right) => (left.seed ?? 9999) - (right.seed ?? 9999) || left.displayName.localeCompare(right.displayName));
   const [selectedTeamIds, setSelectedTeamIds] = useState<string[]>(() => teams.map((team) => team.id));
   const [byeTeamId, setByeTeamId] = useState('');
   const [roundName, setRoundName] = useState('');
@@ -1213,19 +793,9 @@ function ManualRoundBuilder({
   const selected = teams.filter((team) => selectedTeamIds.includes(team.id));
   const pairable = selected.filter((team) => team.id !== byeTeamId);
   const oddNeedsBye = pairable.length % 2 === 1;
-  const toggleTeam = (teamId: string) => {
-    setSelectedTeamIds((current) =>
-      current.includes(teamId) ? current.filter((id) => id !== teamId) : [...current, teamId],
-    );
-    if (byeTeamId === teamId) setByeTeamId('');
-  };
   const createRound = () => {
     if (mode === 'swiss' && selected.length !== teams.length) {
-      onAnnounce(
-        errorNotice(
-          'Swiss manual override must account for every confirmed team; drop teams instead of omitting them.',
-        ),
-      );
+      onAnnounce(errorNotice('Swiss manual override must account for every confirmed team; drop teams instead of omitting them.'));
       return;
     }
     if (selected.length < 2) {
@@ -1240,96 +810,60 @@ function ManualRoundBuilder({
       onAnnounce(errorNotice('This selected field is odd; choose the team receiving the bye.'));
       return;
     }
-    const pairings = [] as Array<{ leftTeamId: string; rightTeamId: string | null }>;
+    const pairings: Array<{ leftTeamId: string; rightTeamId: string | null }> = [];
     for (let index = 0; index < pairable.length; index += 2) {
       const left = pairable[index];
       const right = pairable[index + 1];
       if (left && right) pairings.push({ leftTeamId: left.id, rightTeamId: right.id });
     }
     if (byeTeamId) pairings.push({ leftTeamId: byeTeamId, rightTeamId: null });
-    const result = controller.generateSchedule({
-      roundName: roundName.trim() || undefined,
-      packetId: packetId || null,
-      manualPairings: pairings,
-    });
+    const result = controller.generateSchedule({ roundName: roundName.trim() || undefined, packetId: packetId || null, manualPairings: pairings });
     if (!result.generated) {
       onAnnounce(errorNotice(result.conflicts.join(' ') || 'The manual round was not valid.'));
       return;
     }
-    onAnnounce(
-      mode === 'swiss'
-        ? 'Manual Swiss override created; review and prepare the round before release.'
-        : 'Manual round created; review and prepare the round before release.',
-    );
+    onAnnounce(mode === 'swiss' ? 'Manual Swiss override created; review it on Tournament day.' : 'Manual round created; review it on Tournament day.');
     onNavigate('schedule');
   };
   return (
-    <section className="director-panel">
-      <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">{mode === 'swiss' ? 'Director override' : 'Manual builder'}</p>
-          <h2>{mode === 'swiss' ? 'Power-pairing override' : 'Create a manual round'}</h2>
-        </div>
-        <span className="director-muted">{selected.length} teams selected</span>
-      </div>
-      <PanelBody>
-        <p className="director-panel-description">
-          {mode === 'swiss'
-            ? 'Use this only when the unresolved standings or a pairing conflict requires a human decision. Every confirmed team must be included.'
-            : 'Select the field, choose a bye when needed, and let Director create normal canonical games for review, preparation, and release.'}
-        </p>
-        <div className="director-form-grid director-form-grid-two">
-          <FormField label="Round name">
-            <input
-              value={roundName}
-              onChange={(event) => setRoundName(event.target.value)}
-              placeholder="Round 1"
-            />
-          </FormField>
-          <FormField label="Packet">
-            <select value={packetId} onChange={(event) => setPacketId(event.target.value)}>
-              <option value="">No packet selected</option>
-              {state.packets
-                .filter((packet) => packet.retired !== true)
-                .map((packet) => (
-                  <option key={packet.id} value={packet.id}>
-                    {packet.name}
-                  </option>
-                ))}
-            </select>
-          </FormField>
-        </div>
-        <div className="director-check-group director-manual-team-list">
-          {teams.map((team) => (
-            <label key={team.id} className="director-check-row">
-              <input
-                type="checkbox"
-                checked={selectedTeamIds.includes(team.id)}
-                onChange={() => toggleTeam(team.id)}
-              />
-              <span>{team.displayName}</span>
-            </label>
-          ))}
-        </div>
-        <div className="director-form-grid director-form-grid-two">
-          <FormField label="Bye (optional)" hint="Required when the selected field is odd.">
-            <select value={byeTeamId} onChange={(event) => setByeTeamId(event.target.value)}>
-              <option value="">No bye</option>
-              {selected.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {team.displayName}
-                </option>
-              ))}
-            </select>
-          </FormField>
-          <div className="director-form-actions">
-            <Button variant="secondary" onClick={createRound} disabled={teams.length < 2}>
-              Create round
-            </Button>
-          </div>
-        </div>
-      </PanelBody>
-    </section>
+    <Panel title={mode === 'swiss' ? 'Power-pairing override' : 'Manual pairings'} description="This is an advanced escape hatch; ordinary rounds are generated from Tournament day.">
+      <FieldGrid>
+        <Field label="Round name" optional><TextInput value={roundName} onChange={(event) => setRoundName(event.target.value)} placeholder="Round 1" /></Field>
+        <Field label="Packet" render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={packetId}
+            options={[{ value: '', label: 'No packet selected' }, ...state.packets.filter((packet) => !packet.retired).map((packet) => ({ value: packet.id, label: packet.name }))]}
+            onChange={setPacketId}
+          />
+        )} />
+      </FieldGrid>
+      <Field label="Teams" hint={mode === 'swiss' ? 'Every confirmed team must be included.' : 'Choose the teams playing this manual round.'} render={({ id, describedBy }) => (
+        <MultiSelect
+          id={id}
+          ariaDescribedBy={describedBy}
+          values={selectedTeamIds}
+          options={teams.map((team) => ({ value: team.id, label: team.displayName }))}
+          onChange={(values) => {
+            setSelectedTeamIds(values);
+            if (byeTeamId && !values.includes(byeTeamId)) setByeTeamId('');
+          }}
+          allLabel="All confirmed teams"
+          searchPlaceholder="Filter teams…"
+        />
+      )} />
+      <Field label="Bye" hint="Required when the selected field is odd." render={({ id, describedBy }) => (
+        <Select
+          id={id}
+          ariaDescribedBy={describedBy}
+          value={byeTeamId}
+          options={[{ value: '', label: 'No bye' }, ...selected.map((team) => ({ value: team.id, label: team.displayName }))]}
+          onChange={setByeTeamId}
+        />
+      )} />
+      <div className="director-form-actions"><Button variant="primary" onClick={createRound} disabled={teams.length < 2}>Create manual round</Button></div>
+    </Panel>
   );
 }
 
@@ -1347,30 +881,20 @@ function PoolConfiguration({
   const pools = state.pools
     .filter((pool) => phase.poolIds.includes(pool.id))
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
-  const activePools = pools.filter((pool) => pool.archived !== true);
+  const activePools = pools.filter((pool) => !pool.archived);
   const confirmedTeams = state.teams
     .filter((team) => team.status === 'confirmed')
-    .sort(
-      (left, right) =>
-        (left.seed ?? 9999) - (right.seed ?? 9999) || left.displayName.localeCompare(right.displayName),
-    );
-  const [poolCount, setPoolCount] = useState(() =>
-    String(Math.max(1, Math.min(3, Math.ceil(Math.max(1, confirmedTeams.length) / 6)))),
-  );
+    .sort((left, right) => (left.seed ?? 9999) - (right.seed ?? 9999) || left.displayName.localeCompare(right.displayName));
+  const [poolCount, setPoolCount] = useState(() => String(Math.max(1, Math.min(3, Math.ceil(Math.max(1, confirmedTeams.length) / 6)))));
   const [newPoolName, setNewPoolName] = useState('');
   const locked = phase.roundIds.length > 0;
   const playoffPools = formatForPhase(state, phase)?.kind === 'playoff-pools';
   const assignedTeamIds = new Set(activePools.flatMap((pool) => pool.teamIds));
-  const unassignedCount = playoffPools
-    ? 0
-    : confirmedTeams.filter((team) => !assignedTeamIds.has(team.id)).length;
+  const unassignedCount = playoffPools ? 0 : confirmedTeams.filter((team) => !assignedTeamIds.has(team.id)).length;
   const poolGeneration = formatGenerationAvailability(state);
-  const poolSetupComplete = activePools.length > 0 && poolGeneration.supported;
   const createPools = () => {
     if (locked) {
-      onAnnounce(
-        errorNotice('Pool membership is locked after a round has been generated; add a new stage instead.'),
-      );
+      onAnnounce(errorNotice('Pool membership is locked after a round has been generated; add a new stage instead.'));
       return;
     }
     const count = Number(poolCount);
@@ -1378,142 +902,54 @@ function PoolConfiguration({
       onAnnounce(errorNotice(`Choose between 1 and ${confirmedTeams.length || 1} pools.`));
       return;
     }
-    const sizes = playoffPools
-      ? Array.from({ length: count }, () => 0)
-      : recommendPoolSizes(confirmedTeams.length, count);
+    const sizes = playoffPools ? Array.from({ length: count }, () => 0) : recommendPoolSizes(confirmedTeams.length, count);
     let offset = 0;
     for (let index = 0; index < sizes.length; index += 1) {
       const teamIds = confirmedTeams.slice(offset, offset + (sizes[index] ?? 0)).map((team) => team.id);
-      const added = controller.addPool({ phaseId: phase.id, name: poolName(index), teamIds });
-      if (!added) {
+      if (!controller.addPool({ phaseId: phase.id, name: poolName(index), teamIds })) {
         onAnnounce(errorNotice('Pool creation stopped; review the Director error before trying again.'));
         return;
       }
       offset += sizes[index] ?? 0;
     }
-    onAnnounce(
-      playoffPools
-        ? `${count} playoff pool${count === 1 ? '' : 's'} created; assign advancing teams before generating.`
-        : `${count} pool${count === 1 ? '' : 's'} created and confirmed teams distributed.`,
-    );
+    onAnnounce(playoffPools ? `${count} playoff pool${count === 1 ? '' : 's'} created; assign advancing teams.` : `${count} pool${count === 1 ? '' : 's'} created and teams distributed.`);
   };
   const addPool = () => {
-    if (locked) {
-      onAnnounce(
-        errorNotice('Pool membership is locked after a round has been generated; add a new stage instead.'),
-      );
-      return;
-    }
+    if (locked) return;
     const name = newPoolName.trim() || poolName(pools.length);
     if (!controller.addPool({ phaseId: phase.id, name })) {
       onAnnounce(errorNotice(`${name} was not added; review the Director error.`));
       return;
     }
     setNewPoolName('');
-    onAnnounce(`${name} added; assign its teams before generating.`);
+    onAnnounce(`${name} added.`);
   };
   return (
-    <section className="director-panel">
-      <div className="director-panel-heading">
-        <div>
-          <p className="director-eyebrow">Pool setup</p>
-          <h2>
-            {pools.length
-              ? `${pools.length} pool${pools.length === 1 ? '' : 's'} configured`
-              : playoffPools
-                ? 'Create playoff pools'
-                : 'Assign confirmed teams'}
-          </h2>
+    <Panel
+      title="Pools"
+      description={playoffPools ? 'Assign only the advancing field to these playoff pools.' : 'Every confirmed team belongs to exactly one preliminary pool.'}
+      actions={<StateLabel state={locked ? 'finished' : poolGeneration.supported ? 'ready' : 'warning'} label={locked ? 'Locked' : poolGeneration.supported ? 'Ready' : 'Needs setup'} />}
+    >
+      {pools.length === 0 ? (
+        <div className="director-stack">
+          <Field label="Number of pools" hint={playoffPools ? 'Creates empty pools for advancing teams.' : 'Teams are distributed by seed, with larger pools first.'}>
+            <NumberInput min={1} max={Math.max(1, confirmedTeams.length)} value={poolCount} disabled={locked || confirmedTeams.length === 0} onChange={(event) => setPoolCount(event.target.value)} />
+          </Field>
+          <Button variant="primary" disabled={locked || confirmedTeams.length === 0} onClick={createPools}>{playoffPools ? 'Create playoff pools' : 'Create and distribute pools'}</Button>
         </div>
-        <StateLabel
-          state={locked ? 'finished' : poolSetupComplete ? 'ready' : 'warning'}
-          label={locked ? 'Locked' : poolSetupComplete ? 'Complete' : 'Needs setup'}
-        />
-      </div>
-      <PanelBody>
-        <p className="director-panel-description">
-          {playoffPools
-            ? 'Each advancing team in this stage must belong to exactly one playoff pool; confirmed teams outside the stage are valid.'
-            : 'Every confirmed team must belong to exactly one pool before a pool round can be generated.'}
-          {locked ? ' Membership is locked because this stage already has generated rounds.' : ''}
-        </p>
-        {pools.length === 0 ? (
-          <form
-            className="director-pool-create-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              createPools();
-            }}
-          >
-            <FormField
-              label="Number of pools"
-              hint={
-                playoffPools
-                  ? 'Create empty pools, then assign advancing teams manually.'
-                  : 'Teams are distributed by seed, with larger pools first.'
-              }
-            >
-              <input
-                type="number"
-                min="1"
-                max={Math.max(1, confirmedTeams.length)}
-                step="1"
-                value={poolCount}
-                onChange={(event) => setPoolCount(event.target.value)}
-                disabled={locked || confirmedTeams.length === 0}
-              />
-            </FormField>
-            <Button variant="primary" type="submit" disabled={locked || confirmedTeams.length === 0}>
-              {playoffPools ? 'Create playoff pools' : 'Create and distribute pools'}
-            </Button>
-          </form>
-        ) : (
-          <>
-            <p className="director-panel-footnote">
-              {playoffPools
-                ? assignedTeamIds.size > 0
-                  ? 'Only teams assigned to these pools will play this stage; verify they are the advancing field before generating.'
-                  : 'Assign the advancing teams to playoff pools before generating.'
-                : unassignedCount === 0
-                  ? 'All confirmed teams are assigned exactly once.'
-                  : `${unassignedCount} confirmed team${unassignedCount === 1 ? '' : 's'} still need${unassignedCount === 1 ? 's' : ''} a pool.`}
-            </p>
-            <div className="director-pool-list">
-              {pools.map((pool) => (
-                <PoolEditor
-                  key={pool.id}
-                  pool={pool}
-                  pools={pools}
-                  teams={confirmedTeams}
-                  locked={locked}
-                  controller={controller}
-                  onAnnounce={onAnnounce}
-                />
-              ))}
-            </div>
-            <form
-              className="director-pool-add-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                addPool();
-              }}
-            >
-              <FormField label="Add another pool">
-                <input
-                  value={newPoolName}
-                  onChange={(event) => setNewPoolName(event.target.value)}
-                  placeholder={poolName(pools.length)}
-                  disabled={locked}
-                />
-              </FormField>
-              <Button variant="secondary" type="submit" disabled={locked}>
-                Add pool
-              </Button>
-            </form>
-          </>
-        )}
-      </PanelBody>
-    </section>
+      ) : (
+        <div className="director-stack">
+          {!playoffPools && unassignedCount > 0 && <Callout tone="warning">{unassignedCount} confirmed team{unassignedCount === 1 ? '' : 's'} still need a pool.</Callout>}
+          {pools.map((pool) => (
+            <PoolEditor key={pool.id} pool={pool} pools={pools} teams={confirmedTeams} locked={locked} controller={controller} onAnnounce={onAnnounce} />
+          ))}
+          <div className="director-inline-edit">
+            <Field label="Add another pool"><TextInput value={newPoolName} disabled={locked} onChange={(event) => setNewPoolName(event.target.value)} placeholder={poolName(pools.length)} /></Field>
+            <Button variant="secondary" disabled={locked} onClick={addPool}>Add pool</Button>
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 
@@ -1532,121 +968,85 @@ function PoolEditor({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const [draft, setDraft] = useState(() => ({
-    name: pool.name,
-    teamIds: pool.teamIds,
-    nameDirty: false,
-    teamIdsDirty: false,
-  }));
+  const confirmAction = useConfirm();
+  const [name, setName] = useState(pool.name);
+  const [teamIds, setTeamIds] = useState(pool.teamIds);
   const editable = !locked && !pool.archived;
-  const name = editable && draft.nameDirty ? draft.name : pool.name;
-  const teamIds = editable && draft.teamIdsDirty ? draft.teamIds : pool.teamIds;
   const assignedElsewhere = new Set(
-    pools
-      .filter((candidate) => candidate.id !== pool.id && candidate.archived !== true)
-      .flatMap((candidate) => candidate.teamIds),
+    pools.filter((candidate) => candidate.id !== pool.id && !candidate.archived).flatMap((candidate) => candidate.teamIds),
   );
   const save = () => {
-    const trimmedName = name.trim();
-    if (!trimmedName) {
+    if (!name.trim()) {
       onAnnounce(errorNotice('Enter a pool name first.'));
       return;
     }
-    if (!controller.updatePool(pool.id, { name: trimmedName, teamIds })) {
-      onAnnounce(errorNotice(`${trimmedName} was not saved; review the Director error.`));
+    if (!controller.updatePool(pool.id, { name: name.trim(), teamIds })) {
+      onAnnounce(errorNotice(`${name.trim()} was not saved; review the Director error.`));
       return;
     }
-    setDraft({ name: trimmedName, teamIds, nameDirty: false, teamIdsDirty: false });
-    onAnnounce(`${trimmedName} updated.`);
+    onAnnounce(`${name.trim()} updated.`);
   };
   return (
-    <form
-      className="director-pool-card"
-      onSubmit={(event) => {
-        event.preventDefault();
-        save();
-      }}
-    >
-      <div className="director-form-grid director-form-grid-two">
-        <FormField label="Pool name">
-          <input
-            value={name}
-            onChange={(event) => {
-              setDraft((current) => ({
-                ...current,
-                name: event.target.value,
-                nameDirty: true,
-              }));
-            }}
+    <div className="director-inset">
+      <FieldGrid>
+        <Field label="Pool name"><TextInput value={name} disabled={!editable} onChange={(event) => setName(event.target.value)} /></Field>
+        <Field label="Teams" render={({ id, describedBy }) => (
+          <MultiSelect
+            id={id}
+            ariaDescribedBy={describedBy}
+            values={teamIds}
             disabled={!editable}
+            options={teams.map((team) => ({ value: team.id, label: team.displayName, disabled: assignedElsewhere.has(team.id) && !teamIds.includes(team.id) }))}
+            onChange={setTeamIds}
+            searchPlaceholder="Filter teams…"
           />
-        </FormField>
-        <FormField label="Teams" hint="Hold Command/Ctrl to select more than one team.">
-          <select
-            className="director-pool-team-select"
-            multiple
-            size={Math.min(8, Math.max(3, teams.length))}
-            value={teamIds}
-            onChange={(event) => {
-              setDraft((current) => ({
-                ...current,
-                teamIds: Array.from(event.currentTarget.selectedOptions, (option) => option.value),
-                teamIdsDirty: true,
-              }));
-            }}
-            disabled={!editable}
-          >
-            {teams.map((team) => (
-              <option
-                key={team.id}
-                value={team.id}
-                disabled={assignedElsewhere.has(team.id) && !teamIds.includes(team.id)}
-              >
-                {team.displayName}
-              </option>
-            ))}
-          </select>
-        </FormField>
+        )} />
+      </FieldGrid>
+      <div className="director-form-actions">
+        <StateLabel state={pool.archived ? 'archived' : 'active'} label={pool.archived ? 'Archived' : `${teamIds.length} teams`} />
+        <ActionMenu label={`${pool.name} actions`} triggerLabel={`${pool.name} actions`}>
+          {(close) => (
+            <MenuItem
+              icon={pool.archived ? 'undo' : 'trash'}
+              tone={pool.archived ? 'default' : 'danger'}
+              onSelect={() => {
+                close();
+                void (async () => {
+                  if (!pool.archived) {
+                    const approved = await confirmAction({
+                      title: `Archive ${pool.name}?`,
+                      consequence: 'Its games and membership remain historical, but it will not be used for future rounds.',
+                      confirmLabel: 'Archive pool',
+                      tone: 'danger',
+                    });
+                    if (!approved) return;
+                  }
+                  if (controller.setPoolArchived(pool.id, !pool.archived)) onAnnounce(`${pool.name} ${pool.archived ? 'reopened' : 'archived'}; history was retained.`);
+                  else onAnnounce(errorNotice(`${pool.name} was not changed; review the Director error.`));
+                })();
+              }}
+            >
+              {pool.archived ? 'Reopen pool' : 'Archive pool…'}
+            </MenuItem>
+          )}
+        </ActionMenu>
+        <Button variant="primary" disabled={!editable} onClick={save}>Save pool</Button>
       </div>
-      <div className="director-row-actions">
-        <Button variant="secondary" type="submit" disabled={!editable}>
-          Save {pool.name}
-        </Button>
-        <Button
-          variant="quiet"
-          type="button"
-          onClick={() => {
-            if (
-              !pool.archived &&
-              !confirm(`Archive ${pool.name}? Its games and membership will remain historical.`)
-            ) {
-              return;
-            }
-            if (controller.setPoolArchived(pool.id, !pool.archived)) {
-              onAnnounce(`${pool.name} ${pool.archived ? 'reopened' : 'archived'}; history was retained.`);
-            } else {
-              onAnnounce(errorNotice(`${pool.name} was not changed; review the Director error.`));
-            }
-          }}
-        >
-          {pool.archived ? 'Reopen' : 'Archive'}
-        </Button>
-        <StateLabel
-          state={pool.archived ? 'archived' : 'active'}
-          label={pool.archived ? 'Archived' : 'Active'}
-        />
-        <span className="director-muted">
-          {teamIds.length} team{teamIds.length === 1 ? '' : 's'}
-        </span>
-      </div>
-    </form>
+    </div>
   );
 }
 
-function formatForPhase(
-  state: DirectorState,
-  phase: DirectorState['phases'][number],
-): DirectorState['formats'][number] | undefined {
+const phaseKindOptions: SelectOption<PhaseKind>[] = [
+  { value: 'preliminary', label: 'Preliminary' },
+  { value: 'playoff', label: 'Playoff' },
+  { value: 'final', label: 'Final' },
+  { value: 'placement', label: 'Placement' },
+  { value: 'custom', label: 'Custom' },
+];
+function phaseKindLabel(kind: PhaseKind): string {
+  return phaseKindOptions.find((option) => option.value === kind)?.label ?? kind;
+}
+function formatForPhase(state: DirectorState, phase: DirectorState['phases'][number]): DirectorState['formats'][number] | undefined {
   return state.formats.find((format) => format.id === phase.formatId);
 }
 
@@ -1663,20 +1063,9 @@ type PhaseDraft = {
   carryoverDirty: boolean;
   advancementDirty: boolean;
 };
-
 function phaseConfigurationKey(phase: DirectorState['phases'][number]): string {
-  return [
-    phase.id,
-    phase.name,
-    phase.kind,
-    phase.carryover,
-    phase.advancementRule?.qualifiersPerPool ?? '',
-    phase.advancementRule?.wildcards ?? '',
-    phase.advancementRule?.manualOverrideAllowed ?? '',
-    phase.advancementRule?.tiebreakers.join(',') ?? '',
-  ].join('|');
+  return [phase.id, phase.name, phase.kind, phase.carryover, phase.advancementRule?.qualifiersPerPool ?? '', phase.advancementRule?.wildcards ?? '', phase.advancementRule?.manualOverrideAllowed ?? '', phase.advancementRule?.tiebreakers.join(',') ?? ''].join('|');
 }
-
 function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseDraft {
   return {
     name: phase.name,
@@ -1693,122 +1082,32 @@ function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseDraft {
   };
 }
 
-function reconcilePhaseDraft(draft: PhaseDraft, phase: DirectorState['phases'][number]): PhaseDraft {
-  const incoming = phaseDraftFor(phase);
-  return {
-    ...incoming,
-    name: draft.nameDirty ? draft.name : incoming.name,
-    kind: draft.kindDirty ? draft.kind : incoming.kind,
-    carryover: draft.carryoverDirty ? draft.carryover : incoming.carryover,
-    advancementEnabled: draft.advancementDirty ? draft.advancementEnabled : incoming.advancementEnabled,
-    qualifiersPerPool: draft.advancementDirty ? draft.qualifiersPerPool : incoming.qualifiersPerPool,
-    wildcards: draft.advancementDirty ? draft.wildcards : incoming.wildcards,
-    manualOverrideAllowed: draft.advancementDirty
-      ? draft.manualOverrideAllowed
-      : incoming.manualOverrideAllowed,
-    nameDirty: draft.nameDirty,
-    kindDirty: draft.kindDirty,
-    carryoverDirty: draft.carryoverDirty,
-    advancementDirty: draft.advancementDirty,
-  };
-}
-
 type DirectorTiebreaker = NonNullable<DirectorState['tournament']>['rules']['tiebreakers'][number];
-
 function tiebreakerLabel(tiebreaker: DirectorTiebreaker): string {
-  return (
-    {
-      'head-to-head': 'Head-to-head record',
-      record: 'Overall record',
-      points: 'Points scored',
-      margin: 'Point margin',
-      powers: 'Powers',
-      gets: 'Gets',
-      playoff: 'Playoff result',
-    } as Record<DirectorTiebreaker, string>
-  )[tiebreaker];
+  return ({ 'head-to-head': 'Head-to-head record', record: 'Overall record', points: 'Points scored', margin: 'Point margin', powers: 'Powers', gets: 'Gets', playoff: 'Playoff result' } as Record<DirectorTiebreaker, string>)[tiebreaker];
 }
-
 function tiebreakerDescription(tiebreaker: DirectorTiebreaker): string {
-  return (
-    {
-      'head-to-head': 'Results among the tied teams',
-      record: 'Wins and losses across accepted games',
-      points: 'Total points scored',
-      margin: 'Points scored minus points allowed',
-      powers: 'Total power-tossup conversions',
-      gets: 'Total regular-tossup conversions',
-      playoff: 'Retained for manual playoff review; not ranked automatically',
-    } as Record<DirectorTiebreaker, string>
-  )[tiebreaker];
+  return ({ 'head-to-head': 'Results among the tied teams', record: 'Wins and losses across accepted games', points: 'Total points scored', margin: 'Points scored minus points allowed', powers: 'Total power-tossup conversions', gets: 'Total regular-tossup conversions', playoff: 'Retained for manual playoff review; not ranked automatically' } as Record<DirectorTiebreaker, string>)[tiebreaker];
 }
-
-function teamLabel(state: DirectorState, teamId: string): string {
-  return state.teams.find((team) => team.id === teamId)?.displayName ?? teamId;
-}
-
 function formatDescription(kind: string): string {
-  return (
-    (
-      {
-        'round-robin': 'everyone meets on a deterministic rotation',
-        'double-round-robin': 'the rotation repeats with rematch tracking',
-        pools: 'teams are divided into preliminary groups',
-        'playoff-pools': 'qualifiers are grouped for playoffs',
-        'single-elimination': 'one loss removes a team from the bracket',
-        swiss: 'power matching balances records',
-        custom: 'the director controls each pairing',
-      } as Record<string, string>
-    )[kind] ?? 'custom pairing plan'
-  );
+  return ({ 'round-robin': 'Everyone meets on a deterministic rotation', 'double-round-robin': 'The rotation repeats with rematch tracking', pools: 'Teams are divided into preliminary groups', 'playoff-pools': 'Qualifiers are grouped for playoffs', 'single-elimination': 'One loss removes a team from the bracket', swiss: 'Power matching balances records', custom: 'The director controls each pairing' } as Record<string, string>)[kind] ?? 'Custom pairing plan';
+}
+function formatName(kind: string): string {
+  return ({ 'round-robin': 'Round robin', 'double-round-robin': 'Double round robin', pools: 'Preliminary pools', 'playoff-pools': 'Playoff pools', 'single-elimination': 'Single elimination', swiss: 'Swiss / power matching', custom: 'Custom format' } as Record<string, string>)[kind] ?? 'Custom format';
+}
+function scoringSummary(state: DirectorState): string {
+  const rules = state.tournament?.rules;
+  if (!rules) return 'Tournament scoring rules are not configured.';
+  const marks = [rules.superpowerValue != null ? `${rules.superpowerValue} superpower` : null, rules.powerValue != null ? `${rules.powerValue} power` : null, `${rules.tossupValue} tossup`, rules.negValue != null ? `${rules.negValue} neg` : null].filter(Boolean).join(' · ');
+  return `${marks} · ${rules.bonusValue} × ${rules.bonusParts} bonus · ${rules.tossupCount} tossups`;
 }
 
 type ScoringRuleKey =
-  | 'tossupValue'
-  | 'superpowerValue'
-  | 'powerValue'
-  | 'negValue'
-  | 'bonusValue'
-  | 'tossupCount'
-  | 'maximumTossupCount'
-  | 'bonusParts'
-  | 'minimumBonusParts'
-  | 'maximumBonusScore'
-  | 'bonusDivisor'
-  | 'overtimeTossupCount'
-  | 'lightningCountPerTeam'
-  | 'lightningDivisor'
-  | 'maximumActivePlayers';
-
+  | 'tossupValue' | 'superpowerValue' | 'powerValue' | 'negValue' | 'bonusValue' | 'tossupCount'
+  | 'maximumTossupCount' | 'bonusParts' | 'minimumBonusParts' | 'maximumBonusScore' | 'bonusDivisor'
+  | 'overtimeTossupCount' | 'lightningCountPerTeam' | 'lightningDivisor' | 'maximumActivePlayers';
 type ScoringRuleDrafts = Record<ScoringRuleKey, string>;
-
-function scoringRuleKey(
-  tournamentId: string | undefined,
-  rules: NonNullable<DirectorState['tournament']>['rules'] | undefined,
-): string {
-  return [
-    tournamentId ?? '',
-    rules?.tossupValue ?? '',
-    rules?.superpowerValue ?? '',
-    rules?.powerValue ?? '',
-    rules?.negValue ?? '',
-    rules?.bonusValue ?? '',
-    rules?.tossupCount ?? '',
-    rules?.maximumTossupCount ?? '',
-    rules?.bonusParts ?? '',
-    rules?.minimumBonusParts ?? '',
-    rules?.maximumBonusScore ?? '',
-    rules?.bonusDivisor ?? '',
-    rules?.overtimeTossupCount ?? '',
-    rules?.lightningCountPerTeam ?? '',
-    rules?.lightningDivisor ?? '',
-    rules?.maximumActivePlayers ?? '',
-  ].join('|');
-}
-
-function scoringRuleDraftsFor(
-  rules: NonNullable<DirectorState['tournament']>['rules'] | undefined,
-): ScoringRuleDrafts {
+function scoringRuleDraftsFor(rules: NonNullable<DirectorState['tournament']>['rules'] | undefined): ScoringRuleDrafts {
   return {
     tossupValue: String(rules?.tossupValue ?? 10),
     superpowerValue: rules?.superpowerValue == null ? '' : String(rules.superpowerValue),
@@ -1826,20 +1125,4 @@ function scoringRuleDraftsFor(
     lightningDivisor: String(rules?.lightningDivisor ?? 10),
     maximumActivePlayers: String(rules?.maximumActivePlayers ?? 4),
   };
-}
-
-function formatName(kind: string): string {
-  return (
-    (
-      {
-        'round-robin': 'Round robin',
-        'double-round-robin': 'Double round robin',
-        pools: 'Preliminary pools',
-        'playoff-pools': 'Playoff pools',
-        'single-elimination': 'Single elimination',
-        swiss: 'Swiss / power matching',
-        custom: 'Custom format',
-      } as Record<string, string>
-    )[kind] ?? 'Custom format'
-  );
 }
