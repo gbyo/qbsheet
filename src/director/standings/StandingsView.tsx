@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   derivePlayerStandings,
   deriveTeamStandings,
@@ -5,12 +6,28 @@ import {
   type DirectorState,
 } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
-import { Button, EmptyState } from '../components/Controls';
-import { PageHeader } from '../components/PageHeader';
+import {
+  ActionMenu,
+  DataTable,
+  EmptyState,
+  IdentityCell,
+  MenuItem,
+  Page,
+  PageHeader,
+  Panel,
+  Segmented,
+  Switch,
+  type Column,
+} from '../components';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { formatWinPct } from './statsDisplay';
 import { csvMediaType, downloadText } from '../format/downloadFile';
 import type { AnnounceInput } from '../notices';
+
+type StatsView = 'teams' | 'players';
+
+type TeamStanding = ReturnType<typeof deriveTeamStandings>[number];
+type PlayerStanding = ReturnType<typeof derivePlayerStandings>[number];
 
 export function StandingsView({
   state,
@@ -20,171 +37,190 @@ export function StandingsView({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
+  const [view, setView] = useState<StatsView>('teams');
+  const [showDetailed, setShowDetailed] = useState(false);
   const teamStandings = deriveTeamStandings(state);
-  /*
-   * Everybody who has played, in the order the derivation ranks them.
-   *
-   * This used to be `.slice(0, 10)` with nothing on screen saying so, which is a table that looks
-   * complete and is not: the eleventh player was unreachable from the only page that reports player
-   * statistics, and a director checking a stat leader against a protest would have found the page
-   * silently disagreeing with the export.
-   */
   const playerStandings = derivePlayerStandings(state).filter((standing) => standing.gamesPlayed > 0);
+
+  if (state.teams.length === 0) {
+    return (
+      <Page>
+        <PageHeader title="Standings & stats" description="Derived from accepted game records." />
+        <EmptyState
+          title="No standings yet"
+          description="Add teams and accept results to derive records, scoring, and player statistics."
+        />
+      </Page>
+    );
+  }
+
+  const teamColumns: Column<TeamStanding>[] = [
+    {
+      key: 'rank',
+      header: '#',
+      priority: 1,
+      align: 'right',
+      render: (standing) => teamStandings.findIndex((entry) => entry.teamId === standing.teamId) + 1,
+    },
+    {
+      key: 'team',
+      header: 'Team',
+      priority: 1,
+      render: (standing) => (
+        <IdentityCell
+          title={state.teams.find((team) => team.id === standing.teamId)?.displayName ?? 'Unknown'}
+        />
+      ),
+    },
+    {
+      key: 'record',
+      header: 'W–L',
+      priority: 1,
+      align: 'right',
+      render: (standing) =>
+        `${standing.wins}–${standing.losses}${standing.ties ? `–${standing.ties}` : ''}`,
+    },
+    {
+      key: 'winPct',
+      header: 'Win %',
+      priority: 2,
+      align: 'right',
+      render: formatWinPct,
+    },
+    {
+      key: 'margin',
+      header: 'Margin',
+      priority: 2,
+      align: 'right',
+      render: (standing) => `${standing.margin > 0 ? '+' : ''}${standing.margin}`,
+    },
+    ...(showDetailed
+      ? ([
+          { key: 'pf', header: 'PF', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.pointsFor },
+          { key: 'pa', header: 'PA', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.pointsAgainst },
+          { key: 'powers', header: 'Powers', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.powers },
+          { key: 'gets', header: 'Gets', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.gets },
+          { key: 'negs', header: 'Negs', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.negs },
+        ] satisfies Column<TeamStanding>[])
+      : []),
+  ];
+
+  const playerColumns: Column<PlayerStanding>[] = [
+    {
+      key: 'player',
+      header: 'Player',
+      priority: 1,
+      render: (standing) => (
+        <IdentityCell
+          title={state.players.find((player) => player.id === standing.playerId)?.name ?? 'Unknown'}
+          detail={state.teams.find((team) => team.id === standing.teamId)?.displayName ?? 'Unknown team'}
+        />
+      ),
+    },
+    { key: 'games', header: 'Games', priority: 1, align: 'right', render: (standing) => standing.gamesPlayed },
+    { key: 'ppg', header: 'PPG', priority: 1, align: 'right', render: (standing) => standing.ppg.toFixed(1) },
+    ...(showDetailed
+      ? ([
+          { key: 'powers', header: 'Powers', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.powers },
+          { key: 'gets', header: 'Gets', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.gets },
+          { key: 'negs', header: 'Negs', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.negs },
+          { key: 'bonus', header: 'Bonus pts', priority: 3, align: 'right' as const, render: (standing: PlayerStanding) => standing.bonusPoints },
+        ] satisfies Column<PlayerStanding>[])
+      : []),
+  ];
+
   return (
-    <>
+    <Page>
       <PageHeader
-        eyebrow="Review"
         title="Standings & stats"
-        description="Derived from accepted game records and the tournament tiebreak configuration."
+        description={`${totalAcceptedResults(state)} accepted game${totalAcceptedResults(state) === 1 ? '' : 's'} · ranked using the tournament tiebreak configuration`}
         actions={
-          <>
-            <Button
-              variant="secondary"
-              icon="download"
-              onClick={() => downloadTeamStandings(state, onAnnounce)}
-            >
-              Export team standings CSV
-            </Button>
-            <Button
-              variant="secondary"
-              icon="download"
-              onClick={() => downloadPlayerStats(state, onAnnounce)}
-            >
-              Export player stats CSV
-            </Button>
-          </>
+          <ActionMenu
+            label="Export standings and stats"
+            triggerLabel="Export"
+            triggerVariant="secondary"
+            triggerIcon="download"
+          >
+            {(close) => (
+              <>
+                <MenuItem
+                  icon="download"
+                  onSelect={() => {
+                    close();
+                    downloadTeamStandings(state, onAnnounce);
+                  }}
+                >
+                  Team standings CSV
+                </MenuItem>
+                <MenuItem
+                  icon="download"
+                  onSelect={() => {
+                    close();
+                    downloadPlayerStats(state, onAnnounce);
+                  }}
+                >
+                  Player stats CSV
+                </MenuItem>
+              </>
+            )}
+          </ActionMenu>
         }
       />
-      <div className="director-page-stack">
-        {state.teams.length === 0 ? (
-          <EmptyState
-            title="No standings yet"
-            description="Add teams and accept results to derive records, scoring, and player statistics."
-          />
-        ) : (
-          <>
-            <section className="director-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Team standings</p>
-                  <h2>{teamStandings.length} teams</h2>
-                </div>
-                <span className="director-muted">{totalAcceptedResults(state)} accepted games</span>
-              </div>
-              <div className="director-table-wrap">
-                <table className="director-table director-standings-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">#</th>
-                      <th scope="col">Team</th>
-                      <th scope="col">W–L</th>
-                      <th scope="col">Win %</th>
-                      <th scope="col">PF</th>
-                      <th scope="col">PA</th>
-                      <th scope="col">Margin</th>
-                      <th scope="col">Powers</th>
-                      <th scope="col">Gets</th>
-                      <th scope="col">Negs</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {teamStandings.map((standing, index) => (
-                      <tr key={standing.teamId}>
-                        <td className="director-number-cell">{index + 1}</td>
-                        <td>
-                          <strong>
-                            {state.teams.find((team) => team.id === standing.teamId)?.displayName ??
-                              'Unknown'}
-                          </strong>
-                        </td>
-                        <td className="director-record-cell director-number-cell">
-                          {standing.wins}–{standing.losses}
-                          {standing.ties ? `–${standing.ties}` : ''}
-                        </td>
-                        <td className="director-number-cell">{formatWinPct(standing)}</td>
-                        <td className="director-number-cell">{standing.pointsFor}</td>
-                        <td className="director-number-cell">{standing.pointsAgainst}</td>
-                        <td className="director-number-cell">
-                          {standing.margin > 0 ? '+' : ''}
-                          {standing.margin}
-                        </td>
-                        <td className="director-number-cell">{standing.powers}</td>
-                        <td className="director-number-cell">{standing.gets}</td>
-                        <td className="director-number-cell">{standing.negs}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-            <section className="director-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Player statistics</p>
-                  <h2>
-                    {playerStandings.length} player{playerStandings.length === 1 ? '' : 's'}
-                  </h2>
-                </div>
-                <span className="director-muted">Accepted games only</span>
-              </div>
-              {playerStandings.length === 0 ? (
-                <div className="director-panel-body director-panel-empty-body" role="status">
-                  <p className="director-empty-copy">
-                    Player statistics will appear when accepted results include rosters.
-                  </p>
-                </div>
-              ) : (
-                <div className="director-table-wrap">
-                  <table className="director-table director-player-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Player</th>
-                        <th scope="col">Team</th>
-                        <th scope="col">Games</th>
-                        <th scope="col">PPG</th>
-                        <th scope="col">Powers</th>
-                        <th scope="col">Gets</th>
-                        <th scope="col">Negs</th>
-                        <th scope="col">Bonus pts</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {playerStandings.map((standing) => (
-                        <tr key={standing.playerId}>
-                          <td>
-                            <strong>
-                              {state.players.find((player) => player.id === standing.playerId)?.name ??
-                                'Unknown'}
-                            </strong>
-                          </td>
-                          <td>
-                            {state.teams.find((team) => team.id === standing.teamId)?.displayName ??
-                              'Unknown'}
-                          </td>
-                          <td className="director-number-cell">{standing.gamesPlayed}</td>
-                          <td className="director-number-cell">{standing.ppg.toFixed(1)}</td>
-                          <td className="director-number-cell">{standing.powers}</td>
-                          <td className="director-number-cell">{standing.gets}</td>
-                          <td className="director-number-cell">{standing.negs}</td>
-                          <td className="director-number-cell">{standing.bonusPoints}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </section>
-          </>
-        )}
+
+      <div className="director-results-toolbar">
+        <Segmented<StatsView>
+          value={view}
+          onChange={setView}
+          ariaLabel="Statistics view"
+          options={[
+            { value: 'teams', label: `Teams ${teamStandings.length}` },
+            { value: 'players', label: `Players ${playerStandings.length}` },
+          ]}
+        />
+        <Switch
+          checked={showDetailed}
+          label="Detailed scoring columns"
+          onChange={setShowDetailed}
+        />
       </div>
-    </>
+
+      {view === 'teams' ? (
+        <Panel
+          title="Team standings"
+          description="Rank, team, and record stay visible first; detailed scoring columns are optional and lowest-priority at narrow widths."
+          flush
+        >
+          <DataTable
+            items={teamStandings}
+            columns={teamColumns}
+            rowKey={(standing) => standing.teamId}
+            ariaLabel="Team standings"
+          />
+        </Panel>
+      ) : (
+        <Panel
+          title="Player statistics"
+          description="Accepted games only. Team context stays attached to each player."
+          flush
+        >
+          {playerStandings.length === 0 ? (
+            <div className="director-empty-in-panel">
+              <p className="director-empty-copy">Player statistics will appear when accepted results include rosters.</p>
+            </div>
+          ) : (
+            <DataTable
+              items={playerStandings}
+              columns={playerColumns}
+              rowKey={(standing) => standing.playerId}
+              ariaLabel="Player statistics"
+            />
+          )}
+        </Panel>
+      )}
+    </Page>
   );
 }
 
-/*
- * Both exports write the shared serialization, so the file a director opens has the columns the
- * table above them has. See `standingsCsv` for why that is one module rather than one per page.
- */
 function downloadTeamStandings(
   state: DirectorState,
   onAnnounce: (announcement: AnnounceInput) => void,
@@ -193,7 +229,10 @@ function downloadTeamStandings(
   onAnnounce('Team standings CSV exported.');
 }
 
-function downloadPlayerStats(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
+function downloadPlayerStats(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): void {
   downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
   onAnnounce('Player statistics CSV exported.');
 }
