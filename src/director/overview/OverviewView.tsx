@@ -10,9 +10,10 @@ import {
 } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
+  Badge,
   Button,
-  Callout,
   Diagnostics,
+  EmptyState,
   MetaRow,
   Page,
   PageHeader,
@@ -45,12 +46,28 @@ function sectionForArea(area: PreflightIssue['area']): SectionId {
   }
 }
 
+type AttentionSeverity = 'blocker' | 'warning' | 'review' | 'info';
+
+const severityRank: Record<AttentionSeverity, number> = { blocker: 0, warning: 1, review: 2, info: 3 };
+
+function severityLabel(severity: AttentionSeverity): string {
+  return severity === 'blocker'
+    ? 'Blocking'
+    : severity === 'warning'
+      ? 'Warning'
+      : severity === 'review'
+        ? 'Needs a decision'
+        : 'Check';
+}
+
 interface AttentionItem {
   id: string;
   title: string;
   text: string;
   section: SectionId;
   tone: StatusTone;
+  /** Ranks the list and picks the marker colour. */
+  severity: AttentionSeverity;
   /**
    * Where the fix is, when the item is about a specific thing. A room that has
    * asked for help opens *that* room, not the Rooms page — the point of an
@@ -112,6 +129,7 @@ export function OverviewView({
       text: issue.message,
       section: sectionForArea(issue.area),
       tone: 'danger' as const,
+      severity: 'blocker' as const,
     })),
     ...(controller.error
       ? [
@@ -121,6 +139,7 @@ export function OverviewView({
             text: controller.error,
             section: 'settings' as SectionId,
             tone: 'danger' as const,
+            severity: 'blocker' as const,
           },
         ]
       : []),
@@ -132,6 +151,7 @@ export function OverviewView({
             text: `${reviewCount} result${reviewCount === 1 ? '' : 's'} need${reviewCount === 1 ? 's' : ''} a decision.`,
             section: 'results' as SectionId,
             tone: 'warning' as const,
+            severity: 'review' as const,
           },
         ]
       : []),
@@ -144,6 +164,7 @@ export function OverviewView({
               openProtests === 1 ? '1 protest awaits a ruling.' : `${openProtests} protests await a ruling.`,
             section: 'results' as SectionId,
             tone: 'warning' as const,
+            severity: 'review' as const,
           },
         ]
       : []),
@@ -154,6 +175,7 @@ export function OverviewView({
       target: { section: 'rooms', entityType: 'room', entityId: request.roomId } as DirectorNavigationTarget,
       section: 'rooms' as SectionId,
       tone: 'warning' as const,
+      severity: 'warning' as const,
     })),
     ...helpSessions.map((session) => ({
       id: `help-${session.roomId}`,
@@ -162,6 +184,7 @@ export function OverviewView({
       target: { section: 'rooms', entityType: 'room', entityId: session.roomId } as DirectorNavigationTarget,
       section: 'rooms' as SectionId,
       tone: 'warning' as const,
+      severity: 'warning' as const,
     })),
     ...issues
       .filter((issue) => issue.severity !== 'blocker')
@@ -171,8 +194,9 @@ export function OverviewView({
         text: issue.message,
         section: sectionForArea(issue.area),
         tone: 'info' as const,
+        severity: 'info' as const,
       })),
-  ];
+  ].sort((left, right) => severityRank[left.severity] - severityRank[right.severity]);
 
   return (
     <Page>
@@ -247,17 +271,16 @@ export function OverviewView({
           />
         </Panel>
       ) : (
-        <Callout
-          tone="info"
-          title="Build the tournament plan"
-          actions={
-            <Button variant="primary" onClick={() => onNavigate('teams')}>
-              Add teams
-            </Button>
-          }
-        >
-          Add teams, rooms, and a format. Director saves your tournament as you work.
-        </Callout>
+        /*
+          Before there is a round, the page header's primary action is what to
+          do next and the attention list says what is missing. A third card
+          repeating "add teams" put the same instruction on screen three times.
+        */
+        <EmptyState
+          title="No round yet"
+          description="Add teams, rooms, and a format, and the day's first round appears here."
+          variant="contained"
+        />
       )}
 
       {attention.length > 0 && (
@@ -265,24 +288,33 @@ export function OverviewView({
           title="Needs attention"
           description="Highest-impact issues appear first. Each item opens the workflow that can resolve it."
         >
-          <div className="director-attention-list">
+          {/*
+            Rows rather than a stack of tinted panels. Five full callouts in a
+            column give every item the same weight and fill the screen with
+            borders; a severity rule down the left says the same thing in 3px,
+            and keeps the list scannable when a tournament has a dozen of them.
+          */}
+          <div className="director-attention director-attention-list">
             {(showAllAttention ? attention : attention.slice(0, 5)).map((item) => (
-              <Callout
-                key={item.id}
-                tone={item.tone}
-                title={item.title}
-                actions={
+              <div key={item.id} className="director-attention-item" data-severity={item.severity}>
+                <span className="director-attention-marker" aria-hidden="true" />
+                <div className="director-attention-text">
+                  <p className="director-attention-title">
+                    {item.title}
+                    <Badge tone={item.tone} label={severityLabel(item.severity)} />
+                  </p>
+                  <p className="director-attention-detail">{item.text}</p>
+                </div>
+                <div className="director-attention-action">
                   <Button
-                    variant="quiet"
-                    icon="chevron"
+                    variant="secondary"
+                    iconAfter="chevron"
                     onClick={() => onNavigate(item.section, item.target)}
                   >
                     {`Open ${labelForSection(item.section)}`}
                   </Button>
-                }
-              >
-                {item.text}
-              </Callout>
+                </div>
+              </div>
             ))}
           </div>
           {attention.length > 5 && (

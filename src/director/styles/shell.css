@@ -690,7 +690,14 @@
     padding: var(--director-space-4) var(--director-space-2);
   }
 
-  .director-brand > span,
+  /* The wordmark does not fit a 64px rail; the mark alone would need artwork we
+     do not have, so the brand line is hidden and the application is identified
+     by the tournament switcher directly below it. */
+  .director-brand {
+    display: none;
+  }
+
+  .director-brand > span:not(.visually-hidden),
   .director-nav-label,
   .director-nav-link > span,
   .director-operator > div,
@@ -788,7 +795,11 @@
     content: '';
   }
 
-  .director-brand > span,
+  .director-brand {
+    display: flex;
+  }
+
+  .director-brand > span:not(.visually-hidden),
   .director-nav-label,
   .director-nav-link > span,
   .director-operator > div,

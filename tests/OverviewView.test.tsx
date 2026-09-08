@@ -67,7 +67,7 @@ function confirmedTeam(id: string, displayName: string): DirectorState['teams'][
 
 /** The action inside the attention item whose body reads `text`. */
 function attentionAction(text: string): HTMLElement {
-  const item = screen.getByText(text).closest('.director-callout') as HTMLElement;
+  const item = screen.getByText(text).closest('.director-attention-item') as HTMLElement;
   return within(item).getByRole('button');
 }
 
@@ -75,9 +75,12 @@ describe('OverviewView attention-first layout', () => {
   test('no tournament shows first-step guidance, not subsystem cards', () => {
     const { onNavigate } = renderOverview(emptyDirectorState());
 
-    expect(screen.getByText('Build the tournament plan')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Add teams' }));
+    // One instruction, in one place: the page header's primary action. The
+    // card that used to repeat it beside the attention list is gone.
+    expect(screen.getByText('No round yet')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Set up teams' }));
     expect(onNavigate).toHaveBeenCalledWith('teams');
+    expect(screen.queryByRole('button', { name: 'Add teams' })).toBeNull();
 
     expect(screen.getByText('Needs attention')).toBeTruthy();
     expect(screen.getByText('Create or open a tournament first.')).toBeTruthy();
@@ -358,7 +361,7 @@ test('Overview overflow counts every remaining attention item and help records a
   fireEvent.click(overflow);
   // Every remaining item is drawn once expanded; attention items are callouts
   // rather than list rows now.
-  expect(document.querySelectorAll('.director-attention-list .director-callout')).toHaveLength(5 + count);
+  expect(document.querySelectorAll('.director-attention-item')).toHaveLength(5 + count);
   // A session's help record and the help request it points at are one item, not two.
   expect(screen.getAllByText('Room 0 requested help.')).toHaveLength(1);
   fireEvent.click(attentionAction('Room 7 requested help.'));

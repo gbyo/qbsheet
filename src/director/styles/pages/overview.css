@@ -40,3 +40,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The attention list draws its own edge; the rows inside it are separated by
+   rules rather than each carrying a border. */
+.director-attention-list {
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
