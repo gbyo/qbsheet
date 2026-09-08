@@ -95,7 +95,7 @@ export function normalizeState(state: string): string {
   return (
     state
       .trim()
-      .toLocaleLowerCase()
+      .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '') || 'neutral'
   );
