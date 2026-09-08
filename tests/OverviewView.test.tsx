@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { defaultRules, emptyDirectorState, type DirectorState } from '../src/director/domain';
 import { directorFixture } from '../src/director/transfers/testFixtures';
@@ -63,6 +63,12 @@ function confirmedTeam(id: string, displayName: string): DirectorState['teams'][
     createdAt: '2026-09-05T10:00:00.000Z',
     updatedAt: '2026-09-05T10:00:00.000Z',
   };
+}
+
+/** The action inside the attention item whose body reads `text`. */
+function attentionAction(text: string): HTMLElement {
+  const item = screen.getByText(text).closest('.director-callout') as HTMLElement;
+  return within(item).getByRole('button');
 }
 
 describe('OverviewView attention-first layout', () => {
@@ -134,15 +140,27 @@ describe('OverviewView attention-first layout', () => {
     ];
     const { onNavigate } = renderOverview(state);
 
+    // The list shows the most severe five and offers the rest; this tournament
+    // has more than five, so expand before checking that each one is present.
+    const more = screen.queryByRole('button', { name: /more checks/ });
+    if (more) fireEvent.click(more);
+
     expect(screen.getByText('Add at least two confirmed teams.')).toBeTruthy();
     expect(screen.getByText('1 result needs a decision.')).toBeTruthy();
-    expect(screen.getByText('1 open protest.')).toBeTruthy();
+    expect(screen.getByText('1 protest awaits a ruling.')).toBeTruthy();
     expect(screen.getByText('Room 203 requested help.')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole('button', { name: '1 result needs a decision.' }));
-    expect(onNavigate).toHaveBeenCalledWith('results');
-    fireEvent.click(screen.getByRole('button', { name: 'Room 203 requested help.' }));
-    expect(onNavigate).toHaveBeenCalledWith('rooms');
+    // Each item carries the action that resolves it, named for where it goes
+    // rather than a column of identical "Open" buttons.
+    fireEvent.click(attentionAction('1 result needs a decision.'));
+    expect(onNavigate).toHaveBeenCalledWith('results', undefined);
+    // A room that asked for help opens that room, not the Rooms page.
+    fireEvent.click(attentionAction('Room 203 requested help.'));
+    expect(onNavigate).toHaveBeenCalledWith('rooms', {
+      section: 'rooms',
+      entityType: 'room',
+      entityId: 'room-203',
+    });
   });
 
   test('round banner reports progress with standings as secondary content', () => {
@@ -195,7 +213,7 @@ describe('OverviewView attention-first layout', () => {
     expect(screen.getByText('Round 1')).toBeTruthy();
     expect(screen.getByText(/4 of 5 results accepted/)).toBeTruthy();
     expect(screen.getByText(/1 still playing/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open Rounds' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open Round 1' }));
     expect(onNavigate).toHaveBeenCalledWith('schedule');
 
     expect(screen.getByText('Current leaders')).toBeTruthy();
@@ -244,8 +262,8 @@ describe('OverviewView attention-first layout', () => {
     ];
     const { onNavigate } = renderOverview(state);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Room 1 references a missing moderator.' }));
-    expect(onNavigate).toHaveBeenCalledWith('rooms');
+    fireEvent.click(attentionAction('Room 1 references a missing moderator.'));
+    expect(onNavigate).toHaveBeenCalledWith('rooms', undefined);
   });
 
   test('complete released round offers a one-action finish', () => {
@@ -300,7 +318,8 @@ test('Overview distinguishes live, unresolved, accepted and cancelled games', ()
     (status, index) => ({ ...template, id: `count-${index}`, roundId: round.id, status }),
   );
   renderOverview(state);
-  expect(screen.getByText('1 of 5 results accepted · 1 still playing')).toBeTruthy();
+  expect(screen.getByText('1 of 5 results accepted')).toBeTruthy();
+  expect(screen.getByText(/1 still playing/)).toBeTruthy();
   expect(screen.queryByRole('button', { name: `Finish ${round.name}` })).toBeNull();
 });
 
@@ -337,9 +356,15 @@ test('Overview overflow counts every remaining attention item and help records a
   const overflow = screen.getByRole('button', { name: /more checks/ });
   const count = Number(overflow.textContent!.match(/\d+/)![0]);
   fireEvent.click(overflow);
-  const attention = screen.getByRole('heading', { name: 'Needs attention' }).parentElement!;
-  expect(attention.querySelectorAll('li')).toHaveLength(5 + count + 1);
+  // Every remaining item is drawn once expanded; attention items are callouts
+  // rather than list rows now.
+  expect(document.querySelectorAll('.director-attention-list .director-callout')).toHaveLength(5 + count);
+  // A session's help record and the help request it points at are one item, not two.
   expect(screen.getAllByText('Room 0 requested help.')).toHaveLength(1);
-  fireEvent.click(screen.getByRole('button', { name: 'Room 7 requested help.' }));
-  expect(onNavigate).toHaveBeenLastCalledWith('rooms');
+  fireEvent.click(attentionAction('Room 7 requested help.'));
+  expect(onNavigate).toHaveBeenLastCalledWith('rooms', {
+    section: 'rooms',
+    entityType: 'room',
+    entityId: 'room-7',
+  });
 });

@@ -41,14 +41,14 @@ describe('RecommendedPlan', () => {
     expect(screen.getByText('9 rounds · 9 games per team')).toBeTruthy();
     // The summary and the first consequence share this wording.
     expect(screen.getAllByText('Every team plays every other team once.')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Use this plan' })).toBeTruthy();
-    expect(screen.getByText('Other formats')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Use recommended plan' })).toBeTruthy();
+    expect(screen.getByText('Other suitable formats:')).toBeTruthy();
   });
 
-  test('Use this plan applies the recommendation and goes to Rounds', () => {
+  test('Use recommended plan applies the recommendation and goes to Tournament day', () => {
     const { applyTournamentPlan, onNavigate, onAnnounce } = renderPlan(teamState(10));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Use this plan' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Use recommended plan' }));
     expect(applyTournamentPlan).toHaveBeenCalledTimes(1);
     expect(applyTournamentPlan).toHaveBeenCalledWith(expect.objectContaining({ id: 'full-round-robin' }));
     expect(onNavigate).toHaveBeenCalledWith('schedule');

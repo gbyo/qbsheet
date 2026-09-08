@@ -1,3 +1,4 @@
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useState } from 'react';
 import {
   deriveTeamStandings,
@@ -20,7 +21,7 @@ import {
   Section,
   type StatusTone,
 } from '../components';
-import type { SectionId } from '../app/navigation';
+import { labelForSection, type SectionId } from '../app/navigation';
 import { currentOperationalRound } from '../transfers/assignment';
 import type { AnnounceInput } from '../notices';
 
@@ -50,6 +51,12 @@ interface AttentionItem {
   text: string;
   section: SectionId;
   tone: StatusTone;
+  /**
+   * Where the fix is, when the item is about a specific thing. A room that has
+   * asked for help opens *that* room, not the Rooms page — the point of an
+   * attention list is that it ends the search, not that it starts one.
+   */
+  target?: DirectorNavigationTarget;
 }
 
 export function OverviewView({
@@ -62,7 +69,7 @@ export function OverviewView({
 }: {
   state: DirectorState;
   controller: DirectorController;
-  onNavigate: (section: SectionId) => void;
+  onNavigate: (section: SectionId, target?: DirectorNavigationTarget | null) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
   nativeServerReady?: boolean;
   nativeServerAvailable?: boolean;
@@ -133,7 +140,8 @@ export function OverviewView({
           {
             id: 'open-protests',
             title: 'Open protests',
-            text: `${openProtests} protest${openProtests === 1 ? '' : 's'} await a ruling.`,
+            text:
+              openProtests === 1 ? '1 protest awaits a ruling.' : `${openProtests} protests await a ruling.`,
             section: 'results' as SectionId,
             tone: 'warning' as const,
           },
@@ -143,6 +151,7 @@ export function OverviewView({
       id: request.id,
       title: 'Room requested help',
       text: `${request.roomName} requested help.`,
+      target: { section: 'rooms', entityType: 'room', entityId: request.roomId } as DirectorNavigationTarget,
       section: 'rooms' as SectionId,
       tone: 'warning' as const,
     })),
@@ -150,6 +159,7 @@ export function OverviewView({
       id: `help-${session.roomId}`,
       title: 'Room requested help',
       text: `${state.rooms.find((room) => room.id === session.roomId)?.name ?? 'A room'} requested help.`,
+      target: { section: 'rooms', entityType: 'room', entityId: session.roomId } as DirectorNavigationTarget,
       section: 'rooms' as SectionId,
       tone: 'warning' as const,
     })),
@@ -201,20 +211,22 @@ export function OverviewView({
                   Start {round.name}
                 </Button>
               )}
-              {round.status === 'released' &&
-                (complete ? (
-                  <Button
-                    variant="primary"
-                    icon="chevron"
-                    onClick={() => onAnnounce(controller.finishRound(round.id).summary)}
-                  >
-                    Finish {round.name}
-                  </Button>
-                ) : (
-                  <Button variant="primary" icon="chevron" onClick={() => onNavigate('schedule')}>
-                    Open {round.name}
-                  </Button>
-                ))}
+              {/*
+                The panel owns the round's operations — Start, and Finish once
+                every game is in. Navigating to the day is the quiet action
+                below, and the page header already carries "Open <round>" as the
+                one primary thing to do next; offering it twice made the same
+                button appear on one screen with the same name.
+              */}
+              {round.status === 'released' && complete && (
+                <Button
+                  variant="primary"
+                  icon="chevron"
+                  onClick={() => onAnnounce(controller.finishRound(round.id).summary)}
+                >
+                  Finish {round.name}
+                </Button>
+              )}
               <Button variant="quiet" icon="chevron" onClick={() => onNavigate('schedule')}>
                 Tournament day
               </Button>
@@ -260,8 +272,12 @@ export function OverviewView({
                 tone={item.tone}
                 title={item.title}
                 actions={
-                  <Button variant="quiet" icon="chevron" onClick={() => onNavigate(item.section)}>
-                    Open
+                  <Button
+                    variant="quiet"
+                    icon="chevron"
+                    onClick={() => onNavigate(item.section, item.target)}
+                  >
+                    {`Open ${labelForSection(item.section)}`}
                   </Button>
                 }
               >
