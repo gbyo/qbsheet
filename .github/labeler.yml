@@ -46,6 +46,32 @@
   - changed-files:
       - any-glob-to-any-file: "src/integrations/**"
 
+"area: director":
+  - changed-files:
+      - any-glob-to-any-file: "src/director/**"
+
+"area: recovery":
+  - changed-files:
+      - any-glob-to-any-file: "src/recovery/**"
+
+"area: arcade":
+  - changed-files:
+      - any-glob-to-any-file: "src/arcade/**"
+
+"area: spreadsheet":
+  - changed-files:
+      - any-glob-to-any-file: "src/spreadsheet/**"
+
+"area: game package creator":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/game-package-creator/**"
+          - "src/qr/**"
+
+"area: about":
+  - changed-files:
+      - any-glob-to-any-file: "src/about/**"
+
 # Almost every pull request touches tests, so only call it out when tests are
 # all that changed — that is the part a reviewer can read differently.
 "tests only":
