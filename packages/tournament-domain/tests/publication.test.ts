@@ -125,6 +125,15 @@ describe('the timeline', () => {
     expect(normalizeTimelineEvents([{ title: 'No id' }, { id: 'no-title' }, null, 42])).toEqual([]);
   });
 
+  test('duplicate event ids keep only the first recovered event', () => {
+    const events = normalizeTimelineEvents([
+      { id: 'lunch', title: 'Lunch', type: 'lunch', visibility: 'public' },
+      { id: 'lunch', title: 'Duplicate lunch', type: 'custom', visibility: 'public' },
+    ]);
+    expect(events).toHaveLength(1);
+    expect(events[0].title).toBe('Lunch');
+  });
+
   test('a non-array normalizes to an empty timeline', () => {
     expect(normalizeTimelineEvents(undefined)).toEqual([]);
     expect(normalizeTimelineEvents({ not: 'an array' })).toEqual([]);
