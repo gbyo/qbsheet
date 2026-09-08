@@ -99,9 +99,10 @@ export function AdvancementCommit({
       )}
       <Field
         label="Target stage"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={target.id}
             options={targets.map((entry) => ({ value: entry.id, label: entry.name }))}

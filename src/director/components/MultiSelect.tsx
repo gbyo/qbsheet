@@ -170,7 +170,8 @@ export function MultiSelect<T extends string = string>({
           className="director-multiselect-popover"
           data-placement="bottom"
           role="dialog"
-          aria-label={ariaLabel ?? 'Selection'}
+          aria-label={ariaLabelledBy ? undefined : (ariaLabel ?? 'Selection')}
+          aria-labelledby={ariaLabelledBy}
         >
           <div className="director-combobox-search">
             <div className="director-search-field">

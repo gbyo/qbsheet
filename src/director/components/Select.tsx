@@ -315,6 +315,7 @@ export function Select<T extends string = string>({
           id={listboxId}
           role="listbox"
           aria-label={ariaLabel}
+          aria-labelledby={ariaLabel ? undefined : ariaLabelledBy}
           className="director-select-popover"
           data-placement={placement}
         >
@@ -524,6 +525,7 @@ export function Combobox<T extends string = string>({
           id={listboxId}
           role="listbox"
           aria-label={ariaLabel}
+          aria-labelledby={ariaLabel ? undefined : ariaLabelledBy}
           className="director-select-popover"
           data-placement={placement}
         >

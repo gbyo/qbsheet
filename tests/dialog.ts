@@ -34,3 +34,14 @@ if (proto && typeof proto.showModal !== 'function') {
     this.dispatchEvent(new Event('close'));
   };
 }
+
+/*
+ * `scrollIntoView`, which jsdom also omits.
+ *
+ * Director's select and combobox keep the highlighted option in view during
+ * keyboard travel, so every test that opens one would otherwise fail on a
+ * missing method rather than on anything it was written to check.
+ */
+if (globalThis.Element && typeof globalThis.Element.prototype.scrollIntoView !== 'function') {
+  globalThis.Element.prototype.scrollIntoView = function scrollIntoView() {};
+}

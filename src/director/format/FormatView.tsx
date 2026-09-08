@@ -296,9 +296,10 @@ function FormatBasics({
         <Field
           label="Format"
           hint={locked ? 'Format type is locked after the first generated round.' : undefined}
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={kind}
               options={formatOptions}
@@ -1177,9 +1178,10 @@ function ManualRoundBuilder({
         </Field>
         <Field
           label="Packet"
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={packetId}
               options={[
@@ -1200,9 +1202,10 @@ function ManualRoundBuilder({
             ? 'Every confirmed team must be included.'
             : 'Choose the teams playing this manual round.'
         }
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <MultiSelect
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             values={selectedTeamIds}
             options={teams.map((team) => ({ value: team.id, label: team.displayName }))}
@@ -1218,9 +1221,10 @@ function ManualRoundBuilder({
       <Field
         label="Bye"
         hint="Required when the selected field is odd."
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={byeTeamId}
             options={[
@@ -1429,9 +1433,10 @@ function PoolEditor({
         </Field>
         <Field
           label="Teams"
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <MultiSelect
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               values={teamIds}
               disabled={!editable}

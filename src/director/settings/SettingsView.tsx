@@ -271,9 +271,10 @@ function GeneralSettings({
                 label="Tournament timezone"
                 spanAll
                 hint={`${timeZoneLabel(details.timeZone)}. Future schedule inputs use this zone; stored instants are not shifted.`}
-                render={({ id, describedBy, invalid }) => (
+                render={({ id, labelId, describedBy, invalid }) => (
                   <TimeZoneField
                     id={id}
+                    ariaLabelledBy={labelId}
                     ariaDescribedBy={describedBy}
                     invalid={invalid}
                     value={details.timeZone}

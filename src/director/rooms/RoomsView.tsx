@@ -728,9 +728,10 @@ function RoomDialog({
         <FieldGrid>
           <Field
             label="Moderator"
-            render={({ id, describedBy }) => (
+            render={({ id, labelId, describedBy }) => (
               <Select
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 value={draft.moderatorId}
                 options={moderatorOptions}
@@ -740,9 +741,10 @@ function RoomDialog({
           />
           <Field
             label="Scorekeeper"
-            render={({ id, describedBy }) => (
+            render={({ id, labelId, describedBy }) => (
               <Select
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 value={draft.scorekeeperId}
                 options={scorekeeperOptions}
@@ -752,9 +754,10 @@ function RoomDialog({
           />
           <Field
             label="Equipment"
-            render={({ id, describedBy }) => (
+            render={({ id, labelId, describedBy }) => (
               <Select
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 value={draft.equipmentId}
                 options={equipmentOptions}
@@ -1236,9 +1239,10 @@ function RequestsView({
                     <div className="director-roster-amendment-map">
                       <Field
                         label="Map to existing player"
-                        render={({ id, describedBy }) => (
+                        render={({ id, labelId, describedBy }) => (
                           <Combobox
                             id={id}
+                            ariaLabelledBy={labelId}
                             ariaDescribedBy={describedBy}
                             value={selectedPlayerId}
                             allowClear

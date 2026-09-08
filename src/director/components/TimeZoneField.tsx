@@ -77,6 +77,7 @@ export function TimeZoneField({
   onChange,
   id,
   ariaLabel = 'Tournament timezone',
+  ariaLabelledBy,
   ariaDescribedBy,
   invalid = false,
   disabled = false,
@@ -85,6 +86,8 @@ export function TimeZoneField({
   onChange: (zone: string) => void;
   id?: string;
   ariaLabel?: string;
+  /** The field's own label, so the popover is named by it rather than nothing. */
+  ariaLabelledBy?: string;
   ariaDescribedBy?: string;
   invalid?: boolean;
   disabled?: boolean;
@@ -112,7 +115,8 @@ export function TimeZoneField({
       options={options}
       onChange={(next) => onChange(next || value)}
       id={id}
-      ariaLabel={ariaLabel}
+      ariaLabel={ariaLabelledBy ? undefined : ariaLabel}
+      ariaLabelledBy={ariaLabelledBy}
       ariaDescribedBy={ariaDescribedBy}
       invalid={invalid}
       disabled={disabled}

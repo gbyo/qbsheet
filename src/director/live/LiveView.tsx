@@ -590,9 +590,10 @@ function AnnouncementDialog({
       <Field
         label="Audience"
         hint="Everybody is the default."
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <MultiSelect
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             values={audience}
             options={state.teams.map((team) => ({ value: team.id, label: team.displayName }))}

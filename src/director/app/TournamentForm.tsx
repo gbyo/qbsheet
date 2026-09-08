@@ -172,9 +172,10 @@ export function TournamentFields({
             label="Tournament timezone"
             hint="Used for planned round times and exported schedules."
             error={errorFor('timeZone')}
-            render={({ id, describedBy, invalid }) => (
+            render={({ id, labelId, describedBy, invalid }) => (
               <TimeZoneField
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 invalid={invalid}
                 value={values.timeZone}

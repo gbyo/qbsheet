@@ -671,9 +671,10 @@ function RoundPacketDialog({
     >
       <Field
         label="Packet"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={packetId}
             options={[{ value: '', label: 'No packet' }, ...options]}
@@ -740,9 +741,10 @@ function RoundRoomsDialog({
             <Field
               key={game.id}
               label={gameLabel(state, game)}
-              render={({ id, describedBy }) => (
+              render={({ id, labelId, describedBy }) => (
                 <Select
                   id={id}
+                  ariaLabelledBy={labelId}
                   ariaDescribedBy={describedBy}
                   value={draft[game.id] ?? ''}
                   options={options}
@@ -811,9 +813,10 @@ function MoveGameDialog({
       {failure && <Callout tone="danger">{failure}</Callout>}
       <Field
         label="Game"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={selected?.game.id ?? ''}
             options={choices.map((entry) => ({ value: entry.game.id, label: gameLabel(state, entry.game) }))}
@@ -828,9 +831,10 @@ function MoveGameDialog({
       />
       <Field
         label="Destination room"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={roomId}
             options={(selected?.destinations ?? []).map((room) => ({
@@ -880,9 +884,10 @@ function RoundUsbDialog({
     >
       <Field
         label="Drive"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={driveId}
             options={writable.map((drive) => ({
@@ -1230,9 +1235,10 @@ function TimelineEventDialog({
       <FieldGrid>
         <Field
           label="Event type"
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={type}
               options={eventTypeOptions}
@@ -1272,9 +1278,10 @@ function TimelineEventDialog({
         <Field
           label="Room"
           optional
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={roomId}
               options={[
@@ -1371,9 +1378,10 @@ function TimelineEventDialog({
       <Field
         label="Target teams"
         hint="No selection means the whole tournament."
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <MultiSelect
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             values={teamIds}
             options={state.teams

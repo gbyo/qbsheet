@@ -63,10 +63,16 @@ export function Field({
   optional?: boolean;
   htmlFor?: string;
   spanAll?: boolean;
-  render?: (ids: { id: string; describedBy: string | undefined; invalid: boolean }) => ReactNode;
+  render?: (ids: {
+    id: string;
+    labelId: string;
+    describedBy: string | undefined;
+    invalid: boolean;
+  }) => ReactNode;
 }) {
   const generated = useId();
   const id = htmlFor ?? generated;
+  const labelId = `${generated}-label`;
   const hintId = `${generated}-hint`;
   const errorId = `${generated}-error`;
   const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
@@ -89,11 +95,11 @@ export function Field({
 
   return (
     <div className={`director-field ${spanAll ? 'director-field-span-all' : ''}`.trim()}>
-      <label className="director-field-label" htmlFor={id}>
+      <label className="director-field-label" id={labelId} htmlFor={id}>
         <span>{label}</span>
         {optional && <span className="director-field-optional">optional</span>}
       </label>
-      {render ? render({ id, describedBy, invalid: Boolean(error) }) : labelled}
+      {render ? render({ id, labelId, describedBy, invalid: Boolean(error) }) : labelled}
       {error ? (
         <p className="director-field-error" id={errorId}>
           <Icon name="danger" size={13} />

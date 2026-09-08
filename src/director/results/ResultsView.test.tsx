@@ -120,10 +120,14 @@ describe('the scheduled games panel', () => {
     return state;
   }
 
-  function scheduleRows(): string[] {
+  function scheduleRowIds(): string[] {
     return within(screen.getByRole('list', { name: 'Scheduled games' }))
       .getAllByRole('listitem')
-      .map((row) => row.textContent ?? '');
+      .map(
+        (row) =>
+          row.querySelector('[data-director-navigation-id]')?.getAttribute('data-director-navigation-id') ??
+          '',
+      );
   }
 
   test('games that still need attention are what the view opens on', () => {
@@ -132,9 +136,10 @@ describe('the scheduled games panel', () => {
     );
     showView(/^Games/);
 
-    const rows = scheduleRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain('Alpha');
+    // The game still out in a room; the accepted and cancelled ones are not
+    // what a director opens this view to see. The row no longer prints the raw
+    // game id, so the identity is checked where deep links read it.
+    expect(scheduleRowIds()).toEqual(['scheduled-2']);
     // The count the director scans is on the view control itself.
     expect(screen.getByRole('button', { name: 'Games 1' })).toBeTruthy();
   });
@@ -147,10 +152,10 @@ describe('the scheduled games panel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Show settled games' }));
 
-    expect(scheduleRows()).toHaveLength(3);
+    expect(scheduleRowIds()).toHaveLength(3);
     // And back again, so the default is a filter rather than a one-way door.
     fireEvent.click(screen.getByRole('button', { name: 'Hide settled games' }));
-    expect(scheduleRows()).toHaveLength(1);
+    expect(scheduleRowIds()).toHaveLength(1);
   });
 });
 
@@ -290,8 +295,10 @@ test('open protests are counted where a director is already looking', () => {
 
   render(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
 
-  expect(screen.getByText(/1 open protest ·/)).toBeTruthy();
-  // The panel itself is still there with the protest in it.
+  // The count is on the view control, where a director scanning Results sees it
+  // without opening the protests view.
+  expect(screen.getByRole('button', { name: 'Protests 1' })).toBeTruthy();
+  showView(/^Protests/);
   expect(screen.getByText('Answer was equivalent', { exact: false })).toBeTruthy();
 });
 
@@ -303,7 +310,7 @@ test('round navigation scopes manual entry to that round even when an earlier ro
     scheduledGame('requested', 'team-a', 'team-b', { roundId: 'round-2', status: 'released' }),
   ];
   const controller = controllerWith({ addManualResult: vi.fn(() => true) });
-  render(
+  renderResults(
     <ResultsView
       state={state}
       controller={controller}
@@ -312,8 +319,12 @@ test('round navigation scopes manual entry to that round even when an earlier ro
     />,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Enter result' }));
+
+  // Both rounds pair the same two teams, so the round is what distinguishes the
+  // choices — and only the requested round's game is on offer.
   const game = screen.getByRole('combobox', { name: 'Scheduled game' });
-  expect(game).toHaveValue('requested');
-  expect(within(game).getAllByRole('option')).toHaveLength(1);
-  expect(screen.getByText('Awaiting result')).toBeTruthy();
+  fireEvent.click(game);
+  const options = within(screen.getByRole('listbox', { name: 'Scheduled game' })).getAllByRole('option');
+  expect(options).toHaveLength(1);
+  expect(options[0]).toHaveTextContent('Round 2');
 });

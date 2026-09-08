@@ -114,9 +114,10 @@ export function ResultsView({
         />
         <Field
           label="Round"
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={roundId}
               options={[
@@ -496,9 +497,10 @@ function SubmissionActionDialog({
       >
         <Field
           label="Scheduled game"
-          render={({ id, describedBy }) => (
+          render={({ id, labelId, describedBy }) => (
             <Select
               id={id}
+              ariaLabelledBy={labelId}
               ariaDescribedBy={describedBy}
               value={scheduledGameId}
               options={unresolvedChoices.map((candidate) => ({
@@ -633,12 +635,28 @@ function GamesQueue({
     navigationTarget?.section === 'results' && navigationTarget.entityType === 'game'
       ? navigationTarget.entityId
       : undefined;
+  /*
+   * A game revealed by a deep link stays revealed.
+   *
+   * `useNavigationHighlight` is a one-shot: it focuses the row and then clears
+   * the target, a render later. Filtering on the live target alone therefore
+   * revealed an accepted or cancelled game, focused it, and removed it from the
+   * list in the same gesture — the row vanishing out from under the focus that
+   * had just landed on it. Remembering the id keeps it there until the director
+   * hides settled games again, and re-navigating re-reveals it.
+   */
+  const [revealedGameId, setRevealedGameId] = useState<string | undefined>(targetGameId);
+  if (targetGameId && targetGameId !== revealedGameId) setRevealedGameId(targetGameId);
+  const revealed = targetGameId ?? revealedGameId;
   const scheduled = state.scheduledGames.filter(
-    (game) => !game.bye && (!roundId || game.roundId === roundId || game.id === targetGameId),
+    (game) => !game.bye && (!roundId || game.roundId === roundId || game.id === revealed),
   );
   const games = scheduled.filter(
-    (game) => showSettled || !['accepted', 'cancelled'].includes(game.status) || game.id === targetGameId,
+    (game) => showSettled || !['accepted', 'cancelled'].includes(game.status) || game.id === revealed,
   );
+  const expanded =
+    showSettled ||
+    scheduled.some((game) => game.id === revealed && ['accepted', 'cancelled'].includes(game.status));
   if (!games.length) {
     return (
       <EmptyState title="No unresolved games" description="Every game in this view is accepted or cancelled.">
@@ -653,8 +671,19 @@ function GamesQueue({
   return (
     <div className="director-stack">
       <div className="director-view-actions">
-        <Button variant="quiet" onClick={() => setShowSettled((value) => !value)}>
-          {showSettled ? 'Hide settled games' : 'Show settled games'}
+        <Button
+          variant="quiet"
+          onClick={() => {
+            // The control names the state the list is actually in — which, when
+            // a deep link has revealed a settled game, is "showing settled
+            // games" even though the toggle itself is off. So it also has to be
+            // the way out of a reveal.
+            setShowSettled(!expanded);
+            setRevealedGameId(undefined);
+            onClearNavigationTarget?.();
+          }}
+        >
+          {expanded ? 'Hide settled games' : 'Show settled games'}
         </Button>
       </div>
       <SummaryList ariaLabel="Scheduled games">
@@ -823,9 +852,10 @@ function ForfeitDialog({
     >
       <Field
         label="Forfeiting team"
-        render={({ id, describedBy }) => (
+        render={({ id, labelId, describedBy }) => (
           <Select
             id={id}
+            ariaLabelledBy={labelId}
             ariaDescribedBy={describedBy}
             value={teamId}
             options={choices.map((id) => ({ value: id, label: teamLabel(state, id) }))}
@@ -980,9 +1010,10 @@ function ProtestRulingDialog({
         <FieldGrid>
           <Field
             label="Team"
-            render={({ id, describedBy }) => (
+            render={({ id, labelId, describedBy }) => (
               <Select
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 value={teamId}
                 options={[
@@ -1071,9 +1102,10 @@ function ManualResultDialog({
         <>
           <Field
             label="Scheduled game"
-            render={({ id, describedBy }) => (
+            render={({ id, labelId, describedBy }) => (
               <Select
                 id={id}
+                ariaLabelledBy={labelId}
                 ariaDescribedBy={describedBy}
                 value={selected?.id ?? ''}
                 options={choices.map((game) => ({
