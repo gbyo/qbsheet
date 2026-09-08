@@ -440,9 +440,9 @@ export function SettingsView({
             </div>
             <PanelBody>
               <p>
-                Director stores tournament recovery points locally. Browser preview uses browser storage; the
-                desktop app uses SQLite. Portable archives contain tournament data only, not the operator
-                profile or Live credential.
+                Director stores tournament recovery points locally. Browser preview saves in this browser;
+                the desktop app saves on this device. Portable archives contain tournament data only, not the
+                operator profile or Live credential.
               </p>
             </PanelBody>
           </section>
