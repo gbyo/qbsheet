@@ -100,6 +100,7 @@ export function Panel({
   className = '',
   id,
   level = 2,
+  'data-testid': dataTestId,
 }: {
   title?: ReactNode;
   description?: ReactNode;
@@ -113,10 +114,12 @@ export function Panel({
   className?: string;
   id?: string;
   level?: 2 | 3;
+  /** Test hook for a composed panel without forcing callers to wrap it in a div. */
+  'data-testid'?: string;
 }) {
   const Heading = level === 2 ? 'h2' : 'h3';
   return (
-    <section id={id} className={`director-panel ${className}`.trim()} data-tone={tone}>
+    <section id={id} className={`director-panel ${className}`.trim()} data-tone={tone} data-testid={dataTestId}>
       {(title || actions) && (
         <div className="director-panel-header">
           <div>
