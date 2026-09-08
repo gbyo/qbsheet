@@ -34,6 +34,8 @@ export interface Column<T> {
   priority?: 1 | 2 | 3 | 4;
   numeric?: boolean;
   nowrap?: boolean;
+  /** Explicit text alignment for data whose reading order benefits from it. */
+  align?: 'left' | 'center' | 'right';
   /** An action column: shrink to content and right-align. */
   actions?: boolean;
   render: (item: T) => ReactNode;
@@ -90,6 +92,7 @@ export function DataTable<T>({
                 data-priority={column.priority ?? 3}
                 data-pinned={column.optional && optional.has(column.key) ? true : undefined}
                 data-numeric={column.numeric || undefined}
+                data-align={column.align}
                 aria-sort={column.ariaSort}
                 className={column.actions ? 'director-cell-actions' : undefined}
               >
@@ -127,6 +130,7 @@ export function DataTable<T>({
                       data-priority={column.priority ?? 3}
                       data-pinned={column.optional && optional.has(column.key) ? true : undefined}
                       data-numeric={column.numeric || undefined}
+                      data-align={column.align}
                       className={
                         [
                           column.actions ? 'director-cell-actions' : '',
