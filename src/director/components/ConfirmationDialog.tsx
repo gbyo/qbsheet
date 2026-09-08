@@ -63,9 +63,15 @@ export function ConfirmationDialog({
       <div className="director-help-dialog-body">
         {children}
         <div className="director-form-actions">
-          <Button ref={cancelButtonRef} variant="secondary" disabled={busy} onClick={onCancel}>
+          <button
+            ref={cancelButtonRef}
+            type="button"
+            className="director-button director-button-secondary"
+            disabled={busy}
+            onClick={onCancel}
+          >
             {cancelLabel}
-          </Button>
+          </button>
           <Button variant={danger ? 'danger' : 'primary'} disabled={busy} onClick={onConfirm}>
             {busy ? 'Working…' : confirmLabel}
           </Button>
