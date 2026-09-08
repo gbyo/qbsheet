@@ -95,8 +95,14 @@ export function Field({
 
   return (
     <div className={`director-field ${spanAll ? 'director-field-span-all' : ''}`.trim()}>
-      <label className="director-field-label" id={labelId} htmlFor={id}>
-        <span>{label}</span>
+      {/*
+        The id sits on the text, not the <label>. Accessible-name computation
+        walks back out of a <label> whose `for` points at the element being
+        named and yields nothing, so a control referencing the label element
+        itself ends up anonymous.
+      */}
+      <label className="director-field-label" htmlFor={id}>
+        <span id={labelId}>{label}</span>
         {optional && <span className="director-field-optional">optional</span>}
       </label>
       {render ? render({ id, labelId, describedBy, invalid: Boolean(error) }) : labelled}

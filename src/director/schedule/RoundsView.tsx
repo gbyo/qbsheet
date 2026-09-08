@@ -374,15 +374,22 @@ function RoundWorkspaceRow({
         (location) => location.kind === 'removable-drive' && location.connected && !location.readOnly,
       )
     : [];
+  /*
+   * Offered whenever there is a game that could in principle be moved — not
+   * only when an unblocked destination already exists.
+   *
+   * Hiding the action when every room is blocked leaves the director with no
+   * way to find out *why* they cannot move a game out of a room, which is the
+   * opposite of what a blocker is for: it has to say what is wrong and where to
+   * fix it. The dialog explains the blocker and keeps its own submit disabled.
+   */
   const canMoveGame =
     isActive &&
     games.some(
       (game) =>
         game.roomId !== null &&
         game.status !== 'cancelled' &&
-        state.rooms.some(
-          (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
-        ),
+        state.rooms.some((room) => room.id !== game.roomId),
     );
 
   const start = () => {
@@ -552,7 +559,7 @@ function RoundWorkspaceRow({
       {returned.length > 0 && (
         <Callout
           tone="warning"
-          title={`${returned.length} result${returned.length === 1 ? '' : 's'} need review`}
+          title={returned.length === 1 ? '1 result needs review' : `${returned.length} results need review`}
           actions={
             <Button
               variant="quiet"
@@ -772,20 +779,39 @@ function MoveGameDialog({
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
+  /*
+   * Every movable game is listed, including ones with no free destination.
+   *
+   * Dropping those silently left a director staring at a game that was plainly
+   * in the wrong room with nothing in the interface admitting it, let alone
+   * saying why. A blocked game is offered and the reason is stated.
+   */
   const choices = state.scheduledGames
     .filter(
       (game) => game.roundId === round.id && !game.bye && game.roomId !== null && game.status !== 'cancelled',
     )
-    .map((game) => ({
-      game,
-      destinations: state.rooms.filter(
-        (room) => room.id !== game.roomId && releasedGameRoomMoveBlocker(state, game.id, room.id) === null,
-      ),
-    }))
-    .filter((entry) => entry.destinations.length > 0);
-  const [gameId, setGameId] = useState(choices[0]?.game.id ?? '');
-  const selected = choices.find((entry) => entry.game.id === gameId) ?? choices[0];
-  const [roomId, setRoomId] = useState(selected?.destinations[0]?.id ?? '');
+    .map((game) => {
+      const blockers = state.rooms
+        .filter((room) => room.id !== game.roomId)
+        .map((room) => ({ room, blocker: releasedGameRoomMoveBlocker(state, game.id, room.id) }));
+      return {
+        game,
+        destinations: blockers.filter((entry) => entry.blocker === null).map((entry) => entry.room),
+        // The distinct reasons, so "every room is busy" does not become one line per room.
+        reasons: [
+          ...new Set(
+            blockers.map((entry) => entry.blocker).filter((reason): reason is string => reason !== null),
+          ),
+        ],
+      };
+    })
+    .filter((entry) => entry.destinations.length > 0 || entry.reasons.length > 0);
+  // Open on a game that can actually be moved; a blocked one is still in the
+  // list, but it is not what the director is offered first.
+  const firstMovable = choices.find((entry) => entry.destinations.length > 0) ?? choices[0];
+  const [gameId, setGameId] = useState(firstMovable?.game.id ?? '');
+  const selected = choices.find((entry) => entry.game.id === gameId) ?? firstMovable;
+  const [roomId, setRoomId] = useState(firstMovable?.destinations[0]?.id ?? '');
   const [moving, setMoving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -811,6 +837,11 @@ function MoveGameDialog({
       submitDisabled={moving || !selected || !roomId}
     >
       {failure && <Callout tone="danger">{failure}</Callout>}
+      {selected && selected.destinations.length === 0 && (
+        <Callout tone="warning" role="alert" title="This game cannot be moved yet">
+          {selected.reasons.join(' ')}
+        </Callout>
+      )}
       <Field
         label="Game"
         render={({ id, labelId, describedBy }) => (

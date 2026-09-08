@@ -52,6 +52,33 @@ async function openRounds(state = directorFixture()) {
   return { getController: () => controller, repository };
 }
 
+/**
+ * Moving a released game is a low-frequency recovery action, so it lives in the
+ * round's overflow menu rather than in permanent row chrome. The workflow it
+ * opens is unchanged.
+ */
+function openMoveGame(round = 'Round 5'): void {
+  fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Move game…' }));
+}
+
+/**
+ * The custom select opens a listbox; its options exist only while it is open,
+ * so they are read and chosen within a single open. Options commit on
+ * pointer-down, which is what keeps focus on the trigger.
+ */
+function openDestinations(): HTMLElement[] {
+  const trigger = screen.getByRole('combobox', { name: 'Destination room' });
+  // Idempotent: the trigger toggles, so clicking an already-open select closes it.
+  if (trigger.getAttribute('aria-expanded') !== 'true') fireEvent.click(trigger);
+  return screen.getAllByRole('option');
+}
+
+function chooseDestinationRoom(name: string): void {
+  const option = openDestinations().find((entry) => entry.textContent?.startsWith(name));
+  fireEvent.pointerDown(option as HTMLElement);
+}
+
 describe('released-game room recovery UI', () => {
   afterEach(() => {
     onAnnounce.mockClear();
@@ -63,12 +90,15 @@ describe('released-game room recovery UI', () => {
   test('offers only valid destination rooms and reports a successful move', async () => {
     const { getController } = await openRounds(directorFixture({ games: 2 }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
-    expect(screen.getByLabelText('Destination room')).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Room 102' })).toBeNull();
-    expect(screen.getByRole('option', { name: 'Room 107' })).toBeInTheDocument();
+    openMoveGame();
+    const destinations = openDestinations().map((option) => option.textContent ?? '');
+    expect(destinations.some((name) => name.startsWith('Room 102'))).toBe(false);
+    const room107 = destinations.find((name) => name.startsWith('Room 107'));
+    expect(room107).toBeDefined();
 
-    fireEvent.change(screen.getByLabelText('Destination room'), { target: { value: 'room-107' } });
+    fireEvent.pointerDown(
+      openDestinations().find((option) => option.textContent?.startsWith('Room 107')) as HTMLElement,
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Change room' }));
     await waitFor(() =>
       expect(onAnnounce).toHaveBeenCalledWith(
@@ -102,7 +132,7 @@ describe('released-game room recovery UI', () => {
     });
     await openRounds(state);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
+    openMoveGame();
     expect(screen.getByRole('alert')).toHaveTextContent(/scorer is already paired/i);
     expect(screen.getByRole('button', { name: 'Change room' })).toBeDisabled();
   });
@@ -115,8 +145,8 @@ describe('released-game room recovery UI', () => {
     const { getController, repository } = await openRounds(directorFixture({ games: 2 }));
     liveScorerRooms.mockResolvedValue(['room-101']);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
-    fireEvent.change(screen.getByLabelText('Destination room'), { target: { value: 'room-107' } });
+    openMoveGame();
+    chooseDestinationRoom('Room 107');
     fireEvent.click(screen.getByRole('button', { name: 'Change room' }));
 
     await waitFor(() =>
@@ -138,8 +168,8 @@ describe('released-game room recovery UI', () => {
     const { getController } = await openRounds(directorFixture({ games: 2 }));
     liveScorerRooms.mockRejectedValue(new Error('the server is unreachable'));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move game' }));
-    fireEvent.change(screen.getByLabelText('Destination room'), { target: { value: 'room-107' } });
+    openMoveGame();
+    chooseDestinationRoom('Room 107');
     fireEvent.click(screen.getByRole('button', { name: 'Change room' }));
 
     await waitFor(() =>

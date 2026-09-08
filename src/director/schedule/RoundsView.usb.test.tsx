@@ -82,10 +82,27 @@ async function open(onCommit?: () => void) {
   return { state, repository };
 }
 
+/**
+ * Putting a round on USB is a per-round action that only exists when a drive is
+ * present, so it lives in that round's overflow menu rather than as permanent
+ * chrome on every round.
+ */
+function openRoundUsb(round = 'Round 4'): void {
+  fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Put round on USB…' }));
+}
+
+function roundActionMenuItems(round = 'Round 4'): string[] {
+  fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
+  return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '');
+}
+
 test('requested round writes through the real runtime even when another round is current, then returned files await review', async () => {
   fileSystem.addVolume('/usb', { name: 'KINGSTON' });
   const { repository } = await open();
-  fireEvent.click(await screen.findByRole('button', { name: 'Put Round 4 on USB' }));
+  await screen.findByRole('button', { name: 'Round 4 actions' });
+  openRoundUsb();
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare USB' }));
   await waitFor(() =>
     expect(onAnnounce).toHaveBeenCalledWith('Round 4 copied to KINGSTON — eject normally.'),
   );
@@ -115,7 +132,10 @@ test('requested round writes through the real runtime even when another round is
   await act(async () => controller.syncTransferVolumes(await fileSystem.listVolumes()));
   await waitFor(() => expect(controller.state.submissions).toHaveLength(1));
   expect(controller.state.submissions[0].status).not.toBe('accepted');
-  fireEvent.click(screen.getByRole('button', { name: '1 result returned · Review' }));
+  // Returned results are a callout on the round saying what needs a decision,
+  // with the action that takes the director there.
+  expect(screen.getByText('1 result needs review')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Review results' }));
   expect(onNavigate).toHaveBeenCalledWith('results', {
     section: 'results',
     entityType: 'round',
@@ -160,19 +180,30 @@ test('a drive can be written from the commit that puts its button on screen', as
   expect(fileSystem.allPaths().filter((path) => path.endsWith('.qbj'))).toHaveLength(2);
 });
 
-test('no USB gives no disabled controls; multiple writable drives use a contextual chooser', async () => {
+test('no USB gives no disabled controls; multiple writable drives are chosen in the dialog', async () => {
   await open();
-  expect(screen.queryByRole('button', { name: /Put Round .* on USB/ })).toBeNull();
+  // A tournament with no drive attached is never told about a USB workflow at
+  // all — not even as a disabled control.
+  expect(roundActionMenuItems()).not.toContain('Put round on USB…');
+  fireEvent.keyDown(document, { key: 'Escape' });
+
   fileSystem.addVolume('/one', { name: 'KINGSTON' });
   fileSystem.addVolume('/two', { name: 'SANDISK' });
   fileSystem.addVolume('/locked', { name: 'READ ONLY', readOnly: true });
   await act(async () => {
     controller.syncTransferVolumes(await fileSystem.listVolumes());
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Put Round 4 on USB' }));
-  const menu = screen.getByRole('menu', { name: 'USB for Round 4' });
-  expect(within(menu).queryByRole('menuitem', { name: 'READ ONLY' })).toBeNull();
-  fireEvent.click(within(menu).getByRole('menuitem', { name: 'SANDISK' }));
+
+  openRoundUsb();
+  const drive = screen.getByRole('combobox', { name: 'Drive' });
+  fireEvent.click(drive);
+  const drives = screen.getAllByRole('option').map((option) => option.textContent ?? '');
+  // A read-only drive is not a place a round can be written to, so it is not offered.
+  expect(drives.some((name) => name.startsWith('READ ONLY'))).toBe(false);
+  fireEvent.pointerDown(
+    screen.getAllByRole('option').find((option) => option.textContent?.startsWith('SANDISK')) as HTMLElement,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Prepare USB' }));
   await waitFor(() => expect(onAnnounce).toHaveBeenCalledWith('Round 4 copied to SANDISK — eject normally.'));
   expect(
     fileSystem
