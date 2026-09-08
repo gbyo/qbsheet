@@ -73,6 +73,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </button>
       </div>
       <div className="director-help-dialog-body">
+        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- delegates to the native <a> children below, which are already keyboard-activatable and dispatch a click event on Enter */}
         <nav aria-label="Help sections" className="director-help-toc" onClick={scrollToHelpSection}>
           <a href="#help-getting-started">Getting started</a>
           <a href="#help-planning">Planning a tournament</a>
