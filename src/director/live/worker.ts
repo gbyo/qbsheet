@@ -148,7 +148,8 @@ export function recoverStaleInFlight(publication: LivePublication, at = new Date
       continue;
     }
     const last = item.lastAttemptAt ? Date.parse(item.lastAttemptAt) : 0;
-    if (Number.isFinite(last) && at.getTime() - last < staleInFlightMs) {
+    const age = at.getTime() - last;
+    if (Number.isFinite(last) && Math.abs(age) < staleInFlightMs) {
       outbox.push(item);
       continue;
     }
