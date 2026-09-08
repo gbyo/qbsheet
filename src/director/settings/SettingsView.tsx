@@ -350,10 +350,7 @@ export function SettingsView({
                       <br />
                       <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
                     </span>
-                    <Button
-                      disabled={controller.recovering}
-                      onClick={() => setRestoreCheckpointId(entry.id)}
-                    >
+                    <Button disabled={controller.recovering} onClick={() => setRestoreCheckpointId(entry.id)}>
                       Restore
                     </Button>
                   </li>
