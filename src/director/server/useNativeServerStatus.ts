@@ -87,6 +87,9 @@ export function useNativeServerStatus(options: {
     generationRef.current += 1;
     const inactiveStatus: NativeServerStatus = { running: false };
     statusRef.current = inactiveStatus;
+    // Deactivation must invalidate the snapshot before paint so the next activation never flashes
+    // the previous tournament's state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStatus(inactiveStatus);
     setEverLoaded(false);
   }, [active]);
