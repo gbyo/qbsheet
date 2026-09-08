@@ -1,0 +1,216 @@
+/*
+ * Director design tokens — the single source of truth for the application's
+ * visual system.
+ *
+ * # Why tokens and not another set of one-off rules
+ *
+ * Director used to carry dozens of special-case layout classes, each choosing
+ * its own padding, its own gray, and its own 10–12px label size. The result read
+ * as several admin interfaces sharing a sidebar. Every value a Director surface
+ * needs now comes from here, so "what size is a section title" and "what does a
+ * warning look like" have exactly one answer.
+ *
+ * # The `--director-*` names are the public API
+ *
+ * The older `--director-ink` / `--director-space-3` names are kept, and kept
+ * meaning the same *kind* of thing, because hundreds of rules already reference
+ * them. Their values changed (contrast up, spacing regularised); the vocabulary
+ * did not. New concepts — the type scale, control heights, semantic status
+ * triples, elevation, z-index — are added alongside rather than replacing them.
+ */
+
+:root {
+  /* Director is a deliberately light, high-contrast desktop application. Any
+     native control that survives in the UI must match it, so the scheme is
+     declared rather than inherited from the OS. */
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------- Typography
+     A desktop tournament application should look like it belongs on the
+     operator's desktop. The system UI stack does that on every platform we
+     ship, and it replaces IBM Plex Sans, whose narrow admin-table rendering was
+     a large part of the generic-console feel. */
+  --director-font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --director-font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* One restrained scale. Six levels, each with a job, and nothing
+     operationally important below 13px.
+       display   – the startup screen only
+       title     – page H1
+       section   – panel and section headings
+       subhead   – sub-section headings, dialog section labels
+       body      – body copy, controls, table cells
+       secondary – supporting copy that must still read cleanly
+       meta      – table headers, timestamps, counts, badges
+       micro     – keycaps and dense numeric chrome only */
+  --director-text-display: 28px;
+  --director-text-title: 22px;
+  --director-text-section: 16px;
+  --director-text-subhead: 14px;
+  --director-text-body: 14px;
+  --director-text-secondary: 13px;
+  --director-text-meta: 12px;
+  --director-text-micro: 11px;
+
+  --director-leading-tight: 1.25;
+  --director-leading-snug: 1.4;
+  --director-leading-normal: 1.5;
+  --director-leading-relaxed: 1.6;
+
+  --director-weight-regular: 400;
+  --director-weight-medium: 500;
+  --director-weight-semibold: 600;
+  --director-weight-bold: 700;
+
+  /* -------------------------------------------------------------------- Colour
+     Ink levels are a hierarchy, not a palette: primary carries the information,
+     secondary supports it, meta timestamps it. `faint` is deliberately only one
+     step below `muted` now — operational information used to disappear into it. */
+  --director-ink: #16212c;
+  --director-ink-strong: #0d1620;
+  --director-muted: #4f5d6a;
+  --director-faint: #667585;
+  --director-on-accent: #ffffff;
+
+  --director-page: #f4f6f8;
+  --director-surface: #ffffff;
+  --director-surface-soft: #f7f9fa;
+  --director-surface-sunken: #eef1f4;
+  --director-surface-raised: #ffffff;
+  --director-surface-selected: #e8f1f8;
+  --director-surface-hover: #f0f3f5;
+
+  --director-border-subtle: #e7eaee;
+  --director-border: #d6dce2;
+  --director-border-strong: #b9c2cb;
+
+  --director-accent: #125f95;
+  --director-accent-hover: #0e4d79;
+  --director-accent-active: #0a3d61;
+  --director-accent-soft: #e9f2f9;
+  --director-accent-border: #a8c9de;
+
+  /* ------------------------------------------------------------ Status colours
+     Five tones, each a complete triple (text / tint / border) plus a solid fill
+     for the rare case that needs one. Every status surface in Director — badge,
+     dot, callout, toned panel, table row — draws from these and nothing else. */
+  --director-neutral-fg: #4f5d6a;
+  --director-neutral-bg: #eef1f4;
+  --director-neutral-border: #d6dce2;
+
+  --director-info-fg: #125f95;
+  --director-info-bg: #e9f2f9;
+  --director-info-border: #a8c9de;
+  --director-info-solid: #125f95;
+
+  --director-success-fg: #1f6144;
+  --director-success-bg: #e8f4ed;
+  --director-success-border: #a6ceb8;
+  --director-success-solid: #1f6144;
+
+  --director-warning-fg: #7d4f0c;
+  --director-warning-bg: #fdf3e2;
+  --director-warning-border: #e3c48c;
+  --director-warning-solid: #9a641b;
+
+  --director-danger-fg: #8f342a;
+  --director-danger-bg: #fceeec;
+  --director-danger-border: #e0b0aa;
+  --director-danger-solid: #a03a2e;
+  --director-danger-hover: #8a3025;
+
+  /* Compatibility aliases for the older colour names. */
+  --director-green: var(--director-success-fg);
+  --director-green-soft: var(--director-success-bg);
+  --director-amber: var(--director-warning-fg);
+  --director-amber-soft: var(--director-warning-bg);
+  --director-red: var(--director-danger-fg);
+  --director-red-soft: var(--director-danger-bg);
+
+  /* ------------------------------------------------------------------- Spacing
+     A 4px rhythm. `--director-space-5` was 18px, which broke the scale and is
+     why so many surfaces needed a bespoke margin; it is 20px now. */
+  --director-space-1: 4px;
+  --director-space-2: 8px;
+  --director-space-3: 12px;
+  --director-space-4: 16px;
+  --director-space-5: 20px;
+  --director-space-6: 24px;
+  --director-space-7: 32px;
+  --director-space-8: 40px;
+
+  /* -------------------------------------------------------------------- Radii */
+  --director-radius-sm: 4px;
+  --director-radius: 6px;
+  --director-radius-lg: 10px;
+  --director-radius-pill: 999px;
+
+  /* ----------------------------------------------------------- Control metrics
+     30–34px buttons with 10–12px labels were cramped for an application people
+     drive all day. The default control is 36px tall with 14px text; `sm` is for
+     genuinely dense table rows and is still 32px. */
+  --director-control-sm: 32px;
+  --director-control-md: 36px;
+  --director-control-lg: 42px;
+  --director-control-pad-sm: 0 10px;
+  --director-control-pad-md: 0 14px;
+  --director-control-pad-lg: 0 20px;
+  /* The smallest square an icon-only control may be, so pointer targets stay
+     comfortable even where the visual chrome is quiet. */
+  --director-target-min: 32px;
+
+  /* ------------------------------------------------------------------- Layout */
+  --director-sidebar: 248px;
+  --director-sidebar-rail: 64px;
+  --director-topbar-height: 52px;
+  --director-page-gutter: 32px;
+  --director-page-max: 1320px;
+  --director-panel-inset: 20px;
+
+  /* ---------------------------------------------------------------- Elevation */
+  --director-shadow-sm: 0 1px 2px rgb(16 33 46 / 6%);
+  --director-shadow-menu: 0 6px 20px rgb(16 33 46 / 14%), 0 1px 3px rgb(16 33 46 / 10%);
+  --director-shadow-modal: 0 18px 48px rgb(16 33 46 / 22%);
+
+  /* ----------------------------------------------------------------- Focus
+     One ring, everywhere, including inside custom controls that draw their own
+     chrome. Nothing in Director removes an outline without setting this. */
+  --director-focus-ring: 0 0 0 2px var(--director-surface), 0 0 0 4px rgb(18 95 149 / 45%);
+  --director-focus-outline: 2px solid var(--director-accent);
+  --director-focus-offset: 2px;
+
+  /* --------------------------------------------------------------- Z-index
+     Named so overlays cannot fight: menus sit above sticky table headers,
+     modals above menus, toasts above everything. */
+  --director-z-sticky: 20;
+  --director-z-dropdown: 60;
+  --director-z-overlay: 100;
+  --director-z-modal: 110;
+  --director-z-toast: 200;
+
+  /* --------------------------------------------------------------- Motion
+     Short, functional, and switched off wholesale under
+     `prefers-reduced-motion`. */
+  --director-duration-fast: 90ms;
+  --director-duration: 140ms;
+  --director-ease: cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --director-duration-fast: 0ms;
+    --director-duration: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

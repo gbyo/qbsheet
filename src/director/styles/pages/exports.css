@@ -1,0 +1,68 @@
+/* Director exports surface styles. Rebased on the shared design tokens; page-specific rules only. */
+
+/* Publish */
+
+.director-publish-rows {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--director-border);
+}
+
+.director-publish-row {
+  display: grid;
+  grid-template-columns: 33px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  padding: 13px var(--director-panel-inset);
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-publish-row:last-child {
+  border-bottom: 0;
+}
+
+.director-publish-row h2,
+.director-publish-row p {
+  margin: 0;
+}
+
+.director-publish-row h2 {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.director-publish-row p {
+  margin-top: 3px;
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-publish-action-icon {
+  display: grid;
+  place-items: center;
+  width: 33px;
+  height: 33px;
+  color: var(--director-accent);
+  background: var(--director-accent-soft);
+  border-radius: 4px;
+}
+
+.director-publish-checklist {
+  display: grid;
+  gap: 10px;
+  padding-top: 0;
+  padding-bottom: 16px;
+}
+
+.director-publish-checklist li {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-publish-checklist svg {
+  flex: 0 0 auto;
+  color: var(--director-green);
+}

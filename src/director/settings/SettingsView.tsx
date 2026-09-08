@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useEffect, useState } from 'react';
 import { availableTimeZones, isValidTimeZone, timeZoneLabel, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
@@ -15,12 +16,16 @@ export function SettingsView({
   onAnnounce,
   operatorProfile,
   onSaveOperator,
+  navigationTarget,
+  onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
   operatorProfile?: OperatorProfile;
   onSaveOperator?: (profile: OperatorProfile) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
 }) {
   const tournamentDraftKey = [
     state.tournament?.id ?? '',
@@ -111,6 +116,7 @@ export function SettingsView({
    * identical to reversing the whole array and taking the head, without building the whole array.
    */
   const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
+  useSettingsDeepLink(navigationTarget, onClearNavigationTarget);
   return (
     <>
       <PageHeader
@@ -120,7 +126,7 @@ export function SettingsView({
       />
       <div className="director-page-stack">
         <div className="director-two-column">
-          <section className="director-panel">
+          <section className="director-panel" data-settings-section="tournament" tabIndex={-1}>
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Tournament</p>
@@ -208,7 +214,7 @@ export function SettingsView({
             )}
           </section>
           <div className="director-page-stack">
-            <section className="director-panel">
+            <section className="director-panel" data-settings-section="operator" tabIndex={-1}>
               <div className="director-panel-heading">
                 <div>
                   <p className="director-eyebrow">Operator</p>
@@ -294,7 +300,12 @@ export function SettingsView({
             </section>
           </div>
         </div>
-        <section className="director-panel" aria-label="Recovery">
+        <section
+          className="director-panel"
+          aria-label="Recovery"
+          data-settings-section="recovery"
+          tabIndex={-1}
+        >
           <div className="director-panel-heading">
             <div>
               <h2>Recovery</h2>
@@ -376,7 +387,7 @@ export function SettingsView({
             )}
           </PanelBody>
         </section>
-        <section className="director-panel">
+        <section className="director-panel" data-settings-section="audit" tabIndex={-1}>
           <div className="director-panel-heading">
             <div>
               <p className="director-eyebrow">Audit history</p>
@@ -431,7 +442,7 @@ export function SettingsView({
           )}
         </section>
         <div className="director-two-column">
-          <section className="director-panel">
+          <section className="director-panel" data-settings-section="tournament" tabIndex={-1}>
             <div className="director-panel-heading">
               <div>
                 <p className="director-eyebrow">Storage & recovery</p>
@@ -480,4 +491,30 @@ export function SettingsView({
       </div>
     </>
   );
+}
+
+/**
+ * Settings is the canonical editing surface for tournament and operator
+ * identity, so the tournament and operator menus navigate here with a deep link
+ * rather than opening their own copies of these forms. This brings the
+ * requested section into view and focuses it, so a keyboard operator arrives
+ * where they asked to go.
+ */
+function useSettingsDeepLink(
+  target: DirectorNavigationTarget | null | undefined,
+  onClear: (() => void) | undefined,
+) {
+  useEffect(() => {
+    if (!target || target.section !== 'settings' || target.entityType !== 'setting') return;
+    const id = target.entityId;
+    if (!id) return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = document.querySelector<HTMLElement>(`[data-settings-section="${id}"]`);
+      if (!element) return;
+      element.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      element.focus({ preventScroll: true });
+      onClear?.();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [target, onClear]);
 }

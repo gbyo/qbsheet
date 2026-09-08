@@ -1,0 +1,45 @@
+.director-result-action-panel {
+  display: grid;
+  gap: 10px;
+  max-width: 420px;
+  padding: 12px;
+  margin-top: 10px;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: 5px;
+  text-align: left;
+}
+
+.director-result-action-panel .director-eyebrow {
+  margin-bottom: 0;
+}
+
+.director-protest-list {
+  display: grid;
+  gap: 10px;
+}
+
+.director-protest-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 14px;
+  align-items: start;
+}
+
+.director-protest-row > div:first-child {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.director-protest-row span,
+.director-protest-row small {
+  color: var(--director-muted);
+  font-size: 12px;
+}
+
+.director-protest-ruling {
+  grid-column: 1 / -1;
+  width: min(100%, 620px);
+  margin-top: 0;
+}

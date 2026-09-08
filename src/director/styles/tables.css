@@ -1,0 +1,207 @@
+/*
+ * Director table layer.
+ *
+ * # Why this file exists
+ *
+ * Director's tables all used to be `min-width: 900px` plus
+ * `white-space: nowrap`, which turned most pages into horizontal-scroll
+ * spreadsheets in anything but a maximised window. Tables are right for some
+ * data — standings, submissions, packet inventory — and wrong as the default
+ * layout for every operational object, which is why the summary-list surfaces
+ * exist alongside them.
+ *
+ * # Responsive column priority
+ *
+ * Every column declares a priority. When the window narrows, the lowest
+ * priorities drop out of the table rather than pushing it into a scroll
+ * container; what they contained is still reachable in the row's detail
+ * surface. That is `data-priority` on the cell, hidden by the media queries at
+ * the bottom of this file.
+ *
+ *   priority 1  identity — never hidden
+ *   priority 2  the numbers or state the page is *for*
+ *   priority 3  useful context
+ *   priority 4  telemetry and secondary detail; first to go
+ */
+
+.director-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.director-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--director-text-body);
+}
+
+.director-table caption {
+  padding: 0 var(--director-panel-inset) var(--director-space-2);
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  text-align: left;
+}
+
+.director-table th,
+.director-table td {
+  padding: var(--director-space-3) var(--director-space-3);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-table th:first-child,
+.director-table td:first-child {
+  padding-left: var(--director-panel-inset);
+}
+
+.director-table th:last-child,
+.director-table td:last-child {
+  padding-right: var(--director-panel-inset);
+}
+
+/* Column headers read as headers: 12px semibold in the secondary ink, sentence
+   case. Not tiny uppercase gray. */
+.director-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: var(--director-z-sticky);
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  white-space: nowrap;
+  background: var(--director-surface-soft);
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.director-table tbody tr:hover {
+  background: var(--director-surface-soft);
+}
+
+.director-table tbody tr[data-selected='true'],
+.director-table tbody tr[aria-selected='true'] {
+  background: var(--director-surface-selected);
+}
+
+/* Rows only wrap where wrapping helps. Identity cells wrap; numeric cells do
+   not, because a two-line score column is worse than a slightly wider one. */
+.director-table td {
+  overflow-wrap: break-word;
+}
+
+.director-cell-numeric,
+.director-table [data-numeric='true'] {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.director-cell-nowrap {
+  white-space: nowrap;
+}
+
+/* The identity cell: a title and, below it, the context that used to need its
+   own column. */
+.director-cell-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-cell-identity > strong {
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-cell-identity > small {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+/* The actions column. A row gets at most one visible action plus an overflow
+   menu — never a toolbar. */
+.director-cell-actions {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.director-cell-actions > div {
+  display: flex;
+  gap: var(--director-space-1);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* A sortable header is a button that fills the cell. */
+.director-table thead th button {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-table thead th button:hover {
+  color: var(--director-ink);
+}
+
+.director-table thead th[aria-sort] button {
+  color: var(--director-ink);
+}
+
+/* A detail row expanded under its parent. Used only for read-only detail and
+   diagnostics; editing happens in a dialog or sheet. */
+.director-table tr[data-detail-row='true'] > td {
+  padding: 0 var(--director-panel-inset) var(--director-space-4);
+  background: var(--director-surface-soft);
+}
+
+.director-row-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-4);
+  padding: var(--director-space-4);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-subtle);
+  border-radius: var(--director-radius);
+}
+
+/* A dense table for genuinely numeric grids (stats). Smaller row padding, same
+   type sizes. */
+.director-table-dense th,
+.director-table-dense td {
+  padding: var(--director-space-2) var(--director-space-3);
+}
+
+/* ------------------------------------------------------- Column priority
+   The one place table columns are hidden. Priorities drop from the outside in
+   as the window narrows; nothing at priority 1 or 2 is ever hidden. */
+
+@media (max-width: 1240px) {
+  .director-table [data-priority='4'] {
+    display: none;
+  }
+}
+
+@media (max-width: 1040px) {
+  .director-table [data-priority='3'] {
+    display: none;
+  }
+}
+
+/* Optional columns the operator turned on stay visible regardless of width;
+   they are opt-in, so the horizontal scroll is a choice. */
+.director-table [data-priority][data-pinned='true'] {
+  display: table-cell;
+}
