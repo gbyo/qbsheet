@@ -255,6 +255,14 @@ function PacketItem({
                         onAnnounce(errorNotice('Create a tournament before selecting a default packet.'));
                         return;
                       }
+                      // `selectPacket` reports failure through the controller's
+                      // error channel rather than a return value, so the one
+                      // refusal this view can predict is checked here — a
+                      // retired packet must not be announced as selected.
+                      if (packet.retired) {
+                        onAnnounce(errorNotice('Retired packets cannot be selected; restore it first.'));
+                        return;
+                      }
                       controller.selectPacket(packet.id);
                       onAnnounce(`${packet.name} is now the default for newly generated rounds.`);
                     }}
