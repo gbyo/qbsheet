@@ -30,6 +30,7 @@ describe('readScorerRecovery', () => {
     { label: 'non-array players', players: 'Alice' },
     { label: 'non-string player', players: ['Alice', 42] },
     { label: 'blank player', players: ['Alice', '   '] },
+    { label: 'duplicate player', players: ['Alice', 'Alice'] },
   ])('rejects recovery with $label', ({ players }) => {
     const setup = {
       left: { name: 'Left', players },
