@@ -689,19 +689,20 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   expect(removalConfirmation).toContain('any accepted results');
   expect(removalConfirmation).toContain('A recovery point will be created first.');
   await goToSection(page, 'Settings');
-  // Accept first and assert afterwards. A handler that throws before `accept()` leaves the
-  // modal up, and the click that opened it hangs until the test times out on the wrong thing.
-  let restoreConfirmation = '';
-  page.once('dialog', async (dialog) => {
-    restoreConfirmation = dialog.message();
-    await dialog.accept();
-  });
-  await recovery
+  const restoreButton = recovery
     .locator('li')
     .filter({ hasText: 'Manual recovery point' })
-    .getByRole('button', { name: 'Restore', exact: true })
-    .click();
-  expect(restoreConfirmation).toContain('A recovery point of the current state will be created first.');
+    .getByRole('button', { name: 'Restore', exact: true });
+  await restoreButton.click();
+  const restoreDialog = page.getByRole('dialog', { name: 'Restore this recovery point?' });
+  await expect(restoreDialog).toContainText('Manual recovery point');
+  await expect(restoreDialog).toContainText('A recovery point of the current state will be created first.');
+  await expect(restoreDialog.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+  await restoreDialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(restoreDialog).not.toBeVisible();
+  await expect(restoreButton).toBeFocused();
+  await restoreButton.click();
+  await restoreDialog.getByRole('button', { name: 'Restore tournament', exact: true }).click();
   await expect(recovery.getByText(/Before restoring checkpoint from/)).toBeVisible();
   await page.reload();
   await goToSection(page, 'Rounds');
