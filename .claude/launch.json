@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "director",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "director:dev"],
+      "port": 1420
+    }
+  ]
+}
