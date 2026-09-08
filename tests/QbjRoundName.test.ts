@@ -4,9 +4,7 @@ import { assignmentDocument } from './qbjDocuments';
 
 describe('QBJ round names', () => {
   test('does not treat a digit-prefixed display name as a round number', () => {
-    const source = readQbjSource(
-      assignmentDocument({ roundName: '2026 Finals', omitRoundNumber: true }),
-    );
+    const source = readQbjSource(assignmentDocument({ roundName: '2026 Finals', omitRoundNumber: true }));
 
     expect(source.ok).toBe(true);
     if (!source.ok) return;
@@ -16,9 +14,7 @@ describe('QBJ round names', () => {
   });
 
   test('still reads a bare numeric round name', () => {
-    const source = readQbjSource(
-      assignmentDocument({ roundName: ' 12 ', omitRoundNumber: true }),
-    );
+    const source = readQbjSource(assignmentDocument({ roundName: ' 12 ', omitRoundNumber: true }));
 
     expect(source.ok).toBe(true);
     if (!source.ok) return;
