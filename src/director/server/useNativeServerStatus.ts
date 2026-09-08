@@ -54,6 +54,7 @@ export function useNativeServerStatus(options: {
   // cannot apply afterwards.
   const readInFlightRef = useRef(false);
   const generationRef = useRef(0);
+  const activeRef = useRef(active);
   /*
    * A layout effect, because `toggle` is the Start/Stop button's own click handler and this ref is
    * what tells it which of the two it is.
@@ -72,6 +73,24 @@ export function useNativeServerStatus(options: {
     statusRef.current = status;
   }, [status]);
   /*
+   * Deactivation is a data boundary, not just a polling pause. Director turns this hook off while
+   * there is no open tournament; keeping the old server snapshot through that gap can make the next
+   * tournament briefly inherit the previous tournament's pairing invitations and running state.
+   *
+   * Invalidate reads before paint, reset the visible snapshot, and require a fresh read on the next
+   * activation. `activeRef` also keeps work that began before deactivation from marking the next
+   * activation as loaded when it eventually settles.
+   */
+  useLayoutEffect(() => {
+    activeRef.current = active;
+    if (active) return;
+    generationRef.current += 1;
+    const inactiveStatus: NativeServerStatus = { running: false };
+    statusRef.current = inactiveStatus;
+    setStatus(inactiveStatus);
+    setEverLoaded(false);
+  }, [active]);
+  /*
    * Passive is right for this one: `onPollRef` is read only by `poll`, which is a `setInterval`
    * callback and the setup body of an effect declared below this one — both already run after this
    * effect. Nothing on screen reads it, so no click can observe the window.
@@ -83,7 +102,7 @@ export function useNativeServerStatus(options: {
   /** Authoritative write: supersedes any read that is already in flight. */
   const commitStatus = useCallback((next: NativeServerStatus) => {
     generationRef.current += 1;
-    setStatus(next);
+    if (activeRef.current) setStatus(next);
   }, []);
 
   const refresh = useCallback(async () => {
@@ -102,7 +121,7 @@ export function useNativeServerStatus(options: {
       }
     } finally {
       readInFlightRef.current = false;
-      setEverLoaded(true);
+      if (activeRef.current && generationRef.current === generation) setEverLoaded(true);
     }
   }, []);
 
@@ -129,7 +148,7 @@ export function useNativeServerStatus(options: {
       commitStatus(next);
       return next;
     } finally {
-      setEverLoaded(true);
+      if (activeRef.current) setEverLoaded(true);
       setPendingMutations((count) => Math.max(0, count - 1));
     }
   }, [commitStatus]);
