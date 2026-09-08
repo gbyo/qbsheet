@@ -289,7 +289,7 @@ export function Checklist<T extends string = string>({
       <legend>{legend}</legend>
       {hint && <p className="director-field-hint">{hint}</p>}
       {showSearch && (
-        <div className="director-search-field" style={{ marginBottom: 8 }}>
+        <div className="director-search-field director-checklist-search">
           <Icon name="search" size={15} />
           <input
             type="search"

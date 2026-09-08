@@ -1401,3 +1401,9 @@ kbd,
 [data-reorder-over='true'] {
   box-shadow: inset 0 2px 0 0 var(--director-accent);
 }
+
+/* The filter above an always-visible checklist. A class rather than an inline
+   style, so the checklist obeys the same spacing scale as everything else. */
+.director-checklist-search {
+  margin-bottom: var(--director-space-2);
+}
