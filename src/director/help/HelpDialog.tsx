@@ -42,11 +42,8 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }, [open]);
 
-  const scrollToHelpSection = (event: ReactMouseEvent<HTMLElement>) => {
-    if (!(event.target instanceof Element)) return;
-    const link = event.target.closest<HTMLAnchorElement>('a[href^="#"]');
-    if (!link || !event.currentTarget.contains(link)) return;
-    const href = link.getAttribute('href');
+  const scrollToHelpSection = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    const href = event.currentTarget.getAttribute('href');
     if (!href?.startsWith('#')) return;
     const sectionId = href.slice(1);
     const target = document.getElementById(sectionId);
@@ -73,17 +70,34 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </button>
       </div>
       <div className="director-help-dialog-body">
-        {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-noninteractive-element-interactions -- delegates to the native <a> children below, which are already keyboard-activatable and dispatch a click event on Enter */}
-        <nav aria-label="Help sections" className="director-help-toc" onClick={scrollToHelpSection}>
-          <a href="#help-getting-started">Getting started</a>
-          <a href="#help-planning">Planning a tournament</a>
-          <a href="#help-running">Running rounds</a>
-          <a href="#help-results">Results / review</a>
-          <a href="#help-transfers">Transfers / USB workflow</a>
-          <a href="#help-qbtcp">QBTCP troubleshooting</a>
-          <a href="#help-live">QBSheet Live troubleshooting</a>
-          <a href="#help-storage">Recovery & storage</a>
-          <a href="#help-shortcuts">Keyboard shortcuts</a>
+        <nav aria-label="Help sections" className="director-help-toc">
+          <a href="#help-getting-started" onClick={scrollToHelpSection}>
+            Getting started
+          </a>
+          <a href="#help-planning" onClick={scrollToHelpSection}>
+            Planning a tournament
+          </a>
+          <a href="#help-running" onClick={scrollToHelpSection}>
+            Running rounds
+          </a>
+          <a href="#help-results" onClick={scrollToHelpSection}>
+            Results / review
+          </a>
+          <a href="#help-transfers" onClick={scrollToHelpSection}>
+            Transfers / USB workflow
+          </a>
+          <a href="#help-qbtcp" onClick={scrollToHelpSection}>
+            QBTCP troubleshooting
+          </a>
+          <a href="#help-live" onClick={scrollToHelpSection}>
+            QBSheet Live troubleshooting
+          </a>
+          <a href="#help-storage" onClick={scrollToHelpSection}>
+            Recovery & storage
+          </a>
+          <a href="#help-shortcuts" onClick={scrollToHelpSection}>
+            Keyboard shortcuts
+          </a>
         </nav>
 
         <section id="help-getting-started">
