@@ -410,7 +410,13 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
     }
     const value = Number.parseInt(line.trim(), 10);
     if (!Number.isSafeInteger(value)) {
-      errors.push(error('integer-out-of-range', path, `Integer ${JSON.stringify(line)} is outside the safe numeric range.`));
+      errors.push(
+        error(
+          'integer-out-of-range',
+          path,
+          `Integer ${JSON.stringify(line)} is outside the safe numeric range.`,
+        ),
+      );
       return undefined;
     }
     return value;
