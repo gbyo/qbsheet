@@ -73,7 +73,8 @@ export function Dialog({
   onSubmit?: () => void;
   submitLabel?: string;
   submitDisabled?: boolean;
-  submitVariant?: 'primary' | 'danger-solid';
+  /** `danger` is normalized to the design-system's destructive submit treatment. */
+  submitVariant?: 'primary' | 'danger-solid' | 'danger';
   cancelLabel?: string;
   /** A destructive action for the entity being edited. Rendered apart from Cancel/Save. */
   dangerAction?: ReactNode;
@@ -129,6 +130,7 @@ export function Dialog({
 
   const sizeClass =
     size === 'sheet' ? 'director-dialog-sheet' : size === 'md' ? '' : `director-dialog-${size}`;
+  const resolvedSubmitVariant = submitVariant === 'danger' ? 'danger-solid' : submitVariant;
 
   const body = (
     <>
@@ -167,11 +169,11 @@ export function Dialog({
           </Button>
           {submitLabel &&
             (onSubmit ? (
-              <Button variant={submitVariant} type="submit" disabled={submitDisabled}>
+              <Button variant={resolvedSubmitVariant} type="submit" disabled={submitDisabled}>
                 {submitLabel}
               </Button>
             ) : (
-              <Button variant={submitVariant} disabled={submitDisabled} onClick={onClose}>
+              <Button variant={resolvedSubmitVariant} disabled={submitDisabled} onClick={onClose}>
                 {submitLabel}
               </Button>
             ))}
