@@ -42,6 +42,7 @@ export type IconName =
   | 'teams'
   | 'tournament'
   | 'trash'
+  | 'undo'
   | 'upload'
   | 'usb'
   | 'users'
@@ -298,6 +299,12 @@ export function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
       <>
         <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5A1.5 1.5 0 0 0 8.9 21h6.2a1.5 1.5 0 0 0 1.5-1.5L17.5 7" />
         <path d="M10.5 11v6M13.5 11v6" />
+      </>
+    ),
+    undo: (
+      <>
+        <path d="M9 7H4v-5" />
+        <path d="M4 7c2.2-2.8 5-4 8.3-3.6 4.5.6 7.7 4.6 7.1 9.1-.6 4.5-4.6 7.7-9.1 7.1-2.2-.3-4.1-1.4-5.4-3" />
       </>
     ),
     usb: (
