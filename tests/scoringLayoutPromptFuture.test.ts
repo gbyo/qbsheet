@@ -38,11 +38,7 @@ describe('scoring layout prompt timestamp validation', () => {
     const now = new Date('2026-09-08T03:00:00.000Z');
 
     storeMarker(storage, 'small-skew', new Date(now.getTime() + 5 * 60 * 1000));
-    storeMarker(
-      storage,
-      'bad-future',
-      new Date(now.getTime() + scoringLayoutPromptMaxAgeMs + 1),
-    );
+    storeMarker(storage, 'bad-future', new Date(now.getTime() + scoringLayoutPromptMaxAgeMs + 1));
 
     expect(scoringLayoutChosen('small-skew', now, storage)).toBe(true);
     expect(scoringLayoutChosen('bad-future', now, storage)).toBe(false);
