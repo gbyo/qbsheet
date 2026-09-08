@@ -1055,6 +1055,20 @@ function ManualResultDialog({
   const selected = choices.find((game) => game.id === gameId) ?? choices[0];
   const [leftScore, setLeftScore] = useState('');
   const [rightScore, setRightScore] = useState('');
+  /*
+   * Scores are validated on the fields, not announced as a toast.
+   *
+   * A toast says what went wrong somewhere else on the screen and then goes
+   * away; it does not mark the field, does not set `aria-invalid`, and is gone
+   * by the time the operator looks down to fix it. Clearing on the next
+   * keystroke is the other half: an error that outlives the correction is
+   * noise.
+   */
+  const [scoreError, setScoreError] = useState<string | null>(null);
+  const changeScore = (setter: (value: string) => void) => (value: string) => {
+    setter(value);
+    setScoreError(null);
+  };
   return (
     <Dialog
       title="Enter result"
@@ -1068,7 +1082,7 @@ function ManualResultDialog({
         const left = Number(leftScore);
         const right = Number(rightScore);
         if (!leftScore.trim() || !rightScore.trim() || !Number.isInteger(left) || !Number.isInteger(right)) {
-          onAnnounce(errorNotice('Enter both final team scores as finite whole numbers.'));
+          setScoreError('Enter both final team scores.');
           return;
         }
         const score = (teamId: string, value: number): TeamGameScore => ({
@@ -1095,6 +1109,7 @@ function ManualResultDialog({
       }}
       submitLabel="Accept manual result"
       submitDisabled={!selected}
+      errors={scoreError ? [scoreError] : undefined}
     >
       {choices.length === 0 ? (
         <Callout tone="info">There are no unresolved scheduled games available for manual entry.</Callout>
@@ -1117,6 +1132,7 @@ function ManualResultDialog({
                   setGameId(value);
                   setLeftScore('');
                   setRightScore('');
+                  setScoreError(null);
                 }}
               />
             )}
@@ -1125,15 +1141,17 @@ function ManualResultDialog({
             <Field label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}>
               <NumberInput
                 step={1}
+                invalid={Boolean(scoreError)}
                 value={leftScore}
-                onChange={(event) => setLeftScore(event.target.value)}
+                onChange={(event) => changeScore(setLeftScore)(event.target.value)}
               />
             </Field>
             <Field label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
               <NumberInput
                 step={1}
+                invalid={Boolean(scoreError)}
                 value={rightScore}
-                onChange={(event) => setRightScore(event.target.value)}
+                onChange={(event) => changeScore(setRightScore)(event.target.value)}
               />
             </Field>
           </FieldGrid>

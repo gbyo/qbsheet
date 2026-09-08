@@ -81,9 +81,7 @@ describe('FormatView progressive disclosure', () => {
     // It is still reachable, and the disclosure says why it is not needed.
     const stages = screen.getByRole('button', { name: /Stages & advancement/ });
     expect(stages).toHaveAttribute('aria-expanded', 'false');
-    expect(
-      screen.getByText(/A one-stage tournament does not need stage concepts/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/A one-stage tournament does not need stage concepts/)).toBeInTheDocument();
 
     fireEvent.click(stages);
     expect(screen.getByRole('button', { name: 'Add playoff stage' })).toBeTruthy();

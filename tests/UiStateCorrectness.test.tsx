@@ -146,7 +146,7 @@ describe('schedule event editor entity identity', () => {
     render(<ScheduleView state={scheduleState()} controller={scheduleController} onAnnounce={vi.fn()} />);
     fireEvent.click(editButtons()[0]);
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Alpha draft' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     fireEvent.click(editButtons()[0]);
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Alpha briefing');
@@ -699,7 +699,13 @@ describe('manual result validation', () => {
     fireEvent.change(screen.getByLabelText('Alpha'), { target: { value: '250' } });
     expect((screen.getByLabelText('Alpha') as HTMLInputElement).value).toBe('250');
 
-    fireEvent.change(screen.getByLabelText('Scheduled game'), { target: { value: 'game-2' } });
+    // The game picker is the shared select: it opens a listbox and commits on
+    // pointer-down, which is what keeps focus on the trigger.
+    fireEvent.click(screen.getByRole('combobox', { name: 'Scheduled game' }));
+    const other = screen
+      .getAllByRole('option')
+      .find((option) => option.getAttribute('aria-selected') !== 'true');
+    fireEvent.pointerDown(other as HTMLElement);
     expect((screen.getByLabelText('Alpha') as HTMLInputElement).value).toBe('');
   });
 });

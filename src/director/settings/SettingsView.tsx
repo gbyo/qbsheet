@@ -303,40 +303,48 @@ function GeneralSettings({
         id="settings-operator"
         actions={<StateLabel state="info" label="Local app setting" />}
       >
-        <FieldGrid>
-          <Field label="Display name">
-            <TextInput
-              value={operator.name}
-              onChange={(event) =>
-                setOperatorDraft({ ...operator, key: operatorKey, name: event.target.value })
-              }
-            />
-          </Field>
-          <Field label="Role" optional>
-            <TextInput
-              value={operator.role}
-              onChange={(event) =>
-                setOperatorDraft({ ...operator, key: operatorKey, role: event.target.value })
-              }
-              placeholder="Tournament director"
-            />
-          </Field>
-        </FieldGrid>
-        <div className="director-form-actions">
-          <Button
-            variant="primary"
-            disabled={!onSaveOperator || !operator.name.trim()}
-            onClick={() => {
-              onSaveOperator?.({
-                displayName: operator.name.trim(),
-                role: operator.role.trim() || undefined,
-              });
-              onAnnounce('Operator identity saved locally.');
-            }}
-          >
-            Save operator
-          </Button>
-        </div>
+        {/*
+          A real form, so Enter saves the way it does everywhere else in
+          Director. The save contract is the same one the dialogs follow:
+          collect, then commit on Save, with the primary action disabled rather
+          than accepting a press it cannot honour.
+        */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!onSaveOperator || !operator.name.trim()) return;
+            onSaveOperator({
+              displayName: operator.name.trim(),
+              role: operator.role.trim() || undefined,
+            });
+            onAnnounce('Operator identity saved locally.');
+          }}
+        >
+          <FieldGrid>
+            <Field label="Display name">
+              <TextInput
+                value={operator.name}
+                onChange={(event) =>
+                  setOperatorDraft({ ...operator, key: operatorKey, name: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Role" optional>
+              <TextInput
+                value={operator.role}
+                onChange={(event) =>
+                  setOperatorDraft({ ...operator, key: operatorKey, role: event.target.value })
+                }
+                placeholder="Tournament director"
+              />
+            </Field>
+          </FieldGrid>
+          <div className="director-form-actions">
+            <Button variant="primary" type="submit" disabled={!onSaveOperator || !operator.name.trim()}>
+              Save operator
+            </Button>
+          </div>
+        </form>
       </Panel>
     </div>
   );
