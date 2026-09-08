@@ -392,7 +392,7 @@ export function SettingsView({
               </p>
               <p>
                 Restoring replaces the open tournament with this recovery point. A recovery point of the
-                current state will be created first, so you can return to it if needed.
+                current state will be created first. You can return to it if needed.
               </p>
             </>
           )}
