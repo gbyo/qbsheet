@@ -96,8 +96,8 @@ export function remainingRoomClock(state: IRoomClockState, now = Date.now()): nu
   return Math.max(0, state.durationMs - elapsedRoomClock(state, now));
 }
 
-export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClockState {
-  if (typeof value !== 'object' || value === null) return idleRoomClock(durationMs);
+function validRoomClockState(value: unknown, durationMs: number): value is IRoomClockState {
+  if (typeof value !== 'object' || value === null) return false;
   const raw = value as Partial<IRoomClockState>;
   if (
     raw.version !== roomClockVersion ||
@@ -110,18 +110,20 @@ export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClo
     !Number.isFinite(raw.accumulatedMs) ||
     raw.accumulatedMs < 0
   ) {
-    return idleRoomClock(durationMs);
+    return false;
   }
+  return (
+    raw.status !== 'running' || (typeof raw.runningSince === 'number' && Number.isFinite(raw.runningSince))
+  );
+}
+
+export function normalizeRoomClock(value: unknown, durationMs: number): IRoomClockState {
+  if (!validRoomClockState(value, durationMs)) return idleRoomClock(durationMs);
+  const raw = value;
   if ((durationMs > 0 && raw.accumulatedMs >= durationMs) || raw.status === 'expired') {
     return { version: roomClockVersion, durationMs, status: 'expired', accumulatedMs: durationMs };
   }
   if (raw.status === 'idle') return idleRoomClock(durationMs);
-  if (
-    raw.status === 'running' &&
-    (typeof raw.runningSince !== 'number' || !Number.isFinite(raw.runningSince))
-  ) {
-    return idleRoomClock(durationMs);
-  }
   if (raw.status === 'paused') {
     return {
       version: roomClockVersion,
@@ -283,6 +285,7 @@ export function exportRoomClocks(
       if (typeof value !== 'object' || value === null) continue;
       const durationMs = (value as Partial<IRoomClockState>).durationMs;
       if (typeof durationMs !== 'number' || !Number.isFinite(durationMs) || durationMs < 0) continue;
+      if (!validRoomClockState(value, durationMs)) continue;
       const state = normalizeRoomClock(value, durationMs);
       found[segment] = snapshotRoomClock(state, now);
     }
