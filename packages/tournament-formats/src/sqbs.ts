@@ -408,7 +408,12 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
       errors.push(error('expected-integer', path, `Expected an integer but found ${JSON.stringify(line)}.`));
       return undefined;
     }
-    return Number.parseInt(line.trim(), 10);
+    const value = Number.parseInt(line.trim(), 10);
+    if (!Number.isSafeInteger(value)) {
+      errors.push(error('integer-out-of-range', path, `Integer ${JSON.stringify(line)} is outside the safe numeric range.`));
+      return undefined;
+    }
+    return value;
   };
   const nextNumber = (path: string): number | undefined => {
     const line = next(path);
