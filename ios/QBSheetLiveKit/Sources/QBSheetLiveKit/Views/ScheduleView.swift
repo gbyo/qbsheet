@@ -54,11 +54,23 @@ struct ScheduleView: View {
 
                 let games = scope == .team ? snapshot.games(for: teamId) : snapshot.schedule
                 if games.isEmpty {
-                    ContentUnavailableView(
-                        "Nothing released yet",
-                        systemImage: "calendar",
-                        description: Text("Games appear here when the tournament releases them.")
-                    )
+                    if scope == .team && !snapshot.schedule.isEmpty {
+                        ContentUnavailableView {
+                            Label("No games for \(snapshot.teamName(teamId))", systemImage: "calendar")
+                        } description: {
+                            Text("The tournament has released other games.")
+                        } actions: {
+                            Button("View All Games") {
+                                scope = .all
+                            }
+                        }
+                    } else {
+                        ContentUnavailableView(
+                            "Nothing released yet",
+                            systemImage: "calendar",
+                            description: Text("Games appear here when the tournament releases them.")
+                        )
+                    }
                 } else {
                     ForEach(rounds(of: games), id: \.id) { round in
                         GroupBox(round.title) {
