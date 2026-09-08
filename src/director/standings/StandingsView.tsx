@@ -45,7 +45,7 @@ export function StandingsView({
   if (state.teams.length === 0) {
     return (
       <Page>
-        <PageHeader title="Standings & stats" description="Derived from accepted game records." />
+        <PageHeader title="Standings" description="Derived from accepted game records." />
         <EmptyState
           title="No standings yet"
           description="Add teams and accept results to derive records, scoring, and player statistics."
@@ -191,7 +191,7 @@ export function StandingsView({
   return (
     <Page>
       <PageHeader
-        title="Standings & stats"
+        title="Standings"
         description={`${totalAcceptedResults(state)} accepted game${totalAcceptedResults(state) === 1 ? '' : 's'} · ranked using the tournament tiebreak configuration`}
         actions={
           <ActionMenu

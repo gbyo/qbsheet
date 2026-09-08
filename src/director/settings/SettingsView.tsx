@@ -47,12 +47,27 @@ export function SettingsView({
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
+  /*
+   * Settings is the canonical surface for tournament and operator identity, so
+   * the tournament and operator menus deep-link to a section of it rather than
+   * opening their own copies of these forms.
+   *
+   * The section is adjusted during render rather than from an effect: the
+   * effect version painted the General section once before switching, which
+   * reads as a flash on every arrival from a menu.
+   */
   const targetSection = settingsSectionForTarget(navigationTarget);
-  const [section, setSection] = useState<SettingsSection>(targetSection ?? 'general');
+  const [sectionState, setSectionState] = useState<{
+    target: SettingsSection | null;
+    section: SettingsSection;
+  }>({ target: targetSection, section: targetSection ?? 'general' });
+  if (targetSection && targetSection !== sectionState.target) {
+    setSectionState({ target: targetSection, section: targetSection });
+  }
+  const section = sectionState.section;
+  const setSection = (next: SettingsSection) => setSectionState({ target: targetSection, section: next });
   useEffect(() => {
-    if (!targetSection) return;
-    setSection(targetSection);
-    onClearNavigationTarget?.();
+    if (targetSection) onClearNavigationTarget?.();
   }, [targetSection, onClearNavigationTarget]);
 
   return (
@@ -516,8 +531,8 @@ function SystemDiagnostics({ state, controller }: { state: DirectorState; contro
         icon="network"
       >
         <p>
-          Start and inspect QBTCP from Rooms & staff and QBSheet Live from its own destination. Public
-          spectator URLs never contain management credentials.
+          Start and inspect QBTCP from Rooms and QBSheet Live from its own destination. Public spectator URLs
+          never contain management credentials.
         </p>
       </AdvancedSection>
     </div>

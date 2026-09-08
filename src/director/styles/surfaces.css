@@ -535,6 +535,17 @@
   margin-top: var(--director-space-2);
 }
 
+/* The one-line empty message inside a table, list, or panel body — "No teams
+   match this filter". Short enough not to need the full empty-state treatment,
+   but it still reads at secondary size rather than as fine print. */
+.director-empty-copy {
+  margin: 0;
+  padding: var(--director-space-5) 0;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  text-align: center;
+}
+
 /* Inside a panel or table: no border of its own, centred, quiet. */
 .director-empty-state-contained {
   align-items: center;

@@ -486,8 +486,8 @@ function ScoringRulesDialog({
     >
       {locked && (
         <Callout tone="info" title="Core values are locked">
-          Accepted results already use the tournament's tossup, bonus, and roster-size values. Operational
-          options remain editable.
+          Accepted results already use the tournament&apos;s tossup, bonus, and roster-size values.
+          Operational options remain editable.
         </Callout>
       )}
       <DialogSection title="Preset">

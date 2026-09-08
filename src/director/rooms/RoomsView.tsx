@@ -113,9 +113,15 @@ export function RoomsView({
     navigationTarget?.section === 'rooms' && navigationTarget.entityType === 'room'
       ? navigationTarget.entityId
       : undefined;
-  useEffect(() => {
-    if (targetRoomId) setView('rooms');
-  }, [targetRoomId]);
+  // A deep link to a room selects the Rooms view. This adjusts state during
+  // render rather than from an effect: the effect version rendered the wrong
+  // view once before correcting itself, which is visible as a flash when
+  // arriving from global search or an Overview attention item.
+  const [appliedRoomTarget, setAppliedRoomTarget] = useState<string | undefined>(targetRoomId);
+  if (targetRoomId && targetRoomId !== appliedRoomTarget) {
+    setAppliedRoomTarget(targetRoomId);
+    setView('rooms');
+  }
 
   const qbtcpStatus = nativeServer?.status ?? null;
   const qbtcpLoading = nativeServer?.loading ?? false;
@@ -208,7 +214,7 @@ export function RoomsView({
   return (
     <Page>
       <PageHeader
-        title="Rooms & staff"
+        title="Rooms"
         description={`${state.rooms.length} room${state.rooms.length === 1 ? '' : 's'} · ${state.staff.length} staff · ${state.equipment.length} equipment resource${state.equipment.length === 1 ? '' : 's'}`}
         actions={primaryAdd}
       />

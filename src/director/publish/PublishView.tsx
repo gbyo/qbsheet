@@ -40,7 +40,7 @@ export function PublishView({
       ) : (
         <Panel
           title="Local files"
-          description="Standings and player-stat CSVs use the same canonical serializers as the shortcuts on Standings & stats. Archives retain raw submissions and audit history."
+          description="Standings and player-stat CSVs use the same canonical serializers as the shortcuts on Standings. Archives retain raw submissions and audit history."
           flush
         >
           <SummaryList ariaLabel="Export formats">

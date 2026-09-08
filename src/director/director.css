@@ -17,6 +17,10 @@
  *   shell       sidebar, navigation, top bar, search, responsive behaviour
  *   pages/*     per-destination rules that genuinely only that destination needs
  *
+ * There is no compatibility layer. Everything the pre-redesign stylesheet
+ * carried has either moved into a layer, moved into the destination that
+ * needed it, or gone with the markup it styled.
+ *
  * A page-level file may compose tokens and layer classes. It may not redefine a
  * control, a status colour, or a type size.
  */
@@ -42,5 +46,3 @@
 @import './styles/pages/transfers.css';
 @import './styles/pages/settings.css';
 @import './styles/pages/help.css';
-
-@import './styles/compat.css';
