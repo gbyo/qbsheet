@@ -96,7 +96,7 @@ export function nextEventForTeam(snapshot: QbliveSnapshot, teamId: string, now: 
   const upcoming = candidates
     .filter((candidate) => candidate.scheduledStart !== null)
     .filter((candidate) => Date.parse(candidate.scheduledStart!) >= now.getTime() - 90 * 60_000)
-    .sort((left, right) => left.scheduledStart!.localeCompare(right.scheduledStart!));
+    .sort((left, right) => Date.parse(left.scheduledStart!) - Date.parse(right.scheduledStart!));
   if (upcoming.length > 0) return upcoming[0];
 
   // Nothing has a usable time. Compare explicitly sequenced games and events together. Legacy

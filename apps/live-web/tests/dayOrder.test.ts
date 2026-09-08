@@ -60,6 +60,16 @@ describe('sequence-first next event', () => {
     expect(next?.game?.id).toBe('game-2');
   });
 
+  test('timed events are ordered by their actual instant across UTC offsets', () => {
+    const snapshot = untimedSnapshot();
+    snapshot.schedule[0].scheduledStart = '2026-09-05T10:30:00-04:00';
+    snapshot.schedule[1].scheduledStart = '2026-09-05T14:15:00Z';
+
+    const next = nextEventForTeam(snapshot, 'team-a', new Date('2026-09-05T14:00:00Z'));
+
+    expect(next?.game?.id).toBe('game-2');
+  });
+
   /*
    * Lunch sits between two rounds, and the day order has to say so.
    *
