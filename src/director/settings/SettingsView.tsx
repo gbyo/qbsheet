@@ -111,6 +111,24 @@ export function SettingsView({
    * identical to reversing the whole array and taking the head, without building the whole array.
    */
   const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
+  const storageDurability =
+    controller.repositoryKind === 'tauri-sqlite'
+      ? 'Saved on this device'
+      : controller.repositoryKind === 'indexeddb'
+        ? 'Saved in this browser'
+        : 'Session only';
+  const recoveryStorageCopy =
+    controller.repositoryKind === 'tauri-sqlite'
+      ? 'Saved on this device. Keep a portable archive separately for loss of the computer or disk.'
+      : controller.repositoryKind === 'memory'
+        ? 'Session only: recovery points disappear when this session ends.'
+        : 'Saved in this browser profile. Clearing browser data removes both the tournament and its recovery points.';
+  const storageEngineLabel =
+    controller.repositoryKind === 'tauri-sqlite'
+      ? 'SQLite'
+      : controller.repositoryKind === 'indexeddb'
+        ? 'IndexedDB'
+        : 'Memory';
   return (
     <>
       <PageHeader
@@ -280,13 +298,7 @@ export function SettingsView({
                   </div>
                   <div>
                     <dt>Durability</dt>
-                    <dd>
-                      {controller.repositoryKind === 'tauri-sqlite'
-                        ? 'Saved on this device'
-                        : controller.repositoryKind === 'indexeddb'
-                          ? 'Saved in this browser'
-                          : 'Session only'}
-                    </dd>
+                    <dd>{storageDurability}</dd>
                   </div>
                 </dl>
                 {controller.error && <p className="director-error-copy">{controller.error}</p>}
@@ -328,13 +340,7 @@ export function SettingsView({
               Recovery points preserve this tournament, including rounds, results, and transfer history.
               Restoring replaces the open tournament. Operator settings and credentials stay unchanged.
             </p>
-            <p className="director-muted">
-              {controller.repositoryKind === 'tauri-sqlite'
-                ? 'Saved on this device. Keep a portable archive separately for loss of the computer or disk.'
-                : controller.repositoryKind === 'memory'
-                  ? 'Session only: recovery points disappear when this session ends.'
-                  : 'Saved in this browser profile. Clearing browser data removes both the tournament and its recovery points.'}
-            </p>
+            <p className="director-muted">{recoveryStorageCopy}</p>
             {(controller.checkpoints ?? []).length === 0 ? (
               <p>No recovery points yet.</p>
             ) : (
@@ -440,8 +446,8 @@ export function SettingsView({
             </div>
             <PanelBody>
               <p>
-                Director stores tournament recovery points locally. Browser preview saves in this browser;
-                the desktop app saves on this device. Portable archives contain tournament data only, not the
+                Director stores tournament recovery points locally. Browser preview saves in this browser; the
+                desktop app saves on this device. Portable archives contain tournament data only, not the
                 operator profile or Live credential.
               </p>
             </PanelBody>
@@ -471,14 +477,9 @@ export function SettingsView({
           </div>
           <PanelBody>
             <p>
-              Director schema v{state.schemaVersion} · Storage engine:{' '}
-              {controller.repositoryKind === 'tauri-sqlite'
-                ? 'SQLite'
-                : controller.repositoryKind === 'indexeddb'
-                  ? 'IndexedDB'
-                  : 'Memory'}
-              . If support is needed, export diagnostics from the desktop app without sending private
-              tournament content unless requested.
+              Director schema v{state.schemaVersion} · Storage engine: {storageEngineLabel}. If support is
+              needed, export diagnostics from the desktop app without sending private tournament content
+              unless requested.
             </p>
           </PanelBody>
         </section>
