@@ -151,11 +151,16 @@ export class ResultDeliveryCapabilityStore {
     if (!validCapability(capability)) return false;
     const completed = new Date(completedAt).getTime();
     if (!Number.isFinite(completed)) return false;
+    const now = this.now().getTime();
+    if (!Number.isFinite(now)) return false;
     const document = readDocument(this.storage) ?? { version: resultDeliveryCapabilityVersion, entries: {} };
     this.removeExpired(document);
     document.entries[recordId] = {
       ...capability,
-      expiresAt: new Date(completed + completedGameRetentionMs).toISOString(),
+      // A device clock can be corrected backward after the scorer recorded completion. Never let a
+      // future-dated completion keep a private session capability longer than the retention window
+      // measured from the clock we have now.
+      expiresAt: new Date(Math.min(completed, now) + completedGameRetentionMs).toISOString(),
     };
     return writeDocument(this.storage, document);
   }
