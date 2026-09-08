@@ -80,10 +80,13 @@ export function timelineEventTypeLabel(type: TimelineEventType): string {
 export function normalizeTimelineEvents(value: unknown): TournamentTimelineEvent[] {
   if (!Array.isArray(value)) return [];
   const events: TournamentTimelineEvent[] = [];
+  const seenIds = new Set<DirectorId>();
   for (const candidate of value) {
     if (typeof candidate !== 'object' || candidate === null) continue;
     const record = candidate as Record<string, unknown>;
     if (typeof record.id !== 'string' || typeof record.title !== 'string') continue;
+    if (seenIds.has(record.id)) continue;
+    seenIds.add(record.id);
     const type = timelineEventTypes.includes(record.type as TimelineEventType)
       ? (record.type as TimelineEventType)
       : 'custom';
