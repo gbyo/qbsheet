@@ -69,8 +69,7 @@ export function inspectJournal(gameKey: string, raw: string, now: Date = new Dat
 
   const updated = new Date(parsed.updatedAt).getTime();
   if (!Number.isFinite(updated)) return { gameKey, status: 'malformed' };
-  const age = now.getTime() - updated;
-  if (age < 0) return { gameKey, status: 'malformed', updatedAt: parsed.updatedAt };
+  const age = Math.max(0, now.getTime() - updated);
 
   const setup = parsed.setup;
   const events = parsed.events;
