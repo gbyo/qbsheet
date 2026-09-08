@@ -16,11 +16,9 @@ import {
   Button,
   Callout,
   ChoiceCards,
-  Diagnostics,
   Dialog,
   EmptyState,
   Field,
-  FieldGrid,
   MultiSelect,
   Page,
   PageHeader,
@@ -122,7 +120,9 @@ function SetupPanel({
       );
       onAnnounce('QBSheet Live setup completed. The initial snapshot is queued for publication.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The QBSheet Live backend could not be configured.');
+      setError(
+        reason instanceof Error ? reason.message : 'The QBSheet Live backend could not be configured.',
+      );
     } finally {
       setSubmitting(false);
     }
@@ -167,7 +167,11 @@ function SetupPanel({
       {kind !== 'local' && (
         <Field
           label="Server address"
-          hint={kind === 'cloudflare' ? 'The Worker URL from Cloudflare.' : 'The HTTPS origin of your QBLive server, with no path.'}
+          hint={
+            kind === 'cloudflare'
+              ? 'The Worker URL from Cloudflare.'
+              : 'The HTTPS origin of your QBLive server, with no path.'
+          }
           render={({ id, describedBy, invalid }) => (
             <TextInput
               id={id}
@@ -279,7 +283,9 @@ function LiveStatusPanel({
       title={publicState}
       description={current ? 'Public data is up to date.' : syncSummary(publication)}
       tone={publication.sync.lastError ? 'warning' : undefined}
-      actions={<StateLabel state={publication.sync.lastError ? 'help' : publication.lifecycle} label={publicState} />}
+      actions={
+        <StateLabel state={publication.sync.lastError ? 'help' : publication.lifecycle} label={publicState} />
+      }
     >
       {publication.sync.lastError && (
         <Callout tone="warning" title="Publishing is temporarily degraded">
@@ -310,23 +316,36 @@ function LiveStatusPanel({
             <Button variant="quiet" onClick={() => setShowQr((shown) => !shown)}>
               {showQr ? 'Hide QR' : 'Show QR'}
             </Button>
-            <Button variant="quiet" icon="publish" onClick={() => printQr(link, state.tournament?.name ?? 'Tournament')}>
+            <Button
+              variant="quiet"
+              icon="publish"
+              onClick={() => printQr(link, state.tournament?.name ?? 'Tournament')}
+            >
               Print QR
             </Button>
           </div>
           {showQr && <QrPanel link={link} />}
         </div>
       ) : (
-        <p className="director-text-secondary">The participant link appears after the first publication reaches the backend.</p>
+        <p className="director-text-secondary">
+          The participant link appears after the first publication reaches the backend.
+        </p>
       )}
-      <AdvancedSection label="Publishing diagnostics" hint="Backend, revision, synchronization, and Apple background-update details." icon="settings">
+      <AdvancedSection
+        label="Publishing diagnostics"
+        hint="Backend, revision, synchronization, and Apple background-update details."
+        icon="settings"
+      >
         <Specs
           items={[
             { term: 'Backend', value: backendLabel(publication) },
             { term: 'Local revision', value: publication.sync.localRevision, mono: true },
             { term: 'Backend revision', value: publication.sync.acknowledgedRevision, mono: true },
             { term: 'Pending updates', value: publication.sync.pendingItems || 'None' },
-            { term: 'Last successful sync', value: formatLiveTimestamp(publication.sync.lastSuccessAt) ?? 'Never' },
+            {
+              term: 'Last successful sync',
+              value: formatLiveTimestamp(publication.sync.lastSuccessAt) ?? 'Never',
+            },
             { term: 'Apple background updates', value: pushLabel },
           ]}
         />
@@ -343,11 +362,7 @@ function VisibilityPanel({
   actions: LiveViewActions;
 }) {
   const confirmAction = useConfirm();
-  const setSetting = async (
-    key: keyof LivePublicationSettings,
-    checked: boolean,
-    warning?: string,
-  ) => {
+  const setSetting = async (key: keyof LivePublicationSettings, checked: boolean, warning?: string) => {
     if (checked && warning) {
       const approved = await confirmAction({
         title: 'Make individual information public?',
@@ -362,7 +377,10 @@ function VisibilityPanel({
   };
 
   return (
-    <Panel title="Public visibility" description="These switches take effect immediately and publish on the next synchronization.">
+    <Panel
+      title="Public visibility"
+      description="These switches take effect immediately and publish on the next synchronization."
+    >
       {visibilityGroups.map((group) => (
         <section key={group.heading} className="director-live-visibility-group">
           <h3>{group.heading}</h3>
@@ -372,10 +390,7 @@ function VisibilityPanel({
               const parentEnabled = dependency ? Boolean(publication.settings[dependency.parent]) : true;
               const disabled = Boolean(dependency && !parentEnabled);
               return (
-                <div
-                  key={row.key}
-                  className={dependency ? 'director-choice-dependents' : undefined}
-                >
+                <div key={row.key} className={dependency ? 'director-choice-dependents' : undefined}>
                   <Switch
                     checked={Boolean(publication.settings[row.key])}
                     disabled={disabled}
@@ -418,9 +433,17 @@ const visibilityGroups: {
   {
     heading: 'Schedule and rooms',
     rows: [
-      { key: 'releasedSchedule', label: 'Released schedule', description: 'Only released rounds; unreleased pairings are never published.' },
+      {
+        key: 'releasedSchedule',
+        label: 'Released schedule',
+        description: 'Only released rounds; unreleased pairings are never published.',
+      },
       { key: 'roomLocations', label: 'Room locations', description: 'Room names on public games.' },
-      { key: 'roomDirections', label: 'Room directions', description: 'Directions text associated with public rooms.' },
+      {
+        key: 'roomDirections',
+        label: 'Room directions',
+        description: 'Directions text associated with public rooms.',
+      },
     ],
   },
   {
@@ -476,14 +499,20 @@ function AnnouncementsPanel({
       flush
     >
       {live.length === 0 ? (
-        <div className="director-empty-in-panel"><p className="director-empty-copy">Use announcements for schedule changes, delays, room notices, and tournament-wide updates.</p></div>
+        <div className="director-empty-in-panel">
+          <p className="director-empty-copy">
+            Use announcements for schedule changes, delays, room notices, and tournament-wide updates.
+          </p>
+        </div>
       ) : (
         <SummaryList ariaLabel="Published announcements">
           {live.map((announcement) => (
             <SummaryItem
               key={announcement.id}
               title={<strong>{announcement.title}</strong>}
-              status={<StateLabel state={announcement.severity} label={severityLabel(announcement.severity)} />}
+              status={
+                <StateLabel state={announcement.severity} label={severityLabel(announcement.severity)} />
+              }
               summary={`${formatLiveTimestamp(announcement.publishedAt) ?? announcement.publishedAt}${announcement.audienceTeamIds.length ? ` · ${announcement.audienceTeamIds.length} team${announcement.audienceTeamIds.length === 1 ? '' : 's'}` : ' · Everybody'}`}
               actions={
                 <Button variant="quiet" onClick={() => actions.withdrawAnnouncement(announcement.id)}>
@@ -536,32 +565,43 @@ function AnnouncementDialog({
       submitLabel="Publish announcement"
       submitDisabled={!title.trim() || !body.trim()}
     >
-      <Field label="Title"><TextInput value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} /></Field>
-      <Field label="Message" hint="Plain text. Line breaks are kept; formatting is not."><TextArea value={body} rows={4} maxLength={2000} onChange={(event) => setBody(event.target.value)} /></Field>
-      <Field label="Importance" render={({ id, describedBy }) => (
-        <Select<LiveAnnouncement['severity']>
-          id={id}
-          ariaDescribedBy={describedBy}
-          value={severity}
-          options={[
-            { value: 'information', label: 'Information' },
-            { value: 'important', label: 'Important' },
-            { value: 'urgent', label: 'Urgent' },
-          ]}
-          onChange={setSeverity}
-        />
-      )} />
-      <Field label="Audience" hint="Everybody is the default." render={({ id, describedBy }) => (
-        <MultiSelect
-          id={id}
-          ariaDescribedBy={describedBy}
-          values={audience}
-          options={state.teams.map((team) => ({ value: team.id, label: team.displayName }))}
-          onChange={setAudience}
-          allLabel="Everybody"
-          searchPlaceholder="Filter teams…"
-        />
-      )} />
+      <Field label="Title">
+        <TextInput value={title} maxLength={120} onChange={(event) => setTitle(event.target.value)} />
+      </Field>
+      <Field label="Message" hint="Plain text. Line breaks are kept; formatting is not.">
+        <TextArea value={body} rows={4} maxLength={2000} onChange={(event) => setBody(event.target.value)} />
+      </Field>
+      <Field
+        label="Importance"
+        render={({ id, describedBy }) => (
+          <Select<LiveAnnouncement['severity']>
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={severity}
+            options={[
+              { value: 'information', label: 'Information' },
+              { value: 'important', label: 'Important' },
+              { value: 'urgent', label: 'Urgent' },
+            ]}
+            onChange={setSeverity}
+          />
+        )}
+      />
+      <Field
+        label="Audience"
+        hint="Everybody is the default."
+        render={({ id, describedBy }) => (
+          <MultiSelect
+            id={id}
+            ariaDescribedBy={describedBy}
+            values={audience}
+            options={state.teams.map((team) => ({ value: team.id, label: team.displayName }))}
+            onChange={setAudience}
+            allLabel="Everybody"
+            searchPlaceholder="Filter teams…"
+          />
+        )}
+      />
     </Dialog>
   );
 }
@@ -608,17 +648,22 @@ function LifecyclePanel({
             <Button
               variant="secondary"
               disabled={!canUnpublish}
-              onClick={() => void (async () => {
-                const approved = await confirmAction({
-                  title: 'Unpublish QBSheet Live?',
-                  consequence: 'Participants will no longer be able to open the public tournament after the backend confirms the change. The publication can be restored later.',
-                  confirmLabel: 'Unpublish',
-                  tone: 'warning',
-                });
-                if (!approved) return;
-                actions.unpublish();
-                onAnnounce('Unpublish queued. The public page remains available until the backend confirms it.');
-              })()}
+              onClick={() =>
+                void (async () => {
+                  const approved = await confirmAction({
+                    title: 'Unpublish QBSheet Live?',
+                    consequence:
+                      'Participants will no longer be able to open the public tournament after the backend confirms the change. The publication can be restored later.',
+                    confirmLabel: 'Unpublish',
+                    tone: 'warning',
+                  });
+                  if (!approved) return;
+                  actions.unpublish();
+                  onAnnounce(
+                    'Unpublish queued. The public page remains available until the backend confirms it.',
+                  );
+                })()
+              }
             >
               {publication.lifecycle === 'unpublishing' ? 'Unpublishing…' : 'Unpublish'}
             </Button>
@@ -626,47 +671,64 @@ function LifecyclePanel({
         />
         <SummaryItem
           title={<strong>Turn QBSheet Live off in Director</strong>}
-          summary={publication.backend?.kind === 'local' ? 'Stop the local public listener and clear the local page.' : 'Stop this Director from publishing. Existing backend content is unchanged.'}
+          summary={
+            publication.backend?.kind === 'local'
+              ? 'Stop the local public listener and clear the local page.'
+              : 'Stop this Director from publishing. Existing backend content is unchanged.'
+          }
           actions={
             <Button
               variant="secondary"
               disabled={!canDisable}
-              onClick={() => void (async () => {
-                const approved = await confirmAction({
-                  title: 'Turn QBSheet Live off?',
-                  consequence: publication.backend?.kind === 'local' ? 'The local public page will stop being served.' : 'This Director will stop sending updates; anything already published remains on the backend.',
-                  confirmLabel: 'Turn off',
-                  tone: 'warning',
-                });
-                if (!approved) return;
-                actions.disable();
-                onAnnounce('QBSheet Live turned off in Director.');
-              })()}
+              onClick={() =>
+                void (async () => {
+                  const approved = await confirmAction({
+                    title: 'Turn QBSheet Live off?',
+                    consequence:
+                      publication.backend?.kind === 'local'
+                        ? 'The local public page will stop being served.'
+                        : 'This Director will stop sending updates; anything already published remains on the backend.',
+                    confirmLabel: 'Turn off',
+                    tone: 'warning',
+                  });
+                  if (!approved) return;
+                  actions.disable();
+                  onAnnounce('QBSheet Live turned off in Director.');
+                })()
+              }
             >
               Turn off
             </Button>
           }
         />
       </SummaryList>
-      <AdvancedSection label="Delete backend publication" hint="Permanent destructive cleanup; not part of normal tournament completion." icon="danger">
+      <AdvancedSection
+        label="Delete backend publication"
+        hint="Permanent destructive cleanup; not part of normal tournament completion."
+        icon="danger"
+      >
         <Callout tone="danger" title="Delete permanently">
-          This removes the public tournament, revokes its credential, and deletes Apple push channels. It cannot be undone.
+          This removes the public tournament, revokes its credential, and deletes Apple push channels. It
+          cannot be undone.
         </Callout>
         <Button
           variant="danger-solid"
           disabled={publication.lifecycle === 'deleting'}
-          onClick={() => void (async () => {
-            const approved = await confirmAction({
-              title: 'Delete this QBSheet Live publication?',
-              body: 'The public tournament and its backend credential will be removed.',
-              consequence: 'This cannot be undone. Re-enabling QBSheet Live later creates a new publication.',
-              confirmLabel: 'Delete permanently',
-              tone: 'danger',
-            });
-            if (!approved) return;
-            actions.destroy();
-            onAnnounce('Delete queued. Director will clear the publication after backend confirmation.');
-          })()}
+          onClick={() =>
+            void (async () => {
+              const approved = await confirmAction({
+                title: 'Delete this QBSheet Live publication?',
+                body: 'The public tournament and its backend credential will be removed.',
+                consequence:
+                  'This cannot be undone. Re-enabling QBSheet Live later creates a new publication.',
+                confirmLabel: 'Delete permanently',
+                tone: 'danger',
+              });
+              if (!approved) return;
+              actions.destroy();
+              onAnnounce('Delete queued. Director will clear the publication after backend confirmation.');
+            })()
+          }
         >
           {publication.lifecycle === 'deleting' ? 'Deleting…' : 'Delete from backend…'}
         </Button>
@@ -677,11 +739,12 @@ function LifecyclePanel({
 
 function backendLabel(publication: LivePublication): string {
   if (!publication.backend) return 'Not configured';
-  const kind = publication.backend.kind === 'cloudflare'
-    ? 'Cloudflare · director-owned'
-    : publication.backend.kind === 'local'
-      ? 'Local network'
-      : 'Custom server';
+  const kind =
+    publication.backend.kind === 'cloudflare'
+      ? 'Cloudflare · director-owned'
+      : publication.backend.kind === 'local'
+        ? 'Local network'
+        : 'Custom server';
   return publication.backend.displayName ? `${kind} · ${publication.backend.displayName}` : kind;
 }
 
@@ -690,7 +753,12 @@ function formatLiveTimestamp(iso: string | null | undefined): string | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   try {
-    return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
   } catch {
     return date.toLocaleString();
   }
@@ -709,7 +777,11 @@ function QrPanel({ link }: { link: string }) {
     }
   }, [link]);
   if (!svg) return <p className="director-text-secondary">This link is too long to encode in a QR code.</p>;
-  return <div className="director-live-qr"><div dangerouslySetInnerHTML={{ __html: svg }} /></div>;
+  return (
+    <div className="director-live-qr">
+      <div dangerouslySetInnerHTML={{ __html: svg }} />
+    </div>
+  );
 }
 
 function printQr(link: string, tournamentName: string): void {

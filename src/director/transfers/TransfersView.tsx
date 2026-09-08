@@ -76,9 +76,11 @@ export function TransfersView({
   );
 
   const importPickedFiles = (picked: PickedFile[]) => {
-    const files = picked.map(
-      (item) => new File([item.bytes], item.fileName, { type: 'application/vnd.quizbowl.qbj+json' }),
-    );
+    const files = picked.map((item) => {
+      const bytes = new ArrayBuffer(item.bytes.byteLength);
+      new Uint8Array(bytes).set(item.bytes);
+      return new File([bytes], item.fileName, { type: 'application/vnd.quizbowl.qbj+json' });
+    });
     void transfers.importFiles(files);
     setView('incoming');
   };
@@ -112,14 +114,18 @@ export function TransfersView({
                   Review results
                 </Button>
               )}
-              <Button variant="quiet" onClick={transfers.dismissNotice}>Dismiss</Button>
+              <Button variant="quiet" onClick={transfers.dismissNotice}>
+                Dismiss
+              </Button>
             </>
           }
         >
-          {transfers.notice.resultCount} completed QBSheet game{transfers.notice.resultCount === 1 ? '' : 's'} found
+          {transfers.notice.resultCount} completed QBSheet game{transfers.notice.resultCount === 1 ? '' : 's'}{' '}
+          found
           {transfers.notice.assignmentCount > 0
             ? ` · ${transfers.notice.assignmentCount} assignment file${transfers.notice.assignmentCount === 1 ? '' : 's'}`
-            : ''}.
+            : ''}
+          .
         </Callout>
       )}
       {!transfers.native && transfers.limitation && <Callout tone="info">{transfers.limitation}</Callout>}
@@ -138,7 +144,6 @@ export function TransfersView({
 
       {view === 'incoming' && (
         <IncomingView
-          transfers={transfers}
           state={state}
           controller={controller}
           pending={pending}
@@ -160,18 +165,19 @@ export function TransfersView({
           plan={plan}
         />
       )}
-      {view === 'locations' && (
-        <LocationsView transfers={transfers} state={state} selection={selection} />
-      )}
+      {view === 'locations' && <LocationsView transfers={transfers} state={state} selection={selection} />}
       {view === 'recent' && <HistoryView state={state} />}
 
-      {transfers.status !== '' && <p className="director-text-meta" role="status">Last transfer action: {transfers.status}</p>}
+      {transfers.status !== '' && (
+        <p className="director-text-meta" role="status">
+          Last transfer action: {transfers.status}
+        </p>
+      )}
     </Page>
   );
 }
 
 function IncomingView({
-  transfers,
   state,
   controller,
   pending,
@@ -181,7 +187,6 @@ function IncomingView({
   onPick,
   onReview,
 }: {
-  transfers: TransfersRuntime;
   state: DirectorState;
   controller: DirectorController;
   pending: IncomingArtifact[];
@@ -193,9 +198,19 @@ function IncomingView({
 }) {
   return (
     <Panel
-      title={pending.length === 0 ? 'Incoming results' : `${pending.length} file${pending.length === 1 ? '' : 's'} need attention`}
+      title={
+        pending.length === 0
+          ? 'Incoming results'
+          : `${pending.length} file${pending.length === 1 ? '' : 's'} need attention`
+      }
       description="Import and discovery happen here; accepting, rejecting, correcting, and reconciling results happen only in Results."
-      actions={pending.some((artifact) => artifact.status === 'staged') ? <Button variant="primary" onClick={onReview}>Review results</Button> : undefined}
+      actions={
+        pending.some((artifact) => artifact.status === 'staged') ? (
+          <Button variant="primary" onClick={onReview}>
+            Review results
+          </Button>
+        ) : undefined
+      }
       flush
     >
       <div
@@ -213,7 +228,9 @@ function IncomingView({
         </FilePicker>
       </div>
       {state.transfers.artifacts.length === 0 ? (
-        <div className="director-empty-in-panel"><p className="director-empty-copy">No imported or discovered files yet.</p></div>
+        <div className="director-empty-in-panel">
+          <p className="director-empty-copy">No imported or discovered files yet.</p>
+        </div>
       ) : (
         <SummaryList ariaLabel="Incoming transfer artifacts">
           {state.transfers.artifacts.slice(0, 40).map((artifact) => (
@@ -257,8 +274,16 @@ function ArtifactItem({
       summary={`${matchup}${scheduled ? ` · ${[room?.name, round?.name].filter(Boolean).join(' · ')}` : ''} · ${artifact.sourceLabel}`}
       actions={
         <div className="director-actions">
-          {artifact.status === 'staged' && <Button variant="primary" onClick={onReview}>Review</Button>}
-          {artifact.status !== 'ignored' && <Button variant="quiet" onClick={onDismiss}>Dismiss</Button>}
+          {artifact.status === 'staged' && (
+            <Button variant="primary" onClick={onReview}>
+              Review
+            </Button>
+          )}
+          {artifact.status !== 'ignored' && (
+            <Button variant="quiet" onClick={onDismiss}>
+              Dismiss
+            </Button>
+          )}
         </div>
       }
     >
@@ -294,12 +319,19 @@ function OutgoingView({
     state.qbtcpSessions.filter((session) => session.state !== 'abandoned').map((session) => session.roomId),
   );
   const roundGames = currentRound
-    ? state.scheduledGames.filter((game) => game.roundId === currentRound.id && !game.bye && game.status !== 'cancelled')
+    ? state.scheduledGames.filter(
+        (game) => game.roundId === currentRound.id && !game.bye && game.status !== 'cancelled',
+      )
     : [];
   const connectedCount = roundGames.filter((game) => game.roomId && connectedRoomIds.has(game.roomId)).length;
 
   if (!currentRound) {
-    return <EmptyState title="No current round" description="Generate a round from Tournament day before preparing assignment files." />;
+    return (
+      <EmptyState
+        title="No current round"
+        description="Generate a round from Tournament day before preparing assignment files."
+      />
+    );
   }
   return (
     <Panel
@@ -312,13 +344,23 @@ function OutgoingView({
       }
     >
       {plan.failures.length > 0 && (
-        <Callout tone="danger" title={`${plan.failures.length} game${plan.failures.length === 1 ? '' : 's'} cannot be prepared`}>
+        <Callout
+          tone="danger"
+          title={`${plan.failures.length} game${plan.failures.length === 1 ? '' : 's'} cannot be prepared`}
+        >
           {plan.failures[0]?.reason}
         </Callout>
       )}
-      {plan.warnings.map((warning) => <Callout key={warning} tone="warning">{warning}</Callout>)}
+      {plan.warnings.map((warning) => (
+        <Callout key={warning} tone="warning">
+          {warning}
+        </Callout>
+      ))}
       {writable.length === 0 ? (
-        <Callout tone="info">No connected writable transfer location is available. Download the assignment files or add a location.</Callout>
+        <Callout tone="info">
+          No connected writable transfer location is available. Download the assignment files or add a
+          location.
+        </Callout>
       ) : (
         <SummaryList ariaLabel="Writable transfer destinations">
           {writable.map((location) => (
@@ -330,10 +372,17 @@ function OutgoingView({
                 <Button
                   variant="primary"
                   icon="upload"
-                  disabled={transfers.isOperationActive(prepareOperation(location.id)) || plan.assignments.length === 0}
+                  disabled={
+                    transfers.isOperationActive(prepareOperation(location.id)) ||
+                    plan.assignments.length === 0
+                  }
                   onClick={() => void transfers.prepareTo(location.id, selection)}
                 >
-                  {transfers.isOperationActive(prepareOperation(location.id)) ? 'Preparing…' : location.kind === 'removable-drive' ? 'Prepare USB' : 'Prepare files'}
+                  {transfers.isOperationActive(prepareOperation(location.id))
+                    ? 'Preparing…'
+                    : location.kind === 'removable-drive'
+                      ? 'Prepare USB'
+                      : 'Prepare files'}
                 </Button>
               }
             />
@@ -342,32 +391,45 @@ function OutgoingView({
       )}
       <AdvancedSection
         label="Assignment scope"
-        hint={selectionKind === 'current-round' ? 'Current round is the normal tournament-day scope.' : 'An advanced scope is selected.'}
+        hint={
+          selectionKind === 'current-round'
+            ? 'Current round is the normal tournament-day scope.'
+            : 'An advanced scope is selected.'
+        }
         icon="filter"
       >
-        <Field label="Games to prepare" render={({ id, describedBy }) => (
-          <Select<SelectionKind>
-            id={id}
-            ariaDescribedBy={describedBy}
-            value={selectionKind}
-            options={[
-              { value: 'current-round', label: `Current round · ${currentRound.name}` },
-              { value: 'released', label: 'All released games' },
-              { value: 'unconnected-rooms', label: 'Rooms without QBTCP' },
-            ]}
-            onChange={setSelectionKind}
-          />
-        )} />
+        <Field
+          label="Games to prepare"
+          render={({ id, describedBy }) => (
+            <Select<SelectionKind>
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={selectionKind}
+              options={[
+                { value: 'current-round', label: `Current round · ${currentRound.name}` },
+                { value: 'released', label: 'All released games' },
+                { value: 'unconnected-rooms', label: 'Rooms without QBTCP' },
+              ]}
+              onChange={setSelectionKind}
+            />
+          )}
+        />
         {connectedCount > 0 && (
           <Diagnostics
             label="QBTCP delivery context"
             standalone={false}
             items={[
               { term: 'Connected current-round rooms', value: connectedCount },
-              { term: 'Current-round rooms without QBTCP', value: Math.max(0, roundGames.length - connectedCount) },
+              {
+                term: 'Current-round rooms without QBTCP',
+                value: Math.max(0, roundGames.length - connectedCount),
+              },
             ]}
           >
-            <p>Preparing a file for a connected room is a backup, not a conflict; the scorekeeper uses whichever copy it needs.</p>
+            <p>
+              Preparing a file for a connected room is a backup, not a conflict; the scorekeeper uses
+              whichever copy it needs.
+            </p>
           </Diagnostics>
         )}
       </AdvancedSection>
@@ -388,7 +450,16 @@ function LocationsView({
     <Panel
       title="Transfer locations"
       description="USB drives, shared folders, network shares, and cloud-synced folders are destinations and discovery sources."
-      actions={<Button variant="secondary" icon="plus" disabled={!transfers.native} onClick={() => void transfers.addFolder()}>Add folder</Button>}
+      actions={
+        <Button
+          variant="secondary"
+          icon="plus"
+          disabled={!transfers.native}
+          onClick={() => void transfers.addFolder()}
+        >
+          Add folder
+        </Button>
+      }
       flush
     >
       {state.transfers.locations.length === 0 ? (
@@ -440,8 +511,20 @@ function LocationItem({
   onPrepare: () => void;
 }) {
   const confirmAction = useConfirm();
-  const stateName = !location.connected ? 'offline' : location.readOnly ? 'warning' : location.watching ? 'live' : 'connected';
-  const stateText = !location.connected ? 'Not connected' : location.readOnly ? 'Read-only' : location.watching ? 'Watching' : 'Connected';
+  const stateName = !location.connected
+    ? 'offline'
+    : location.readOnly
+      ? 'warning'
+      : location.watching
+        ? 'live'
+        : 'connected';
+  const stateText = !location.connected
+    ? 'Not connected'
+    : location.readOnly
+      ? 'Read-only'
+      : location.watching
+        ? 'Watching'
+        : 'Connected';
   return (
     <SummaryItem
       title={<strong>{location.label}</strong>}
@@ -457,20 +540,47 @@ function LocationItem({
           <ActionMenu label={`${location.label} actions`} triggerLabel={`${location.label} actions`}>
             {(close) => (
               <>
-                {location.connected && !location.readOnly && <MenuItem icon="upload" onSelect={() => { close(); onPrepare(); }}>Prepare current assignment scope</MenuItem>}
-                {location.connected && !location.readOnly && <MenuItem icon="settings" onSelect={() => { close(); onInitialize(); }}>Set up QBSheet folder</MenuItem>}
-                <MenuItem icon="trash" tone="danger" onSelect={() => {
-                  close();
-                  void (async () => {
-                    const approved = await confirmAction({
-                      title: `Remove ${location.label} from Director?`,
-                      consequence: 'The folder or drive itself is not deleted. Director only forgets this transfer-location record.',
-                      confirmLabel: 'Remove location',
-                      tone: 'danger',
-                    });
-                    if (approved) onRemove();
-                  })();
-                }}>Remove location…</MenuItem>
+                {location.connected && !location.readOnly && (
+                  <MenuItem
+                    icon="upload"
+                    onSelect={() => {
+                      close();
+                      onPrepare();
+                    }}
+                  >
+                    Prepare current assignment scope
+                  </MenuItem>
+                )}
+                {location.connected && !location.readOnly && (
+                  <MenuItem
+                    icon="settings"
+                    onSelect={() => {
+                      close();
+                      onInitialize();
+                    }}
+                  >
+                    Set up QBSheet folder
+                  </MenuItem>
+                )}
+                <MenuItem
+                  icon="trash"
+                  tone="danger"
+                  onSelect={() => {
+                    close();
+                    void (async () => {
+                      const approved = await confirmAction({
+                        title: `Remove ${location.label} from Director?`,
+                        consequence:
+                          'The folder or drive itself is not deleted. Director only forgets this transfer-location record.',
+                        confirmLabel: 'Remove location',
+                        tone: 'danger',
+                      });
+                      if (approved) onRemove();
+                    })();
+                  }}
+                >
+                  Remove location…
+                </MenuItem>
               </>
             )}
           </ActionMenu>
@@ -500,7 +610,12 @@ function LocationItem({
 
 function HistoryView({ state }: { state: DirectorState }) {
   if (state.transfers.events.length === 0) {
-    return <EmptyState title="No transfer history" description="Scans, imports, prepared assignments, and other transfer actions will appear here." />;
+    return (
+      <EmptyState
+        title="No transfer history"
+        description="Scans, imports, prepared assignments, and other transfer actions will appear here."
+      />
+    );
   }
   return (
     <Panel title="Transfer history" description="Most recent actions first." flush>
@@ -519,23 +634,35 @@ function HistoryView({ state }: { state: DirectorState }) {
 
 function classificationState(artifact: IncomingArtifact): string {
   switch (artifact.classification) {
-    case 'ready': return 'ready';
-    case 'duplicate': return 'info';
-    case 'needs-review': return 'review';
-    case 'assignment': return 'pending';
-    case 'invalid': return 'error';
-    default: return 'neutral';
+    case 'ready':
+      return 'ready';
+    case 'duplicate':
+      return 'info';
+    case 'needs-review':
+      return 'review';
+    case 'assignment':
+      return 'pending';
+    case 'invalid':
+      return 'error';
+    default:
+      return 'neutral';
   }
 }
 
 function classificationLabel(artifact: IncomingArtifact): string {
   switch (artifact.classification) {
-    case 'ready': return 'Ready';
-    case 'duplicate': return 'Duplicate';
-    case 'needs-review': return 'Needs review';
-    case 'assignment': return 'Assignment';
-    case 'invalid': return 'Invalid';
-    default: return 'Not a result';
+    case 'ready':
+      return 'Ready';
+    case 'duplicate':
+      return 'Duplicate';
+    case 'needs-review':
+      return 'Needs review';
+    case 'assignment':
+      return 'Assignment';
+    case 'invalid':
+      return 'Invalid';
+    default:
+      return 'Not a result';
   }
 }
 
@@ -545,7 +672,9 @@ function teamName(state: DirectorState, teamId: string | null): string {
 
 function formatTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 export { transportLabel };

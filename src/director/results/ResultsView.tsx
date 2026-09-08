@@ -56,7 +56,13 @@ export function ResultsView({
   ).length;
   const targetType = navigationTarget?.section === 'results' ? navigationTarget.entityType : undefined;
   const [view, setView] = useState<ResultsViewMode>(
-    targetType === 'game' ? 'games' : reviewCount > 0 ? 'review' : openProtestCount > 0 ? 'protests' : 'games',
+    targetType === 'game'
+      ? 'games'
+      : reviewCount > 0
+        ? 'review'
+        : openProtestCount > 0
+          ? 'protests'
+          : 'games',
   );
   const [roundFilter, setRoundFilter] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
@@ -71,7 +77,8 @@ export function ResultsView({
 
   const switchView = (next: ResultsViewMode) => {
     setView(next);
-    if (navigationTarget?.section === 'results' && navigationTarget.entityType !== 'round') onClearNavigationTarget?.();
+    if (navigationTarget?.section === 'results' && navigationTarget.entityType !== 'round')
+      onClearNavigationTarget?.();
   };
 
   return (
@@ -157,9 +164,7 @@ export function ResultsView({
           onClearNavigationTarget={onClearNavigationTarget}
         />
       )}
-      {view === 'protests' && (
-        <ProtestsQueue state={state} controller={controller} onAnnounce={onAnnounce} />
-      )}
+      {view === 'protests' && <ProtestsQueue state={state} controller={controller} onAnnounce={onAnnounce} />}
 
       {manualOpen && (
         <ManualResultDialog
@@ -199,7 +204,8 @@ function SubmissionQueue({
     return state.submissions
       .filter((submission) => {
         if (submission.id === targetSubmissionId) return true;
-        const inRound = !roundId || state.games.some((game) => game.id === submission.gameId && game.roundId === roundId);
+        const inRound =
+          !roundId || state.games.some((game) => game.id === submission.gameId && game.roundId === roundId);
         const review = submission.status === 'review' || submission.status === 'received';
         return inRound && (history ? !review : review);
       })
@@ -210,7 +216,11 @@ function SubmissionQueue({
     return (
       <EmptyState
         title={history ? 'No result history in this view' : 'Nothing needs review'}
-        description={history ? 'Accepted, rejected, duplicate, and superseded submissions appear here.' : 'New QBTCP and imported submissions will appear here when they need a decision.'}
+        description={
+          history
+            ? 'Accepted, rejected, duplicate, and superseded submissions appear here.'
+            : 'New QBTCP and imported submissions will appear here when they need a decision.'
+        }
       />
     );
   }
@@ -255,7 +265,9 @@ function SubmissionItem({
   );
   const [action, setAction] = useState<SubmissionAction | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
-  const scheduled = game ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId) : undefined;
+  const scheduled = game
+    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+    : undefined;
   const left = scheduled ? teamLabel(state, scheduled.leftTeamId) : 'Unmatched result';
   const right = scheduled ? teamLabel(state, scheduled.rightTeamId) : '';
   const score = game
@@ -278,7 +290,12 @@ function SubmissionItem({
           {scheduled ? `${left} vs ${right}` : left}
         </strong>
       }
-      status={<StateLabel state={submissionState(submission.status)} label={submissionStatusLabel(submission.status)} />}
+      status={
+        <StateLabel
+          state={submissionState(submission.status)}
+          label={submissionStatusLabel(submission.status)}
+        />
+      }
       summary={`${score} · ${round?.name ?? 'Unmatched'} · Received ${formatTime(submission.receivedAt)}${game?.source ? ` · ${game.source}` : ''}`}
       actions={
         <div className="director-actions">
@@ -287,7 +304,11 @@ function SubmissionItem({
               variant="primary"
               onClick={() => {
                 const accepted = controller.acceptSubmission(submission.id);
-                onAnnounce(accepted ? `${left} result accepted.` : errorNotice(`${left} result remains in review; it was not accepted.`));
+                onAnnounce(
+                  accepted
+                    ? `${left} result accepted.`
+                    : errorNotice(`${left} result remains in review; it was not accepted.`),
+                );
               }}
             >
               Accept
@@ -298,22 +319,47 @@ function SubmissionItem({
               {(close) => (
                 <>
                   {review && (
-                    <MenuItem icon="x" tone="danger" onSelect={() => { close(); setAction('reject'); }}>
+                    <MenuItem
+                      icon="x"
+                      tone="danger"
+                      onSelect={() => {
+                        close();
+                        setAction('reject');
+                      }}
+                    >
                       Reject result…
                     </MenuItem>
                   )}
                   {review && !scheduled && game && (
-                    <MenuItem icon="link" onSelect={() => { close(); setAction('associate'); }}>
+                    <MenuItem
+                      icon="link"
+                      onSelect={() => {
+                        close();
+                        setAction('associate');
+                      }}
+                    >
                       Associate with scheduled game…
                     </MenuItem>
                   )}
                   {submission.status === 'accepted' && game && scheduled && (
-                    <MenuItem icon="edit" onSelect={() => { close(); setAction('edit'); }}>
+                    <MenuItem
+                      icon="edit"
+                      onSelect={() => {
+                        close();
+                        setAction('edit');
+                      }}
+                    >
                       Correct accepted result…
                     </MenuItem>
                   )}
                   {submission.status === 'accepted' && game && scheduled?.rightTeamId && (
-                    <MenuItem icon="flag" onSelect={() => { close(); setAction('protest'); }}>
+                    <MenuItem
+                      icon="flag"
+                      onSelect={() => {
+                        close();
+                        setAction('protest');
+                      }}
+                    >
                       Open protest…
                     </MenuItem>
                   )}
@@ -324,9 +370,22 @@ function SubmissionItem({
         </div>
       }
     >
-      {cancelledGame && review && <Callout tone="warning">This game is cancelled, so the submission cannot be accepted unless the game state is repaired first.</Callout>}
-      {warnings.length > 0 && <Callout tone="warning" title="Submission warnings">{warnings.map(describeWarning).join(' ')}</Callout>}
-      {game?.detailedStats && game.detailedStats !== 'complete' && <p className="director-text-meta">{game.detailedStats === 'unknown' ? 'Detailed stats not recorded.' : 'Detailed stats incomplete.'}</p>}
+      {cancelledGame && review && (
+        <Callout tone="warning">
+          This game is cancelled, so the submission cannot be accepted unless the game state is repaired
+          first.
+        </Callout>
+      )}
+      {warnings.length > 0 && (
+        <Callout tone="warning" title="Submission warnings">
+          {warnings.map(describeWarning).join(' ')}
+        </Callout>
+      )}
+      {game?.detailedStats && game.detailedStats !== 'complete' && (
+        <p className="director-text-meta">
+          {game.detailedStats === 'unknown' ? 'Detailed stats not recorded.' : 'Detailed stats incomplete.'}
+        </p>
+      )}
       <Diagnostics
         label="Submission details"
         standalone={false}
@@ -375,8 +434,12 @@ function SubmissionActionDialog({
     (candidate) => !candidate.bye && !['accepted', 'cancelled'].includes(candidate.status),
   );
   const [scheduledGameId, setScheduledGameId] = useState(unresolvedChoices[0]?.id ?? '');
-  const leftScore = scheduled ? game.scores.find((entry) => entry.teamId === scheduled.leftTeamId) : undefined;
-  const rightScore = scheduled?.rightTeamId ? game.scores.find((entry) => entry.teamId === scheduled.rightTeamId) : undefined;
+  const leftScore = scheduled
+    ? game.scores.find((entry) => entry.teamId === scheduled.leftTeamId)
+    : undefined;
+  const rightScore = scheduled?.rightTeamId
+    ? game.scores.find((entry) => entry.teamId === scheduled.rightTeamId)
+    : undefined;
   const [left, setLeft] = useState(String(leftScore?.score ?? ''));
   const [right, setRight] = useState(String(rightScore?.score ?? ''));
   const [category, setCategory] = useState<'tossup' | 'bonus' | 'procedure' | 'other'>('other');
@@ -390,14 +453,23 @@ function SubmissionActionDialog({
         onClose={onClose}
         onSubmit={() => {
           const rejected = controller.rejectSubmission(submission.id, reason.trim() || undefined);
-          onAnnounce(rejected ? 'Result rejected and game reopened.' : errorNotice('The result could not be rejected; review the current state.'));
+          onAnnounce(
+            rejected
+              ? 'Result rejected and game reopened.'
+              : errorNotice('The result could not be rejected; review the current state.'),
+          );
           if (rejected) onClose();
         }}
         submitLabel="Reject result"
         submitVariant="danger"
       >
         <Field label="Reason" optional hint="Stored on the submission and in audit history.">
-          <TextArea rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Scores transposed; room is re-entering" />
+          <TextArea
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Scores transposed; room is re-entering"
+          />
         </Field>
       </Dialog>
     );
@@ -412,25 +484,32 @@ function SubmissionActionDialog({
         onSubmit={() => {
           if (!scheduledGameId) return;
           const associated = controller.associateSubmission(submission.id, scheduledGameId);
-          onAnnounce(associated ? 'Result associated with the selected game and kept in review.' : errorNotice('The result was not associated; review the Director error.'));
+          onAnnounce(
+            associated
+              ? 'Result associated with the selected game and kept in review.'
+              : errorNotice('The result was not associated; review the Director error.'),
+          );
           if (associated) onClose();
         }}
         submitLabel="Associate result"
         submitDisabled={!scheduledGameId}
       >
-        <Field label="Scheduled game" render={({ id, describedBy }) => (
-          <Select
-            id={id}
-            ariaDescribedBy={describedBy}
-            value={scheduledGameId}
-            options={unresolvedChoices.map((candidate) => ({
-              value: candidate.id,
-              label: matchupLabel(state, candidate),
-              detail: state.rounds.find((round) => round.id === candidate.roundId)?.name,
-            }))}
-            onChange={setScheduledGameId}
-          />
-        )} />
+        <Field
+          label="Scheduled game"
+          render={({ id, describedBy }) => (
+            <Select
+              id={id}
+              ariaDescribedBy={describedBy}
+              value={scheduledGameId}
+              options={unresolvedChoices.map((candidate) => ({
+                value: candidate.id,
+                label: matchupLabel(state, candidate),
+                detail: state.rounds.find((round) => round.id === candidate.roundId)?.name,
+              }))}
+              onChange={setScheduledGameId}
+            />
+          )}
+        />
       </Dialog>
     );
   }
@@ -456,16 +535,31 @@ function SubmissionActionDialog({
                 : entry,
           );
           const saved = controller.editAcceptedResult(game.id, scores, reason.trim() || undefined);
-          onAnnounce(saved ? 'Accepted result corrected; the prior result remains in audit history.' : errorNotice('The correction was not saved; review the Director error.'));
+          onAnnounce(
+            saved
+              ? 'Accepted result corrected; the prior result remains in audit history.'
+              : errorNotice('The correction was not saved; review the Director error.'),
+          );
           if (saved) onClose();
         }}
         submitLabel="Save correction"
       >
         <FieldGrid>
-          <Field label={teamLabel(state, scheduled.leftTeamId)}><NumberInput step={1} value={left} onChange={(event) => setLeft(event.target.value)} /></Field>
-          <Field label={teamLabel(state, scheduled.rightTeamId)}><NumberInput step={1} value={right} onChange={(event) => setRight(event.target.value)} /></Field>
+          <Field label={teamLabel(state, scheduled.leftTeamId)}>
+            <NumberInput step={1} value={left} onChange={(event) => setLeft(event.target.value)} />
+          </Field>
+          <Field label={teamLabel(state, scheduled.rightTeamId)}>
+            <NumberInput step={1} value={right} onChange={(event) => setRight(event.target.value)} />
+          </Field>
         </FieldGrid>
-        <Field label="Correction note" optional><TextArea rows={3} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why is the accepted score changing?" /></Field>
+        <Field label="Correction note" optional>
+          <TextArea
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Why is the accepted score changing?"
+          />
+        </Field>
       </Dialog>
     );
   }
@@ -481,26 +575,40 @@ function SubmissionActionDialog({
           return;
         }
         const saved = controller.addProtest(game.id, description, category);
-        onAnnounce(saved ? 'Protest opened and retained with the accepted result.' : errorNotice('The protest was not opened; review the Director error.'));
+        onAnnounce(
+          saved
+            ? 'Protest opened and retained with the accepted result.'
+            : errorNotice('The protest was not opened; review the Director error.'),
+        );
         if (saved) onClose();
       }}
       submitLabel="Open protest"
     >
-      <Field label="Category" render={({ id, describedBy }) => (
-        <Select<typeof category>
-          id={id}
-          ariaDescribedBy={describedBy}
-          value={category}
-          options={[
-            { value: 'tossup', label: 'Tossup' },
-            { value: 'bonus', label: 'Bonus' },
-            { value: 'procedure', label: 'Procedure' },
-            { value: 'other', label: 'Other' },
-          ]}
-          onChange={setCategory}
+      <Field
+        label="Category"
+        render={({ id, describedBy }) => (
+          <Select<typeof category>
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={category}
+            options={[
+              { value: 'tossup', label: 'Tossup' },
+              { value: 'bonus', label: 'Bonus' },
+              { value: 'procedure', label: 'Procedure' },
+              { value: 'other', label: 'Other' },
+            ]}
+            onChange={setCategory}
+          />
+        )}
+      />
+      <Field label="Description">
+        <TextArea
+          rows={4}
+          value={description}
+          onChange={(event) => setDescription(event.target.value)}
+          placeholder="What needs review?"
         />
-      )} />
-      <Field label="Description"><TextArea rows={4} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="What needs review?" /></Field>
+      </Field>
     </Dialog>
   );
 }
@@ -521,15 +629,24 @@ function GamesQueue({
   onClearNavigationTarget?: () => void;
 }) {
   const [showSettled, setShowSettled] = useState(false);
-  const targetGameId = navigationTarget?.section === 'results' && navigationTarget.entityType === 'game' ? navigationTarget.entityId : undefined;
+  const targetGameId =
+    navigationTarget?.section === 'results' && navigationTarget.entityType === 'game'
+      ? navigationTarget.entityId
+      : undefined;
   const scheduled = state.scheduledGames.filter(
     (game) => !game.bye && (!roundId || game.roundId === roundId || game.id === targetGameId),
   );
-  const games = scheduled.filter((game) => showSettled || !['accepted', 'cancelled'].includes(game.status) || game.id === targetGameId);
+  const games = scheduled.filter(
+    (game) => showSettled || !['accepted', 'cancelled'].includes(game.status) || game.id === targetGameId,
+  );
   if (!games.length) {
     return (
       <EmptyState title="No unresolved games" description="Every game in this view is accepted or cancelled.">
-        {scheduled.length > 0 && <Button variant="secondary" onClick={() => setShowSettled(true)}>Show settled games</Button>}
+        {scheduled.length > 0 && (
+          <Button variant="secondary" onClick={() => setShowSettled(true)}>
+            Show settled games
+          </Button>
+        )}
       </EmptyState>
     );
   }
@@ -574,7 +691,13 @@ function ScheduledGameItem({
 }) {
   const confirmAction = useConfirm();
   const [forfeitOpen, setForfeitOpen] = useState(false);
-  const highlighted = useNavigationHighlight(navigationTarget, 'results', 'game', game.id, onClearNavigationTarget);
+  const highlighted = useNavigationHighlight(
+    navigationTarget,
+    'results',
+    'game',
+    game.id,
+    onClearNavigationTarget,
+  );
   const round = state.rounds.find((entry) => entry.id === game.roundId);
   const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
   const canCancel = !['accepted', 'cancelled'].includes(game.status) && !game.bracketKey;
@@ -582,36 +705,86 @@ function ScheduledGameItem({
   return (
     <SummaryItem
       className={highlighted ? 'is-navigation-target' : ''}
-      title={<strong data-director-navigation-id={game.id} data-director-navigation-focus tabIndex={-1}>{matchupLabel(state, game)}</strong>}
+      title={
+        <strong data-director-navigation-id={game.id} data-director-navigation-focus tabIndex={-1}>
+          {matchupLabel(state, game)}
+        </strong>
+      }
       status={<StateLabel state={game.status} label={gameStatusLabel(game.status)} />}
       summary={`${round?.name ?? 'Unknown round'} · ${room?.name ?? 'Room unassigned'}`}
-      actions={(canCancel || canForfeit) ? (
-        <ActionMenu label={`${matchupLabel(state, game)} actions`} triggerLabel="Game actions" triggerVariant="secondary">
-          {(close) => (
-            <>
-              {canForfeit && <MenuItem icon="flag" onSelect={() => { close(); setForfeitOpen(true); }}>Record forfeit…</MenuItem>}
-              {canCancel && <MenuItem icon="trash" tone="danger" onSelect={() => {
-                close();
-                void (async () => {
-                  const approved = await confirmAction({
-                    title: `Cancel ${matchupLabel(state, game)}?`,
-                    consequence: 'The game will no longer block the round from closing. Any raw submissions remain in history.',
-                    confirmLabel: 'Cancel game',
-                    tone: 'danger',
-                  });
-                  if (!approved) return;
-                  const cancelled = controller.cancelScheduledGame(game.id);
-                  onAnnounce(cancelled ? 'Scheduled game cancelled; the round can now close without it.' : errorNotice('The game was not cancelled; review the Director error.'));
-                })();
-              }}>Cancel game…</MenuItem>}
-            </>
-          )}
-        </ActionMenu>
-      ) : undefined}
+      actions={
+        canCancel || canForfeit ? (
+          <ActionMenu
+            label={`${matchupLabel(state, game)} actions`}
+            triggerLabel="Game actions"
+            triggerVariant="secondary"
+          >
+            {(close) => (
+              <>
+                {canForfeit && (
+                  <MenuItem
+                    icon="flag"
+                    onSelect={() => {
+                      close();
+                      setForfeitOpen(true);
+                    }}
+                  >
+                    Record forfeit…
+                  </MenuItem>
+                )}
+                {canCancel && (
+                  <MenuItem
+                    icon="trash"
+                    tone="danger"
+                    onSelect={() => {
+                      close();
+                      void (async () => {
+                        const approved = await confirmAction({
+                          title: `Cancel ${matchupLabel(state, game)}?`,
+                          consequence:
+                            'The game will no longer block the round from closing. Any raw submissions remain in history.',
+                          confirmLabel: 'Cancel game',
+                          tone: 'danger',
+                        });
+                        if (!approved) return;
+                        const cancelled = controller.cancelScheduledGame(game.id);
+                        onAnnounce(
+                          cancelled
+                            ? 'Scheduled game cancelled; the round can now close without it.'
+                            : errorNotice('The game was not cancelled; review the Director error.'),
+                        );
+                      })();
+                    }}
+                  >
+                    Cancel game…
+                  </MenuItem>
+                )}
+              </>
+            )}
+          </ActionMenu>
+        ) : undefined
+      }
     >
-      {game.bracketKey && game.status === 'cancelled' && <Callout tone="warning">Cancelled elimination game: generate a replacement or record an explicit administrative resolution before closing the phase.</Callout>}
-      <Diagnostics label="Game details" standalone={false} items={[{ term: 'Game ID', value: game.id, mono: true }]} />
-      {forfeitOpen && <ForfeitDialog state={state} game={game} controller={controller} onAnnounce={onAnnounce} onClose={() => setForfeitOpen(false)} />}
+      {game.bracketKey && game.status === 'cancelled' && (
+        <Callout tone="warning">
+          Cancelled elimination game: generate a replacement or record an explicit administrative resolution
+          before closing the phase.
+        </Callout>
+      )}
+      <Diagnostics
+        label="Game details"
+        standalone={false}
+        items={[{ term: 'Game ID', value: game.id, mono: true }]}
+      />
+      {forfeitOpen && (
+        <ForfeitDialog
+          state={state}
+          game={game}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setForfeitOpen(false)}
+        />
+      )}
     </SummaryItem>
   );
 }
@@ -638,15 +811,28 @@ function ForfeitDialog({
       onClose={onClose}
       onSubmit={() => {
         const saved = controller.recordForfeit(game.id, teamId);
-        onAnnounce(saved ? `${teamLabel(state, teamId)} recorded as forfeiting.` : errorNotice('The forfeit was not recorded; review the Director error.'));
+        onAnnounce(
+          saved
+            ? `${teamLabel(state, teamId)} recorded as forfeiting.`
+            : errorNotice('The forfeit was not recorded; review the Director error.'),
+        );
         if (saved) onClose();
       }}
       submitLabel="Record forfeit"
       submitVariant="danger"
     >
-      <Field label="Forfeiting team" render={({ id, describedBy }) => (
-        <Select id={id} ariaDescribedBy={describedBy} value={teamId} options={choices.map((id) => ({ value: id, label: teamLabel(state, id) }))} onChange={setTeamId} />
-      )} />
+      <Field
+        label="Forfeiting team"
+        render={({ id, describedBy }) => (
+          <Select
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={teamId}
+            options={choices.map((id) => ({ value: id, label: teamLabel(state, id) }))}
+            onChange={setTeamId}
+          />
+        )}
+      />
     </Dialog>
   );
 }
@@ -660,11 +846,20 @@ function ProtestsQueue({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  if (!state.protests.length) return <EmptyState title="No protests" description="Protests opened from accepted results will appear here." />;
+  if (!state.protests.length)
+    return (
+      <EmptyState title="No protests" description="Protests opened from accepted results will appear here." />
+    );
   return (
     <SummaryList ariaLabel="Protests">
       {state.protests.map((protest) => (
-        <ProtestItem key={protest.id} protest={protest} state={state} controller={controller} onAnnounce={onAnnounce} />
+        <ProtestItem
+          key={protest.id}
+          protest={protest}
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+        />
       ))}
     </SummaryList>
   );
@@ -683,18 +878,42 @@ function ProtestItem({
 }) {
   const [rulingOpen, setRulingOpen] = useState(false);
   const game = state.games.find((entry) => entry.id === protest.gameId);
-  const scheduled = game ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId) : undefined;
+  const scheduled = game
+    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+    : undefined;
   return (
     <SummaryItem
       title={<strong>{scheduled ? matchupLabel(state, scheduled) : 'Unmatched game'}</strong>}
       status={<StateLabel state={protest.status} label={protest.status === 'open' ? 'Open' : 'Ruled'} />}
       summary={`${categoryLabel(protest.category)} · ${protest.description}`}
-      actions={protest.status === 'open' && game && scheduled?.rightTeamId ? <Button variant="primary" onClick={() => setRulingOpen(true)}>Rule protest</Button> : undefined}
+      actions={
+        protest.status === 'open' && game && scheduled?.rightTeamId ? (
+          <Button variant="primary" onClick={() => setRulingOpen(true)}>
+            Rule protest
+          </Button>
+        ) : undefined
+      }
     >
-      {protest.ruling && <p className="director-text-secondary"><strong>Ruling:</strong> {protest.ruling}</p>}
-      {protest.scoreAdjustment && <p className="director-text-meta">Score correction: {teamLabel(state, protest.scoreAdjustment.teamId)} {formatDelta(protest.scoreAdjustment.delta)}</p>}
+      {protest.ruling && (
+        <p className="director-text-secondary">
+          <strong>Ruling:</strong> {protest.ruling}
+        </p>
+      )}
+      {protest.scoreAdjustment && (
+        <p className="director-text-meta">
+          Score correction: {teamLabel(state, protest.scoreAdjustment.teamId)}{' '}
+          {formatDelta(protest.scoreAdjustment.delta)}
+        </p>
+      )}
       {rulingOpen && game && scheduled?.rightTeamId && (
-        <ProtestRulingDialog protest={protest} state={state} scheduled={scheduled} controller={controller} onAnnounce={onAnnounce} onClose={() => setRulingOpen(false)} />
+        <ProtestRulingDialog
+          protest={protest}
+          state={state}
+          scheduled={scheduled}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setRulingOpen(false)}
+        />
       )}
     </SummaryItem>
   );
@@ -732,34 +951,52 @@ function ProtestRulingDialog({
         if (teamId || delta.trim()) {
           const parsed = Number(delta);
           if (!teamId || !Number.isInteger(parsed) || parsed === 0) {
-            onAnnounce(errorNotice('A score correction needs a team and a non-zero whole-number adjustment.'));
+            onAnnounce(
+              errorNotice('A score correction needs a team and a non-zero whole-number adjustment.'),
+            );
             return;
           }
           adjustment = { teamId, delta: parsed };
         }
         const saved = controller.ruleProtest(protest.id, ruling, adjustment);
-        onAnnounce(saved ? 'Protest ruled and retained in the audit history.' : errorNotice('The ruling was not saved; review the Director error.'));
+        onAnnounce(
+          saved
+            ? 'Protest ruled and retained in the audit history.'
+            : errorNotice('The ruling was not saved; review the Director error.'),
+        );
         if (saved) onClose();
       }}
       submitLabel="Save ruling"
     >
-      <Field label="Ruling"><TextArea rows={4} value={ruling} onChange={(event) => setRuling(event.target.value)} placeholder="How was the protest resolved?" /></Field>
+      <Field label="Ruling">
+        <TextArea
+          rows={4}
+          value={ruling}
+          onChange={(event) => setRuling(event.target.value)}
+          placeholder="How was the protest resolved?"
+        />
+      </Field>
       <DialogSection title="Optional score correction">
         <FieldGrid>
-          <Field label="Team" render={({ id, describedBy }) => (
-            <Select
-              id={id}
-              ariaDescribedBy={describedBy}
-              value={teamId}
-              options={[
-                { value: '', label: 'No score change' },
-                { value: scheduled.leftTeamId, label: teamLabel(state, scheduled.leftTeamId) },
-                { value: scheduled.rightTeamId ?? '', label: teamLabel(state, scheduled.rightTeamId) },
-              ].filter((option) => option.value !== '' || option.label === 'No score change')}
-              onChange={setTeamId}
-            />
-          )} />
-          <Field label="Point adjustment" hint="Positive or negative whole number."><NumberInput step={1} value={delta} onChange={(event) => setDelta(event.target.value)} /></Field>
+          <Field
+            label="Team"
+            render={({ id, describedBy }) => (
+              <Select
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={teamId}
+                options={[
+                  { value: '', label: 'No score change' },
+                  { value: scheduled.leftTeamId, label: teamLabel(state, scheduled.leftTeamId) },
+                  { value: scheduled.rightTeamId ?? '', label: teamLabel(state, scheduled.rightTeamId) },
+                ].filter((option) => option.value !== '' || option.label === 'No score change')}
+                onChange={setTeamId}
+              />
+            )}
+          />
+          <Field label="Point adjustment" hint="Positive or negative whole number.">
+            <NumberInput step={1} value={delta} onChange={(event) => setDelta(event.target.value)} />
+          </Field>
         </FieldGrid>
       </DialogSection>
     </Dialog>
@@ -780,7 +1017,8 @@ function ManualResultDialog({
   onClose: () => void;
 }) {
   const choices = state.scheduledGames.filter(
-    (game) => !game.bye && (!roundId || game.roundId === roundId) && !['accepted', 'cancelled'].includes(game.status),
+    (game) =>
+      !game.bye && (!roundId || game.roundId === roundId) && !['accepted', 'cancelled'].includes(game.status),
   );
   const [gameId, setGameId] = useState(choices[0]?.id ?? '');
   const selected = choices.find((game) => game.id === gameId) ?? choices[0];
@@ -802,9 +1040,26 @@ function ManualResultDialog({
           onAnnounce(errorNotice('Enter both final team scores as finite whole numbers.'));
           return;
         }
-        const score = (teamId: string, value: number): TeamGameScore => ({ teamId, score: value, superpowers: 0, powers: 0, gets: 0, negs: 0, bonuses: 0, bonusPoints: 0, bouncebacks: 0 });
-        const accepted = controller.addManualResult({ scheduledGameId: selected.id, scores: [score(selected.leftTeamId, left), score(selected.rightTeamId, right)] });
-        onAnnounce(accepted ? 'Manual result accepted locally; standings updated.' : errorNotice('Manual result was not accepted; review the current game state.'));
+        const score = (teamId: string, value: number): TeamGameScore => ({
+          teamId,
+          score: value,
+          superpowers: 0,
+          powers: 0,
+          gets: 0,
+          negs: 0,
+          bonuses: 0,
+          bonusPoints: 0,
+          bouncebacks: 0,
+        });
+        const accepted = controller.addManualResult({
+          scheduledGameId: selected.id,
+          scores: [score(selected.leftTeamId, left), score(selected.rightTeamId, right)],
+        });
+        onAnnounce(
+          accepted
+            ? 'Manual result accepted locally; standings updated.'
+            : errorNotice('Manual result was not accepted; review the current game state.'),
+        );
         if (accepted) onClose();
       }}
       submitLabel="Accept manual result"
@@ -814,18 +1069,41 @@ function ManualResultDialog({
         <Callout tone="info">There are no unresolved scheduled games available for manual entry.</Callout>
       ) : (
         <>
-          <Field label="Scheduled game" render={({ id, describedBy }) => (
-            <Select
-              id={id}
-              ariaDescribedBy={describedBy}
-              value={selected?.id ?? ''}
-              options={choices.map((game) => ({ value: game.id, label: matchupLabel(state, game), detail: state.rounds.find((round) => round.id === game.roundId)?.name }))}
-              onChange={(value) => { setGameId(value); setLeftScore(''); setRightScore(''); }}
-            />
-          )} />
+          <Field
+            label="Scheduled game"
+            render={({ id, describedBy }) => (
+              <Select
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={selected?.id ?? ''}
+                options={choices.map((game) => ({
+                  value: game.id,
+                  label: matchupLabel(state, game),
+                  detail: state.rounds.find((round) => round.id === game.roundId)?.name,
+                }))}
+                onChange={(value) => {
+                  setGameId(value);
+                  setLeftScore('');
+                  setRightScore('');
+                }}
+              />
+            )}
+          />
           <FieldGrid>
-            <Field label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}><NumberInput step={1} value={leftScore} onChange={(event) => setLeftScore(event.target.value)} /></Field>
-            <Field label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}><NumberInput step={1} value={rightScore} onChange={(event) => setRightScore(event.target.value)} /></Field>
+            <Field label={selected ? teamLabel(state, selected.leftTeamId) : 'Left score'}>
+              <NumberInput
+                step={1}
+                value={leftScore}
+                onChange={(event) => setLeftScore(event.target.value)}
+              />
+            </Field>
+            <Field label={selected ? teamLabel(state, selected.rightTeamId) : 'Right score'}>
+              <NumberInput
+                step={1}
+                value={rightScore}
+                onChange={(event) => setRightScore(event.target.value)}
+              />
+            </Field>
           </FieldGrid>
         </>
       )}
@@ -834,10 +1112,20 @@ function ManualResultDialog({
 }
 
 function submissionState(status: DirectorState['submissions'][number]['status']): string {
-  return status === 'accepted' ? 'accepted' : status === 'rejected' ? 'rejected' : status === 'duplicate' || status === 'superseded' ? 'warning' : 'review';
+  return status === 'accepted'
+    ? 'accepted'
+    : status === 'rejected'
+      ? 'rejected'
+      : status === 'duplicate' || status === 'superseded'
+        ? 'warning'
+        : 'review';
 }
 function submissionStatusLabel(status: DirectorState['submissions'][number]['status']): string {
-  return status === 'received' ? 'Review' : status === 'superseded' ? 'Superseded' : status.charAt(0).toUpperCase() + status.slice(1);
+  return status === 'received'
+    ? 'Review'
+    : status === 'superseded'
+      ? 'Superseded'
+      : status.charAt(0).toUpperCase() + status.slice(1);
 }
 function teamLabel(state: DirectorState, id: string | null): string {
   return id ? (state.teams.find((team) => team.id === id)?.displayName ?? 'Unknown team') : 'Bye';
@@ -846,13 +1134,34 @@ function matchupLabel(state: DirectorState, game: DirectorState['scheduledGames'
   return `${teamLabel(state, game.leftTeamId)} vs ${teamLabel(state, game.rightTeamId)}`;
 }
 function gameStatusLabel(status: DirectorState['scheduledGames'][number]['status']): string {
-  return ({ scheduled: 'Not started', released: 'Awaiting result', live: 'Playing', submitted: 'Review', accepted: 'Accepted', cancelled: 'Cancelled' } as Record<string, string>)[status] ?? status;
+  return (
+    (
+      {
+        scheduled: 'Not started',
+        released: 'Awaiting result',
+        live: 'Playing',
+        submitted: 'Review',
+        accepted: 'Accepted',
+        cancelled: 'Cancelled',
+      } as Record<string, string>
+    )[status] ?? status
+  );
 }
 function categoryLabel(category: DirectorState['protests'][number]['category']): string {
-  return category === 'tossup' ? 'Tossup' : category === 'bonus' ? 'Bonus' : category === 'procedure' ? 'Procedure' : 'Other';
+  return category === 'tossup'
+    ? 'Tossup'
+    : category === 'bonus'
+      ? 'Bonus'
+      : category === 'procedure'
+        ? 'Procedure'
+        : 'Other';
 }
-function formatDelta(delta: number): string { return `${delta > 0 ? '+' : ''}${delta}`; }
+function formatDelta(delta: number): string {
+  return `${delta > 0 ? '+' : ''}${delta}`;
+}
 function formatTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

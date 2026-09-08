@@ -82,7 +82,13 @@ export function TeamsView({
         .filter((player) => player.teamId === team.id)
         .map((player) => player.name)
         .join(' ');
-      return [team.displayName, organizationNameFor(state, team.organizationId), team.teamLetter, team.status, players]
+      return [
+        team.displayName,
+        organizationNameFor(state, team.organizationId),
+        team.teamLetter,
+        team.status,
+        players,
+      ]
         .join(' ')
         .toLocaleLowerCase()
         .includes(needle);
@@ -198,7 +204,9 @@ export function TeamsView({
       header: 'Roster',
       priority: 2,
       render: (team) => {
-        const activePlayers = state.players.filter((player) => player.teamId === team.id && player.active).length;
+        const activePlayers = state.players.filter(
+          (player) => player.teamId === team.id && player.active,
+        ).length;
         return `${activePlayers} player${activePlayers === 1 ? '' : 's'}`;
       },
     },
@@ -209,7 +217,9 @@ export function TeamsView({
       render: (team) => (
         <StateLabel
           state={team.status}
-          label={team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'}
+          label={
+            team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
+          }
         />
       ),
     },
@@ -416,11 +426,16 @@ function TeamActions({
     }
     let changed = false;
     try {
-      changed = team.status === 'dropped' ? controller.restoreTeam(team.id) : await dropTeamFlexibly(controller, team.id);
+      changed =
+        team.status === 'dropped'
+          ? controller.restoreTeam(team.id)
+          : await dropTeamFlexibly(controller, team.id);
     } catch (reason: unknown) {
       onAnnounce(
         errorNotice(
-          reason instanceof Error ? `Team status was not changed: ${reason.message}` : 'Team status was not changed.',
+          reason instanceof Error
+            ? `Team status was not changed: ${reason.message}`
+            : 'Team status was not changed.',
         ),
       );
       return;
@@ -602,7 +617,9 @@ function TeamDialog({
       if (player.id) {
         if (player.removed) {
           if (!controller.removePlayer(player.id)) {
-            onAnnounce(errorNotice(`Could not remove ${player.name || 'that player'}; review the Director error.`));
+            onAnnounce(
+              errorNotice(`Could not remove ${player.name || 'that player'}; review the Director error.`),
+            );
             return;
           }
         } else if (
@@ -614,7 +631,9 @@ function TeamDialog({
             notes: player.notes || undefined,
           })
         ) {
-          onAnnounce(errorNotice(`Could not save ${player.name || 'that player'}; review the Director error.`));
+          onAnnounce(
+            errorNotice(`Could not save ${player.name || 'that player'}; review the Director error.`),
+          );
           return;
         }
       } else if (!player.removed && player.name.trim()) {
@@ -663,7 +682,8 @@ function TeamDialog({
               maxLength={4}
               onChange={(event) => {
                 setTeamLetter(event.target.value);
-                if (!displayNameCustomized) setDisplayName(suggestedName(organizationName, event.target.value));
+                if (!displayNameCustomized)
+                  setDisplayName(suggestedName(organizationName, event.target.value));
               }}
             />
           </Field>
@@ -731,7 +751,11 @@ function TeamDialog({
                   onChange={(event) => updatePlayer(player.key, { notes: event.target.value })}
                   placeholder="Notes"
                 />
-                <Button variant="quiet" type="button" onClick={() => updatePlayer(player.key, { removed: true })}>
+                <Button
+                  variant="quiet"
+                  type="button"
+                  onClick={() => updatePlayer(player.key, { removed: true })}
+                >
                   Remove
                 </Button>
               </div>

@@ -3,8 +3,8 @@
 How Director looks and behaves, and the rules that keep it one application
 rather than several admin interfaces sharing a sidebar.
 
-Read `DIRECTOR_PRODUCT_PRINCIPLES.md` first. That document says *what* should be
-visible; this one says *how* it is built.
+Read `DIRECTOR_PRODUCT_PRINCIPLES.md` first. That document says _what_ should be
+visible; this one says _how_ it is built.
 
 ## The shape of the code
 
@@ -31,16 +31,16 @@ does not exist, it goes in `components/`, not in the feature.
 
 Six levels, each with a job. Nothing operationally important below 13px.
 
-| Token | Size | Used for |
-| --- | --- | --- |
-| `--director-text-display` | 28px | the startup screen only |
-| `--director-text-title` | 22px | page `<h1>` |
-| `--director-text-section` | 16px | panel and section headings |
-| `--director-text-subhead` | 14px semibold | sub-sections, dialog groups |
-| `--director-text-body` | 14px | body copy, controls, table cells |
-| `--director-text-secondary` | 13px | supporting copy, field labels, hints |
-| `--director-text-meta` | 12px | table headers, timestamps, counts, badges |
-| `--director-text-micro` | 11px | keycaps only |
+| Token                       | Size          | Used for                                  |
+| --------------------------- | ------------- | ----------------------------------------- |
+| `--director-text-display`   | 28px          | the startup screen only                   |
+| `--director-text-title`     | 22px          | page `<h1>`                               |
+| `--director-text-section`   | 16px          | panel and section headings                |
+| `--director-text-subhead`   | 14px semibold | sub-sections, dialog groups               |
+| `--director-text-body`      | 14px          | body copy, controls, table cells          |
+| `--director-text-secondary` | 13px          | supporting copy, field labels, hints      |
+| `--director-text-meta`      | 12px          | table headers, timestamps, counts, badges |
+| `--director-text-micro`     | 11px          | keycaps only                              |
 
 The font is the platform UI face. Director loads no webfont.
 
@@ -56,12 +56,12 @@ dense table rows. Icon-only controls are never smaller than
 
 ### Action hierarchy
 
-| Variant | Rule |
-| --- | --- |
-| `primary` | **One per surface.** The thing the operator came to do. |
-| `secondary` | Ordinary actions beside it. The default. |
-| `quiet` | Low emphasis, dense toolbars, row actions. |
-| `danger` | Destructive or tournament-altering. Outlined. |
+| Variant        | Rule                                                       |
+| -------------- | ---------------------------------------------------------- |
+| `primary`      | **One per surface.** The thing the operator came to do.    |
+| `secondary`    | Ordinary actions beside it. The default.                   |
+| `quiet`        | Low emphasis, dense toolbars, row actions.                 |
+| `danger`       | Destructive or tournament-altering. Outlined.              |
 | `danger-solid` | **Only** the confirm button in a destructive confirmation. |
 
 Anything that navigates is a `Link`. Anything that only reports state is a
@@ -73,19 +73,19 @@ literal `•••` is gone; the trigger is the shared `more` icon.
 There are no visible native dropdowns, checkboxes, multi-selects, datalists,
 `<details>`, or `confirm()` dialogs in Director.
 
-| Instead of | Use |
-| --- | --- |
-| `<select>` | `Select` (scannable) or `Combobox` (searchable) |
-| `<select multiple>` | `MultiSelect` or `Checklist` |
-| `<datalist>` | `Combobox` |
-| `type="checkbox"` | `Checkbox` / `CheckboxGroup` / `Checklist` |
-| `type="radio"` | `RadioGroup` / `ChoiceCards` / `Segmented` |
-| `<details>` | `Disclosure` / `AdvancedSection` / `Diagnostics` |
-| `confirm()` | `useConfirm()` |
-| a timezone text field | `TimeZoneField` |
-| a file `<label>` | `FilePicker` / `MenuFileItem` |
+| Instead of            | Use                                              |
+| --------------------- | ------------------------------------------------ |
+| `<select>`            | `Select` (scannable) or `Combobox` (searchable)  |
+| `<select multiple>`   | `MultiSelect` or `Checklist`                     |
+| `<datalist>`          | `Combobox`                                       |
+| `type="checkbox"`     | `Checkbox` / `CheckboxGroup` / `Checklist`       |
+| `type="radio"`        | `RadioGroup` / `ChoiceCards` / `Segmented`       |
+| `<details>`           | `Disclosure` / `AdvancedSection` / `Diagnostics` |
+| `confirm()`           | `useConfirm()`                                   |
+| a timezone text field | `TimeZoneField`                                  |
+| a file `<label>`      | `FilePicker` / `MenuFileItem`                    |
 
-Native elements that *stay*, because the platform's behaviour is genuinely
+Native elements that _stay_, because the platform's behaviour is genuinely
 better and the popup is transient rather than part of the page's appearance:
 `type="date"`, `type="time"`, `type="file"`, and the real `input` inside every
 `Checkbox`/`Switch`/radio (visually hidden, so labels, `indeterminate`, form
@@ -109,7 +109,7 @@ One answer to "what happens when I edit something?"
    `SaveState` says so on screen. Cancel and Escape discard. Enter submits.
 2. **Inline edits** commit on blur/Enter and confirm visibly.
 3. **Operations** apply immediately and are `Switch`es or buttons — never
-   checkboxes in a form. The `Checkbox`/`Switch` choice *is* the signal.
+   checkboxes in a form. The `Checkbox`/`Switch` choice _is_ the signal.
 
 ## Dialog action convention
 
@@ -121,15 +121,15 @@ Escape and the close button do exactly what Cancel does.
 ## Status
 
 Five tones — `neutral`, `info`, `success`, `warning`, `danger` — and four
-presentations. The choice between presentations is about *what kind of thing* is
+presentations. The choice between presentations is about _what kind of thing_ is
 in the state, never about emphasis:
 
-| Presentation | For |
-| --- | --- |
-| `Badge` | the state of an object, inline |
-| `StateLabel` | the same fact where a pill would out-shout the data |
-| `Callout` | a state needing a sentence and usually an action |
-| `Panel data-tone` | a container that is itself in that state |
+| Presentation      | For                                                 |
+| ----------------- | --------------------------------------------------- |
+| `Badge`           | the state of an object, inline                      |
+| `StateLabel`      | the same fact where a pill would out-shout the data |
+| `Callout`         | a state needing a sentence and usually an action    |
+| `Panel data-tone` | a container that is itself in that state            |
 
 Tinted surfaces mean a status. Nothing is tinted for variety.
 
@@ -150,12 +150,12 @@ for rounds, rooms, staff, and transfer locations.
 
 `DataTable` columns declare a priority:
 
-| Priority | Meaning |
-| --- | --- |
-| 1 | identity. Never hidden. |
-| 2 | what the page is *for*. |
-| 3 | useful context. Hidden below 1040px. |
-| 4 | telemetry and secondary detail. Hidden below 1240px. |
+| Priority | Meaning                                              |
+| -------- | ---------------------------------------------------- |
+| 1        | identity. Never hidden.                              |
+| 2        | what the page is _for_.                              |
+| 3        | useful context. Hidden below 1040px.                 |
+| 4        | telemetry and secondary detail. Hidden below 1240px. |
 
 Anything hidden stays reachable in the row's detail surface. No table sets a
 `min-width` and blanket `nowrap`; only numeric cells refuse to wrap.
@@ -206,12 +206,12 @@ Legacy `tournament` deep links resolve to Tournament day via
 
 ### Where global things live
 
-| Home | Owns |
-| --- | --- |
+| Home                              | Owns                                              |
+| --------------------------------- | ------------------------------------------------- |
 | Tournament switcher (sidebar top) | switching tournaments; New, Open, Details, Manage |
-| Operator (sidebar bottom) | operator identity, Settings, Help |
-| Settings (a destination) | everything editable |
-| Top bar | global search, and the operational "now" strip |
+| Operator (sidebar bottom)         | operator identity, Settings, Help                 |
+| Settings (a destination)          | everything editable                               |
+| Top bar                           | global search, and the operational "now" strip    |
 
 Global search is a command/entity navigator. It **never** filters a page —
 page-local filtering is `SearchField` on the page.

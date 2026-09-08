@@ -22,14 +22,17 @@ export function RecommendedPlan({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const activeTeamCount = state.teams.filter((team) => team.status === 'confirmed').length;
-  const planApplicable = state.rounds.every((round) => round.status === 'planned') && state.scheduledGames.length === 0;
+  const planApplicable =
+    state.rounds.every((round) => round.status === 'planned') && state.scheduledGames.length === 0;
   const planSet = activeTeamCount >= 2 && planApplicable ? recommendTournamentPlan(activeTeamCount) : null;
   if (!planSet) return null;
 
   const apply = (plan: TournamentPlanRecommendation): void => {
     if (!controller.applyTournamentPlan(plan)) {
       onAnnounce(
-        errorNotice('That plan no longer applies: rounds or pairings already exist. Edit the structure directly.'),
+        errorNotice(
+          'That plan no longer applies: rounds or pairings already exist. Edit the structure directly.',
+        ),
       );
       return;
     }
@@ -61,7 +64,12 @@ export function RecommendedPlan({
         <div className="director-actions director-format-alternatives">
           <span className="director-text-meta">Other suitable formats:</span>
           {alternatives.map((alternative) => (
-            <Button key={alternative.id} variant="quiet" onClick={() => apply(alternative)} title={alternative.summary}>
+            <Button
+              key={alternative.id}
+              variant="quiet"
+              onClick={() => apply(alternative)}
+              title={alternative.summary}
+            >
               {alternative.title}
             </Button>
           ))}

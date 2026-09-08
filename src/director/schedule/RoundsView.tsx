@@ -124,14 +124,19 @@ export function RoundsView({
     if (controller.addTimelineEvent({ type, title, visibility: 'public' })) {
       onAnnounce(`${title} added at the end of the day. Use Reorder when you want to change its position.`);
     } else {
-      onAnnounce(errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`));
+      onAnnounce(
+        errorNotice(`The ${title.toLowerCase()} event could not be saved; review the Director error.`),
+      );
     }
   };
 
   if (!tournament) {
     return (
       <Page>
-        <PageHeader title="Tournament day" description="A tournament is required before the day can be planned." />
+        <PageHeader
+          title="Tournament day"
+          description="A tournament is required before the day can be planned."
+        />
         <Callout tone="info" title="No tournament open">
           Create a tournament from Overview before planning rounds and day events.
         </Callout>
@@ -219,7 +224,9 @@ export function RoundsView({
           {orderedItems.map((item, index) => {
             const reorderControl = reorder.active ? (
               <ReorderHandle
-                label={item.kind === 'round' && item.round ? item.round.name : (item.event?.title ?? 'day item')}
+                label={
+                  item.kind === 'round' && item.round ? item.round.name : (item.event?.title ?? 'day item')
+                }
                 index={index}
                 count={orderedItems.length}
                 onMove={(delta) => moveItem(item, delta)}
@@ -252,13 +259,15 @@ export function RoundsView({
                 onDelete={async () => {
                   const approved = await confirmAction({
                     title: `Remove “${item.event?.title}”?`,
-                    consequence: 'The event will be removed from the tournament-day sequence. Rounds and results are not changed.',
+                    consequence:
+                      'The event will be removed from the tournament-day sequence. Rounds and results are not changed.',
                     confirmLabel: 'Remove event',
                     tone: 'danger',
                   });
                   if (!approved) return;
                   if (controller.removeTimelineEvent(item.id)) onAnnounce(`${item.event?.title} removed.`);
-                  else onAnnounce(errorNotice('The schedule event was not removed; review the Director error.'));
+                  else
+                    onAnnounce(errorNotice('The schedule event was not removed; review the Director error.'));
                 }}
               />
             ) : null;
@@ -440,15 +449,13 @@ function RoundWorkspaceRow({
       className={highlighted ? 'is-navigation-target' : ''}
       selected={isActive}
       title={
-        <strong
-          data-director-navigation-id={round.id}
-          data-director-navigation-focus
-          tabIndex={-1}
-        >
+        <strong data-director-navigation-id={round.id} data-director-navigation-focus tabIndex={-1}>
           {round.name}
         </strong>
       }
-      status={<StateLabel state={statusState} label={friendlyRoundStatus(round.status, accepted, games.length)} />}
+      status={
+        <StateLabel state={statusState} label={friendlyRoundStatus(round.status, accepted, games.length)} />
+      }
       summary={summary || 'Pairings and delivery appear here once the round has games.'}
       actions={
         <div className="director-actions">
@@ -536,7 +543,11 @@ function RoundWorkspaceRow({
       }
     >
       {isActive && games.length > 0 && (
-        <Progress value={accepted} max={games.length} label={`${accepted} of ${games.length} results accepted`} />
+        <Progress
+          value={accepted}
+          max={games.length}
+          label={`${accepted} of ${games.length} results accepted`}
+        />
       )}
       {returned.length > 0 && (
         <Callout
@@ -545,7 +556,9 @@ function RoundWorkspaceRow({
           actions={
             <Button
               variant="quiet"
-              onClick={() => onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id })}
+              onClick={() =>
+                onNavigate('results', { section: 'results', entityType: 'round', entityId: round.id })
+              }
             >
               Review results
             </Button>
@@ -702,7 +715,10 @@ function RoundRoomsDialog({
           if (saved) {
             onAnnounce(`Rooms assigned to ${round.name}.`);
             onClose();
-          } else onAnnounce(errorNotice('Rooms could not be assigned; choose available rooms without duplicates.'));
+          } else
+            onAnnounce(
+              errorNotice('Rooms could not be assigned; choose available rooms without duplicates.'),
+            );
         });
       }}
       submitLabel="Save rooms"
@@ -716,7 +732,7 @@ function RoundRoomsDialog({
               .map((room) => ({
                 value: room.id,
                 label: room.name,
-                detail: room.location || undefined,
+                detail: room.building || undefined,
                 disabled: !roomIsAssignable(state, room.id) && room.id !== game.roomId,
               })),
           ];
@@ -755,7 +771,9 @@ function MoveGameDialog({
   onClose: () => void;
 }) {
   const choices = state.scheduledGames
-    .filter((game) => game.roundId === round.id && !game.bye && game.roomId !== null && game.status !== 'cancelled')
+    .filter(
+      (game) => game.roundId === round.id && !game.bye && game.roomId !== null && game.status !== 'cancelled',
+    )
     .map((game) => ({
       game,
       destinations: state.rooms.filter(
@@ -818,7 +836,7 @@ function MoveGameDialog({
             options={(selected?.destinations ?? []).map((room) => ({
               value: room.id,
               label: room.name,
-              detail: room.location || undefined,
+              detail: room.building || undefined,
             }))}
             onChange={setRoomId}
           />
@@ -841,7 +859,9 @@ function RoundUsbDialog({
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
-  const writable = drives.filter((drive) => drive.kind === 'removable-drive' && drive.connected && !drive.readOnly);
+  const writable = drives.filter(
+    (drive) => drive.kind === 'removable-drive' && drive.connected && !drive.readOnly,
+  );
   const [driveId, setDriveId] = useState(writable[0]?.id ?? '');
   const active = driveId ? transfers.isOperationActive(prepareOperation(driveId)) : false;
   return (
@@ -865,7 +885,11 @@ function RoundUsbDialog({
             id={id}
             ariaDescribedBy={describedBy}
             value={driveId}
-            options={writable.map((drive) => ({ value: drive.id, label: drive.label, detail: drive.path || undefined }))}
+            options={writable.map((drive) => ({
+              value: drive.id,
+              label: drive.label,
+              detail: drive.path || undefined,
+            }))}
             onChange={setDriveId}
           />
         )}
@@ -915,14 +939,24 @@ function RoundPlannedTimeDialog({
           label="Date"
           optional
           render={({ id, describedBy }) => (
-            <DateField id={id} aria-describedby={describedBy} value={date} onChange={(event) => setDate(event.target.value)} />
+            <DateField
+              id={id}
+              aria-describedby={describedBy}
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+            />
           )}
         />
         <Field
           label="Time"
           optional
           render={({ id, describedBy }) => (
-            <TimeField id={id} aria-describedby={describedBy} value={time} onChange={(event) => setTime(event.target.value)} />
+            <TimeField
+              id={id}
+              aria-describedby={describedBy}
+              value={time}
+              onChange={(event) => setTime(event.target.value)}
+            />
           )}
         />
       </FieldGrid>
@@ -1005,7 +1039,9 @@ function RoundRecoveryDialog({
               onClick={() => {
                 const closed = controller.closeRound(round.id);
                 onAnnounce(
-                  closed ? `${round.name} closed.` : errorNotice(`${round.name} could not close; resolve every game first.`),
+                  closed
+                    ? `${round.name} closed.`
+                    : errorNotice(`${round.name} could not close; resolve every game first.`),
                 );
               }}
             >
@@ -1014,14 +1050,18 @@ function RoundRecoveryDialog({
           )}
         </div>
       </DialogSection>
-      <DialogSection title="Remove round" description="Removal also removes the round's games and dependent result records.">
+      <DialogSection
+        title="Remove round"
+        description="Removal also removes the round's games and dependent result records."
+      >
         <Button
           variant="danger"
           onClick={async () => {
             const approved = await confirmAction({
               title: `Remove ${round.name}?`,
               body: 'A recovery point will be created before removal.',
-              consequence: 'The round, its games, submissions, protests, and any accepted results will be removed from the current tournament state.',
+              consequence:
+                'The round, its games, submissions, protests, and any accepted results will be removed from the current tournament state.',
               confirmLabel: 'Remove round',
               tone: 'danger',
             });
@@ -1167,7 +1207,9 @@ function TimelineEventDialog({
       location,
       teamIds,
     };
-    const saved = event ? controller.updateTimelineEvent(event.id, input) : controller.addTimelineEvent(input);
+    const saved = event
+      ? controller.updateTimelineEvent(event.id, input)
+      : controller.addTimelineEvent(input);
     if (!saved) {
       onAnnounce(errorNotice('The schedule event could not be saved; review the Director error.'));
       return;
@@ -1237,7 +1279,11 @@ function TimelineEventDialog({
               value={roomId}
               options={[
                 { value: '', label: 'No numbered room' },
-                ...state.rooms.map((room) => ({ value: room.id, label: room.name, detail: room.location || undefined })),
+                ...state.rooms.map((room) => ({
+                  value: room.id,
+                  label: room.name,
+                  detail: room.building || undefined,
+                })),
               ]}
               onChange={setRoomId}
             />
@@ -1250,28 +1296,48 @@ function TimelineEventDialog({
             label="Start date"
             optional
             render={({ id, describedBy }) => (
-              <DateField id={id} aria-describedby={describedBy} value={startDate} onChange={(eventObject) => setStartDate(eventObject.target.value)} />
+              <DateField
+                id={id}
+                aria-describedby={describedBy}
+                value={startDate}
+                onChange={(eventObject) => setStartDate(eventObject.target.value)}
+              />
             )}
           />
           <Field
             label="Start time"
             optional
             render={({ id, describedBy }) => (
-              <TimeField id={id} aria-describedby={describedBy} value={startTime} onChange={(eventObject) => setStartTime(eventObject.target.value)} />
+              <TimeField
+                id={id}
+                aria-describedby={describedBy}
+                value={startTime}
+                onChange={(eventObject) => setStartTime(eventObject.target.value)}
+              />
             )}
           />
           <Field
             label="End date"
             optional
             render={({ id, describedBy }) => (
-              <DateField id={id} aria-describedby={describedBy} value={endDate} onChange={(eventObject) => setEndDate(eventObject.target.value)} />
+              <DateField
+                id={id}
+                aria-describedby={describedBy}
+                value={endDate}
+                onChange={(eventObject) => setEndDate(eventObject.target.value)}
+              />
             )}
           />
           <Field
             label="End time"
             optional
             render={({ id, describedBy }) => (
-              <TimeField id={id} aria-describedby={describedBy} value={endTime} onChange={(eventObject) => setEndTime(eventObject.target.value)} />
+              <TimeField
+                id={id}
+                aria-describedby={describedBy}
+                value={endTime}
+                onChange={(eventObject) => setEndTime(eventObject.target.value)}
+              />
             )}
           />
         </FieldGrid>

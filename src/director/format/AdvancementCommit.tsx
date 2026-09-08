@@ -93,7 +93,8 @@ export function AdvancementCommit({
       {rule && (
         <p className="director-text-secondary">
           Top {rule.qualifiersPerPool} from each pool
-          {(rule.wildcards ?? 0) > 0 ? ` · best ${rule.wildcards} remaining teams` : ''}. Placement changes are audited; results stay untouched.
+          {(rule.wildcards ?? 0) > 0 ? ` · best ${rule.wildcards} remaining teams` : ''}. Placement changes
+          are audited; results stay untouched.
         </p>
       )}
       <Field
@@ -135,8 +136,15 @@ export function AdvancementCommit({
         ))}
       </div>
       {(needsReason || reason !== '') && (
-        <Field label="Director decision" hint="Required when the cutoff is tied or placement differs from the preview.">
-          <TextInput value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Why this placement differs from the preview" />
+        <Field
+          label="Director decision"
+          hint="Required when the cutoff is tied or placement differs from the preview."
+        >
+          <TextInput
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Why this placement differs from the preview"
+          />
         </Field>
       )}
       <Button variant="primary" onClick={commit}>

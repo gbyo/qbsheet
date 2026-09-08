@@ -77,8 +77,7 @@ export function StandingsView({
       header: 'W–L',
       priority: 1,
       align: 'right',
-      render: (standing) =>
-        `${standing.wins}–${standing.losses}${standing.ties ? `–${standing.ties}` : ''}`,
+      render: (standing) => `${standing.wins}–${standing.losses}${standing.ties ? `–${standing.ties}` : ''}`,
     },
     {
       key: 'winPct',
@@ -96,11 +95,41 @@ export function StandingsView({
     },
     ...(showDetailed
       ? ([
-          { key: 'pf', header: 'PF', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.pointsFor },
-          { key: 'pa', header: 'PA', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.pointsAgainst },
-          { key: 'powers', header: 'Powers', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.powers },
-          { key: 'gets', header: 'Gets', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.gets },
-          { key: 'negs', header: 'Negs', priority: 3, align: 'right' as const, render: (standing: TeamStanding) => standing.negs },
+          {
+            key: 'pf',
+            header: 'PF',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: TeamStanding) => standing.pointsFor,
+          },
+          {
+            key: 'pa',
+            header: 'PA',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: TeamStanding) => standing.pointsAgainst,
+          },
+          {
+            key: 'powers',
+            header: 'Powers',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: TeamStanding) => standing.powers,
+          },
+          {
+            key: 'gets',
+            header: 'Gets',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: TeamStanding) => standing.gets,
+          },
+          {
+            key: 'negs',
+            header: 'Negs',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: TeamStanding) => standing.negs,
+          },
         ] satisfies Column<TeamStanding>[])
       : []),
   ];
@@ -117,14 +146,44 @@ export function StandingsView({
         />
       ),
     },
-    { key: 'games', header: 'Games', priority: 1, align: 'right', render: (standing) => standing.gamesPlayed },
+    {
+      key: 'games',
+      header: 'Games',
+      priority: 1,
+      align: 'right',
+      render: (standing) => standing.gamesPlayed,
+    },
     { key: 'ppg', header: 'PPG', priority: 1, align: 'right', render: (standing) => standing.ppg.toFixed(1) },
     ...(showDetailed
       ? ([
-          { key: 'powers', header: 'Powers', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.powers },
-          { key: 'gets', header: 'Gets', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.gets },
-          { key: 'negs', header: 'Negs', priority: 2, align: 'right' as const, render: (standing: PlayerStanding) => standing.negs },
-          { key: 'bonus', header: 'Bonus pts', priority: 3, align: 'right' as const, render: (standing: PlayerStanding) => standing.bonusPoints },
+          {
+            key: 'powers',
+            header: 'Powers',
+            priority: 2,
+            align: 'right' as const,
+            render: (standing: PlayerStanding) => standing.powers,
+          },
+          {
+            key: 'gets',
+            header: 'Gets',
+            priority: 2,
+            align: 'right' as const,
+            render: (standing: PlayerStanding) => standing.gets,
+          },
+          {
+            key: 'negs',
+            header: 'Negs',
+            priority: 2,
+            align: 'right' as const,
+            render: (standing: PlayerStanding) => standing.negs,
+          },
+          {
+            key: 'bonus',
+            header: 'Bonus pts',
+            priority: 3,
+            align: 'right' as const,
+            render: (standing: PlayerStanding) => standing.bonusPoints,
+          },
         ] satisfies Column<PlayerStanding>[])
       : []),
   ];
@@ -177,11 +236,7 @@ export function StandingsView({
             { value: 'players', label: `Players ${playerStandings.length}` },
           ]}
         />
-        <Switch
-          checked={showDetailed}
-          label="Detailed scoring columns"
-          onChange={setShowDetailed}
-        />
+        <Switch checked={showDetailed} label="Detailed scoring columns" onChange={setShowDetailed} />
       </div>
 
       {view === 'teams' ? (
@@ -205,7 +260,9 @@ export function StandingsView({
         >
           {playerStandings.length === 0 ? (
             <div className="director-empty-in-panel">
-              <p className="director-empty-copy">Player statistics will appear when accepted results include rosters.</p>
+              <p className="director-empty-copy">
+                Player statistics will appear when accepted results include rosters.
+              </p>
             </div>
           ) : (
             <DataTable
@@ -229,10 +286,7 @@ function downloadTeamStandings(
   onAnnounce('Team standings CSV exported.');
 }
 
-function downloadPlayerStats(
-  state: DirectorState,
-  onAnnounce: (announcement: AnnounceInput) => void,
-): void {
+function downloadPlayerStats(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
   onAnnounce('Player statistics CSV exported.');
 }

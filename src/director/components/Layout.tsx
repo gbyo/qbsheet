@@ -119,7 +119,12 @@ export function Panel({
 }) {
   const Heading = level === 2 ? 'h2' : 'h3';
   return (
-    <section id={id} className={`director-panel ${className}`.trim()} data-tone={tone} data-testid={dataTestId}>
+    <section
+      id={id}
+      className={`director-panel ${className}`.trim()}
+      data-tone={tone}
+      data-testid={dataTestId}
+    >
       {(title || actions) && (
         <div className="director-panel-header">
           <div>

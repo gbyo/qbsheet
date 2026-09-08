@@ -310,7 +310,11 @@ function PacketItem({
           },
         ]}
       >
-        {packet.notes && <p><strong>Notes:</strong> {packet.notes}</p>}
+        {packet.notes && (
+          <p>
+            <strong>Notes:</strong> {packet.notes}
+          </p>
+        )}
         {usingRounds.length > 0 && (
           <div className="director-actions">
             {usingRounds.map((round) => (
@@ -352,7 +356,9 @@ function PacketItem({
                         : 'Unresolved assignment'}
                     </strong>
                   }
-                  status={<StateLabel state={used ? 'finished' : 'scheduled'} label={used ? 'Used' : 'Assigned'} />}
+                  status={
+                    <StateLabel state={used ? 'finished' : 'scheduled'} label={used ? 'Used' : 'Assigned'} />
+                  }
                   summary={
                     scheduled
                       ? `${round?.name ?? 'Unknown round'}${scheduled.roomId ? ` · ${roomName(state, scheduled.roomId)}` : ''}`
@@ -407,7 +413,11 @@ function PacketDialog({
       submitLabel={packet ? 'Save changes' : 'Add packet'}
     >
       <Field label="Packet name">
-        <TextInput value={name} onChange={(event) => setName(event.target.value)} placeholder="Round 1 · Set A" />
+        <TextInput
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Round 1 · Set A"
+        />
       </Field>
       <Checkbox
         checked={tiebreaker}
@@ -428,9 +438,7 @@ function PacketDialog({
 }
 
 function teamName(state: DirectorState, teamId: string | null): string {
-  return teamId
-    ? (state.teams.find((team) => team.id === teamId)?.displayName ?? 'Unknown team')
-    : 'Bye';
+  return teamId ? (state.teams.find((team) => team.id === teamId)?.displayName ?? 'Unknown team') : 'Bye';
 }
 
 function roomName(state: DirectorState, roomId: string): string {

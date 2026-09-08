@@ -184,7 +184,9 @@ export function OverviewView({
       {round ? (
         <Panel
           title={round.name}
-          description={nextEvent ? `Up next: ${nextEvent.title} · then ${round.name}` : 'Current tournament round'}
+          description={
+            nextEvent ? `Up next: ${nextEvent.title} · then ${round.name}` : 'Current tournament round'
+          }
           tone={round.status === 'released' ? 'info' : undefined}
           actions={
             <>
@@ -324,7 +326,9 @@ export function OverviewView({
                   : 'Memory only',
           },
           { term: 'Audit history', value: `${state.audit.length} entries` },
-          ...(!nativeServerAvailable ? [{ term: 'Native server', value: 'Unavailable in this browser' }] : []),
+          ...(!nativeServerAvailable
+            ? [{ term: 'Native server', value: 'Unavailable in this browser' }]
+            : []),
         ]}
       >
         <Button variant="quiet" icon="history" onClick={() => onNavigate('settings')}>

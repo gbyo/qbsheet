@@ -29,7 +29,6 @@ import {
   StateLabel,
   SummaryItem,
   SummaryList,
-  Switch,
   TextArea,
   TextInput,
   type SelectOption,
@@ -129,7 +128,9 @@ export function RoomsView({
     [state],
   );
   const pairingRooms = state.rooms.filter((room) => assignableRoomIds.has(room.id));
-  const helpRequests = [...state.qbtcpHelpRequests].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const helpRequests = [...state.qbtcpHelpRequests].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  );
   const rosterAmendments = [...state.qbtcpRosterAmendments].reverse();
   const openHelpCount = helpRequests.filter((request) => request.status === 'open').length;
   const pendingAmendments = rosterAmendments.filter((entry) => entry.status === 'pending').length;
@@ -155,7 +156,9 @@ export function RoomsView({
       const next = await nativeServer.toggle();
       onAnnounce(next.message ?? (next.running ? 'QBTCP server started.' : 'QBTCP server stopped.'));
     } catch (reason: unknown) {
-      onAnnounce(errorNotice(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.'));
+      onAnnounce(
+        errorNotice(reason instanceof Error ? reason.message : 'The QBTCP server could not be changed.'),
+      );
     }
   };
 
@@ -178,7 +181,9 @@ export function RoomsView({
       onAnnounce(`Pairing invitation issued for ${invitation.roomName}.`);
     } catch (reason: unknown) {
       onAnnounce(
-        errorNotice(reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.'),
+        errorNotice(
+          reason instanceof Error ? reason.message : 'A room pairing invitation could not be issued.',
+        ),
       );
     } finally {
       setPairingRoomId(null);
@@ -339,7 +344,9 @@ export function RoomsView({
       {editingStaffId && (
         <StaffDialog
           key={editingStaffId}
-          member={editingStaffId === 'new' ? undefined : state.staff.find((member) => member.id === editingStaffId)}
+          member={
+            editingStaffId === 'new' ? undefined : state.staff.find((member) => member.id === editingStaffId)
+          }
           controller={controller}
           onAnnounce={onAnnounce}
           onClose={() => setEditingStaffId(null)}
@@ -516,7 +523,11 @@ function RoomSummary({
         <>
           <span>{location || 'No location details'}</span>
           <span> · Current: {currentWork}</span>
-          <span> · Next round: {assignable ? 'Assignable' : room.available ? 'Waiting for current work' : 'Unavailable'}</span>
+          <span>
+            {' '}
+            · Next round:{' '}
+            {assignable ? 'Assignable' : room.available ? 'Waiting for current work' : 'Unavailable'}
+          </span>
           {people && <span> · {people}</span>}
         </>
       }
@@ -536,7 +547,8 @@ function RoomSummary({
                       onAnnounce(
                         `${room.name} marked ${room.available ? 'unavailable' : 'available'} for future assignment.`,
                       );
-                    } else onAnnounce(errorNotice(`${room.name} was not changed; review the Director error.`));
+                    } else
+                      onAnnounce(errorNotice(`${room.name} was not changed; review the Director error.`));
                   }}
                 >
                   {room.available ? 'Mark unavailable' : 'Mark available'}
@@ -559,10 +571,26 @@ function RoomSummary({
       }
     >
       {(room.accessibility || room.directions || room.notes || roomQbtcpHasDetail(state, room.id)) && (
-        <Diagnostics label="Room details & QBTCP" standalone={false} hint="Wayfinding, notes, and connection telemetry.">
-          {room.accessibility && <p><strong>Accessibility:</strong> {room.accessibility}</p>}
-          {room.directions && <p><strong>Directions:</strong> {room.directions}</p>}
-          {room.notes && <p><strong>Notes:</strong> {room.notes}</p>}
+        <Diagnostics
+          label="Room details & QBTCP"
+          standalone={false}
+          hint="Wayfinding, notes, and connection telemetry."
+        >
+          {room.accessibility && (
+            <p>
+              <strong>Accessibility:</strong> {room.accessibility}
+            </p>
+          )}
+          {room.directions && (
+            <p>
+              <strong>Directions:</strong> {room.directions}
+            </p>
+          )}
+          {room.notes && (
+            <p>
+              <strong>Notes:</strong> {room.notes}
+            </p>
+          )}
           {roomQbtcpHasDetail(state, room.id) && <RoomQbtcpTelemetry state={state} roomId={room.id} />}
         </Diagnostics>
       )}
@@ -620,7 +648,9 @@ function RoomDialog({
     };
     const saved = room ? controller.updateRoom(room.id, payload) : controller.addRoom(payload);
     if (!saved) {
-      onAnnounce(errorNotice(`The room could not be ${room ? 'updated' : 'added'}; review the Director error.`));
+      onAnnounce(
+        errorNotice(`The room could not be ${room ? 'updated' : 'added'}; review the Director error.`),
+      );
       return;
     }
     onAnnounce(`${draft.name.trim()} ${room ? 'updated' : 'added'}.`);
@@ -628,11 +658,17 @@ function RoomDialog({
   };
   const moderatorOptions: SelectOption[] = [
     { value: '', label: 'Unassigned' },
-    ...staffForRole(state, 'moderator', draft.moderatorId).map((member) => ({ value: member.id, label: member.name })),
+    ...staffForRole(state, 'moderator', draft.moderatorId).map((member) => ({
+      value: member.id,
+      label: member.name,
+    })),
   ];
   const scorekeeperOptions: SelectOption[] = [
     { value: '', label: 'Unassigned' },
-    ...staffForRole(state, 'scorekeeper', draft.scorekeeperId).map((member) => ({ value: member.id, label: member.name })),
+    ...staffForRole(state, 'scorekeeper', draft.scorekeeperId).map((member) => ({
+      value: member.id,
+      label: member.name,
+    })),
   ];
   const equipmentOptions: SelectOption[] = [
     { value: '', label: 'Unassigned' },
@@ -651,19 +687,75 @@ function RoomDialog({
     >
       <DialogSection title="Location">
         <FieldGrid>
-          <Field label="Room name"><TextInput value={draft.name} onChange={(event) => set('name', event.target.value)} /></Field>
-          <Field label="Building" optional><TextInput value={draft.building} onChange={(event) => set('building', event.target.value)} /></Field>
-          <Field label="Floor" optional><TextInput value={draft.floor} onChange={(event) => set('floor', event.target.value)} /></Field>
-          <Field label="Accessibility" optional><TextInput value={draft.accessibility} onChange={(event) => set('accessibility', event.target.value)} placeholder="Step-free entrance" /></Field>
-          <Field label="Directions" optional spanAll><TextInput value={draft.directions} onChange={(event) => set('directions', event.target.value)} placeholder="East stairwell, first door on the left" /></Field>
-          <Field label="Notes" optional spanAll><TextArea rows={2} value={draft.notes} onChange={(event) => set('notes', event.target.value)} /></Field>
+          <Field label="Room name">
+            <TextInput value={draft.name} onChange={(event) => set('name', event.target.value)} />
+          </Field>
+          <Field label="Building" optional>
+            <TextInput value={draft.building} onChange={(event) => set('building', event.target.value)} />
+          </Field>
+          <Field label="Floor" optional>
+            <TextInput value={draft.floor} onChange={(event) => set('floor', event.target.value)} />
+          </Field>
+          <Field label="Accessibility" optional>
+            <TextInput
+              value={draft.accessibility}
+              onChange={(event) => set('accessibility', event.target.value)}
+              placeholder="Step-free entrance"
+            />
+          </Field>
+          <Field label="Directions" optional spanAll>
+            <TextInput
+              value={draft.directions}
+              onChange={(event) => set('directions', event.target.value)}
+              placeholder="East stairwell, first door on the left"
+            />
+          </Field>
+          <Field label="Notes" optional spanAll>
+            <TextArea rows={2} value={draft.notes} onChange={(event) => set('notes', event.target.value)} />
+          </Field>
         </FieldGrid>
       </DialogSection>
-      <DialogSection title="Assignments" description="Leave any resource unassigned when you do not want Director to track it.">
+      <DialogSection
+        title="Assignments"
+        description="Leave any resource unassigned when you do not want Director to track it."
+      >
         <FieldGrid>
-          <Field label="Moderator" render={({ id, describedBy }) => <Select id={id} ariaDescribedBy={describedBy} value={draft.moderatorId} options={moderatorOptions} onChange={(value) => set('moderatorId', value)} />} />
-          <Field label="Scorekeeper" render={({ id, describedBy }) => <Select id={id} ariaDescribedBy={describedBy} value={draft.scorekeeperId} options={scorekeeperOptions} onChange={(value) => set('scorekeeperId', value)} />} />
-          <Field label="Equipment" render={({ id, describedBy }) => <Select id={id} ariaDescribedBy={describedBy} value={draft.equipmentId} options={equipmentOptions} onChange={(value) => set('equipmentId', value)} />} />
+          <Field
+            label="Moderator"
+            render={({ id, describedBy }) => (
+              <Select
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={draft.moderatorId}
+                options={moderatorOptions}
+                onChange={(value) => set('moderatorId', value)}
+              />
+            )}
+          />
+          <Field
+            label="Scorekeeper"
+            render={({ id, describedBy }) => (
+              <Select
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={draft.scorekeeperId}
+                options={scorekeeperOptions}
+                onChange={(value) => set('scorekeeperId', value)}
+              />
+            )}
+          />
+          <Field
+            label="Equipment"
+            render={({ id, describedBy }) => (
+              <Select
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={draft.equipmentId}
+                options={equipmentOptions}
+                onChange={(value) => set('equipmentId', value)}
+              />
+            )}
+          />
         </FieldGrid>
         <Checkbox
           checked={draft.available}
@@ -696,9 +788,13 @@ function ResourceView({
   const hasItems = Array.isArray(children) ? children.length > 0 : true;
   return (
     <Panel title={title} description={description} flush>
-      {hasItems ? children : (
+      {hasItems ? (
+        children
+      ) : (
         <EmptyState title={emptyTitle} description={emptyDescription}>
-          <Button variant="primary" icon="plus" onClick={onAdd}>{addLabel}</Button>
+          <Button variant="primary" icon="plus" onClick={onAdd}>
+            {addLabel}
+          </Button>
         </EmptyState>
       )}
     </Panel>
@@ -719,11 +815,18 @@ function StaffSummary({
   return (
     <SummaryItem
       title={<strong>{member.name}</strong>}
-      status={<StateLabel state={member.available ? 'available' : 'offline'} label={member.available ? 'Available' : 'Unavailable'} />}
+      status={
+        <StateLabel
+          state={member.available ? 'available' : 'offline'}
+          label={member.available ? 'Available' : 'Unavailable'}
+        />
+      }
       summary={[member.roles.map(roleLabel).join(' · '), member.notes].filter(Boolean).join(' · ')}
       actions={
         <div className="director-actions">
-          <Button variant="secondary" icon="edit" onClick={onEdit}>Edit</Button>
+          <Button variant="secondary" icon="edit" onClick={onEdit}>
+            Edit
+          </Button>
           <ActionMenu label={`${member.name} actions`} triggerLabel={`${member.name} actions`}>
             {(close) => (
               <MenuItem
@@ -731,8 +834,11 @@ function StaffSummary({
                 onSelect={() => {
                   close();
                   if (controller.updateStaff(member.id, { available: !member.available })) {
-                    onAnnounce(`${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`);
-                  } else onAnnounce(errorNotice(`${member.name} was not changed; review the Director error.`));
+                    onAnnounce(
+                      `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
+                    );
+                  } else
+                    onAnnounce(errorNotice(`${member.name} was not changed; review the Director error.`));
                 }}
               >
                 {member.available ? 'Mark unavailable' : 'Mark available'}
@@ -758,7 +864,12 @@ function StaffDialog({
 }) {
   const [draft, setDraft] = useState<StaffDraft>(() =>
     member
-      ? { name: member.name, roles: member.roles.length ? [...member.roles] : ['moderator'], notes: member.notes ?? '', available: member.available }
+      ? {
+          name: member.name,
+          roles: member.roles.length ? [...member.roles] : ['moderator'],
+          notes: member.notes ?? '',
+          available: member.available,
+        }
       : blankStaff(),
   );
   const save = () => {
@@ -770,21 +881,53 @@ function StaffDialog({
       onAnnounce(errorNotice('Choose at least one staff role.'));
       return;
     }
-    const payload = { name: draft.name.trim(), roles: draft.roles, notes: draft.notes, available: draft.available };
+    const payload = {
+      name: draft.name.trim(),
+      roles: draft.roles,
+      notes: draft.notes,
+      available: draft.available,
+    };
     const saved = member ? controller.updateStaff(member.id, payload) : controller.addStaff(payload);
     if (!saved) {
-      onAnnounce(errorNotice(`The staff member could not be ${member ? 'updated' : 'added'}; review the Director error.`));
+      onAnnounce(
+        errorNotice(
+          `The staff member could not be ${member ? 'updated' : 'added'}; review the Director error.`,
+        ),
+      );
       return;
     }
     onAnnounce(`${draft.name.trim()} ${member ? 'updated' : 'added to staff'}.`);
     onClose();
   };
   return (
-    <Dialog title={member ? `Edit ${member.name}` : 'Add staff member'} onClose={onClose} onSubmit={save} submitLabel={member ? 'Save changes' : 'Add staff member'}>
-      <Field label="Name"><TextInput value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
-      <StaffRoleField roles={draft.roles} onChange={(roles) => setDraft((current) => ({ ...current, roles }))} />
-      <Field label="Notes" optional><TextArea rows={2} value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} /></Field>
-      <Checkbox checked={draft.available} label="Available for future assignment" onChange={(available) => setDraft((current) => ({ ...current, available }))} />
+    <Dialog
+      title={member ? `Edit ${member.name}` : 'Add staff member'}
+      onClose={onClose}
+      onSubmit={save}
+      submitLabel={member ? 'Save changes' : 'Add staff member'}
+    >
+      <Field label="Name">
+        <TextInput
+          value={draft.name}
+          onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+        />
+      </Field>
+      <StaffRoleField
+        roles={draft.roles}
+        onChange={(roles) => setDraft((current) => ({ ...current, roles }))}
+      />
+      <Field label="Notes" optional>
+        <TextArea
+          rows={2}
+          value={draft.notes}
+          onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
+        />
+      </Field>
+      <Checkbox
+        checked={draft.available}
+        label="Available for future assignment"
+        onChange={(available) => setDraft((current) => ({ ...current, available }))}
+      />
     </Dialog>
   );
 }
@@ -803,11 +946,18 @@ function EquipmentSummary({
   return (
     <SummaryItem
       title={<strong>{item.name}</strong>}
-      status={<StateLabel state={item.available ? 'available' : 'offline'} label={item.available ? 'Available' : 'Unavailable'} />}
+      status={
+        <StateLabel
+          state={item.available ? 'available' : 'offline'}
+          label={item.available ? 'Available' : 'Unavailable'}
+        />
+      }
       summary={[equipmentKindLabel(item.kind), item.notes].filter(Boolean).join(' · ')}
       actions={
         <div className="director-actions">
-          <Button variant="secondary" icon="edit" onClick={onEdit}>Edit</Button>
+          <Button variant="secondary" icon="edit" onClick={onEdit}>
+            Edit
+          </Button>
           <ActionMenu label={`${item.name} actions`} triggerLabel={`${item.name} actions`}>
             {(close) => (
               <MenuItem
@@ -815,7 +965,9 @@ function EquipmentSummary({
                 onSelect={() => {
                   close();
                   if (controller.updateEquipment(item.id, { available: !item.available })) {
-                    onAnnounce(`${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`);
+                    onAnnounce(
+                      `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
+                    );
                   } else onAnnounce(errorNotice(`${item.name} was not changed; review the Director error.`));
                 }}
               >
@@ -841,40 +993,74 @@ function EquipmentDialog({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState<EquipmentDraft>(() =>
-    item ? { name: item.name, kind: item.kind, notes: item.notes ?? '', available: item.available } : blankEquipment(),
+    item
+      ? { name: item.name, kind: item.kind, notes: item.notes ?? '', available: item.available }
+      : blankEquipment(),
   );
   const save = () => {
     if (!draft.name.trim()) {
       onAnnounce(errorNotice('Enter an equipment name first.'));
       return;
     }
-    const payload = { name: draft.name.trim(), kind: draft.kind, notes: draft.notes, available: draft.available };
+    const payload = {
+      name: draft.name.trim(),
+      kind: draft.kind,
+      notes: draft.notes,
+      available: draft.available,
+    };
     const saved = item ? controller.updateEquipment(item.id, payload) : controller.addEquipment(payload);
     if (!saved) {
-      onAnnounce(errorNotice(`The equipment resource could not be ${item ? 'updated' : 'added'}; review the Director error.`));
+      onAnnounce(
+        errorNotice(
+          `The equipment resource could not be ${item ? 'updated' : 'added'}; review the Director error.`,
+        ),
+      );
       return;
     }
     onAnnounce(`${draft.name.trim()} ${item ? 'updated' : 'added to equipment'}.`);
     onClose();
   };
   return (
-    <Dialog title={item ? `Edit ${item.name}` : 'Add equipment'} onClose={onClose} onSubmit={save} submitLabel={item ? 'Save changes' : 'Add equipment'}>
-      <Field label="Name"><TextInput value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></Field>
-      <Field label="Type" render={({ id, describedBy }) => (
-        <Select<EquipmentKind>
-          id={id}
-          ariaDescribedBy={describedBy}
-          value={draft.kind}
-          options={[
-            { value: 'buzzer', label: 'Buzzer' },
-            { value: 'device', label: 'Laptop / tablet' },
-            { value: 'other', label: 'Other' },
-          ]}
-          onChange={(kind) => setDraft((current) => ({ ...current, kind }))}
+    <Dialog
+      title={item ? `Edit ${item.name}` : 'Add equipment'}
+      onClose={onClose}
+      onSubmit={save}
+      submitLabel={item ? 'Save changes' : 'Add equipment'}
+    >
+      <Field label="Name">
+        <TextInput
+          value={draft.name}
+          onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
         />
-      )} />
-      <Field label="Notes" optional><TextArea rows={2} value={draft.notes} onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))} /></Field>
-      <Checkbox checked={draft.available} label="Available for future assignment" onChange={(available) => setDraft((current) => ({ ...current, available }))} />
+      </Field>
+      <Field
+        label="Type"
+        render={({ id, describedBy }) => (
+          <Select<EquipmentKind>
+            id={id}
+            ariaDescribedBy={describedBy}
+            value={draft.kind}
+            options={[
+              { value: 'buzzer', label: 'Buzzer' },
+              { value: 'device', label: 'Laptop / tablet' },
+              { value: 'other', label: 'Other' },
+            ]}
+            onChange={(kind) => setDraft((current) => ({ ...current, kind }))}
+          />
+        )}
+      />
+      <Field label="Notes" optional>
+        <TextArea
+          rows={2}
+          value={draft.notes}
+          onChange={(event) => setDraft((current) => ({ ...current, notes: event.target.value }))}
+        />
+      </Field>
+      <Checkbox
+        checked={draft.available}
+        label="Available for future assignment"
+        onChange={(available) => setDraft((current) => ({ ...current, available }))}
+      />
     </Dialog>
   );
 }
@@ -897,41 +1083,74 @@ function RequestsView({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   if (!helpRequests.length && !rosterAmendments.length) {
-    return <EmptyState title="No operational requests" description="QBTCP help requests and roster amendments will appear here when a room sends one." />;
+    return (
+      <EmptyState
+        title="No operational requests"
+        description="QBTCP help requests and roster amendments will appear here when a room sends one."
+      />
+    );
   }
   return (
     <div className="director-stack">
       {helpRequests.length > 0 && (
-        <Panel title="Scorekeeper help" description="Requests from connected rooms that may need a director decision." flush>
+        <Panel
+          title="Scorekeeper help"
+          description="Requests from connected rooms that may need a director decision."
+          flush
+        >
           <SummaryList ariaLabel="Scorekeeper help requests">
             {helpRequests.map((request) => (
               <SummaryItem
                 key={request.id}
-                title={<strong>{request.roomName} · {request.category}</strong>}
-                status={<StateLabel state={request.status === 'open' ? 'help' : 'finished'} label={request.status === 'open' ? 'Open' : request.status} />}
+                title={
+                  <strong>
+                    {request.roomName} · {request.category}
+                  </strong>
+                }
+                status={
+                  <StateLabel
+                    state={request.status === 'open' ? 'help' : 'finished'}
+                    label={request.status === 'open' ? 'Open' : request.status}
+                  />
+                }
                 summary={`${request.message} · ${formatTime(request.createdAt)}${request.operatorName ? ` · ${request.operatorName}` : ''}`}
-                actions={request.status === 'open' ? (
-                  <Button
-                    variant="primary"
-                    onClick={() => {
-                      void controller.resolveQbtcpHelp(request.id).then((resolved) => {
-                        if (resolved) onAnnounce(`${request.roomName} help request resolved.`);
-                        else onAnnounce(errorNotice(`${request.roomName}'s help request was not resolved; review the Director error.`));
-                      });
-                    }}
-                  >
-                    Mark resolved
-                  </Button>
-                ) : undefined}
+                actions={
+                  request.status === 'open' ? (
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        void controller.resolveQbtcpHelp(request.id).then((resolved) => {
+                          if (resolved) onAnnounce(`${request.roomName} help request resolved.`);
+                          else
+                            onAnnounce(
+                              errorNotice(
+                                `${request.roomName}'s help request was not resolved; review the Director error.`,
+                              ),
+                            );
+                        });
+                      }}
+                    >
+                      Mark resolved
+                    </Button>
+                  ) : undefined
+                }
               >
-                <Diagnostics label="Request details" standalone={false} items={[{ term: 'Device', value: request.deviceId, mono: true }]} />
+                <Diagnostics
+                  label="Request details"
+                  standalone={false}
+                  items={[{ term: 'Device', value: request.deviceId, mono: true }]}
+                />
               </SummaryItem>
             ))}
           </SummaryList>
         </Panel>
       )}
       {rosterAmendments.length > 0 && (
-        <Panel title="Roster amendments" description="Reconcile scorekeeper-entered names with the canonical roster." flush>
+        <Panel
+          title="Roster amendments"
+          description="Reconcile scorekeeper-entered names with the canonical roster."
+          flush
+        >
           <SummaryList ariaLabel="Roster amendments">
             {rosterAmendments.map((entry) => {
               const playerName = stringField(entry.amendment.playerName) ?? 'Unrecognized player';
@@ -940,9 +1159,14 @@ function RequestsView({
               const referencedTeam = referencedTeamId
                 ? state.teams.find((candidate) => candidate.id === referencedTeamId)
                 : referencedTeamName
-                  ? state.teams.find((candidate) => candidate.displayName.trim().toLocaleLowerCase() === referencedTeamName.toLocaleLowerCase())
+                  ? state.teams.find(
+                      (candidate) =>
+                        candidate.displayName.trim().toLocaleLowerCase() ===
+                        referencedTeamName.toLocaleLowerCase(),
+                    )
                   : undefined;
-              const team = referencedTeam?.displayName ?? referencedTeamName ?? referencedTeamId ?? 'Team unresolved';
+              const team =
+                referencedTeam?.displayName ?? referencedTeamName ?? referencedTeamId ?? 'Team unresolved';
               const candidates = state.players.filter(
                 (player) => player.active && (!referencedTeam || player.teamId === referencedTeam.id),
               );
@@ -951,26 +1175,56 @@ function RequestsView({
                 <SummaryItem
                   key={entry.id}
                   title={<strong>{playerName}</strong>}
-                  status={<StateLabel state={entry.status === 'pending' ? 'review' : 'finished'} label={rosterAmendmentStatusLabel(entry.status)} />}
+                  status={
+                    <StateLabel
+                      state={entry.status === 'pending' ? 'review' : 'finished'}
+                      label={rosterAmendmentStatusLabel(entry.status)}
+                    />
+                  }
                   summary={`${team} · Original scorekeeper submission retained as evidence.${entry.decidedBy ? ` Decided by ${entry.decidedBy}.` : ''}`}
-                  actions={entry.status === 'pending' ? (
-                    <ActionMenu label={`${playerName} amendment actions`} triggerLabel="Resolve" triggerVariant="primary">
-                      {(close) => (
-                        <>
-                          <MenuItem onSelect={() => {
-                            close();
-                            if (controller.approveRosterAmendmentAsNew(entry.id)) onAnnounce(`${playerName} approved as a new canonical player.`);
-                            else onAnnounce(errorNotice(`${playerName} was not approved; review the Director error.`));
-                          }}>Approve as new</MenuItem>
-                          <MenuItem tone="danger" onSelect={() => {
-                            close();
-                            if (controller.rejectRosterAmendment(entry.id)) onAnnounce(`${playerName} roster amendment dismissed.`);
-                            else onAnnounce(errorNotice(`${playerName}'s roster amendment was not dismissed; review the Director error.`));
-                          }}>Reject amendment</MenuItem>
-                        </>
-                      )}
-                    </ActionMenu>
-                  ) : undefined}
+                  actions={
+                    entry.status === 'pending' ? (
+                      <ActionMenu
+                        label={`${playerName} amendment actions`}
+                        triggerLabel="Resolve"
+                        triggerVariant="primary"
+                      >
+                        {(close) => (
+                          <>
+                            <MenuItem
+                              onSelect={() => {
+                                close();
+                                if (controller.approveRosterAmendmentAsNew(entry.id))
+                                  onAnnounce(`${playerName} approved as a new canonical player.`);
+                                else
+                                  onAnnounce(
+                                    errorNotice(`${playerName} was not approved; review the Director error.`),
+                                  );
+                              }}
+                            >
+                              Approve as new
+                            </MenuItem>
+                            <MenuItem
+                              tone="danger"
+                              onSelect={() => {
+                                close();
+                                if (controller.rejectRosterAmendment(entry.id))
+                                  onAnnounce(`${playerName} roster amendment dismissed.`);
+                                else
+                                  onAnnounce(
+                                    errorNotice(
+                                      `${playerName}'s roster amendment was not dismissed; review the Director error.`,
+                                    ),
+                                  );
+                              }}
+                            >
+                              Reject amendment
+                            </MenuItem>
+                          </>
+                        )}
+                      </ActionMenu>
+                    ) : undefined
+                  }
                 >
                   {entry.status === 'pending' && (
                     <div className="director-roster-amendment-map">
@@ -988,7 +1242,9 @@ function RequestsView({
                               label: candidate.name,
                               detail: teamName(state, candidate.teamId),
                             }))}
-                            onChange={(value) => setMappings((previous) => ({ ...previous, [entry.id]: value }))}
+                            onChange={(value) =>
+                              setMappings((previous) => ({ ...previous, [entry.id]: value }))
+                            }
                           />
                         )}
                       />
@@ -996,15 +1252,23 @@ function RequestsView({
                         variant="secondary"
                         disabled={!selectedPlayerId}
                         onClick={() => {
-                          if (controller.mapRosterAmendment(entry.id, selectedPlayerId)) onAnnounce(`${playerName} mapped to the canonical roster.`);
-                          else onAnnounce(errorNotice(`${playerName} was not mapped; review the Director error.`));
+                          if (controller.mapRosterAmendment(entry.id, selectedPlayerId))
+                            onAnnounce(`${playerName} mapped to the canonical roster.`);
+                          else
+                            onAnnounce(
+                              errorNotice(`${playerName} was not mapped; review the Director error.`),
+                            );
                         }}
                       >
                         Map player
                       </Button>
                     </div>
                   )}
-                  <Diagnostics label="Amendment details" standalone={false} items={[{ term: 'Session', value: entry.sessionId, mono: true }]} />
+                  <Diagnostics
+                    label="Amendment details"
+                    standalone={false}
+                    items={[{ term: 'Session', value: entry.sessionId, mono: true }]}
+                  />
                 </SummaryItem>
               );
             })}
@@ -1023,7 +1287,7 @@ function QbtcpNetwork({
   qbtcpRunning,
   qbtcpHasError,
   pairingRooms,
-  invitations,
+  invitations = [],
   pairingRoomId,
   controller,
   onToggle,
@@ -1047,53 +1311,114 @@ function QbtcpNetwork({
   const status = nativeServer.status;
   return (
     <div className="director-stack">
-      {qbtcpHasError && <Callout tone="danger" title="QBTCP server needs attention">{status?.message}</Callout>}
+      {qbtcpHasError && (
+        <Callout tone="danger" title="QBTCP server needs attention">
+          {status?.message}
+        </Callout>
+      )}
       {controller.qbtcpHealth.error && <Callout tone="danger">{controller.qbtcpHealth.error}</Callout>}
       <div className="director-actions">
         {nativeDirector ? (
-          <Button variant={qbtcpRunning ? 'secondary' : 'primary'} icon={qbtcpRunning ? 'pause' : 'play'} disabled={qbtcpLoading} onClick={onToggle}>
+          <Button
+            variant={qbtcpRunning ? 'secondary' : 'primary'}
+            icon={qbtcpRunning ? 'pause' : 'play'}
+            disabled={qbtcpLoading}
+            onClick={onToggle}
+          >
             {qbtcpLoading ? 'Checking server' : qbtcpRunning ? 'Stop server' : 'Start server'}
           </Button>
         ) : (
-          <Callout tone="info">Open the Tauri Director app to start the LAN server. Browser preview can still plan manual games.</Callout>
+          <Callout tone="info">
+            Open the Tauri Director app to start the LAN server. Browser preview can still plan manual games.
+          </Callout>
         )}
         {qbtcpRunning && status?.pairingUrl && invitations.length <= 1 && (
-          <Button variant="secondary" icon="copy" onClick={() => onCopy(status.pairingUrl ?? '', 'Pairing link copied.')}>Copy pairing link</Button>
+          <Button
+            variant="secondary"
+            icon="copy"
+            onClick={() => onCopy(status.pairingUrl ?? '', 'Pairing link copied.')}
+          >
+            Copy pairing link
+          </Button>
         )}
       </div>
       <Diagnostics
         defaultOpen={qbtcpHasError}
         standalone={false}
         items={[
-          { term: 'Address', value: qbtcpRunning && status?.address ? `${status.address}${status.port ? `:${status.port}` : ''}` : 'Not listening', mono: true },
-          { term: 'Paired rooms', value: qbtcpRunning ? (status?.pairedRooms ?? state.qbtcpSessions.length) : '—' },
+          {
+            term: 'Address',
+            value:
+              qbtcpRunning && status?.address
+                ? `${status.address}${status.port ? `:${status.port}` : ''}`
+                : 'Not listening',
+            mono: true,
+          },
+          {
+            term: 'Paired rooms',
+            value: qbtcpRunning ? (status?.pairedRooms ?? state.qbtcpSessions.length) : '—',
+          },
           { term: 'Protocol', value: qbtcpRunning ? (status?.protocol ?? 'QBTCP v1') : '—' },
         ]}
       />
       {nativeDirector && qbtcpRunning && (
-        <Panel title="Room invitations" description={`Each invitation is scoped to one room and expires after ${invitations[0]?.expiresInSeconds ?? 900} seconds.`} flush>
+        <Panel
+          title="Room invitations"
+          description={`Each invitation is scoped to one room and expires after ${invitations[0]?.expiresInSeconds ?? 900} seconds.`}
+          flush
+        >
           <SummaryList ariaLabel="QBTCP room invitations">
             {pairingRooms.length === 0 ? (
-              <div className="director-empty-in-panel"><p className="director-empty-copy">No assignable rooms are configured.</p></div>
-            ) : pairingRooms.map((room) => {
-              const invitation = invitations.find((entry) => entry.roomId === room.id);
-              return (
-                <SummaryItem
-                  key={room.id}
-                  title={<strong>{room.name}</strong>}
-                  status={<StateLabel state={invitation ? 'paired' : 'waiting'} label={invitation ? 'Invitation active' : 'No invitation'} />}
-                  summary={invitation ? `Code ${invitation.pairingCode}` : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'}
-                  actions={
-                    <div className="director-actions">
-                      {invitation?.pairingUrl && <Button variant="secondary" onClick={() => onCopy(invitation.pairingUrl ?? '', `${room.name} pairing link copied.`)}>Copy link</Button>}
-                      <Button variant={invitation ? 'quiet' : 'primary'} disabled={pairingRoomId !== null} onClick={() => onIssue(room.id)}>
-                        {pairingRoomId === room.id ? 'Issuing…' : invitation ? 'Issue new' : 'Issue pairing'}
-                      </Button>
-                    </div>
-                  }
-                />
-              );
-            })}
+              <div className="director-empty-in-panel">
+                <p className="director-empty-copy">No assignable rooms are configured.</p>
+              </div>
+            ) : (
+              pairingRooms.map((room) => {
+                const invitation = invitations.find((entry) => entry.roomId === room.id);
+                return (
+                  <SummaryItem
+                    key={room.id}
+                    title={<strong>{room.name}</strong>}
+                    status={
+                      <StateLabel
+                        state={invitation ? 'paired' : 'waiting'}
+                        label={invitation ? 'Invitation active' : 'No invitation'}
+                      />
+                    }
+                    summary={
+                      invitation
+                        ? `Code ${invitation.pairingCode}`
+                        : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'
+                    }
+                    actions={
+                      <div className="director-actions">
+                        {invitation?.pairingUrl && (
+                          <Button
+                            variant="secondary"
+                            onClick={() =>
+                              onCopy(invitation.pairingUrl ?? '', `${room.name} pairing link copied.`)
+                            }
+                          >
+                            Copy link
+                          </Button>
+                        )}
+                        <Button
+                          variant={invitation ? 'quiet' : 'primary'}
+                          disabled={pairingRoomId !== null}
+                          onClick={() => onIssue(room.id)}
+                        >
+                          {pairingRoomId === room.id
+                            ? 'Issuing…'
+                            : invitation
+                              ? 'Issue new'
+                              : 'Issue pairing'}
+                        </Button>
+                      </div>
+                    }
+                  />
+                );
+              })
+            )}
           </SummaryList>
         </Panel>
       )}
@@ -1125,27 +1450,44 @@ function RoomQbtcpTelemetry({ state, roomId }: { state: DirectorState; roomId: s
   return (
     <div className="director-stack director-stack-tight">
       {sessions.map((session) => {
-        const game = session.matchId ? state.scheduledGames.find((candidate) => candidate.id === session.matchId) : undefined;
+        const game = session.matchId
+          ? state.scheduledGames.find((candidate) => candidate.id === session.matchId)
+          : undefined;
         const lastSeen = new Date(session.lastSeenAt).getTime();
         const stale = Number.isFinite(lastSeen) && now - lastSeen > qbtcpStaleAfterMs;
         return (
           <div key={session.sessionId} className="director-inset director-inset-quiet">
-            <StateLabel state={stale ? 'stale' : session.state} label={stale ? `${qbtcpSessionLabel(session.state)} · stale` : qbtcpSessionLabel(session.state)} />
-            <p>{game ? matchupLabel(state, game) : 'No game linked'}{session.operatorName ? ` · ${session.operatorName}` : ''}</p>
-            <small>Last seen {formatTime(session.lastSeenAt)}{session.resumable ? ' · Resumable' : ''}</small>
+            <StateLabel
+              state={stale ? 'stale' : session.state}
+              label={stale ? `${qbtcpSessionLabel(session.state)} · stale` : qbtcpSessionLabel(session.state)}
+            />
+            <p>
+              {game ? matchupLabel(state, game) : 'No game linked'}
+              {session.operatorName ? ` · ${session.operatorName}` : ''}
+            </p>
+            <small>
+              Last seen {formatTime(session.lastSeenAt)}
+              {session.resumable ? ' · Resumable' : ''}
+            </small>
             <small className="director-mono">Session {session.sessionId}</small>
           </div>
         );
       })}
-      {sessions.length === 0 && games.length === 0 && <p className="director-text-meta">No active QBTCP session.</p>}
+      {sessions.length === 0 && games.length === 0 && (
+        <p className="director-text-meta">No active QBTCP session.</p>
+      )}
     </div>
   );
 }
 
 function roomQbtcpHasDetail(state: DirectorState, roomId: string): boolean {
-  return state.qbtcpSessions.some((session) => session.roomId === roomId) ||
+  return (
+    state.qbtcpSessions.some((session) => session.roomId === roomId) ||
     state.qbtcpHelpRequests.some((request) => request.roomId === roomId) ||
-    state.scheduledGames.some((game) => game.roomId === roomId && !game.bye && !['accepted', 'cancelled'].includes(game.status));
+    state.scheduledGames.some(
+      (game) => game.roomId === roomId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
+    )
+  );
 }
 
 const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [
@@ -1155,7 +1497,13 @@ const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [
   { value: 'hq', label: 'HQ staff' },
 ];
 
-function StaffRoleField({ roles, onChange }: { roles: readonly StaffRole[]; onChange: (roles: StaffRole[]) => void }) {
+function StaffRoleField({
+  roles,
+  onChange,
+}: {
+  roles: readonly StaffRole[];
+  onChange: (roles: StaffRole[]) => void;
+}) {
   return (
     <CheckboxGroup legend="Roles" hint="A staff member can have more than one role." columns>
       {staffRoleOptions.map((role) => (
@@ -1163,7 +1511,11 @@ function StaffRoleField({ roles, onChange }: { roles: readonly StaffRole[]; onCh
           key={role.value}
           checked={roles.includes(role.value)}
           label={role.label}
-          onChange={(checked) => onChange(checked ? [...new Set([...roles, role.value])] : roles.filter((entry) => entry !== role.value))}
+          onChange={(checked) =>
+            onChange(
+              checked ? [...new Set([...roles, role.value])] : roles.filter((entry) => entry !== role.value),
+            )
+          }
         />
       ))}
     </CheckboxGroup>
@@ -1176,8 +1528,14 @@ function roleLabel(role: StaffRole): string {
 function equipmentKindLabel(kind: EquipmentKind): string {
   return kind === 'buzzer' ? 'Buzzer' : kind === 'device' ? 'Laptop / tablet' : 'Other';
 }
-function staffForRole(state: DirectorState, role: 'moderator' | 'scorekeeper', selectedId: string): DirectorState['staff'] {
-  return state.staff.filter((member) => (member.roles.includes(role) && member.available) || member.id === selectedId);
+function staffForRole(
+  state: DirectorState,
+  role: 'moderator' | 'scorekeeper',
+  selectedId: string,
+): DirectorState['staff'] {
+  return state.staff.filter(
+    (member) => (member.roles.includes(role) && member.available) || member.id === selectedId,
+  );
 }
 function staffName(state: DirectorState, id: string | null): string {
   return id ? (state.staff.find((member) => member.id === id)?.name ?? '') : '';
@@ -1194,12 +1552,18 @@ function humanRoomStatus(status: string): string {
 function qbtcpSessionLabel(state: DirectorState['qbtcpSessions'][number]['state']): string {
   return state === 'result-received' ? 'Result received' : state.charAt(0).toUpperCase() + state.slice(1);
 }
-function rosterAmendmentStatusLabel(status: DirectorState['qbtcpRosterAmendments'][number]['status']): string {
+function rosterAmendmentStatusLabel(
+  status: DirectorState['qbtcpRosterAmendments'][number]['status'],
+): string {
   switch (status) {
-    case 'approved-new': return 'Approved as new';
-    case 'mapped-existing': return 'Mapped to existing';
-    case 'rejected': return 'Rejected';
-    default: return 'Review';
+    case 'approved-new':
+      return 'Approved as new';
+    case 'mapped-existing':
+      return 'Mapped to existing';
+    case 'rejected':
+      return 'Rejected';
+    default:
+      return 'Review';
   }
 }
 function stringField(value: unknown): string | undefined {
@@ -1207,5 +1571,7 @@ function stringField(value: unknown): string | undefined {
 }
 function formatTime(value: string): string {
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }

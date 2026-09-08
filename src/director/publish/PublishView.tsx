@@ -1,13 +1,5 @@
 import { deriveTeamStandings, type DirectorState } from '../domain';
-import {
-  Button,
-  EmptyState,
-  Page,
-  PageHeader,
-  Panel,
-  SummaryItem,
-  SummaryList,
-} from '../components';
+import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
