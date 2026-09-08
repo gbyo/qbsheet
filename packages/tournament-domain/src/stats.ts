@@ -59,6 +59,13 @@ export interface DirectorStandingsOptions {
   tiebreakers?: TournamentRules['tiebreakers'];
 }
 
+function compareIsoInstants(left: string, right: string): number {
+  const leftTime = Date.parse(left);
+  const rightTime = Date.parse(right);
+  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) return leftTime - rightTime;
+  return left.localeCompare(right);
+}
+
 /**
  * Select one current accepted GameRecord per scheduled game.
  *
@@ -81,7 +88,7 @@ export function acceptedGameRecords(
       .filter((submission) => submission.status === 'accepted')
       .sort(
         (left, right) =>
-          (left.acceptedAt ?? left.receivedAt).localeCompare(right.acceptedAt ?? right.receivedAt) ||
+          compareIsoInstants(left.acceptedAt ?? left.receivedAt, right.acceptedAt ?? right.receivedAt) ||
           left.id.localeCompare(right.id),
       )
       .at(-1);
@@ -145,13 +152,13 @@ export function acceptedGameRecords(
     const currentAt = currentSubmission?.acceptedAt ?? currentSubmission?.receivedAt ?? game.acceptedAt ?? '';
     const previousAt =
       previousSubmission?.acceptedAt ?? previousSubmission?.receivedAt ?? previous?.acceptedAt ?? '';
+    const timeOrder = compareIsoInstants(currentAt, previousAt);
     if (
       !previous ||
       (gameHasCanonicalSubmission && !previousHasCanonicalSubmission) ||
+      (gameHasCanonicalSubmission === previousHasCanonicalSubmission && timeOrder > 0) ||
       (gameHasCanonicalSubmission === previousHasCanonicalSubmission &&
-        currentAt.localeCompare(previousAt) > 0) ||
-      (gameHasCanonicalSubmission === previousHasCanonicalSubmission &&
-        currentAt === previousAt &&
+        timeOrder === 0 &&
         game.id.localeCompare(previous.id) > 0)
     ) {
       byScheduledGame.set(game.scheduledGameId, game);
