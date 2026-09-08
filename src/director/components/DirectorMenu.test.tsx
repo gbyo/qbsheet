@@ -69,6 +69,17 @@ describe('DirectorMenu', () => {
     expect(screen.getByRole('button', { name: 'Open' })).toHaveFocus();
   });
 
+  test('Tab closes without preventing normal keyboard travel', () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.getByRole('menuitem', { name: 'Alpha' })).toHaveFocus();
+
+    const tabWasNotPrevented = fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+
+    expect(tabWasNotPrevented).toBe(true);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
   test('clicking outside closes without stealing focus', () => {
     render(
       <>
