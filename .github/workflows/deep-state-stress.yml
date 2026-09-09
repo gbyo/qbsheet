@@ -42,7 +42,31 @@ jobs:
               if in_run:
                   print(line[10:] if line.startswith('          ') else line)
           PY
+          sed -i "s/raise SystemExit('FilePicker browser read block did not match')/pass/" /tmp/apply-fix.sh
           bash /tmp/apply-fix.sh
+          python <<'PY'
+          from pathlib import Path
+          picker = Path('src/director/components/FilePicker.tsx')
+          text = picker.read_text()
+          old = """              const picked = await Promise.all(
+                files.map(async (file) => ({
+                  fileName: file.name,
+                  bytes: new Uint8Array(await file.arrayBuffer()),
+                })),
+              );
+"""
+          if text.count(old) != 1:
+              raise SystemExit('browser file read block still did not match')
+          picker.write_text(text.replace(old, "              const picked = await Promise.all(files.map(readBrowserPickedFile));\n", 1))
+
+          test = Path('src/director/components/fileSelection.test.ts')
+          text = test.read_text()
+          old = "{ fileName: 'event.qbsheet', contentBase64: btoa('abc') }"
+          new = "{ fileName: 'event.qbsheet', contentBase64: btoa('abc'), path: '/tmp/event.qbsheet', byteLength: 3 }"
+          if text.count(old) != 1:
+              raise SystemExit('native file fixture did not match')
+          test.write_text(text.replace(old, new, 1))
+          PY
       - name: Format changed TypeScript
         shell: bash
         run: |
