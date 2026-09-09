@@ -86,6 +86,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout 0ceab2ce812b6d35e6c315c8d7bf8f57a55a8f1e -- .github/workflows/deep-state-stress.yml
           git rm -f .github/workflows/fix-519.yml
+          rm -f scripts/tmp-trigger-519.txt
           git add -A
           git commit -m 'fix: preserve and surface unsaved Director drafts (#519)'
           git push origin HEAD:fix/519-settings-unsaved-state
