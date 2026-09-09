@@ -5,6 +5,7 @@ import {
   type StartRoundResult,
 } from './useDirectorControllerBase';
 import {
+  advancementCommitBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
   unresolvedReleasedRoundBlocker,
@@ -96,6 +97,15 @@ export function useDirectorController(
         }
         allow();
         return base.startRound(roundId);
+      },
+      commitAdvancement(input) {
+        const blocker = advancementCommitBlocker(base.state, input.sourcePhaseId);
+        if (blocker) {
+          raise(blocker);
+          return { committed: false, message: blocker, assigned: 0, overridden: [] };
+        }
+        allow();
+        return base.commitAdvancement(input);
       },
     };
   }, [base, safetyError]);
