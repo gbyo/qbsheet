@@ -1,5 +1,5 @@
 import { type DirectorId, type DirectorState, type ScheduledGame } from './model';
-import { activeTournamentTeams } from './field';
+import { activeTournamentTeams, phaseCompetitiveField } from './field';
 import {
   currentFormat,
   currentPhase,
@@ -685,15 +685,8 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
 }
 
 function expectedRoundTeams(state: DirectorState, phase: DirectorState['phases'][number] | undefined) {
-  if (!phase || phase.poolIds.length === 0) {
-    return activeTournamentTeams(state);
-  }
-  const ids = new Set(
-    state.pools
-      .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
-      .flatMap((pool) => pool.teamIds),
-  );
-  return activeTournamentTeams(state).filter((team) => ids.has(team.id));
+  if (!phase) return activeTournamentTeams(state);
+  return phaseCompetitiveField(state, phase.id).teams;
 }
 
 function expectedRoundByeCount(
