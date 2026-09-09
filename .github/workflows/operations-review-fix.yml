@@ -1,0 +1,89 @@
+name: Apply operations review follow-ups
+
+on:
+  push:
+    branches:
+      - fix/operations-review-followups
+    paths:
+      - .github/workflows/operations-review-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply verified replacements
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path('src/director/state/useDirectorControllerBase.ts'): [(
+                  """        if (changes.defaultEquipmentIds !== undefined) {\n          const unique = [...new Set(changes.defaultEquipmentIds)];\n          room.defaultEquipmentIds = unique;\n          // The single legacy field keeps the first resource so an older build reading this\n          // document still sees a sensible default rather than nothing.\n          room.equipmentId = unique[0] ?? null;\n        }\n        // Availability controls future assignment. Do not overwrite a live scorer, open help\n""",
+                  """        if (changes.defaultEquipmentIds !== undefined) {\n          const unique = [...new Set(changes.defaultEquipmentIds)];\n          room.defaultEquipmentIds = unique;\n          // The single legacy field keeps the first resource so an older build reading this\n          // document still sees a sensible default rather than nothing.\n          room.equipmentId = unique[0] ?? null;\n        } else if (changes.equipmentId !== undefined) {\n          room.defaultEquipmentIds = changes.equipmentId ? [changes.equipmentId] : [];\n        }\n        // Availability controls future assignment. Do not overwrite a live scorer, open help\n""",
+              )],
+              Path('apps/director/src-tauri/src/store.rs'): [(
+                  '            text(assignment, "kind").unwrap_or_else(|| "room".to_owned()),\n',
+                  '''            match text(assignment, "kind").as_deref() {\n                Some("hq") => "hq".to_owned(),\n                Some("runner") => "runner".to_owned(),\n                _ => "room".to_owned(),\n            },\n''',
+              )],
+          }
+
+          for path, edits in replacements.items():
+              text = path.read_text()
+              for old, new in edits:
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'{path}: expected exactly one match, found {count}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+
+      - name: Format touched TypeScript
+        run: >-
+          npx prettier --write
+          src/director/domain/operations.fixtures.ts
+          src/director/domain/operations.test.ts
+          src/director/domain/operationsPlanner.ts
+          src/director/domain/operationsPlanner.test.ts
+          src/director/persistence/stateMigrations.ts
+          src/director/state/useDirectorControllerBase.ts
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml -- --check
+
+      - name: Run focused Director tests
+        run: npx vitest --run src/director/domain/operations.test.ts src/director/domain/operationsPlanner.test.ts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run native store tests
+        run: cargo test --manifest-path apps/director/src-tauri/Cargo.toml store::tests --lib
+
+      - name: Commit validated fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/director/src-tauri/src/store.rs src/director/state/useDirectorControllerBase.ts \
+            src/director/domain/operations.fixtures.ts src/director/domain/operations.test.ts \
+            src/director/domain/operationsPlanner.ts src/director/domain/operationsPlanner.test.ts \
+            src/director/persistence/stateMigrations.ts
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "fix: harden operations persistence follow-ups"
+            git push origin HEAD:fix/operations-review-followups
+          fi
