@@ -4,7 +4,7 @@ import type { AdvancementPreview, DirectorState } from '../domain';
 import type { AnnounceInput } from '../notices';
 import { errorNotice, infoNotice } from '../notices';
 import { Button, Checkbox, Field, Select, TextInput } from '../components';
-import { commitAdvancementSafely } from './advancementCommit';
+import { commitAdvancementSafely } from './advancementCommitPlan';
 import {
   advancementCutoffDecisions,
   cutoffDecisionsAreValid,
