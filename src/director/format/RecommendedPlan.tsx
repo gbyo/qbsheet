@@ -1,4 +1,4 @@
-import { recommendTournamentPlan, type TournamentPlanRecommendation } from '../domain';
+import { activeTournamentTeams, recommendTournamentPlan, type TournamentPlanRecommendation } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorState } from '../domain';
 import type { SectionId } from '../app/navigation';
@@ -21,7 +21,8 @@ export function RecommendedPlan({
   onNavigate: (section: SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const activeTeamCount = state.teams.filter((team) => team.status === 'confirmed').length;
+  const activeTeamCount = activeTournamentTeams(state).length;
+  const waitlistedTeamCount = state.teams.filter((team) => team.status === 'waitlist').length;
   const planApplicable =
     state.rounds.every((round) => round.status === 'planned') && state.scheduledGames.length === 0;
   const planSet = activeTeamCount >= 2 && planApplicable ? recommendTournamentPlan(activeTeamCount) : null;
@@ -59,7 +60,15 @@ export function RecommendedPlan({
         </Button>
       }
     >
-      <FactList items={recommended.consequences} />
+      <FactList
+        items={[
+          `Planning for ${activeTeamCount} confirmed team${activeTeamCount === 1 ? '' : 's'}.`,
+          ...(waitlistedTeamCount > 0
+            ? [`${waitlistedTeamCount} waitlisted team${waitlistedTeamCount === 1 ? '' : 's'} not included.`]
+            : []),
+          ...recommended.consequences,
+        ]}
+      />
       {alternatives.length > 0 && (
         <div className="director-actions director-format-alternatives">
           <span className="director-text-meta">Other suitable formats:</span>
