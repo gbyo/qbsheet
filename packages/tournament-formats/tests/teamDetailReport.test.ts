@@ -208,7 +208,7 @@ describe('printable team detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'teamdetail.html',
     )!.content;
-    const aiken = sectionFor(page, 'team-1-team-a');
+    const aiken = sectionFor(page, 'team-team-a');
 
     expect(aiken.indexOf('Round 1')).toBeLessThan(aiken.indexOf('Round 2'));
     expect(aiken.indexOf('Round 2')).toBeLessThan(aiken.indexOf('Round 3'));
@@ -222,7 +222,7 @@ describe('printable team detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'teamdetail.html',
     )!.content;
-    const aiken = sectionFor(page, 'team-1-team-a');
+    const aiken = sectionFor(page, 'team-team-a');
     const roundTwo = aiken.slice(aiken.indexOf('Round 2'), aiken.indexOf('Round 3'));
 
     expect(roundTwo).toContain('300–100');
@@ -234,15 +234,15 @@ describe('printable team detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'teamdetail.html',
     )!.content;
-    const aiken = sectionFor(page, 'team-1-team-a');
+    const aiken = sectionFor(page, 'team-team-a');
 
     expect(aiken).toContain('Tournament total');
     expect(aiken).toContain('PF 700');
     expect(aiken).toContain('24.00');
     expect(aiken).toContain('Packet &lt;One&gt;');
     expect(aiken).toContain('Classifications: Small School');
-    expect(aiken).toContain('playerdetail.html#player-1-alice');
-    expect(aiken).toContain('teamdetail.html#team-2-team-b');
+    expect(aiken).toContain('playerdetail.html#player-alice');
+    expect(aiken).toContain('teamdetail.html#team-team-b');
     expect(aiken).toContain('<th scope="col">Stage</th>');
   });
 });
