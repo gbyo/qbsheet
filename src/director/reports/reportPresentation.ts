@@ -64,6 +64,10 @@ export function withReportPresentation(
     definitions,
     options: rawOptions,
     capabilities: {
+      // A canonical zero is still recorded data. Unknown/null is not.
+      bouncebacksRecorded: snapshot.games.some((game) =>
+        (game.teamStats ?? []).some((row) => typeof row.bouncebacks === 'number'),
+      ),
       packetRecorded: snapshot.games.some((game) => Boolean(game.packetName)),
       stageRecorded: phaseIds.size > 1,
       // Director's canonical report DTO does not yet retain lightning statistics. A configured
