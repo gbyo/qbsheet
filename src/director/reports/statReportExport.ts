@@ -1,5 +1,5 @@
 import {
-  buildPrintableStatReportBundle,
+  buildExtendedStatReportBundle,
   zipStatReportBundle,
   type StatReportPage,
 } from '@qbsheet/tournament-formats';
@@ -19,7 +19,7 @@ export function buildCanonicalStatReport(
   generatedAt = new Date().toISOString(),
 ): CanonicalStatReportArtifact {
   const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
-  const pages = buildPrintableStatReportBundle(snapshot);
+  const pages = buildExtendedStatReportBundle(snapshot);
   return {
     fileName: `${safeReportName(state.tournament?.name ?? 'tournament')}-stat-report.zip`,
     pages,
@@ -37,7 +37,7 @@ export function buildCanonicalStandingsHtml(
   generatedAt = new Date().toISOString(),
 ): string {
   const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
-  const standings = buildPrintableStatReportBundle(snapshot).find((page) => page.name === 'standings.html');
+  const standings = buildExtendedStatReportBundle(snapshot).find((page) => page.name === 'standings.html');
   if (!standings) throw new Error('The canonical stat report did not include standings.html.');
   return standings.content;
 }
