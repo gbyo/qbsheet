@@ -170,10 +170,11 @@ fn native_file_picker_filters(
             .take(MAX_NATIVE_FILTER_EXTENSIONS)
         {
             let Some(extension) = normalize_native_filter_extension(&extension) else {
-                if extension.trim() == "*" && name == "All files" {
-                    if seen_extensions.insert("*".to_owned()) {
-                        extensions.push("*".to_owned());
-                    }
+                if extension.trim() == "*"
+                    && name == "All files"
+                    && seen_extensions.insert("*".to_owned())
+                {
+                    extensions.push("*".to_owned());
                 }
                 continue;
             };
