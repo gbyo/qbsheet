@@ -170,11 +170,7 @@ export default function ConnectedSetup(
         requestedRoomId,
         existingDeviceId,
       );
-      if (
-        !activeRef.current ||
-        codeRef.current !== requestedCode ||
-        roomIdRef.current !== requestedRoomId
-      )
+      if (!activeRef.current || codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId)
         return;
       if (!paired.ok) {
         setError(paired.error);
@@ -182,11 +178,7 @@ export default function ConnectedSetup(
       }
       adoptRoom(paired.value);
     } catch {
-      if (
-        !activeRef.current ||
-        codeRef.current !== requestedCode ||
-        roomIdRef.current !== requestedRoomId
-      )
+      if (!activeRef.current || codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId)
         return;
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
