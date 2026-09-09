@@ -140,6 +140,7 @@ pub struct ServerRosterAmendmentSnapshot {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSnapshot {
+    pub tournament_id: Option<String>,
     pub results: Vec<ServerResultSnapshot>,
     pub progress: Vec<ServerProgressSnapshot>,
     pub presence: Vec<ServerPresenceSnapshot>,
@@ -388,6 +389,25 @@ impl ServerRuntime {
             .as_ref()
             .ok_or(ServerError::Unavailable)
             .and_then(|state| state.snapshot())
+    }
+
+    /// Revoke the native writer authority for sessions a Director is settling administratively.
+    /// The retained result/event history is intentionally preserved, while late finals are marked
+    /// late-after-abandon by the shared QBTCP core instead of being applied to a reused room.
+    pub fn abandon_sessions(&self, session_ids: &[String]) -> Result<(), ServerError> {
+        let server = self
+            .inner
+            .lock()
+            .map_err(|_| ServerError::Unavailable)?
+            .server
+            .clone()
+            .ok_or(ServerError::NotRunning)?;
+        for session_id in session_ids {
+            server
+                .abandon_session(session_id)
+                .map_err(|error| ServerError::Operation(format!("{error:?}")))?;
+        }
+        Ok(())
     }
 
     /// Rooms among `room_ids` a scorer is connected to right now.
@@ -844,7 +864,13 @@ impl DirectorQbtcpState {
                 amendment: record.amendment,
             })
             .collect();
+        let tournament_id = self
+            .tournament
+            .read()
+            .map_err(|_| ServerError::Unavailable)
+            .map(|tournament| Some(tournament.id.clone()))?;
         Ok(ServerSnapshot {
+            tournament_id,
             results,
             progress,
             presence,

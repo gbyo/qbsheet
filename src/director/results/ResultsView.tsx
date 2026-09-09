@@ -795,7 +795,7 @@ function ScheduledGameItem({
                           tone: 'danger',
                         });
                         if (!approved) return;
-                        const cancelled = controller.cancelScheduledGame(game.id);
+                        const cancelled = await Promise.resolve(controller.cancelScheduledGame(game.id));
                         onAnnounce(
                           cancelled
                             ? 'Scheduled game cancelled; the round can now close without it.'
@@ -858,13 +858,14 @@ function ForfeitDialog({
       description="Choose the team that forfeited. Director records the administrative result so the round or bracket can advance."
       onClose={onClose}
       onSubmit={() => {
-        const saved = controller.recordForfeit(game.id, teamId);
-        onAnnounce(
-          saved
-            ? `${teamLabel(state, teamId)} recorded as forfeiting.`
-            : errorNotice('The forfeit was not recorded; review the Director error.'),
-        );
-        if (saved) onClose();
+        void Promise.resolve(controller.recordForfeit(game.id, teamId)).then((saved) => {
+          onAnnounce(
+            saved
+              ? `${teamLabel(state, teamId)} recorded as forfeiting.`
+              : errorNotice('The forfeit was not recorded; review the Director error.'),
+          );
+          if (saved) onClose();
+        });
       }}
       submitLabel="Record forfeit"
       submitVariant="danger"
@@ -1122,16 +1123,19 @@ function ManualResultDialog({
           onAnnounce(errorNotice(decisionIssue.message));
           return;
         }
-        const accepted = controller.addManualResult({
-          scheduledGameId: selected.id,
-          scores,
+        void Promise.resolve(
+          controller.addManualResult({
+            scheduledGameId: selected.id,
+            scores,
+          }),
+        ).then((accepted) => {
+          onAnnounce(
+            accepted
+              ? 'Manual result accepted locally; standings updated.'
+              : errorNotice('Manual result was not accepted; review the current game state.'),
+          );
+          if (accepted) onClose();
         });
-        onAnnounce(
-          accepted
-            ? 'Manual result accepted locally; standings updated.'
-            : errorNotice('Manual result was not accepted; review the current game state.'),
-        );
-        if (accepted) onClose();
       }}
       submitLabel="Accept manual result"
       submitDisabled={!selected}

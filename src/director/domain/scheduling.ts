@@ -5,6 +5,7 @@ import {
   type Phase,
   type Pool,
   type Round,
+  type RoundDeliveryMode,
   type ScheduledGame,
   type Team,
   type BracketState,
@@ -50,6 +51,7 @@ export interface ScheduleOptions {
    * `buildGenerationResult`, so generated rounds never land without one.
    */
   dayOrder?: number | null;
+  deliveryMode?: RoundDeliveryMode;
 }
 
 export interface ScheduleConflict {
@@ -642,6 +644,7 @@ function buildGenerationResult(
     releasedAt: null,
     startedAt: null,
     closedAt: null,
+    ...(options.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
   };
   const valid =
     expectedTeams.length === 0
@@ -704,6 +707,7 @@ export function generateDirectorRound(
     | 'manualPairings'
     | 'allowIncomplete'
     | 'dayOrder'
+    | 'deliveryMode'
   > = {},
 ): ScheduleGenerationResult {
   const format = currentFormat(state);
@@ -753,6 +757,9 @@ export function generateDirectorRound(
     avoidRematches: options.avoidRematches ?? format.avoidRematches,
     avoidSameOrganization: options.avoidSameOrganization ?? format.avoidSameOrganization,
     allowByes: format.allowByes,
+    // A generated round is manual unless the operator explicitly selects a transport. A room
+    // assignment remains a legacy signal for imported/older documents via effectiveRoundDeliveryMode.
+    ...(options.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
   };
 
   if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
@@ -1515,6 +1522,99 @@ export function scheduleGameCount(games: ScheduledGame[]): number {
   return games.filter((game) => !game.bye && game.status !== 'cancelled').length;
 }
 
+export type AssignmentEditTarget =
+  | { kind: 'team'; id: DirectorId }
+  | { kind: 'player'; id: DirectorId }
+  | { kind: 'room'; id: DirectorId }
+  | { kind: 'packet'; id: DirectorId }
+  | { kind: 'organization'; id: DirectorId };
+
+export interface AssignmentEditImpact {
+  activeGameIds: DirectorId[];
+  wouldReplaceAssignment: boolean;
+}
+
+/** Return the effective delivery intent without consulting historical QBTCP session state. */
+export function effectiveRoundDeliveryMode(
+  state: DirectorState,
+  roundOrId: Round | DirectorId,
+): RoundDeliveryMode {
+  const round =
+    typeof roundOrId === 'string' ? state.rounds.find((entry) => entry.id === roundOrId) : roundOrId;
+  if (round?.deliveryMode) return round.deliveryMode;
+  if (round && state.scheduledGames.some((game) => game.roundId === round.id && game.roomId !== null)) {
+    return 'qbtcp';
+  }
+  if (
+    state.qbtcpSessions.some(
+      (session) =>
+        session.state !== 'abandoned' &&
+        state.scheduledGames.some(
+          (game) =>
+            game.roundId === round?.id && (game.id === session.matchId || game.roomId === session.roomId),
+        ),
+    ) ||
+    state.qbtcpHelpRequests.some(
+      (request) =>
+        request.status === 'open' &&
+        state.scheduledGames.some((game) => game.roundId === round?.id && game.roomId === request.roomId),
+    )
+  ) {
+    return 'qbtcp';
+  }
+  return state.transfers.locations.length > 0 ? 'usb' : 'manual';
+}
+
+/**
+ * Assignment-visible edits are a lifecycle boundary. Keep this policy in the domain so forms and
+ * whole-document/recovery callers cannot accidentally replace a live scorer assignment.
+ */
+export function assignmentEditImpact(
+  state: DirectorState,
+  target: AssignmentEditTarget,
+): AssignmentEditImpact {
+  const activeSessions = state.qbtcpSessions.filter(
+    (session) => session.state !== 'abandoned' && qbtcpSessionHasUnresolvedWork(state, session),
+  );
+  const activeGameIds = new Set<DirectorId>();
+  for (const session of activeSessions) {
+    if (session.matchId) {
+      activeGameIds.add(session.matchId);
+      continue;
+    }
+    for (const game of state.scheduledGames) {
+      if (!game.bye && game.roomId === session.roomId && !['accepted', 'cancelled'].includes(game.status)) {
+        activeGameIds.add(game.id);
+      }
+    }
+  }
+  const games = state.scheduledGames.filter((game) => activeGameIds.has(game.id));
+  const affected = games.filter((game) => {
+    if (target.kind === 'room') return game.roomId === target.id;
+    if (target.kind === 'packet')
+      return (
+        (game.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId) === target.id
+      );
+    if (target.kind === 'team') return game.leftTeamId === target.id || game.rightTeamId === target.id;
+    if (target.kind === 'player') {
+      const player = state.players.find((entry) => entry.id === target.id);
+      return Boolean(player && (game.leftTeamId === player.teamId || game.rightTeamId === player.teamId));
+    }
+    const teamIds = state.teams.filter((team) => team.organizationId === target.id).map((team) => team.id);
+    return teamIds.includes(game.leftTeamId) || teamIds.includes(game.rightTeamId ?? '');
+  });
+  return { activeGameIds: affected.map((game) => game.id), wouldReplaceAssignment: affected.length > 0 };
+}
+
+export function assignmentEditBlocker(state: DirectorState, target: AssignmentEditTarget): string | null {
+  const impact = assignmentEditImpact(state, target);
+  if (!impact.wouldReplaceAssignment) return null;
+  const game = state.scheduledGames.find((entry) => entry.id === impact.activeGameIds[0]);
+  const room = game?.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
+  const roomLabel = room ? ` in ${room.name}` : '';
+  return `This change affects a live QBTCP scorer assignment${roomLabel}. Finish the game or use an explicit assignment replacement before editing it.`;
+}
+
 /**
  * A scheduled game occupies a room until its operational work is explicitly resolved. Planned
  * work is intent for a future round; released/live/submitted work can still resume or produce a
@@ -1551,7 +1651,16 @@ export function qbtcpSessionHasUnresolvedWork(
   const scheduled = session.matchId
     ? state.scheduledGames.find((game) => game.id === session.matchId)
     : undefined;
-  if (scheduled && (scheduled.status === 'accepted' || scheduled.status === 'cancelled')) return false;
+  // A normal scorer result is terminal and no longer occupies the room. A live/paired session
+  // on a game that Director has already settled is different: it is the unsafe legacy state that
+  // administrative settlement must retire before the room can be reused.
+  if (
+    scheduled &&
+    ['accepted', 'cancelled'].includes(scheduled.status) &&
+    session.state === 'result-received'
+  ) {
+    return false;
+  }
   return (
     session.state === 'paired' ||
     session.state === 'assigned' ||

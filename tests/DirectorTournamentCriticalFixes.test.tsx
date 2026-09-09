@@ -252,7 +252,11 @@ describe('Director tournament-critical regressions', () => {
     });
     expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(false);
 
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 2', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
     const secondRound = hook.result.current.state.rounds.find((round) => round.name === 'Round 2');
     const secondGame = secondRound
       ? hook.result.current.state.scheduledGames.find((game) => game.roundId === secondRound.id && !game.bye)
@@ -269,7 +273,11 @@ describe('Director tournament-critical regressions', () => {
 
   test('a paired session keeps its released game room-reserved until that game is resolved', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 1', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -404,8 +412,16 @@ describe('Director tournament-critical regressions', () => {
 
   test('dropping a team closes a released round without losing matchup history and leaves future rounds operable', async () => {
     const hook = await directorWithSetup(4, 1);
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 1', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 2', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
     const round = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 1');
     const futureRound = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 2');
     if (!round || !futureRound) throw new Error('test setup did not create both rounds');

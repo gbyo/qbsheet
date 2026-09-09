@@ -293,6 +293,9 @@ export interface Phase {
   archived?: boolean;
 }
 
+/** The operator's intended way for a round's assignments to reach scorekeepers. */
+export type RoundDeliveryMode = 'qbtcp' | 'usb' | 'manual';
+
 export interface Pool {
   id: DirectorId;
   phaseId: DirectorId;
@@ -325,6 +328,8 @@ export interface Round {
   /** When play actually began, if Director has observed it. */
   startedAt: string | null;
   closedAt: string | null;
+  /** Explicit delivery intent. Older documents omit this and use the deterministic legacy fallback. */
+  deliveryMode?: RoundDeliveryMode;
 }
 
 export interface ScheduledGame {

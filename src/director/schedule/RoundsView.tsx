@@ -1064,12 +1064,13 @@ function RoundRecoveryDialog({
             <Button
               variant="secondary"
               onClick={() => {
-                const released = controller.releaseRound(round.id);
-                onAnnounce(
-                  released
-                    ? `${round.name} released.`
-                    : errorNotice('The round is not ready to release; review room assignments first.'),
-                );
+                void Promise.resolve(controller.releaseRound(round.id)).then((released) => {
+                  onAnnounce(
+                    released
+                      ? `${round.name} released.`
+                      : errorNotice('The round is not ready to release; review room assignments first.'),
+                  );
+                });
               }}
             >
               Release

@@ -61,6 +61,7 @@ pub fn run() {
             commands::director_server_status,
             commands::director_server_snapshot,
             commands::director_qbtcp_live_rooms,
+            commands::director_abandon_qbtcp_sessions,
             commands::director_resolve_qbtcp_help,
             commands::director_issue_qbtcp_pairing,
             commands::director_store_live_credential,

@@ -991,7 +991,7 @@ describe('Director integration hardening', () => {
   test('round orchestration: manual start needs no rooms, one finish closes the round', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => {
-      expect(hook.result.current.generateSchedule().generated).toBe(true);
+      expect(hook.result.current.generateSchedule({ deliveryMode: 'manual' }).generated).toBe(true);
     });
     const roundId = hook.result.current.state.rounds[0].id;
 
@@ -1065,9 +1065,8 @@ describe('Director integration hardening', () => {
   });
 
   test('round orchestration: optional rooms allow manual games alongside QBTCP and USB', async () => {
-    // One room exists, so generation assigns it to the first game only. With
-    // no QBTCP or USB configured that partial assignment stays a label: the
-    // round still starts as a manual round.
+    // A partial room assignment is an intended QBTCP round, not an implicit
+    // manual fallback. The Director must require the missing room assignment.
     const partial = await directorWithSetup(4);
     act(() => {
       expect(partial.hook.result.current.generateSchedule().generated).toBe(true);
@@ -1077,11 +1076,11 @@ describe('Director integration hardening', () => {
     await act(async () => {
       partialResult = await partial.hook.result.current.startRound(partialRoundId);
     });
-    expect(partialResult?.ok).toBe(true);
-    expect(partialResult?.manual).toBe(true);
-    expect(partial.hook.result.current.state.rounds[0].status).toBe('released');
+    expect(partialResult?.ok).toBe(false);
+    expect(partial.hook.result.current.error).toMatch(/no room assignment/i);
 
-    // Pairing a QBTCP room must not prevent the other game from using manual results.
+    // A paired QBTCP assignment makes the round electronic by intent. The missing
+    // room must be repaired instead of silently turning the round manual.
     const electronic = await directorWithSetup(4);
     act(() => {
       expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
@@ -1117,9 +1116,9 @@ describe('Director integration hardening', () => {
     await act(async () => {
       blocked = await electronic.hook.result.current.startRound(electronicRoundId);
     });
-    expect(blocked?.ok).toBe(true);
-    expect(blocked?.summary).toContain('1 game can be entered manually.');
-    expect(electronic.hook.result.current.state.rounds[0].status).toBe('released');
+    expect(blocked?.ok).toBe(false);
+    expect(blocked?.summary).toMatch(/no room assignment/i);
+    expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
 
     // Configuring USB identifies the outstanding physical handoff on an already-started round.
     act(() => {
@@ -1134,12 +1133,183 @@ describe('Director integration hardening', () => {
     await act(async () => {
       usb = await electronic.hook.result.current.startRound(electronicRoundId);
     });
-    expect(usb?.ok).toBe(true);
-    expect(usb?.manual).not.toBe(true);
-    expect(usb?.deliveredGames).toBe(1);
-    expect(usb?.pendingHandoffs).toHaveLength(1);
-    expect(usb?.summary).toContain('handoff');
-    expect(electronic.hook.result.current.state.rounds[0].status).toBe('released');
+    expect(usb?.ok).toBe(false);
+    expect(usb?.summary).toMatch(/no room assignment/i);
+    expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
+  });
+
+  test('an electronic first round cannot start while the native QBTCP server is down', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const roundId = hook.result.current.state.rounds[0]?.id;
+    if (!roundId) throw new Error('test setup did not create a round');
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'director_server_status') return { running: false };
+      return {};
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    let result: StartRoundResult | undefined;
+    await act(async () => {
+      result = await hook.result.current.startRound(roundId);
+    });
+    expect(result?.ok).toBe(false);
+    expect(result?.reason).toMatch(/QBTCP is not running/i);
+    expect(hook.result.current.state.rounds[0]?.status).toBe('planned');
+    expect(invoke).toHaveBeenCalledWith('director_server_status');
+  });
+
+  test('an electronic round cannot start until the native QBTCP snapshot ingests successfully', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    const roundId = hook.result.current.state.rounds[0]?.id;
+    if (!roundId) throw new Error('test setup did not create a round');
+    const invoke = vi.fn(async (command: string) => {
+      if (command === 'director_server_status') return { running: true };
+      throw new Error('snapshot transport unavailable');
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    let result: StartRoundResult | undefined;
+    await act(async () => {
+      result = await hook.result.current.startRound(roundId);
+    });
+    expect(result?.ok).toBe(false);
+    expect(result?.reason).toMatch(/sync is unhealthy/i);
+    expect(hook.result.current.state.rounds[0]?.status).toBe('planned');
+    expect(invoke).toHaveBeenCalledWith('director_server_snapshot');
+  });
+
+  test('administrative manual settlement retires the live native QBTCP session first', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId)
+      throw new Error('test setup did not create a room game');
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions = [
+      {
+        roomId: scheduled.roomId,
+        sessionId: 'live-session',
+        matchId: scheduled.id,
+        deviceId: 'device-1',
+        operatorName: 'Scorekeeper',
+        state: 'live',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 3,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: { tossupsRead: 3, leftScore: 20, rightScore: 10 },
+        helpRequestId: null,
+      },
+    ];
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    const invoke = vi.fn(async () => undefined);
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    let saved = false;
+    await act(async () => {
+      saved = await Promise.resolve(
+        hook.result.current.addManualResult({
+          scheduledGameId: scheduled.id,
+          scores: [score(scheduled.leftTeamId, 30), score(scheduled.rightTeamId!, 15)],
+        }),
+      );
+    });
+    expect(saved).toBe(true);
+    expect(invoke).toHaveBeenCalledWith('director_abandon_qbtcp_sessions', { sessionIds: ['live-session'] });
+    expect(hook.result.current.state.qbtcpSessions[0]).toMatchObject({
+      state: 'abandoned',
+      resumable: false,
+      progress: null,
+    });
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'accepted',
+    );
+  });
+
+  test('administrative cancellation retires a live native QBTCP session before freeing its room', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.roomId) throw new Error('test setup did not create a room game');
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions = [
+      {
+        roomId: scheduled.roomId,
+        sessionId: 'cancel-live-session',
+        matchId: scheduled.id,
+        deviceId: 'device-1',
+        operatorName: 'Scorekeeper',
+        state: 'live',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 1,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    const invoke = vi.fn(async () => undefined);
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    let cancelled = false;
+    await act(async () => {
+      cancelled = await Promise.resolve(
+        hook.result.current.cancelScheduledGame(scheduled.id, 'Room retired'),
+      );
+    });
+    expect(cancelled).toBe(true);
+    expect(invoke).toHaveBeenCalledWith('director_abandon_qbtcp_sessions', {
+      sessionIds: ['cancel-live-session'],
+    });
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'cancelled',
+    );
+    expect(hook.result.current.state.qbtcpSessions[0]).toMatchObject({
+      state: 'abandoned',
+      resumable: false,
+    });
+  });
+
+  test('assignment-visible metadata edits are blocked while a QBTCP session is live', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.roomId) throw new Error('test setup did not create a room game');
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions = [
+      {
+        roomId: scheduled.roomId,
+        sessionId: 'metadata-live-session',
+        matchId: scheduled.id,
+        deviceId: 'device-1',
+        operatorName: 'Scorekeeper',
+        state: 'live',
+        resumable: true,
+        resultReceived: false,
+        progressSequence: 1,
+        lastSeenAt: '2026-09-01T11:02:00.000Z',
+        progress: null,
+        helpRequestId: null,
+      },
+    ];
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    const teamId = scheduled.leftTeamId;
+    let changed = true;
+    act(() => {
+      changed = hook.result.current.updateTeam(teamId, { displayName: 'Rebound Team' });
+    });
+    expect(changed).toBe(false);
+    expect(hook.result.current.error).toMatch(/live QBTCP scorer assignment/i);
+    expect(hook.result.current.state.teams.find((team) => team.id === teamId)?.displayName).not.toBe(
+      'Rebound Team',
+    );
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {
@@ -1609,8 +1779,8 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.prepareRound(roundId)).toBe(true);
     });
     let released = true;
-    act(() => {
-      released = hook.result.current.releaseRound(roundId);
+    await act(async () => {
+      released = await Promise.resolve(hook.result.current.releaseRound(roundId));
     });
     expect(released).toBe(false);
     expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
@@ -1619,8 +1789,8 @@ describe('Director integration hardening', () => {
       expect(hook.result.current.updateStaff(staffId, { available: true })).toBe(true);
     });
     released = true;
-    act(() => {
-      released = hook.result.current.releaseRound(roundId);
+    await act(async () => {
+      released = await Promise.resolve(hook.result.current.releaseRound(roundId));
     });
     expect(released).toBe(false);
     expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
@@ -1628,8 +1798,8 @@ describe('Director integration hardening', () => {
     act(() => {
       expect(hook.result.current.updateEquipment(equipmentId, { available: true })).toBe(true);
     });
-    act(() => {
-      released = hook.result.current.releaseRound(roundId);
+    await act(async () => {
+      released = await Promise.resolve(hook.result.current.releaseRound(roundId));
     });
     expect(released).toBe(true);
     expect(hook.result.current.state.rounds[0]?.releasedAt).not.toBeNull();
@@ -1977,12 +2147,14 @@ describe('Director integration hardening', () => {
     });
     let acceptedLateResult = true;
     let addedLateResult = true;
-    act(() => {
+    await act(async () => {
       acceptedLateResult = hook.result.current.acceptSubmission('late-cancellation-submission');
-      addedLateResult = hook.result.current.addManualResult({
-        scheduledGameId: scheduled.id,
-        scores: [score(scheduled.leftTeamId, 30), score(rightTeamId, 15)],
-      });
+      addedLateResult = await Promise.resolve(
+        hook.result.current.addManualResult({
+          scheduledGameId: scheduled.id,
+          scores: [score(scheduled.leftTeamId, 30), score(rightTeamId, 15)],
+        }),
+      );
     });
     expect(acceptedLateResult).toBe(false);
     expect(addedLateResult).toBe(false);

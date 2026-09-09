@@ -4,6 +4,7 @@ import {
   currentFormat,
   currentPhase,
   currentPacket,
+  effectiveRoundDeliveryMode,
   formatGenerationAvailability,
   qbtcpSessionHasUnresolvedWork,
   resolveDirectorBracket,
@@ -22,6 +23,11 @@ export interface PreflightIssue {
   area: 'tournament' | 'teams' | 'format' | 'schedule' | 'rooms' | 'packets' | 'storage' | 'qbtcp';
   message: string;
   action?: string;
+}
+
+export interface QbtcpPreflightHealth {
+  lastSuccessfulAt: string | null;
+  error: string | null;
 }
 
 /**
@@ -142,6 +148,7 @@ export function runPreflight(
   state: DirectorState,
   nativeServerReady = false,
   nativeServerAvailable = true,
+  qbtcpHealth?: QbtcpPreflightHealth,
 ): PreflightIssue[] {
   const issues: PreflightIssue[] = [];
   if (!state.tournament) {
@@ -276,19 +283,57 @@ export function runPreflight(
     });
   }
   issues.push(...packetReferenceIssues(state));
-  // QBTCP serves rooms: with no room records there is nothing to pair, so a
-  // roomless manual tournament is never nagged about the native server.
-  if (
-    nativeServerAvailable &&
-    !nativeServerReady &&
-    (state.qbtcpSessions.length > 0 || state.qbtcpHelpRequests.length > 0)
-  ) {
-    if (state.tournament.status !== 'complete' && state.tournament.status !== 'archived') {
+  const qbtcpRound = state.rounds.find(
+    (round) =>
+      (round.status === 'planned' || round.status === 'prepared') &&
+      effectiveRoundDeliveryMode(state, round) === 'qbtcp',
+  );
+  const qbtcpIntent =
+    qbtcpRound ??
+    (state.qbtcpSessions.some((session) => session.state !== 'abandoned') ||
+    state.qbtcpHelpRequests.some((request) => request.status === 'open')
+      ? null
+      : undefined);
+  if (nativeServerAvailable && qbtcpIntent !== undefined) {
+    const qbtcpGames = qbtcpRound
+      ? state.scheduledGames.filter(
+          (game) => game.roundId === qbtcpRound.id && !game.bye && game.status !== 'cancelled',
+        )
+      : [];
+    const roundLabel = qbtcpRound?.name ?? 'the next electronic round';
+    const missingRooms = qbtcpGames.filter((game) => game.roomId === null);
+    if (missingRooms.length > 0) {
+      issues.push({
+        id: 'qbtcp-room-assignments',
+        severity: 'blocker',
+        area: 'qbtcp',
+        message: `${roundLabel} is configured for electronic QBTCP delivery, but ${missingRooms.length} game(s) have no room assignment. Assign rooms before starting.`,
+        action: 'Open Rooms',
+      });
+    }
+    if (!nativeServerReady) {
       issues.push({
         id: 'qbtcp-offline',
-        severity: 'recommendation',
+        severity: 'blocker',
         area: 'qbtcp',
-        message: 'Start the native QBTCP server before releasing electronic assignments.',
+        message: `QBTCP is not running. Start the native QBTCP server before releasing ${roundLabel} to electronic scorekeepers.`,
+        action: 'Open Rooms',
+      });
+    } else if (qbtcpHealth?.error) {
+      issues.push({
+        id: 'qbtcp-sync-unhealthy',
+        severity: 'blocker',
+        area: 'qbtcp',
+        message: `QBTCP sync is unhealthy: ${qbtcpHealth.error} Resolve the connection before starting ${roundLabel}.`,
+        action: 'Open Rooms',
+      });
+    } else if (qbtcpHealth && !qbtcpHealth.lastSuccessfulAt) {
+      issues.push({
+        id: 'qbtcp-ingestion-unverified',
+        severity: 'blocker',
+        area: 'qbtcp',
+        message: `QBTCP is running, but no healthy server snapshot has been ingested yet. Wait for the first successful sync before starting ${roundLabel}.`,
+        action: 'Open Rooms',
       });
     }
   }
