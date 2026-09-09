@@ -58,6 +58,26 @@ function teamTable(): HTMLElement {
   return screen.getByRole('table', { name: 'Team standings' });
 }
 
+function detailedSwitch(): HTMLElement {
+  return screen.getByRole('switch', { name: 'Detailed scoring columns' });
+}
+
+function expectPinnedColumns(table: HTMLElement, headers: string[], priority: string): void {
+  const columnHeaders = within(table).getAllByRole('columnheader');
+  const firstDataRow = within(table).getAllByRole('row')[1] as HTMLElement;
+  const cells = within(firstDataRow).getAllByRole('cell');
+
+  expect(cells).toHaveLength(columnHeaders.length);
+  for (const header of headers) {
+    const headerIndex = columnHeaders.findIndex((columnHeader) => columnHeader.textContent === header);
+    expect(headerIndex).toBeGreaterThanOrEqual(0);
+    expect(columnHeaders[headerIndex]).toHaveAttribute('data-priority', priority);
+    expect(columnHeaders[headerIndex]).toHaveAttribute('data-pinned', 'true');
+    expect(cells[headerIndex]).toHaveAttribute('data-priority', priority);
+    expect(cells[headerIndex]).toHaveAttribute('data-pinned', 'true');
+  }
+}
+
 test('a twelfth-place player is on the page rather than silently dropped', () => {
   render(<StandingsView state={tournamentWithPlayers(12)} controller={controller} onAnnounce={vi.fn()} />);
 
@@ -128,4 +148,60 @@ test('a team that has played still shows the rate it earned', () => {
 
   const row = within(teamTable()).getByText('Ninety Six').closest('tr') as HTMLElement;
   expect(within(row).getAllByRole('cell')[3]?.textContent).toBe('100.0%');
+});
+
+test('team detail columns are omitted by default and pinned when enabled', () => {
+  render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
+
+  const compactTable = teamTable();
+  expect(within(compactTable).queryByRole('columnheader', { name: 'PF' })).toBeNull();
+  expect(
+    within(compactTable)
+      .getAllByRole('columnheader')
+      .map((header) => header.dataset.priority),
+  ).toEqual(['1', '1', '1', '2', '2']);
+  expect(detailedSwitch()).toHaveAttribute('aria-checked', 'false');
+
+  fireEvent.click(detailedSwitch());
+
+  expect(detailedSwitch()).toHaveAttribute('aria-checked', 'true');
+  const detailedTable = teamTable();
+  expectPinnedColumns(detailedTable, ['PF', 'PA', 'Powers', 'Gets', 'Negs'], '3');
+  expect(
+    within(detailedTable)
+      .getAllByRole('columnheader')
+      .slice(0, 5)
+      .every((header) => !header.dataset.pinned),
+  ).toBe(true);
+
+  fireEvent.click(detailedSwitch());
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'PF' })).toBeNull();
+});
+
+test('player detail columns pin Bonus pts without changing the compact core', () => {
+  render(<StandingsView state={tournamentWithPlayers(2)} controller={controller} onAnnounce={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
+  const table = screen.getByRole('table', { name: 'Player statistics' });
+  expect(within(table).queryByRole('columnheader', { name: 'Bonus pts' })).toBeNull();
+
+  fireEvent.click(detailedSwitch());
+
+  const detailedTable = screen.getByRole('table', { name: 'Player statistics' });
+  expectPinnedColumns(detailedTable, ['Powers', 'Gets', 'Negs'], '2');
+  expectPinnedColumns(detailedTable, ['Bonus pts'], '3');
+  expect(within(detailedTable).getAllByRole('columnheader')).toHaveLength(7);
+  expect(
+    within(detailedTable)
+      .getAllByRole('columnheader')
+      .slice(0, 3)
+      .map((header) => header.dataset.priority),
+  ).toEqual(['1', '1', '1']);
+
+  fireEvent.click(detailedSwitch());
+  expect(
+    within(screen.getByRole('table', { name: 'Player statistics' })).queryByRole('columnheader', {
+      name: 'Bonus pts',
+    }),
+  ).toBeNull();
 });
