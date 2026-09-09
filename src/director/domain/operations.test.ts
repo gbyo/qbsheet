@@ -1,15 +1,12 @@
 import { describe, expect, test } from 'vitest';
 import {
-  defaultRules,
-  emptyDirectorState,
-  type DirectorState,
   type OperationalAssignment,
-  type QbtcpRoomSession,
   type Room,
   type Round,
   type ScheduledGame,
   type StaffMember,
 } from './model';
+import { operationsFixture, session } from './operations.fixtures';
 import {
   currentOperationsRound,
   deriveOperationalEquipment,
@@ -27,62 +24,6 @@ import {
 /* -------------------------------------------------------------------------- */
 /* Fixtures                                                                    */
 /* -------------------------------------------------------------------------- */
-
-export function operationsFixture(): DirectorState {
-  const state = emptyDirectorState();
-  state.tournament = {
-    id: 'tournament-1',
-    name: 'Operations test',
-    date: '2026-09-09',
-    venue: 'Test hall',
-    organizer: 'QBSheet',
-    status: 'running',
-    timeZone: 'UTC',
-    rules: structuredClone(defaultRules),
-    formatId: null,
-    currentPhaseId: 'phase-1',
-    currentPacketId: null,
-    currentRoundId: 'round-1',
-    createdAt: '2026-09-09T09:00:00.000Z',
-    updatedAt: '2026-09-09T09:00:00.000Z',
-  };
-  state.teams = ['Aiken', 'Lakeside', 'Jefferson', 'Hoover'].map((displayName, index) => ({
-    id: `team-${index + 1}`,
-    organizationId: null,
-    displayName,
-    teamLetter: '',
-    seed: index + 1,
-    status: 'confirmed',
-    createdAt: '2026-09-09T09:00:00.000Z',
-    updatedAt: '2026-09-09T09:00:00.000Z',
-  }));
-  state.rooms = [room('room-201', '201'), room('room-202', '202'), room('room-203', '203')];
-  state.staff = [
-    staff('staff-alice', 'Alice Johnson', ['moderator']),
-    staff('staff-bob', 'Bob Smith', ['scorekeeper']),
-    staff('staff-cara', 'Cara Diaz', ['moderator', 'scorekeeper']),
-    staff('staff-dan', 'Dan Lee', ['scorekeeper']),
-  ];
-  state.equipment = [
-    { id: 'equipment-1', name: 'Buzzer 1', kind: 'buzzer', available: true },
-    { id: 'equipment-2', name: 'Buzzer 2', kind: 'buzzer', available: true },
-    { id: 'equipment-3', name: 'Buzzer 3', kind: 'buzzer', available: true },
-  ];
-  state.rounds = [round('round-1', 1, 'released'), round('round-2', 2, 'planned')];
-  state.scheduledGames = [
-    game('game-1a', 'round-1', 'team-1', 'team-2', 'room-201'),
-    game('game-1b', 'round-1', 'team-3', 'team-4', 'room-202'),
-    game('game-2a', 'round-2', 'team-1', 'team-3', null),
-    game('game-2b', 'round-2', 'team-2', 'team-4', null),
-  ];
-  state.operationalAssignments = [
-    assignment('assignment-1a', 'round-1', 'game-1a', 'room-201', 'staff-alice', 'staff-bob', [
-      'equipment-1',
-    ]),
-    assignment('assignment-1b', 'round-1', 'game-1b', 'room-202', 'staff-cara', 'staff-dan', ['equipment-2']),
-  ];
-  return state;
-}
 
 function room(id: string, name: string, overrides: Partial<Room> = {}): Room {
   return {
@@ -161,18 +102,6 @@ function assignment(
     moderatorId,
     scorekeeperId,
     equipmentIds,
-    ...overrides,
-  };
-}
-
-export function session(overrides: Partial<QbtcpRoomSession> & { roomId: string }): QbtcpRoomSession {
-  return {
-    sessionId: `session-${overrides.roomId}`,
-    deviceId: 'device-1',
-    state: 'paired',
-    lastSeenAt: '2026-09-09T10:05:00.000Z',
-    progress: null,
-    helpRequestId: null,
     ...overrides,
   };
 }
