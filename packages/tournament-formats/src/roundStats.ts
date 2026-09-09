@@ -144,6 +144,10 @@ function allKnownTeamStats(game: GameStatsRow): GameTeamStatsRow[] | null {
  * A forfeit is a result for standings but is not evidence that a game was
  * competitively played. It enters scoring denominators only when real played
  * detail exists (for example, a game forfeited after play began).
+ *
+ * Legacy score records often carry a structurally complete line of zeroes for
+ * a scoreless forfeit. Zero-valued fields alone are therefore not evidence of
+ * play; an exact positive tossup count or at least one non-zero recorded stat is.
  */
 function contributesScoringStats(game: GameStatsRow): boolean {
   if (!game.forfeitedTeamId && game.status !== 'forfeit') return true;
@@ -153,7 +157,7 @@ function contributesScoringStats(game: GameStatsRow): boolean {
     teams !== null &&
     teams.some((team) =>
       [team.superpowers, team.powers, team.gets, team.negs, team.bonusesHeard, team.bonusPoints].some(
-        (value) => finite(value),
+        (value) => finite(value) && value > 0,
       ),
     )
   );
@@ -235,7 +239,21 @@ function completeApplicability(
   games: readonly GameStatsRow[],
   key: 'superpowers' | 'powers' | 'bonuses',
 ): boolean {
-  return games.length > 0 && games.every((game) => game.roundStatDefinition?.[key] !== null && game.roundStatDefinition?.[key] !== undefined);
+  return (
+    games.length > 0 &&
+    games.every(
+      (game) =>
+        game.roundStatDefinition?.[key] !== null &&
+        game.roundStatDefinition?.[key] !== undefined,
+    )
+  );
+}
+
+function everyGameUses(
+  games: readonly GameStatsRow[],
+  key: 'superpowers' | 'powers',
+): boolean {
+  return games.length > 0 && games.every((game) => game.roundStatDefinition?.[key] === true);
 }
 
 function aggregate(roundId: string | null, roundName: string, results: readonly GameStatsRow[]): AggregateFacts {
@@ -249,7 +267,9 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
     played.map((game) => game.roundStatDefinition?.regulationTossups ?? null),
   );
   const tossupsByGame = played.map(tossupsReadForGame);
-  const allTossupsKnown = played.length > 0 && tossupsByGame.every((value): value is number => finite(value) && value > 0);
+  const allTossupsKnown =
+    played.length > 0 &&
+    tossupsByGame.every((value): value is number => finite(value) && value > 0);
   const totalTossupsRead = allTossupsKnown
     ? (tossupsByGame as number[]).reduce((sum, value) => sum + value, 0)
     : null;
@@ -267,6 +287,8 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
   const superpowerApplicabilityKnown = completeApplicability(played, 'superpowers');
   const powerApplicabilityKnown = completeApplicability(played, 'powers');
   const bonusApplicabilityKnown = completeApplicability(played, 'bonuses');
+  const allUseSuperpowers = everyGameUses(played, 'superpowers');
+  const allUsePowers = everyGameUses(played, 'powers');
 
   const bonusPoints = sumKnown(played, (team) => team.bonusPoints);
   const bonusesHeard = sumKnown(played, (team) => team.bonusesHeard);
@@ -279,12 +301,23 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
       ? bonusPoints / bonusesHeard
       : null;
 
+  const bonusConversionApplicable =
+    hasBonuses &&
+    played.some((game) => {
+      const maximum = game.roundStatDefinition?.maximumBonusScore;
+      return finite(maximum) && maximum > 0;
+    });
   let maximumBonusPoints: number | null = 0;
   if (hasBonuses && bonusApplicabilityKnown && played.length > 0) {
     for (const game of played) {
       const definition = game.roundStatDefinition;
       const teamRows = allKnownTeamStats(game);
-      if (!definition || !teamRows || !finite(definition.maximumBonusScore) || definition.maximumBonusScore <= 0) {
+      if (
+        !definition ||
+        !teamRows ||
+        !finite(definition.maximumBonusScore) ||
+        definition.maximumBonusScore <= 0
+      ) {
         maximumBonusPoints = null;
         break;
       }
@@ -305,7 +338,8 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
       ? bonusPoints / maximumBonusPoints
       : null;
 
-  let normalizedPointsSum: number | null = regulationTossups === null || played.length === 0 ? null : 0;
+  let normalizedPointsSum: number | null =
+    regulationTossups === null || played.length === 0 ? null : 0;
   if (normalizedPointsSum !== null) {
     for (let index = 0; index < played.length; index += 1) {
       const game = played[index]!;
@@ -319,7 +353,8 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
         normalizedPointsSum = null;
         break;
       }
-      normalizedPointsSum += ((game.teamOnePoints + game.teamTwoPoints) / 2) * (regulationTossups / tossups);
+      normalizedPointsSum +=
+        ((game.teamOnePoints + game.teamTwoPoints) / 2) * (regulationTossups / tossups);
     }
   }
   const pointsPerTeamPerXTuh =
@@ -330,19 +365,28 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
       ? positiveConversions / totalTossupsRead
       : null;
   const powerRate =
-    hasPowers && powerApplicabilityKnown && powers !== null && positiveConversions !== null && positiveConversions > 0
+    hasPowers &&
+    powerApplicabilityKnown &&
+    allUsePowers &&
+    powers !== null &&
+    positiveConversions !== null &&
+    positiveConversions > 0
       ? powers / positiveConversions
       : null;
   const superpowerRate =
     hasSuperpowers &&
     superpowerApplicabilityKnown &&
+    allUseSuperpowers &&
     superpowers !== null &&
     positiveConversions !== null &&
     positiveConversions > 0
       ? superpowers / positiveConversions
       : null;
   const negRatePerXTuh =
-    regulationTossups !== null && negs !== null && totalTossupsRead !== null && totalTossupsRead > 0
+    regulationTossups !== null &&
+    negs !== null &&
+    totalTossupsRead !== null &&
+    totalTossupsRead > 0
       ? (negs / totalTossupsRead) * regulationTossups
       : null;
 
@@ -350,7 +394,9 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
     const teamRows = allKnownTeamStats(game);
     return (
       teamRows !== null &&
-      teamRows.every((team) => [team.superpowers, team.powers, team.gets, team.negs].every(finite))
+      teamRows.every((team) =>
+        [team.superpowers, team.powers, team.gets, team.negs].every(finite),
+      )
     );
   }).length;
 
@@ -361,6 +407,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
     ...(hasPowers ? [powerRate] : []),
     ...(hasSuperpowers ? [superpowerRate] : []),
     ...(hasBonuses ? [ppb] : []),
+    ...(bonusConversionApplicable ? [bonusConversionRate] : []),
   ];
   const partial =
     excludedForfeits > 0 ||
@@ -395,7 +442,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
     hasSuperpowers,
     hasPowers,
     hasBonuses,
-    bonusConversionApplicable: hasBonuses && bonusConversionRate !== null,
+    bonusConversionApplicable,
   };
 }
 
