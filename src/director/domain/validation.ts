@@ -1,4 +1,5 @@
 import { type DirectorId, type DirectorState, type ScheduledGame } from './model';
+import { activeTournamentTeams } from './field';
 import {
   currentFormat,
   currentPhase,
@@ -152,7 +153,7 @@ export function runPreflight(
     });
     return issues;
   }
-  if (state.teams.filter((team) => team.status === 'confirmed').length < 2) {
+  if (activeTournamentTeams(state).length < 2) {
     issues.push({
       id: 'teams-too-few',
       severity: 'blocker',
@@ -517,9 +518,7 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
     .map((poolId) => state.pools.find((pool) => pool.id === poolId))
     .filter((pool): pool is NonNullable<typeof pool> => pool !== undefined && pool.archived !== true);
   if (pools.some((pool) => !pool || pool.phaseId !== phase.id)) return false;
-  const confirmedIds = new Set(
-    state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
-  );
+  const confirmedIds = new Set(activeTournamentTeams(state).map((team) => team.id));
   const eligiblePoolTeamIds = new Set(
     state.teams
       .filter((team) => team.status === 'confirmed' || team.status === 'dropped')
@@ -543,11 +542,8 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
   }
   return pools.every((pool) => {
     if (!pool) return false;
-    const poolTeams = state.teams.filter(
-      (team) =>
-        team.status === 'confirmed' &&
-        pool.teamIds.includes(team.id) &&
-        !cancellationExemptTeamIds.has(team.id),
+    const poolTeams = activeTournamentTeams(state).filter(
+      (team) => pool.teamIds.includes(team.id) && !cancellationExemptTeamIds.has(team.id),
     );
     const poolGames = activeGames.filter((game) => game.poolId === pool.id);
     return scheduleIsValid(poolGames, poolTeams, {
@@ -559,14 +555,14 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
 
 function expectedRoundTeams(state: DirectorState, phase: DirectorState['phases'][number] | undefined) {
   if (!phase || phase.poolIds.length === 0) {
-    return state.teams.filter((team) => team.status === 'confirmed');
+    return activeTournamentTeams(state);
   }
   const ids = new Set(
     state.pools
       .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
       .flatMap((pool) => pool.teamIds),
   );
-  return state.teams.filter((team) => team.status === 'confirmed' && ids.has(team.id));
+  return activeTournamentTeams(state).filter((team) => ids.has(team.id));
 }
 
 function expectedRoundByeCount(
@@ -581,7 +577,7 @@ function expectedRoundByeCount(
     .reduce((count, pool) => {
       const activeCount = pool.teamIds.filter(
         (teamId) =>
-          state.teams.find((team) => team.id === teamId)?.status === 'confirmed' &&
+          activeTournamentTeams(state).some((team) => team.id === teamId) &&
           (!expectedTeamIds || expectedTeamIds.has(teamId)),
       ).length;
       return count + (activeCount % 2);
@@ -590,7 +586,7 @@ function expectedRoundByeCount(
 
 function cancellationExemptTeams(state: DirectorState, games: readonly ScheduledGame[]): Set<DirectorId> {
   const exempt = new Set<DirectorId>();
-  for (const team of state.teams.filter((entry) => entry.status === 'confirmed')) {
+  for (const team of activeTournamentTeams(state)) {
     const involving = games.filter(
       (game) => !game.bye && (game.leftTeamId === team.id || game.rightTeamId === team.id),
     );

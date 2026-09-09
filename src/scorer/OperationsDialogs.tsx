@@ -17,7 +17,7 @@ import QuestionEditor from './QuestionEditor';
 import ScorerDialog from './ScorerDialog';
 import PlayingBenchEditor from './PlayingBenchEditor';
 import { orderedActivePlayers, playersAddedAfter } from './LineupEditing';
-import { readScorerRecovery } from './ScorerRecovery';
+import { inspectScorerRecovery, IScorerRecoveryIdentity, ScorerRecoveryInspection } from './ScorerRecovery';
 import { DisplaySideMapping, identityDisplaySideMapping } from './DisplaySideMapping';
 
 /**
@@ -1031,39 +1031,119 @@ export function ScoresheetReviewDialog(props: {
 }
 
 export function RecoveryDialog(props: {
-  expectedTeams: { left: { name: string }; right: { name: string } };
+  expectedIdentity: IScorerRecoveryIdentity;
+  tournamentName: string;
+  roundName: string;
   onRestore: (events: ScoreEvent[]) => void;
   onClose: () => void;
 }) {
-  const { expectedTeams, onRestore, onClose } = props;
+  const { expectedIdentity, tournamentName, roundName, onRestore, onClose } = props;
   const [error, setError] = useState('');
+  const [review, setReview] = useState<{
+    payload: Extract<ScorerRecoveryInspection, { kind: 'review-required' }>['payload'];
+    fileName: string;
+    savedAt: string;
+  }>();
+
+  const rejectMessage = (reason: Extract<ScorerRecoveryInspection, { kind: 'rejected' }>['reason']) => {
+    if (reason === 'match-id-mismatch')
+      return 'This recovery file belongs to a different scheduled game. It was not restored.';
+    if (reason === 'tournament-id-mismatch')
+      return 'This recovery file belongs to a different tournament. It was not restored.';
+    if (reason === 'round-id-mismatch')
+      return 'This recovery file belongs to a different scheduled round. It was not restored.';
+    if (reason === 'team-id-mismatch')
+      return 'The recovery file has different team identities. It was not restored.';
+    if (reason === 'team-mismatch')
+      return 'This file has a different left/right matchup. It was not restored.';
+    return 'This file has no valid recovery data. It was not restored.';
+  };
+
+  const restoreAfterReview = () => {
+    if (!review) return;
+    onRestore(review.payload.events);
+    onClose();
+  };
+
   return (
     <ScorerDialog title="Recover from QBJ" onClose={onClose}>
-      <p className="scorer-dialog-note">
-        Choose a QBJ backup downloaded by this scorer for {expectedTeams.left.name} vs{' '}
-        {expectedTeams.right.name}. This replaces the events currently on screen.
-      </p>
-      <label className="scorer-file-field" htmlFor="scorer-recovery-file">
-        QBJ backup
-        <input
-          id="scorer-recovery-file"
-          type="file"
-          accept=".qbj,application/json"
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            if (!file) return;
-            try {
-              const recovery = readScorerRecovery(JSON.parse(await file.text()), expectedTeams);
-              if (!recovery) throw new Error('This file has no compatible recovery data for this matchup.');
-              onRestore(recovery.events);
-              onClose();
-            } catch (reason) {
-              setError(reason instanceof Error ? reason.message : 'This QBJ file could not be read.');
-            }
-          }}
-        />
-      </label>
-      {error && <p className="scorer-problem">{error}</p>}
+      {review ? (
+        <>
+          <p className="scorer-problem" role="alert">
+            This recovery file cannot be proven to belong to the scheduled game. Review the details before
+            deciding whether to restore it. The safe action is Cancel.
+          </p>
+          <dl className="scorer-dialog-note">
+            <dt>Current game</dt>
+            <dd>
+              {roundName} · {expectedIdentity.leftTeamName} vs {expectedIdentity.rightTeamName}
+            </dd>
+            <dt>Tournament</dt>
+            <dd>{tournamentName}</dd>
+            <dt>Recovery file</dt>
+            <dd>
+              {review.fileName} · saved {review.savedAt}
+            </dd>
+            <dt>Identity</dt>
+            <dd>No Director match ID in this older or manual file.</dd>
+          </dl>
+          <div className="scorer-choices">
+            <button type="button" className="scorer-choice" onClick={() => setReview(undefined)}>
+              Cancel
+            </button>
+            <button type="button" className="scorer-choice" onClick={restoreAfterReview}>
+              Restore after review
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="scorer-dialog-note">
+            Choose a QBJ backup downloaded by this scorer for {expectedIdentity.leftTeamName} vs{' '}
+            {expectedIdentity.rightTeamName}. This replaces the events currently on screen.
+          </p>
+          <label className="scorer-file-field" htmlFor="scorer-recovery-file">
+            QBJ backup
+            <input
+              id="scorer-recovery-file"
+              type="file"
+              accept=".qbj,application/json"
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                setError('');
+                try {
+                  const inspected = inspectScorerRecovery(JSON.parse(await file.text()), expectedIdentity);
+                  if (inspected.kind === 'compatible') {
+                    onRestore(inspected.payload.events);
+                    onClose();
+                    return;
+                  }
+                  if (inspected.kind === 'review-required') {
+                    setReview({
+                      payload: inspected.payload,
+                      fileName: file.name,
+                      savedAt:
+                        file.lastModified > 0
+                          ? new Date(file.lastModified).toLocaleString()
+                          : 'time unavailable',
+                    });
+                    return;
+                  }
+                  setError(rejectMessage(inspected.reason));
+                } catch (reason) {
+                  setError(reason instanceof Error ? reason.message : 'This QBJ file could not be read.');
+                }
+              }}
+            />
+          </label>
+          {error && (
+            <p className="scorer-problem" role="alert">
+              {error}
+            </p>
+          )}
+        </>
+      )}
     </ScorerDialog>
   );
 }

@@ -1,7 +1,10 @@
 import { useRef, type ReactNode } from 'react';
 import { Button, type ButtonVariant } from './Controls';
-import { isNativeDirector, openNativeTournamentFile } from '../platform/native';
+import { isNativeDirector } from '../platform/native';
 import type { IconName } from './Icon';
+import { pickDirectorFiles, type PickedFile } from './filePickerContract';
+
+export type { PickedFile } from './filePickerContract';
 
 /**
  * One file-choosing affordance.
@@ -19,16 +22,6 @@ import type { IconName } from './Icon';
  * uses the platform dialog in the desktop build and the browser's file input in
  * the browser build. The operator sees one control either way.
  */
-
-export interface PickedFile {
-  fileName: string;
-  bytes: Uint8Array;
-}
-
-function decodeBase64(base64: string): Uint8Array {
-  const binary = atob(base64);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-}
 
 export function FilePicker({
   children,
@@ -60,16 +53,6 @@ export function FilePicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const native = preferNative && !multiple && isNativeDirector();
 
-  const openNative = async () => {
-    try {
-      const selected = await openNativeTournamentFile();
-      if (!selected) return;
-      await onPick([{ fileName: selected.fileName, bytes: decodeBase64(selected.contentBase64) }]);
-    } catch (reason: unknown) {
-      onError?.(reason instanceof Error ? reason.message : 'That file could not be opened.');
-    }
-  };
-
   return (
     <>
       <Button
@@ -78,7 +61,7 @@ export function FilePicker({
         size={size}
         disabled={disabled}
         onClick={() => {
-          if (native) void openNative();
+          if (native) void pickDirectorFiles({ native: true, onPick, onError });
           else inputRef.current?.click();
         }}
       >
@@ -96,19 +79,7 @@ export function FilePicker({
           const files = Array.from(event.currentTarget.files ?? []);
           event.currentTarget.value = '';
           if (!files.length) return;
-          void (async () => {
-            try {
-              const picked = await Promise.all(
-                files.map(async (file) => ({
-                  fileName: file.name,
-                  bytes: new Uint8Array(await file.arrayBuffer()),
-                })),
-              );
-              await onPick(picked);
-            } catch (reason: unknown) {
-              onError?.(reason instanceof Error ? reason.message : 'That file could not be read.');
-            }
-          })();
+          void pickDirectorFiles({ native: false, files, onPick, onError });
         }}
       />
     </>
