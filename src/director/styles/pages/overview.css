@@ -6,6 +6,30 @@
  * which is the one layout unique to this destination.
  */
 
+/*
+ * The current-round panel is the only top-level Overview panel with a Progress
+ * control. Keep its operational status compact instead of spending two full
+ * body rows on a progress bar and (sometimes empty) metadata. The shared Panel
+ * still owns the surface, border, type, and actions; this only composes its body.
+ */
+.director-page > .director-panel:has(.director-progress) .director-panel-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--director-space-4);
+  align-items: center;
+  padding: var(--director-space-3) var(--director-panel-inset);
+}
+
+.director-page > .director-panel:has(.director-progress) .director-meta-row {
+  justify-content: flex-end;
+}
+
+/* MetaRow filters empty values, but the element itself still renders. Without
+   this, an idle round reserves a blank second row in the panel body. */
+.director-page > .director-panel:has(.director-progress) .director-meta-row:empty {
+  display: none;
+}
+
 .director-leader-list li {
   display: flex;
   gap: var(--director-space-3);
@@ -47,4 +71,15 @@
   background: var(--director-surface);
   border: 1px solid var(--director-border);
   border-radius: var(--director-radius);
+}
+
+@media (max-width: 760px) {
+  .director-page > .director-panel:has(.director-progress) .director-panel-body {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--director-space-2);
+  }
+
+  .director-page > .director-panel:has(.director-progress) .director-meta-row {
+    justify-content: flex-start;
+  }
 }
