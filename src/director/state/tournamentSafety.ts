@@ -53,6 +53,15 @@ export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: Di
       game.status !== 'cancelled'
     );
   }).length;
+  // The basis is final once every round that actually carries play is closed and no competitive
+  // game is outstanding. A later-phase plan may still hold empty placeholder rounds; those carry no
+  // result and cannot change the standings, so they must not block a settled advancement.
+  const playedRounds = state.rounds.filter(
+    (round) =>
+      round.phaseId === sourcePhaseId && state.scheduledGames.some((game) => game.roundId === round.id),
+  );
+  const openPlayedRounds = playedRounds.filter((round) => round.status !== 'closed');
+  if (unresolvedGames === 0 && openPlayedRounds.length === 0 && playedRounds.length > 0) return null;
   const suffix =
     unresolvedGames > 0
       ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
