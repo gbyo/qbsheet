@@ -31,6 +31,7 @@ import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { errorNotice, type AnnounceInput } from '../notices';
 import { dropTeamFlexibly } from '../state/flexibleEditing';
+import { planTeamRestore } from '../domain';
 
 interface PlayerDraft {
   key: string;
@@ -116,6 +117,7 @@ export function TeamsView({
 
   const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
     const result = controller.addImportedTeams(toImportedTeamInputs(teams));
+    if (!result.ok) return;
     const duplicate = result.skipped
       ? ` ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped.`
       : '';
@@ -382,6 +384,7 @@ function TeamActions({
   const confirmAction = useConfirm();
 
   const changeStatus = async () => {
+    const restorePlan = team.status === 'dropped' ? planTeamRestore(state, team.id) : undefined;
     const affectedGames = state.scheduledGames.filter((game) => {
       const round = state.rounds.find((entry) => entry.id === game.roundId);
       return (
@@ -446,7 +449,7 @@ function TeamActions({
     }
     onAnnounce(
       team.status === 'dropped'
-        ? `${team.displayName} restored. Future pool or round assignments can now be repaired as needed.`
+        ? `${team.displayName} restored.${restorePlan?.safeGameIds.length ? ` ${restorePlan.safeGameIds.length} drop-cancelled game${restorePlan.safeGameIds.length === 1 ? '' : 's'} reopened.` : ''}${restorePlan?.review.length ? ` ${restorePlan.review.length} game${restorePlan.review.length === 1 ? '' : 's'} need explicit schedule review.` : ''}`
         : `${team.displayName} dropped.${futureGames.length ? ` ${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} reconciled; repair those rounds when ready.` : ''}`,
     );
   };
@@ -812,6 +815,7 @@ function PasteTeamsDialog({
       return;
     }
     const result = controller.addImportedTeams(toImportedTeamInputs(report.value));
+    if (!result.ok) return;
     onAnnounce(
       `${result.inserted} team${result.inserted === 1 ? '' : 's'} imported${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''}.`,
     );

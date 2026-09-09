@@ -26,6 +26,7 @@
 import {
   isoNow,
   newDirectorId,
+  resultDecisionIssue,
   type DirectorId,
   type DirectorState,
   type GameRecord,
@@ -33,6 +34,7 @@ import {
   type ResultSubmission,
   type TeamGameScore,
 } from '../domain/model';
+import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, isCanonicalCount } from '../domain';
 import { resultFingerprint } from './canonical';
 import { hasScoringContent, matchObject, readQbjIdentity, type QbjIdentity } from './parse';
 import {
@@ -65,12 +67,14 @@ export const ingestWarnings = {
   cancelledGame: 'cancelled-game',
   alreadyAccepted: 'already-accepted',
   statisticsWarning: 'statistics-warning',
+  invalidStatisticCount: 'invalid-statistic-count',
   ambiguousTeamIdentity: 'ambiguous-team-identity',
   unresolvedPlayerIdentity: 'unresolved-player-identity',
   unrecognizedAnswerValue: 'unrecognized-answer-value',
   lateAfterAbandon: 'late-after-abandon',
   transportReviewRequired: 'transport-review-required',
   directorAssociation: 'director-association',
+  winnerRequiredTie: 'winner-required-tie',
 } as const;
 
 export type IngestWarning = (typeof ingestWarnings)[keyof typeof ingestWarnings];
@@ -102,6 +106,8 @@ export function describeWarning(code: string): string {
       return 'This game already has an accepted result.';
     case ingestWarnings.statisticsWarning:
       return 'The statistics did not validate cleanly.';
+    case ingestWarnings.invalidStatisticCount:
+      return 'A statistic count was not a finite non-negative whole number.';
     case ingestWarnings.ambiguousTeamIdentity:
       return 'A team name matches more than one roster entry.';
     case ingestWarnings.unresolvedPlayerIdentity:
@@ -114,6 +120,8 @@ export function describeWarning(code: string): string {
       return 'The transport flagged this result for review.';
     case ingestWarnings.directorAssociation:
       return 'A director explicitly associated this result with the selected scheduled game; verify the matchup before accepting it.';
+    case ingestWarnings.winnerRequiredTie:
+      return 'This final is tied but the format requires a winner; finish any required overtime and enter a decisive score, or record an explicit administrative forfeit before accepting it.';
     default:
       return code;
   }
@@ -224,7 +232,12 @@ function answerAggregate(
   for (const count of counts) {
     if (!isRecord(count)) continue;
     const value = isRecord(count.answer_type) ? finiteNumber(count.answer_type.value) : undefined;
-    const number = finiteNumber(count.number) ?? 0;
+    if (count.number === undefined) continue;
+    if (!isCanonicalCount(count.number)) {
+      warnings.push(ingestWarnings.invalidStatisticCount);
+      continue;
+    }
+    const number = count.number;
     if (value === undefined || number === 0) continue;
     // Points always reconcile from the document's own values, even for an
     // answer type the tournament rules do not name. Bucketing is where the
@@ -295,7 +308,9 @@ export function readResultStatistics(
       const teamId = resultTeamId(entry.team, state, scheduled, warnings);
       const score = finiteNumber(entry.points);
       if (!teamId || score === undefined) return null;
-      return { teamId, score, ...teamAggregate(entry, state, warnings) };
+      const candidate = { teamId, score, ...teamAggregate(entry, state, warnings) };
+      if (invalidTeamGameScoreCountField(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
+      return candidate;
     })
     .filter((entry): entry is TeamGameScore => entry !== null);
   const playerStats = entries.flatMap((entry): PlayerGameStat[] => {
@@ -316,20 +331,20 @@ export function readResultStatistics(
       }
       const [player] = players;
       const aggregate = answerAggregate(candidate.answer_counts, state, warnings);
-      return [
-        {
-          playerId: player.id,
-          teamId,
-          superpowers: aggregate.superpowers,
-          powers: aggregate.powers,
-          gets: aggregate.gets,
-          negs: aggregate.negs,
-          bonusPoints: finiteNumber(candidate.bonus_points) ?? 0,
-          tossupsHeard:
-            finiteNumber(candidate.tossups_heard) ??
-            aggregate.superpowers + aggregate.powers + aggregate.gets + aggregate.negs,
-        },
-      ];
+      const stat = {
+        playerId: player.id,
+        teamId,
+        superpowers: aggregate.superpowers,
+        powers: aggregate.powers,
+        gets: aggregate.gets,
+        negs: aggregate.negs,
+        bonusPoints: finiteNumber(candidate.bonus_points) ?? 0,
+        tossupsHeard:
+          finiteNumber(candidate.tossups_heard) ??
+          aggregate.superpowers + aggregate.powers + aggregate.gets + aggregate.negs,
+      };
+      if (invalidPlayerGameStatCountField(stat)) warnings.push(ingestWarnings.invalidStatisticCount);
+      return [stat];
     });
   });
   return { scores, playerStats, warnings };
@@ -553,6 +568,13 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
       warnings.add(ingestWarnings.rosterMismatch);
   }
   if (statistics.scores.length < 2) warnings.add(ingestWarnings.statisticsWarning);
+  if (
+    scheduled &&
+    statistics.scores.length === 2 &&
+    resultDecisionIssue(state, scheduled, statistics.scores)
+  ) {
+    warnings.add(ingestWarnings.winnerRequiredTie);
+  }
 
   // Duplicate and conflict are the same question asked of the same set of prior submissions: does
   // Director already hold a result for this game, and does it say the same thing? Fingerprints are

@@ -7,6 +7,28 @@ import { useDirectorController, type DirectorController } from '../state/useDire
 import { TeamsView } from './TeamsView';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 
+test('a rejected bulk import does not announce success or close the paste dialog', () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  const state = directorFixture();
+  const announce = vi.fn();
+  const addImportedTeams = vi.fn(() => ({ ok: false as const, inserted: 0 as const, skipped: 0 as const }));
+  const controller = { addImportedTeams } as unknown as DirectorController;
+
+  render(<TeamsView state={state} controller={controller} onAnnounce={announce} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Import' }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Paste teams…' }));
+  fireEvent.change(screen.getByLabelText('Team CSV'), {
+    target: { value: 'team_name\nRejected team' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Import teams' }));
+
+  expect(addImportedTeams).toHaveBeenCalledOnce();
+  expect(announce).not.toHaveBeenCalledWith(expect.stringContaining('0 teams imported'));
+  expect(screen.getByRole('dialog')).toBeTruthy();
+});
+
 test('navigation opens a team repeatedly and pasted names preserve pending removals and unsaved drafts', async () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;

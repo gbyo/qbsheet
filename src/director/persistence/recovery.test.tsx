@@ -280,7 +280,12 @@ test('a mutation attempted while the document is being replaced reports failure'
   act(() => {
     restored = hook.result.current.restoreCheckpoint(point.id);
   });
-  await waitFor(() => expect(hook.result.current.recovering).toBe(true));
+  await waitFor(() =>
+    expect(hook.result.current.documentTransition).toEqual({
+      kind: 'restoring-checkpoint',
+      checkpointId: point.id,
+    }),
+  );
   act(() => {
     expect(hook.result.current.updateTournament({ venue: 'Late edit' })).toBe(false);
   });
@@ -290,5 +295,6 @@ test('a mutation attempted while the document is being replaced reports failure'
     expect(await restored!).toBe(true);
   });
   expect(hook.result.current.state.tournament!.venue).toBe(before.tournament!.venue);
+  expect(hook.result.current.documentTransition).toBeNull();
   hook.unmount();
 });

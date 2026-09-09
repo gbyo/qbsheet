@@ -351,6 +351,18 @@ function OutgoingView({
           {plan.failures[0]?.reason}
         </Callout>
       )}
+      {plan.skipped.length > 0 && (
+        <Callout
+          tone="info"
+          title={`${plan.skipped.length} selected game${plan.skipped.length === 1 ? '' : 's'} intentionally skipped`}
+        >
+          {plan.skipped.map((entry) => (
+            <p key={entry.scheduledGameId}>
+              {entry.scheduledGameId}: {entry.reason}
+            </p>
+          ))}
+        </Callout>
+      )}
       {plan.warnings.map((warning) => (
         <Callout key={warning} tone="warning">
           {warning}

@@ -11,7 +11,12 @@ import { ActionMenu, MenuItem } from '../components/Menu';
 import { Badge } from '../components/Status';
 import { useFormState } from '../components/Fields';
 import { canonicalSection, groupForSection, labelForSection, type SectionId } from './navigation';
-import { useDirectorController } from '../state/useDirectorController';
+import {
+  useDirectorController,
+  type DocumentTransitionCheck,
+  type DirectorDocumentTransition,
+  type NewTournamentInput,
+} from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
 import { TeamsView } from '../teams/TeamsView';
 import { FormatView } from '../format/FormatView';
@@ -87,7 +92,7 @@ export default function DirectorApp() {
 
 function DirectorAppContent() {
   const controller = useDirectorController();
-  const { loading, state, syncQbtcp } = controller;
+  const { loading, state, syncQbtcp, canLeaveCurrentDocument, retryPersistence } = controller;
   const nativeDirector = isNativeDirector();
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
@@ -96,7 +101,7 @@ function DirectorAppContent() {
     (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input)),
     [setAnnouncement],
   );
-  const transfers = useTransfers(state, controller, announce, !loading && !controller.recovering);
+  const transfers = useTransfers(state, controller, announce, !loading && !controller.documentTransition);
   // The one shared native QBTCP snapshot: Overview preflight, Rooms, and the
   // top-bar now-strip all read this same state, and Rooms writes through to it.
   const nativeServer = useNativeServerStatus({
@@ -116,6 +121,32 @@ function DirectorAppContent() {
   const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
   const [newTournamentOpen, setNewTournamentOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [blockedTransition, setBlockedTransition] = useState<{
+    check: Extract<DocumentTransitionCheck, { ok: false }>;
+    action: () => boolean | Promise<boolean>;
+  } | null>(null);
+
+  const requestDocumentTransition = useCallback(
+    (action: () => boolean | Promise<boolean>, onBlocked?: () => void): boolean | Promise<boolean> => {
+      const check = canLeaveCurrentDocument();
+      if (!check.ok) {
+        onBlocked?.();
+        setBlockedTransition({ check, action });
+        return false;
+      }
+      return action();
+    },
+    [canLeaveCurrentDocument, setBlockedTransition],
+  );
+
+  const retryBlockedTransition = useCallback(async () => {
+    if (!blockedTransition) return;
+    const saved = await retryPersistence();
+    if (!saved) return;
+    const action = blockedTransition.action;
+    setBlockedTransition(null);
+    await action();
+  }, [blockedTransition, retryPersistence, setBlockedTransition]);
 
   const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
 
@@ -134,12 +165,15 @@ function DirectorAppContent() {
 
   const importFile = useCallback(
     (file: PickedFile) => {
-      const result = openTournamentFile(file, (snapshot) =>
-        controller.importSnapshot(snapshot as Parameters<typeof controller.importSnapshot>[0]),
-      );
-      announce(result.announcement);
+      void requestDocumentTransition(() => {
+        const result = openTournamentFile(file, (snapshot) =>
+          controller.importSnapshot(snapshot as Parameters<typeof controller.importSnapshot>[0]),
+        );
+        announce(result.announcement);
+        return result.ok;
+      });
     },
-    [announce, controller],
+    [announce, controller, requestDocumentTransition],
   );
 
   const saveOperator = useCallback((profile: OperatorProfile) => {
@@ -147,12 +181,8 @@ function DirectorAppContent() {
     saveOperatorProfile(profile);
   }, []);
 
-  if (controller.recovering)
-    return (
-      <div className="director-loading" role="status">
-        Saving tournament recovery…
-      </div>
-    );
+  if (controller.documentTransition)
+    return <DocumentTransitionLoading transition={controller.documentTransition} />;
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
@@ -284,6 +314,9 @@ function DirectorAppContent() {
             onSaveOperator={saveOperator}
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
+            onRestoreCheckpoint={(checkpointId) =>
+              Promise.resolve(requestDocumentTransition(() => controller.restoreCheckpoint(checkpointId)))
+            }
           />
         );
     }
@@ -303,8 +336,10 @@ function DirectorAppContent() {
         recentTournaments={recentTournaments}
         archivedTournaments={archivedTournaments}
         onSwitchTournament={(id, name) => {
-          void controller.switchTournament(id).then((switched) => {
+          void requestDocumentTransition(async () => {
+            const switched = await controller.switchTournament(id);
             if (switched) announce(`Opened ${name}.`);
+            return switched;
           });
         }}
         onNewTournament={() => setNewTournamentOpen(true)}
@@ -352,6 +387,16 @@ function DirectorAppContent() {
         }
         banners={
           <>
+            {tournament.status === 'archived' && (
+              <ArchivedTournamentReadOnlyNotice
+                tournamentName={tournament.name}
+                onReopen={() =>
+                  void controller.reopenTournament().then((reopened) => {
+                    if (reopened) announce(`${tournament.name} reopened as a draft.`);
+                  })
+                }
+              />
+            )}
             {(controller.writerStatus === 'blocked' || controller.writerStatus === 'unavailable') && (
               <Callout tone="warning" title="Read-only Director tab" role="alert">
                 {controller.writerStatus === 'blocked'
@@ -420,11 +465,20 @@ function DirectorAppContent() {
       <HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
       {newTournamentOpen && (
         <NewTournamentDialog
-          controller={controller}
           onClose={() => setNewTournamentOpen(false)}
-          onCreated={(name) => {
-            setNewTournamentOpen(false);
-            announce(`${name} created.`);
+          onCreate={(input) => {
+            const result = requestDocumentTransition(
+              () => {
+                const created = controller.createTournament(input);
+                if (created) {
+                  setNewTournamentOpen(false);
+                  announce(`${input.name} created.`);
+                }
+                return created;
+              },
+              () => setNewTournamentOpen(false),
+            );
+            return typeof result === 'boolean' ? result : false;
           }}
         />
       )}
@@ -435,8 +489,10 @@ function DirectorAppContent() {
           onClose={() => setManageOpen(false)}
           onSwitch={(entry) => {
             setManageOpen(false);
-            void controller.switchTournament(entry.id).then((switched) => {
+            void requestDocumentTransition(async () => {
+              const switched = await controller.switchTournament(entry.id);
               if (switched) announce(`Opened ${entry.name}.`);
+              return switched;
             });
           }}
           onReopen={(entry) => {
@@ -452,7 +508,95 @@ function DirectorAppContent() {
           canArchive={tournament.status === 'complete'}
         />
       )}
+      {blockedTransition && (
+        <DocumentTransitionDialog
+          check={blockedTransition.check}
+          onCancel={() => setBlockedTransition(null)}
+          onRetry={() => void retryBlockedTransition()}
+          onExport={() => void downloadArchive(state, announce)}
+        />
+      )}
     </>
+  );
+}
+
+export function ArchivedTournamentReadOnlyNotice({
+  tournamentName,
+  onReopen,
+}: {
+  tournamentName: string;
+  onReopen: () => void;
+}) {
+  return (
+    <Callout
+      tone="info"
+      title="Archived tournament — read-only"
+      role="status"
+      actions={
+        <Button variant="secondary" icon="refresh" onClick={onReopen}>
+          Reopen as draft
+        </Button>
+      }
+    >
+      {tournamentName} is open for historical inspection. Reopen it as a draft before making changes.
+    </Callout>
+  );
+}
+
+export function DocumentTransitionLoading({ transition }: { transition: DirectorDocumentTransition }) {
+  const message =
+    transition.kind === 'switching'
+      ? 'Opening tournament…'
+      : transition.kind === 'restoring-checkpoint'
+        ? 'Restoring recovery point…'
+        : 'Applying recovery edit…';
+  return (
+    <div className="director-loading" role="status">
+      {message}
+    </div>
+  );
+}
+
+function DocumentTransitionDialog({
+  check,
+  onCancel,
+  onRetry,
+  onExport,
+}: {
+  check: Extract<DocumentTransitionCheck, { ok: false }>;
+  onCancel: () => void;
+  onRetry: () => void;
+  onExport: () => void;
+}) {
+  return (
+    <Dialog
+      title="Unsaved tournament changes"
+      description="This tournament cannot be replaced yet because its latest changes exist only in memory."
+      size="sm"
+      onClose={onCancel}
+      footer={
+        <div className="director-dialog-footer">
+          <Button variant="secondary" onClick={onCancel} data-autofocus>
+            Cancel
+          </Button>
+          <Button variant="secondary" onClick={onRetry}>
+            Retry save
+          </Button>
+          <Button variant="secondary" icon="download" onClick={onExport}>
+            Export recovery archive
+          </Button>
+        </div>
+      }
+    >
+      <p>
+        Revision {check.revision} is not durable yet (last durable revision: {check.durableRevision}). Leaving
+        now would lose the in-memory changes.
+      </p>
+      {check.error && <p className="director-panel-footnote">Save error: {check.error}</p>}
+      <p className="director-panel-footnote">
+        Retry the save, export a recovery archive, or cancel and keep working in this tournament.
+      </p>
+    </Dialog>
   );
 }
 
@@ -521,27 +665,36 @@ function humanRoundStatus(status: string): string {
 
 /* ------------------------------------------------------------ New tournament */
 
-export function NewTournamentDialog({
-  controller,
-  onClose,
-  onCreated,
-}: {
-  controller: ReturnType<typeof useDirectorController>;
-  onClose: () => void;
-  onCreated: (name: string) => void;
-}) {
+type NewTournamentDialogProps =
+  | {
+      onClose: () => void;
+      onCreate: (input: NewTournamentInput) => boolean;
+      controller?: never;
+      onCreated?: never;
+    }
+  | {
+      onClose: () => void;
+      controller: ReturnType<typeof useDirectorController>;
+      onCreated: (name: string) => void;
+      onCreate?: never;
+    };
+
+export function NewTournamentDialog(props: NewTournamentDialogProps) {
+  const { onClose } = props;
   const form = useFormState<TournamentFormValues>({
     initial: emptyTournamentForm(localCalendarDate(), localTimeZone()),
     validate: validateTournamentForm,
     onSubmit: (draft) => {
-      const created = controller.createTournament({
+      const input = {
         name: draft.name.trim(),
         date: draft.date,
         venue: draft.venue,
         organizer: draft.organizer,
-      });
+      };
+      if (props.onCreate) return props.onCreate(input);
+      const created = props.controller.createTournament(input);
       if (!created) return false;
-      onCreated(draft.name.trim());
+      props.onCreated(draft.name.trim());
       return true;
     },
   });
