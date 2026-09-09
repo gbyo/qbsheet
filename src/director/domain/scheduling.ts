@@ -88,6 +88,17 @@ export interface FormatGenerationAvailability {
   message: string;
 }
 
+export interface FormatDistance {
+  /** The competitive endpoint, or null when the format needs an explicit decision. */
+  requiredRounds: number | null;
+  /** Rounds currently materialized for this phase, including planned rounds. */
+  generatedRounds: number;
+  /** Materialized rounds that have reached the closed state. */
+  closedRounds: number;
+  /** True only when a known endpoint has been materialized. */
+  exhausted: boolean;
+}
+
 /**
  * Resolve the persisted bracket using only accepted/forfeit results whose assigned participants
  * still agree with the bracket. This is the shared source of truth for generation, validation,
@@ -98,6 +109,85 @@ export function resolveDirectorBracket(state: DirectorState, formatId: DirectorI
   return format?.kind === 'single-elimination' && format.bracket
     ? resolveBracketState(state, format.bracket)
     : null;
+}
+
+/**
+ * Return the format distance for a phase. This is deliberately shared by generation and
+ * completion: an absent future round is not evidence that an incremental format is exhausted.
+ */
+export function formatDistance(state: DirectorState, phaseId: DirectorId): FormatDistance {
+  const phase = state.phases.find((entry) => entry.id === phaseId);
+  const format = phase ? state.formats.find((entry) => entry.id === phase.formatId) : undefined;
+  const rounds = state.rounds.filter((round) => round.phaseId === phaseId);
+  const generatedRounds = rounds.length;
+  const closedRounds = rounds.filter((round) => round.status === 'closed').length;
+  if (!phase || !format) {
+    return { requiredRounds: null, generatedRounds, closedRounds, exhausted: false };
+  }
+
+  const confirmedCount = activeTournamentTeams(state).length;
+  const cycleLength = roundRobinCycleLength(confirmedCount);
+  let requiredRounds: number | null;
+  switch (format.kind) {
+    case 'round-robin':
+      requiredRounds = Math.min(format.roundsPerTeam ?? cycleLength, cycleLength);
+      break;
+    case 'double-round-robin':
+      requiredRounds = Math.min(format.roundsPerTeam ?? cycleLength * 2, cycleLength * 2);
+      break;
+    case 'pools':
+    case 'playoff-pools': {
+      const pools = state.pools.filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true);
+      const teamsById = new Map(state.teams.map((team) => [team.id, team]));
+      const naturalLimit =
+        pools.length > 0
+          ? Math.max(
+              ...pools.map((pool) =>
+                roundRobinCycleLength(
+                  pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status === 'confirmed').length,
+                ),
+              ),
+            )
+          : 0;
+      const hasUnassignedPlannedRound = rounds.some(
+        (round) => round.status === 'planned' && round.scheduledGameIds.length === 0,
+      );
+      requiredRounds =
+        format.roundsPerTeam !== null
+          ? Math.min(format.roundsPerTeam, naturalLimit || format.roundsPerTeam)
+          : hasUnassignedPlannedRound
+            ? null
+            : naturalLimit > 0
+              ? naturalLimit
+              : null;
+      break;
+    }
+    case 'swiss':
+    case 'custom':
+      requiredRounds = format.roundsPerTeam;
+      break;
+    case 'single-elimination':
+      requiredRounds = null;
+      break;
+  }
+
+  return {
+    requiredRounds,
+    generatedRounds,
+    closedRounds,
+    exhausted: requiredRounds !== null && generatedRounds >= requiredRounds,
+  };
+}
+
+function phaseFormatCompletionBlocker(state: DirectorState, phase: Phase): string {
+  const distance = formatDistance(state, phase.id);
+  if (distance.requiredRounds === null) {
+    return `${phase.name} has no configured automatic completion distance; explicitly complete the phase before completing the tournament.`;
+  }
+  if (!distance.exhausted) {
+    return `${phase.name} requires ${distance.requiredRounds} rounds, but only ${distance.generatedRounds} have been generated.`;
+  }
+  return `${phase.name} has not reached a valid completion state.`;
 }
 
 /** A phase is complete only when its generated rounds are closed and its format is complete. */
@@ -111,7 +201,44 @@ export function phaseCanComplete(state: DirectorState, phaseId: DirectorId): boo
   if (format?.kind === 'single-elimination') {
     return resolveDirectorBracket(state, format.id)?.complete === true;
   }
-  return true;
+  return formatDistance(state, phase.id).exhausted;
+}
+
+/**
+ * The canonical blockers for the authoritative tournament-complete transition. Keep operational
+ * guards here alongside format-distance guards so callers cannot accidentally use a weaker scan.
+ */
+export function tournamentCompletionBlockers(state: DirectorState): string[] {
+  const blockers: string[] = [];
+  if (!state.tournament) return ['Create a tournament before completing it.'];
+  if (state.rounds.length === 0)
+    return ['Generate and resolve at least one round before completing the tournament.'];
+  if (state.rounds.some((round) => round.status !== 'closed')) {
+    blockers.push('Every generated round must be closed before completing the tournament.');
+  }
+  if (state.scheduledGames.some((game) => !game.bye && !['accepted', 'cancelled'].includes(game.status))) {
+    blockers.push(
+      'Every competitive game must have an accepted result or be cancelled before completing the tournament.',
+    );
+  }
+  if (
+    state.submissions.some((submission) => submission.status === 'received' || submission.status === 'review')
+  ) {
+    blockers.push('Resolve every received or under-review submission before completing the tournament.');
+  }
+  if (state.protests.some((protest) => protest.status === 'open')) {
+    blockers.push('Resolve every open protest before completing the tournament.');
+  }
+  if (state.qbtcpHelpRequests.some((request) => request.status === 'open')) {
+    blockers.push('Resolve every open room-help request before completing the tournament.');
+  }
+  if (state.qbtcpRosterAmendments.some((amendment) => amendment.status === 'pending')) {
+    blockers.push('Resolve every pending roster amendment before completing the tournament.');
+  }
+  for (const phase of state.phases.filter((entry) => entry.archived !== true)) {
+    if (!phaseCanComplete(state, phase.id)) blockers.push(phaseFormatCompletionBlocker(state, phase));
+  }
+  return blockers;
 }
 
 export function currentFormat(state: DirectorState): FormatDefinition | null {
@@ -173,33 +300,34 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
       format.kind !== 'playoff-pools',
     );
     if (configurationProblem) return { supported: false, message: configurationProblem };
-    const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
-    if (format.roundsPerTeam !== null && phaseRoundCount >= format.roundsPerTeam) {
+    const distance = formatDistance(state, phase.id);
+    if (distance.exhausted) {
       return {
         supported: false,
-        message: `This format has reached its configured limit of ${format.roundsPerTeam} round${format.roundsPerTeam === 1 ? '' : 's'} per team.`,
+        message:
+          format.roundsPerTeam === null
+            ? 'This pool round robin is complete; add a new phase for additional play.'
+            : `This format has reached its configured limit of ${distance.requiredRounds} round${distance.requiredRounds === 1 ? '' : 's'} per team.`,
       };
     }
     return { supported: true, message: 'Pool round-robin generation is available for this phase.' };
   }
   if (format.kind === 'round-robin' || format.kind === 'double-round-robin') {
-    const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
-    const naturalLimit =
-      format.kind === 'double-round-robin' ? roundRobinCycleLength(confirmedCount) * 2 : null;
-    const maximumRoundCount =
-      naturalLimit === null
-        ? format.roundsPerTeam
-        : Math.min(format.roundsPerTeam ?? naturalLimit, naturalLimit);
-    if (maximumRoundCount !== null && phaseRoundCount >= maximumRoundCount) {
-      if (naturalLimit !== null && phaseRoundCount >= naturalLimit) {
+    const distance = formatDistance(state, phase.id);
+    if (distance.exhausted) {
+      const naturalLimit =
+        format.kind === 'double-round-robin'
+          ? roundRobinCycleLength(confirmedCount) * 2
+          : roundRobinCycleLength(confirmedCount);
+      if (distance.requiredRounds === naturalLimit) {
         return {
           supported: false,
-          message: 'This double round robin is complete; add a new phase for additional play.',
+          message: `This ${format.kind === 'double-round-robin' ? 'double ' : ''}round robin is complete; add a new phase for additional play.`,
         };
       }
       return {
         supported: false,
-        message: `This format has reached its configured limit of ${maximumRoundCount} round${maximumRoundCount === 1 ? '' : 's'} per team.`,
+        message: `This format has reached its configured limit of ${distance.requiredRounds} round${distance.requiredRounds === 1 ? '' : 's'} per team.`,
       };
     }
     return { supported: true, message: 'Round-robin generation is available for this format.' };
@@ -208,12 +336,26 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
     return { supported: true, message: 'Seeded single-elimination generation is available.' };
   }
   if (format.kind === 'swiss') {
+    const distance = formatDistance(state, phase.id);
+    if (distance.exhausted) {
+      return {
+        supported: false,
+        message: `This Swiss phase has reached its configured limit of ${distance.requiredRounds} rounds; add a new phase for additional play.`,
+      };
+    }
     return {
       supported: true,
       message: 'Quizbowl Swiss pairing is available after the previous round is settled.',
     };
   }
   if (format.kind === 'custom') {
+    const distance = formatDistance(state, phase.id);
+    if (distance.exhausted) {
+      return {
+        supported: false,
+        message: `This format has reached its configured limit of ${distance.requiredRounds} rounds per team.`,
+      };
+    }
     return { supported: true, message: 'Create a manual round from the pairing builder below.' };
   }
   return {
@@ -350,24 +492,22 @@ export function generateRoundRobinRound(
     : [];
   const roundIndex = phaseRounds.length;
   const cycleLength = roundRobinCycleLength(teams.length);
-  if (options.formatKind === 'double-round-robin' && roundIndex >= cycleLength * 2) {
+  const naturalLimit = options.formatKind === 'double-round-robin' ? cycleLength * 2 : cycleLength;
+  const maximumRoundCount = Math.min(options.roundsPerTeam ?? naturalLimit, naturalLimit);
+  const allExistingRoundsClosed = phaseRounds.every((round) => round.status === 'closed');
+  const exhausted =
+    roundIndex >= maximumRoundCount &&
+    (options.formatKind === 'double-round-robin' ||
+      (options.roundsPerTeam !== null && options.roundsPerTeam !== undefined) ||
+      allExistingRoundsClosed);
+  if (exhausted) {
     conflicts.push({
       code: 'format-complete',
       severity: 'error',
-      message: 'This double round robin already contains both complete rotations.',
-    });
-    return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
-  }
-  const naturalLimit = options.formatKind === 'double-round-robin' ? cycleLength * 2 : null;
-  const maximumRoundCount =
-    naturalLimit === null
-      ? (options.roundsPerTeam ?? null)
-      : Math.min(options.roundsPerTeam ?? naturalLimit, naturalLimit);
-  if (maximumRoundCount !== null && roundIndex >= maximumRoundCount) {
-    conflicts.push({
-      code: 'format-complete',
-      severity: 'error',
-      message: `This format has reached its configured limit of ${maximumRoundCount} round${maximumRoundCount === 1 ? '' : 's'} per team.`,
+      message:
+        options.formatKind === 'double-round-robin' && roundIndex >= cycleLength * 2
+          ? 'This double round robin already contains both complete rotations.'
+          : `This format has reached its configured limit of ${maximumRoundCount} round${maximumRoundCount === 1 ? '' : 's'} per team.`,
     });
     return buildGenerationResult(roundId, roundNumber, options, [], conflicts);
   }
@@ -789,9 +929,18 @@ function generateSwissRound(
   options: ScheduleOptions,
 ): ScheduleGenerationResult {
   const phase = state.phases.find((entry) => entry.id === phaseId);
+  const distance = formatDistance(state, phaseId);
   const phaseRounds = state.rounds
     .filter((round) => round.phaseId === phaseId)
     .sort((left, right) => left.number - right.number || left.id.localeCompare(right.id));
+  if (distance.exhausted) {
+    return failedGenerationResult(
+      state,
+      options,
+      'format-complete',
+      `This Swiss phase has reached its configured limit of ${distance.requiredRounds} rounds; add a new phase for additional play.`,
+    );
+  }
   const previousRound = phaseRounds.at(-1);
   if (previousRound && previousRound.status !== 'closed' && !options.manualPairings) {
     return failedGenerationResult(
@@ -1338,19 +1487,6 @@ function generatePoolRound(
   phase: Phase,
   options: ScheduleOptions,
 ): ScheduleGenerationResult {
-  const phaseRoundCount = state.rounds.filter((round) => round.phaseId === phase.id).length;
-  if (
-    options.roundsPerTeam !== null &&
-    options.roundsPerTeam !== undefined &&
-    phaseRoundCount >= options.roundsPerTeam
-  ) {
-    return failedGenerationResult(
-      state,
-      options,
-      'format-complete',
-      `This format has reached its configured limit of ${options.roundsPerTeam} round${options.roundsPerTeam === 1 ? '' : 's'} per team.`,
-    );
-  }
   const pools = state.pools
     .filter((pool) => phase.poolIds.includes(pool.id) && pool.archived !== true)
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
@@ -1434,6 +1570,15 @@ function generatePoolRound(
   }
   if (conflicts.some((conflict) => conflict.severity === 'error')) {
     return failedGenerationResultWithConflicts(state, options, conflicts);
+  }
+  const distance = formatDistance(state, phase.id);
+  if (distance.exhausted) {
+    return failedGenerationResult(
+      state,
+      options,
+      'format-complete',
+      `This format has reached its configured limit of ${distance.requiredRounds} round${distance.requiredRounds === 1 ? '' : 's'} per team.`,
+    );
   }
 
   const resolvedRoundNumber = options.roundNumber ?? nextRoundNumber(state);

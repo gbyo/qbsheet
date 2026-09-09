@@ -15,6 +15,7 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
   roomAssignmentConflicts,
@@ -1126,16 +1127,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.status === status) return true;
+      const completionBlockers =
+        current.status === 'running' && status === 'complete' ? tournamentCompletionBlockers(snapshot) : [];
       const valid =
         (current.status === 'draft' &&
           status === 'running' &&
           snapshot.rounds.some((round) => round.status !== 'planned')) ||
-        (current.status === 'running' && status === 'complete' && tournamentCanComplete(snapshot)) ||
+        (current.status === 'running' && status === 'complete' && completionBlockers.length === 0) ||
         (current.status === 'complete' && status === 'archived') ||
         (current.status === 'complete' && status === 'running') ||
         (current.status === 'archived' && status === 'draft');
       if (!valid) {
-        setError(`Cannot change a ${current.status} tournament to ${status}.`);
+        setError(
+          completionBlockers.length > 0
+            ? `Cannot complete the tournament: ${completionBlockers.join(' ')}`
+            : `Cannot change a ${current.status} tournament to ${status}.`,
+        );
         return false;
       }
       return commit((draft) => {
@@ -6078,23 +6085,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
     importSnapshot,
     live,
   };
-}
-
-function tournamentCanComplete(state: DirectorState): boolean {
-  if (!state.tournament || state.rounds.length === 0) return false;
-  if (state.rounds.some((round) => round.status !== 'closed')) return false;
-  if (state.scheduledGames.some((game) => !game.bye && !['accepted', 'cancelled'].includes(game.status))) {
-    return false;
-  }
-  if (
-    state.submissions.some((submission) => submission.status === 'received' || submission.status === 'review')
-  ) {
-    return false;
-  }
-  if (state.protests.some((protest) => protest.status === 'open')) return false;
-  if (state.qbtcpHelpRequests.some((request) => request.status === 'open')) return false;
-  if (state.qbtcpRosterAmendments.some((amendment) => amendment.status === 'pending')) return false;
-  return true;
 }
 
 function fingerprintForScores(scores: TeamGameScore[]): string {

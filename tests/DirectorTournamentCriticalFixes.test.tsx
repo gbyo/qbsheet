@@ -1,9 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  formatDistance,
   formatGenerationAvailability,
   roomIsAssignable,
   roundScheduleIsValid,
+  tournamentCompletionBlockers,
   type TeamGameScore,
 } from '../src/director/domain';
 import { dropTeamFlexibly } from '../src/director/state/flexibleEditing';
@@ -90,6 +92,109 @@ describe('Director tournament-critical regressions', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     delete window.__TAURI_INTERNALS__;
+  });
+
+  test('does not complete an incremental Swiss phase or tournament before its configured distance', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => {
+      expect(hook.result.current.updateFormat({ kind: 'swiss', name: 'Swiss', roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule({ roundName: 'Swiss round 1' }).generated).toBe(true);
+    });
+
+    const settleRound = async (roundId: string) => {
+      await act(async () => {
+        expect((await hook.result.current.startRound(roundId)).ok).toBe(true);
+      });
+      const games = hook.result.current.state.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye,
+      );
+      act(() => {
+        for (const game of games) {
+          expect(
+            hook.result.current.addManualResult({
+              scheduledGameId: game.id,
+              scores: [score(game.leftTeamId, 100), score(game.rightTeamId!, 90)],
+            }),
+          ).toBe(true);
+        }
+        expect(hook.result.current.closeRound(roundId)).toBe(true);
+      });
+    };
+
+    const firstRoundId = hook.result.current.state.rounds[0]!.id;
+    await settleRound(firstRoundId);
+    expect(hook.result.current.state.phases[0]?.status).toBe('active');
+    expect(formatDistance(hook.result.current.state, hook.result.current.state.phases[0]!.id)).toMatchObject({
+      requiredRounds: 2,
+      generatedRounds: 1,
+      closedRounds: 1,
+      exhausted: false,
+    });
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
+    expect(tournamentCompletionBlockers(hook.result.current.state)).toEqual(
+      expect.arrayContaining([expect.stringContaining('requires 2 rounds')]),
+    );
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(false));
+    expect(hook.result.current.error).toMatch(/requires 2 rounds/i);
+
+    act(() =>
+      expect(hook.result.current.generateSchedule({ roundName: 'Swiss round 2' }).generated).toBe(true),
+    );
+    await settleRound(hook.result.current.state.rounds[1]!.id);
+    expect(hook.result.current.state.phases[0]?.status).toBe('complete');
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(false);
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(true));
+    expect(hook.result.current.state.tournament?.status).toBe('complete');
+    hook.unmount();
+  });
+
+  test('uses a full single round-robin cycle as the endpoint when no limit is configured', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+
+    const phaseId = hook.result.current.state.phases[0]!.id;
+    expect(formatDistance(hook.result.current.state, phaseId)).toMatchObject({
+      requiredRounds: 3,
+      generatedRounds: 1,
+      exhausted: false,
+    });
+    const round = hook.result.current.state.rounds[0]!;
+    await act(async () => {
+      expect((await hook.result.current.startRound(round.id)).ok).toBe(true);
+    });
+    act(() => {
+      for (const game of hook.result.current.state.scheduledGames.filter(
+        (entry) => entry.roundId === round.id && !entry.bye,
+      )) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 100), score(game.rightTeamId!, 90)],
+          }),
+        ).toBe(true);
+      }
+      expect(hook.result.current.closeRound(round.id)).toBe(true);
+    });
+    expect(hook.result.current.state.phases[0]?.status).toBe('active');
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(false));
+    expect(hook.result.current.error).toMatch(/requires 3 rounds/i);
+    hook.unmount();
+  });
+
+  test('permits intentional finite exhaustion and blocks generation beyond it', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.updateFormat({ roundsPerTeam: 1 })).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    const phaseId = hook.result.current.state.phases[0]!.id;
+    expect(formatDistance(hook.result.current.state, phaseId)).toMatchObject({
+      requiredRounds: 1,
+      generatedRounds: 1,
+      exhausted: true,
+    });
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(false));
+    expect(hook.result.current.state.rounds).toHaveLength(1);
+    hook.unmount();
   });
 
   test('QBTCP applies matching progress, remains idempotent, rejects older progress, and protects an occupied room', async () => {
