@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  canonicalAcceptedGame,
   useDirectorController as useBaseDirectorController,
   type DirectorController,
   type StartRoundResult,
@@ -109,6 +110,13 @@ export function useDirectorController(
         if (blocker) return reject(blocker);
         allow();
         return base.editAcceptedResult(gameId, scores, note);
+      },
+      correctForfeit(scheduledGameId, replacement, reason) {
+        const current = canonicalAcceptedGame(base.state, scheduledGameId);
+        const blocker = current ? advancementCorrectionBlocker(base.state, current.id) : null;
+        if (blocker) return reject(blocker);
+        allow();
+        return base.correctForfeit(scheduledGameId, replacement, reason);
       },
       ruleProtest(protestId, ruling, scoreAdjustment) {
         if (scoreAdjustment) {

@@ -7389,7 +7389,10 @@ function roundCloseBlockersForController(state: DirectorState, roundId: Director
   return roundCloseBlockers(state, roundId);
 }
 
-function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
+export function canonicalAcceptedGame(
+  state: DirectorState,
+  scheduledGameId: DirectorId,
+): GameRecord | undefined {
   const candidates = state.games.filter((game) => {
     // Forfeits are decided results: they resolve the scheduled game exactly
     // like accepted scores.
