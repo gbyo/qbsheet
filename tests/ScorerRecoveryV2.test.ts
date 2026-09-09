@@ -6,7 +6,9 @@ import type { IGameSessionHistory } from '../src/scorer/GameSession';
 import {
   attachScorerRecovery,
   legacyScorerRecoveryVersion,
+  inspectScorerRecovery,
   readScorerRecovery,
+  scorerRecoveryIdentity,
   scorerRecoveryKey,
   scorerRecoveryVersion,
 } from '../src/scorer/ScorerRecovery';
@@ -38,7 +40,7 @@ describe('the versioned private scorer recovery envelope', () => {
       events,
       history,
     });
-    expect(readScorerRecovery(qbj, setup)).toEqual({
+    expect(readScorerRecovery(qbj, setup, { allowLegacy: true })).toEqual({
       version: scorerRecoveryVersion,
       setup,
       events,
@@ -56,11 +58,120 @@ describe('the versioned private scorer recovery envelope', () => {
       },
     };
 
-    expect(readScorerRecovery(qbj, setup)).toEqual({
+    expect(readScorerRecovery(qbj, setup)).toBeNull();
+    expect(inspectScorerRecovery(qbj, { leftTeamName: 'Left', rightTeamName: 'Right' })).toMatchObject({
+      kind: 'review-required',
+      reason: 'missing-stable-identity',
+    });
+    expect(readScorerRecovery(qbj, setup, { allowLegacy: true })).toEqual({
       version: legacyScorerRecoveryVersion,
       setup,
       events,
     });
+  });
+
+  test('serializes exact assignment identity without credentials', () => {
+    const identity = {
+      tournamentId: 'tournament-1',
+      matchId: 'match-round-2',
+      roundId: 'round-2',
+      assignmentRevision: 3,
+      leftTeamId: 'team-left',
+      rightTeamId: 'team-right',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    };
+    const qbj = attachScorerRecovery(
+      { type: 'Match', sessionToken: 'must-not-be-written', nested: { credentials: 'secret' } },
+      setup,
+      [{ ...events[0], sessionToken: 'event-secret' } as unknown as (typeof events)[number]],
+      undefined,
+      identity,
+    );
+
+    expect(recoveryOf(qbj)).toMatchObject({ version: scorerRecoveryVersion, identity });
+    expect(JSON.stringify(qbj)).not.toContain('must-not-be-written');
+    expect(JSON.stringify(qbj)).not.toContain('credentials');
+    expect(JSON.stringify(qbj)).not.toContain('event-secret');
+    expect(readScorerRecovery(qbj, identity)).toMatchObject({ identity });
+  });
+
+  test('derives the recovery identity from the scheduled package', () => {
+    const packageValue = validPackage({
+      qbjIdentity: {
+        tournamentId: 'tournament-1',
+        matchId: 'match-round-8',
+        roundId: 'round-8',
+        teamIds: { left: 'team-left', right: 'team-right' },
+      },
+    });
+    expect(scorerRecoveryIdentity(packageValue, setup)).toEqual({
+      tournamentId: 'tournament-1',
+      matchId: 'match-round-8',
+      roundId: 'round-8',
+      leftTeamId: 'team-left',
+      rightTeamId: 'team-right',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    });
+  });
+
+  test.each([
+    {
+      label: 'different scheduled match',
+      expected: { matchId: 'match-2' },
+      reason: 'match-id-mismatch',
+    },
+    {
+      label: 'different tournament',
+      expected: { tournamentId: 'tournament-2' },
+      reason: 'tournament-id-mismatch',
+    },
+  ])('$label cannot fall back to same team names', ({ expected, reason }) => {
+    const identity = {
+      tournamentId: 'tournament-1',
+      matchId: 'match-1',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    };
+    const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, identity);
+    const inspected = inspectScorerRecovery(qbj, {
+      ...identity,
+      ...expected,
+    });
+
+    expect(inspected).toEqual({ kind: 'rejected', reason });
+    expect(readScorerRecovery(qbj, { ...identity, ...expected })).toBeNull();
+  });
+
+  test('same tournament and match identity succeeds, including a rematch-shaped setup', () => {
+    const identity = {
+      tournamentId: 'tournament-1',
+      matchId: 'round-8-match-17',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    };
+    const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, identity);
+
+    expect(readScorerRecovery(qbj, { ...identity })).not.toBeNull();
+    expect(readScorerRecovery(qbj, { ...identity, matchId: 'round-2-match-4' })).toBeNull();
+  });
+
+  test('reversed team orientation remains incompatible', () => {
+    const identity = {
+      tournamentId: 'tournament-1',
+      matchId: 'match-1',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    };
+    const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, identity);
+    expect(
+      inspectScorerRecovery(qbj, {
+        ...identity,
+        leftTeamName: 'Right',
+        rightTeamName: 'Left',
+      }),
+    ).toEqual({ kind: 'rejected', reason: 'team-mismatch' });
   });
 
   test('discards malformed auxiliary history while retaining valid events', () => {
@@ -76,7 +187,7 @@ describe('the versioned private scorer recovery envelope', () => {
       },
     };
 
-    const recovered = readScorerRecovery(qbj, setup);
+    const recovered = readScorerRecovery(qbj, setup, { allowLegacy: true });
     expect(recovered?.events).toEqual(events);
     expect(recovered?.history).toBeUndefined();
   });
@@ -107,7 +218,7 @@ describe('the versioned private scorer recovery envelope', () => {
       },
     };
 
-    expect(readScorerRecovery(qbj, setup)?.history).toEqual({ undo: [1], redo: [] });
+    expect(readScorerRecovery(qbj, setup, { allowLegacy: true })?.history).toEqual({ undo: [1], redo: [] });
   });
 
   test('does not carry the v2 history into portable QBJ', () => {
