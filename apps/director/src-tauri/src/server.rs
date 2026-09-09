@@ -23,6 +23,9 @@ const DUPLICATE_ASSIGNMENT_MESSAGE: &str =
 const UNRESOLVED_RESULT_REASON: &str = "unresolved-result";
 const UNRESOLVED_RESULT_MESSAGE: &str =
     "This room has a submitted result awaiting Director review. Resolve it before pairing another game.";
+const RETIRED_PACKET_REASON: &str = "retired-packet";
+const RETIRED_PACKET_MESSAGE: &str =
+    "This game's packet is retired. Restore it or assign a replacement in Director before pairing this room.";
 
 const ALLOWED_SCORE_SHEET_ORIGINS: &[&str] = &[
     "https://qbsheet.com",
@@ -1390,6 +1393,35 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, Projected
             }
             let round_id = string_field(Some(scheduled), "roundId")?;
             let round = rounds.get(&round_id)?;
+            let packet_id = string_field(Some(scheduled), "packetId")
+                .or_else(|| string_field(Some(round), "packetId"));
+            let retired_packet = packet_id.as_ref().and_then(|id| {
+                root.get("packets")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_object)
+                    .find(|packet| {
+                        string_field(Some(packet), "id").as_deref() == Some(id.as_str())
+                            && packet
+                                .get("retired")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                    })
+            });
+            if retired_packet.is_some() {
+                return Some((
+                    room_id,
+                    ProjectedAssignment {
+                        key: format!("blocked|{RETIRED_PACKET_REASON}|{scheduled_id}"),
+                        state: AssignmentState::Blocked {
+                            reason: RETIRED_PACKET_REASON.to_owned(),
+                            message: RETIRED_PACKET_MESSAGE.to_owned(),
+                            meta: AssignmentMeta::default(),
+                        },
+                    },
+                ));
+            }
             let round_number = u32_field(Some(round), "number").filter(|number| *number > 0)?;
             let left_team_id = string_field(Some(scheduled), "leftTeamId")?;
             let right_team_id = string_field(Some(scheduled), "rightTeamId")?;
@@ -2319,6 +2351,45 @@ mod tests {
             .expect("unknown assignment");
         let unknown_match = assignment_match_object(&unknown).expect("match object");
         assert!(unknown_match["_qbtcp"].get("scorekeeper").is_none());
+    }
+
+    #[test]
+    fn retired_packet_blocks_native_room_projection() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "packets": [{"id": "packet-6", "name": "Packet 6", "retired": true}],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "packetId": "packet-6"}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "released"
+            }]
+        });
+        let state = DirectorQbtcpState::from_document(Some(&document));
+        match <DirectorQbtcpState as QbtcpState>::assignment(&state, "room-101")
+            .expect("room projection is available")
+        {
+            AssignmentState::Blocked {
+                reason, message, ..
+            } => {
+                assert_eq!(reason, RETIRED_PACKET_REASON);
+                assert_eq!(message, RETIRED_PACKET_MESSAGE);
+            }
+            AssignmentState::Assigned(_)
+            | AssignmentState::None(_)
+            | AssignmentState::Held { .. } => {
+                panic!("retired packet must not be projected to a scorer")
+            }
+        }
     }
 
     #[test]

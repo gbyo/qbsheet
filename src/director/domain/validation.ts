@@ -289,6 +289,22 @@ export function runPreflight(
       message: `Packet reuse detected: ${packetReuse.map((entry) => `${entry.packetId} (${entry.gameIds.length} games)`).join(', ')}.`,
     });
   }
+  const retiredPacketBlockers = [
+    ...new Set(
+      state.rounds
+        .map((round) => retiredPacketBlocker(state, round.id))
+        .filter((message): message is string => message !== null),
+    ),
+  ];
+  if (retiredPacketBlockers.length > 0) {
+    issues.push({
+      id: 'retired-packet',
+      severity: 'blocker',
+      area: 'packets',
+      message: retiredPacketBlockers.join(' '),
+      action: 'Restore or replace the packet before continuing.',
+    });
+  }
   issues.push(...packetReferenceIssues(state));
   // QBTCP serves rooms: with no room records there is nothing to pair, so a
   // roomless manual tournament is never nagged about the native server.
@@ -319,6 +335,107 @@ export function runPreflight(
     });
   }
   return issues;
+}
+
+export interface PacketRetirementImpact {
+  historicalGameIds: DirectorId[];
+  futureRoundIds: DirectorId[];
+  futureGameIds: DirectorId[];
+  releasedUnresolvedGameIds: DirectorId[];
+}
+
+/**
+ * Classify the references that retirement may affect. Accepted/forfeit records and games already
+ * exposed to a room are never treated as ordinary future assignments: their packet identity is
+ * part of the audit history, and a live assignment cannot be silently rewritten underneath a
+ * scorer.
+ */
+export function packetRetirementImpact(state: DirectorState, packetId: DirectorId): PacketRetirementImpact {
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const recordsByScheduledId = new Map<DirectorId, DirectorState['games']>();
+  for (const record of state.games) {
+    const records = recordsByScheduledId.get(record.scheduledGameId) ?? [];
+    records.push(record);
+    recordsByScheduledId.set(record.scheduledGameId, records);
+  }
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const historicalGameIds = new Set<DirectorId>();
+  const futureRoundIds = new Set<DirectorId>();
+  const futureGameIds = new Set<DirectorId>();
+  const releasedUnresolvedGameIds = new Set<DirectorId>();
+  const isHistorical = (game: ScheduledGame): boolean =>
+    game.status === 'accepted' ||
+    recordsByScheduledId
+      .get(game.id)
+      ?.some((record) => record.status === 'accepted' || record.status === 'forfeit') === true;
+  const isUnresolved = (game: ScheduledGame): boolean =>
+    !game.bye && game.status !== 'accepted' && game.status !== 'cancelled';
+  const addReference = (game: ScheduledGame | undefined, assumesPacketReference = false): void => {
+    if (!game || (!assumesPacketReference && effectivePacketIdForValidation(state, game) !== packetId))
+      return;
+    if (isHistorical(game)) {
+      historicalGameIds.add(game.id);
+      return;
+    }
+    if (!isUnresolved(game)) return;
+    const round = roundById.get(game.roundId);
+    if (
+      round?.status === 'released' ||
+      round?.status === 'closed' ||
+      game.status === 'released' ||
+      game.status === 'live' ||
+      game.status === 'submitted'
+    ) {
+      releasedUnresolvedGameIds.add(game.id);
+      return;
+    }
+    futureGameIds.add(game.id);
+    futureRoundIds.add(game.roundId);
+  };
+
+  for (const game of state.scheduledGames) addReference(game);
+
+  const canonicalScheduledId = (referenceId: DirectorId): DirectorId | undefined => {
+    if (scheduledById.has(referenceId)) return referenceId;
+    return state.games.find((record) => record.id === referenceId)?.scheduledGameId;
+  };
+  const packet = state.packets.find((entry) => entry.id === packetId);
+  for (const referenceId of packet?.assignedGameIds ?? []) {
+    const scheduledId = canonicalScheduledId(referenceId);
+    addReference(scheduledById.get(scheduledId ?? ''), true);
+  }
+  for (const roundId of packet?.assignedRoundIds ?? []) {
+    const round = roundById.get(roundId);
+    if (round && round.status !== 'released' && round.status !== 'closed') futureRoundIds.add(roundId);
+  }
+
+  return {
+    historicalGameIds: [...historicalGameIds],
+    futureRoundIds: [...futureRoundIds],
+    futureGameIds: [...futureGameIds],
+    releasedUnresolvedGameIds: [...releasedUnresolvedGameIds],
+  };
+}
+
+/** Return an actionable reason when an unresolved round still resolves to a retired packet. */
+export function retiredPacketBlocker(state: DirectorState, roundId: DirectorId): string | null {
+  const round = state.rounds.find((entry) => entry.id === roundId);
+  if (!round || round.status === 'closed') return null;
+  for (const game of state.scheduledGames) {
+    if (game.roundId !== roundId || game.bye || game.status === 'accepted' || game.status === 'cancelled') {
+      continue;
+    }
+    const packetId = effectivePacketIdForValidation(state, game);
+    const packet = packetId ? state.packets.find((entry) => entry.id === packetId) : undefined;
+    if (packet?.retired === true) {
+      return `${round.name} still assigns retired packet “${packet.name}” (${packet.id}) to ${game.id}. Restore the packet or assign a replacement before preparing or starting this round.`;
+    }
+  }
+  return null;
+}
+
+function effectivePacketIdForValidation(state: DirectorState, game: ScheduledGame): DirectorId | null {
+  return game.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId ?? null;
 }
 
 export function roomAssignmentConflicts(
