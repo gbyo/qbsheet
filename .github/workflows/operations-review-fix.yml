@@ -51,18 +51,16 @@ jobs:
                   text = text.replace(old, new, 1)
               path.write_text(text)
 
-      - name: Format touched TypeScript
-        run: >-
-          npx prettier --write
-          src/director/domain/operations.fixtures.ts
-          src/director/domain/operations.test.ts
-          src/director/domain/operationsPlanner.ts
-          src/director/domain/operationsPlanner.test.ts
-          src/director/persistence/stateMigrations.ts
-          src/director/state/useDirectorControllerBase.ts
-
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml -- --check
+      - name: Format touched files
+        run: |
+          npx prettier --write \
+            src/director/domain/operations.fixtures.ts \
+            src/director/domain/operations.test.ts \
+            src/director/domain/operationsPlanner.ts \
+            src/director/domain/operationsPlanner.test.ts \
+            src/director/persistence/stateMigrations.ts \
+            src/director/state/useDirectorControllerBase.ts
+          cargo fmt --manifest-path apps/director/src-tauri/Cargo.toml
 
       - name: Run focused Director tests
         run: npx vitest --run src/director/domain/operations.test.ts src/director/domain/operationsPlanner.test.ts
