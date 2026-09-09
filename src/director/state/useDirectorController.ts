@@ -1017,7 +1017,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * that it needs publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const commit = useCallback(
-    (mutator: (draft: DirectorState) => void): boolean => {
+    (mutator: (draft: DirectorState) => void, options: { allowArchived?: boolean } = {}): boolean => {
       /*
        * A commit dropped mid-recovery is a failure, and says so.
        *
@@ -1028,6 +1028,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
        */
       if (documentTransitionRef.current) {
         setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        return false;
+      }
+      if (stateRef.current.tournament?.status === 'archived' && !options.allowArchived) {
+        setError('This tournament is archived and read-only. Reopen it as a draft before making changes.');
         return false;
       }
       if (!ensureWriter()) return false;
@@ -1095,21 +1099,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Cannot change a ${current.status} tournament to ${status}.`);
         return false;
       }
-      return commit((draft) => {
-        if (!draft.tournament) return;
-        const from = draft.tournament.status;
-        draft.tournament.status = status;
-        draft.tournament.updatedAt = isoNow();
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: draft.tournament.updatedAt,
-          actor: 'Director',
-          type: 'tournament-updated',
-          summary: `Tournament lifecycle changed from ${from} to ${status}.`,
-          entityId: draft.tournament.id,
-          details: { from, to: status },
-        });
-      });
+      return commit(
+        (draft) => {
+          if (!draft.tournament) return;
+          const from = draft.tournament.status;
+          draft.tournament.status = status;
+          draft.tournament.updatedAt = isoNow();
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: draft.tournament.updatedAt,
+            actor: 'Director',
+            type: 'tournament-updated',
+            summary: `Tournament lifecycle changed from ${from} to ${status}.`,
+            entityId: draft.tournament.id,
+            details: { from, to: status },
+          });
+        },
+        { allowArchived: current.status === 'archived' && status === 'draft' },
+      );
     },
     [commit],
   );
@@ -4497,6 +4504,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const syncQbtcp = useCallback(() => {
+    // Archived documents are historical snapshots. Do not let background scorer telemetry mutate them.
+    if (stateRef.current.tournament?.status === 'archived') return Promise.resolve();
     // The app polls every second. Do not allow a slow local-network read to overlap the next poll:
     // an older response could otherwise arrive after a newer one and reopen a cancelled help
     // request or apply stale operational metadata.
@@ -4681,6 +4690,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const restoreCheckpoint = useCallback(
     async (checkpointId: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (stateRef.current.tournament?.status === 'archived') {
+        setError(
+          'This tournament is archived and read-only. Reopen it as a draft before restoring a recovery point.',
+        );
+        return false;
+      }
       if (!ensureWriter()) return false;
       if (!repositoryRef.current.restoreCheckpoint) {
         setError('This storage backend does not support recovery points.');
@@ -4766,6 +4781,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const editTournamentSnapshot = useCallback(
     async (value: DirectorState, reason: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (stateRef.current.tournament?.status === 'archived') {
+        setError(
+          'This tournament is archived and read-only. Reopen it as a draft before editing its snapshot.',
+        );
+        return false;
+      }
       if (!ensureWriter()) return false;
       const before = structuredClone(stateRef.current);
       const startingRevision = stateRevisionRef.current;
