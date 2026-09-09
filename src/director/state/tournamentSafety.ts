@@ -20,6 +20,31 @@ export function releasedRoundResultBlocker(
   return `${round.name} has not started yet. Results can only be accepted after the round is released.`;
 }
 
+/**
+ * Normal tournament operation has one released round with unresolved play at a time. Checking
+ * scheduled-game state instead of room occupancy also protects manual and roomless tournaments.
+ */
+export function unresolvedReleasedRoundBlocker(
+  state: DirectorState,
+  roundId: DirectorId,
+): string | null {
+  const blockingRound = state.rounds.find(
+    (round) =>
+      round.id !== roundId &&
+      round.status === 'released' &&
+      state.scheduledGames.some(
+        (game) =>
+          game.roundId === round.id &&
+          !game.bye &&
+          game.status !== 'accepted' &&
+          game.status !== 'cancelled',
+      ),
+  );
+  return blockingRound
+    ? `${blockingRound.name} still has unresolved play. Finish or repair it before starting another round.`
+    : null;
+}
+
 /** Resolve the scheduled target of a staged submission without changing any review state. */
 export function scheduledGameIdForSubmission(
   state: DirectorState,
