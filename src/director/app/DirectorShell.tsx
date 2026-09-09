@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Command } from 'cmdk';
 import BrandLogo from '../../BrandLogo';
 import { IconButton } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -188,7 +189,7 @@ export function DirectorShell({
           <button
             type="button"
             className="director-tournament-switcher"
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             aria-expanded={openMenu === 'tournament'}
             aria-label={`Tournament: ${tournament.name}. Switch tournament or open tournament actions`}
             onClick={(event) => openMenuFrom('tournament', event)}
@@ -201,6 +202,7 @@ export function DirectorShell({
             <DirectorMenu
               label="Tournament"
               className="director-menu director-tournament-menu"
+              searchPlaceholder="Search tournaments"
               align="start"
               openerRef={menuOpenerRef}
               onClose={closeMenu}
@@ -322,7 +324,7 @@ export function DirectorShell({
             <button
               type="button"
               className="director-operator"
-              aria-haspopup="menu"
+              aria-haspopup="dialog"
               aria-expanded={openMenu === 'operator'}
               aria-label={`Operator: ${operatorName}. Application menu`}
               onClick={(event) => openMenuFrom('operator', event)}
@@ -417,11 +419,12 @@ export function DirectorShell({
 /**
  * The one Open affordance in the shell.
  *
- * A real `role="menuitem"`, so arrow-key travel through the menu works — the
- * old version was a `<label>` wrapping a file input, which is not a menu item
- * to a screen reader and was skipped by the menu's keyboard navigation. It
- * calls the desktop file dialog in the Tauri build and the browser's file input
- * otherwise; the operator sees the same entry either way.
+ * A real menu entry — a `cmdk` item, so it filters and takes arrow-key travel
+ * like every other line in the popover. The old version was a `<label>`
+ * wrapping a file input, which is not an entry to a screen reader and was
+ * skipped by the menu's keyboard navigation. It calls the desktop file dialog
+ * in the Tauri build and the browser's file input otherwise; the operator sees
+ * the same entry either way.
  */
 function ShellFileMenuItem({
   accept,
@@ -440,11 +443,9 @@ function ShellFileMenuItem({
   };
   return (
     <>
-      <button
-        role="menuitem"
-        type="button"
+      <Command.Item
         className="director-menu-item"
-        onClick={() => {
+        onSelect={() => {
           if (!native) {
             inputRef.current?.click();
             return;
@@ -456,7 +457,7 @@ function ShellFileMenuItem({
           <Icon name="file" size={15} />
         </span>
         <span>Open tournament file…</span>
-      </button>
+      </Command.Item>
       <input
         ref={inputRef}
         type="file"

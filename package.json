@@ -70,6 +70,7 @@
     "@qbsheet/tournament-core": "0.1.0",
     "@qbsheet/tournament-domain": "0.1.0",
     "@qbsheet/tournament-formats": "0.1.0",
+    "cmdk": "^1.1.1",
     "fflate": "^0.8.3",
     "jsqr": "^1.4.0",
     "react": "^18.3.1",

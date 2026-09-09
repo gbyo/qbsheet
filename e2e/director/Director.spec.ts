@@ -567,7 +567,7 @@ test('Director supports keyboard search, inline edits, and audited result review
     .getByRole('button', { name: /result actions$/ })
     .first()
     .click();
-  await page.getByRole('menuitem', { name: 'Correct accepted result…' }).click();
+  await page.getByRole('option', { name: 'Correct accepted result…' }).click();
   const correction = page.getByRole('dialog');
   await correction.locator('input[type="number"]').nth(0).fill('');
   await dialogFooter().getByRole('button', { name: 'Save correction' }).click();
@@ -584,7 +584,7 @@ test('Director supports keyboard search, inline edits, and audited result review
     .getByRole('button', { name: /result actions$/ })
     .first()
     .click();
-  await page.getByRole('menuitem', { name: 'Open protest…' }).click();
+  await page.getByRole('option', { name: 'Open protest…' }).click();
   await page.getByRole('dialog').getByLabel('Description').fill('Verify the tossup ruling.');
   await dialogFooter().getByRole('button', { name: 'Open protest' }).click();
 
@@ -707,7 +707,7 @@ test('Director Help has one entry, owns focus, and restores the exact invoker', 
   const operator = page.getByRole('button', { name: /^Operator:/ });
   await operator.focus();
   await operator.click();
-  await page.getByRole('menuitem', { name: 'Help & keyboard shortcuts' }).click();
+  await page.getByRole('option', { name: 'Help & keyboard shortcuts' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Help & keyboard shortcuts' });
   await expect(dialog).toBeVisible();
@@ -787,12 +787,12 @@ test('Director keeps unavailable resources out of new room assignments', async (
 
   // Maintenance actions are in the row's overflow menu, not permanent chrome.
   await page.getByRole('button', { name: /Moderator Two actions/ }).click();
-  await page.getByRole('menuitem', { name: 'Mark unavailable' }).click();
+  await page.getByRole('option', { name: 'Mark unavailable' }).click();
   await expect(page.getByText('Unavailable').first()).toBeVisible();
 
   await view(/^Equipment/).click();
   await page.getByRole('button', { name: /Buzzer One actions/ }).click();
-  await page.getByRole('menuitem', { name: 'Mark unavailable' }).click();
+  await page.getByRole('option', { name: 'Mark unavailable' }).click();
 
   /*
    * The point of the test: a resource marked unavailable is not offered for a
@@ -894,7 +894,7 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
 
   await page.getByRole('button', { name: 'Add event' }).click();
   // A common break is one press: the menu adds it rather than opening a form.
-  await page.getByRole('menuitem', { name: 'Lunch', exact: true }).click();
+  await page.getByRole('option', { name: 'Lunch', exact: true }).click();
   await expect(days()).toHaveCount(10);
 
   /*
@@ -934,7 +934,7 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await goToSection(page, 'Tournament day');
   const firstRound = days().first();
   await firstRound.getByRole('button', { name: /Round 1 actions/ }).click();
-  await page.getByRole('menuitem', { name: 'Assign packet…' }).click();
+  await page.getByRole('option', { name: 'Assign packet…' }).click();
   await page
     .getByRole('dialog')
     .getByRole('combobox', { name: /Packet/ })
@@ -944,7 +944,7 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await expect(firstRound).toContainText('Morning packet');
 
   await firstRound.getByRole('button', { name: /Round 1 actions/ }).click();
-  await page.getByRole('menuitem', { name: 'Assign rooms…' }).click();
+  await page.getByRole('option', { name: 'Assign rooms…' }).click();
   const roomDialog = page.getByRole('dialog');
   const roomAssignments = roomDialog.getByRole('combobox');
   await expect(roomAssignments).toHaveCount(roomNames.length);
@@ -976,7 +976,7 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await goToSection(page, 'Tournament day');
   const lastRound = days().last();
   await lastRound.getByRole('button', { name: /actions/ }).click();
-  await page.getByRole('menuitem', { name: 'Advanced recovery…' }).click();
+  await page.getByRole('option', { name: 'Advanced recovery…' }).click();
   await page.getByRole('button', { name: 'Remove round…' }).click();
   const removal = page.getByRole('alertdialog');
   await expect(removal).toContainText('accepted results will be removed');

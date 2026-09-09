@@ -1106,7 +1106,12 @@
 
 /* ===================================================================== Menus
    The overflow/action menu. One implementation, one trigger icon — the literal
-   `•••` text is gone — and real `role="menu"` keyboard behaviour. */
+   `•••` text is gone — and one filter field at the top of every popover, so
+   the place all the rare work went is also the place you can search. The items
+   are `cmdk` options: highlight follows `[data-selected]` (keyboard *and*
+   pointer, since cmdk moves the selection on hover) rather than :hover/:focus,
+   and unavailable ones carry `aria-disabled` instead of the `disabled`
+   attribute a <button> had. */
 
 .director-menu-wrap {
   position: relative;
@@ -1143,6 +1148,52 @@
   bottom: calc(100% + 4px);
 }
 
+.director-menu-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: var(--director-space-1) var(--director-space-1) var(--director-space-2);
+}
+
+.director-menu-search > svg:first-child {
+  position: absolute;
+  left: 12px;
+  color: var(--director-faint);
+  pointer-events: none;
+}
+
+.director-menu-search-input {
+  width: 100%;
+  height: var(--director-control-sm);
+  padding: 0 var(--director-space-2) 0 32px;
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-sm);
+}
+
+.director-menu-search-input:focus-visible {
+  border-color: var(--director-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+/* The list scrolls; the field above it does not, so the query stays put while
+   the tournament switcher's history runs past it. */
+.director-menu-list {
+  max-height: min(50vh, 360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.director-menu-empty {
+  padding: var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  text-align: center;
+}
+
 .director-menu-item {
   display: flex;
   gap: var(--director-space-2);
@@ -1153,12 +1204,16 @@
   color: var(--director-ink);
   font-size: var(--director-text-body);
   text-align: left;
+  cursor: pointer;
   background: none;
   border: 0;
   border-radius: var(--director-radius-sm);
 }
 
-.director-menu-item > span:first-of-type {
+/* The label, whichever span it is: an entry with an icon puts that span first,
+   and `:first-of-type` handed the growth to the icon, which pushed every
+   icon-bearing label to the right of its own row. */
+.director-menu-item > span:not(.director-menu-item-icon) {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1171,9 +1226,9 @@
   white-space: nowrap;
 }
 
-.director-menu-item:not(:disabled):hover,
-.director-menu-item:focus-visible {
-  background: var(--director-surface-hover);
+.director-menu-item[aria-disabled='true'] {
+  color: var(--director-faint);
+  opacity: 0.55;
 }
 
 .director-menu-item[aria-checked='true'],
@@ -1182,11 +1237,17 @@
   background: var(--director-surface-selected);
 }
 
+/* Last, so the item the keyboard or the pointer is on reads as the active one
+   even when it is also the chosen one. */
+.director-menu-item[data-selected='true'] {
+  background: var(--director-surface-hover);
+}
+
 .director-menu-item-danger {
   color: var(--director-danger-fg);
 }
 
-.director-menu-item-danger:not(:disabled):hover {
+.director-menu-item-danger[data-selected='true'] {
   background: var(--director-danger-bg);
 }
 

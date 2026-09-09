@@ -59,7 +59,7 @@ async function openRounds(state = directorFixture()) {
  */
 function openMoveGame(round = 'Round 5'): void {
   fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Move game…' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Move game…' }));
 }
 
 /**
@@ -141,7 +141,7 @@ describe('released-game room recovery UI', () => {
     const { getController } = await openRounds(directorFixture({ games: 1 }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Round 5 actions' }));
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Advanced recovery…' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Advanced recovery…' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
 
     expect(getController().state.rounds.find((round) => round.id === 'round-5')?.status).toBe('released');

@@ -10,6 +10,7 @@ import 'fake-indexeddb/auto';
 import './localStorage';
 import './broadcastChannel';
 import './dialog';
+import './resizeObserver';
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';

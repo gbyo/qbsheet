@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Command, useCommandState } from 'cmdk';
 import { DirectorMenu } from './DirectorMenu';
 import { Icon, type IconName } from './Icon';
 import { Button, IconButton } from './Controls';
@@ -19,6 +20,10 @@ import { Button, IconButton } from './Controls';
  * work is one predictable click away.
  *
  * The trigger is the shared `more` icon. The literal `•••` text is gone.
+ *
+ * Because everything overflows into one of these, they are also searchable: the popover is a `cmdk`
+ * command list and typing filters the items by fuzzy score. See `DirectorMenu` for what that costs
+ * in ARIA terms — the items are options in a filtered listbox, not menu items.
  */
 
 export function ActionMenu({
@@ -32,6 +37,7 @@ export function ActionMenu({
   triggerVariant = 'icon',
   disabled = false,
   className = '',
+  searchPlaceholder,
 }: {
   /** The menu's accessible name, e.g. "Round 4 actions". */
   label: string;
@@ -45,6 +51,8 @@ export function ActionMenu({
   triggerVariant?: 'icon' | 'secondary' | 'quiet' | 'primary';
   disabled?: boolean;
   className?: string;
+  /** Overrides the filter field's placeholder, e.g. "Search packets". */
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
@@ -73,7 +81,8 @@ export function ActionMenu({
   }, [open]);
 
   const commonTriggerProps = {
-    'aria-haspopup': 'menu' as const,
+    // The popover is a filter field over a listbox, not a menu — see `DirectorMenu`.
+    'aria-haspopup': 'dialog' as const,
     'aria-expanded': open,
     'aria-controls': open ? menuId : undefined,
     disabled,
@@ -112,6 +121,7 @@ export function ActionMenu({
           placement={placement}
           openerRef={openerRef}
           onClose={close}
+          searchPlaceholder={searchPlaceholder}
         >
           {typeof children === 'function' ? children(close) : children}
         </DirectorMenu>
@@ -120,6 +130,14 @@ export function ActionMenu({
   );
 }
 
+/**
+ * One action in a menu.
+ *
+ * The label and any `detail` are both searchable — an operator looking for the round with the
+ * missing packet types "packet", not the row number. `keywords` adds terms that are not on screen,
+ * for the entries whose visible label is not what anyone would type ("Advanced recovery…" is what
+ * you reach for when you would have searched "rollback").
+ */
 export function MenuItem({
   children,
   onSelect,
@@ -128,6 +146,7 @@ export function MenuItem({
   disabled = false,
   tone = 'default',
   selected = false,
+  keywords,
 }: {
   children: ReactNode;
   onSelect: () => void;
@@ -136,11 +155,11 @@ export function MenuItem({
   disabled?: boolean;
   tone?: 'default' | 'danger';
   selected?: boolean;
+  /** Extra search terms that are not part of the visible label. */
+  keywords?: string[];
 }) {
   return (
-    <button
-      role="menuitem"
-      type="button"
+    <Command.Item
       className={[
         'director-menu-item',
         tone === 'danger' ? 'director-menu-item-danger' : '',
@@ -149,7 +168,8 @@ export function MenuItem({
         .filter(Boolean)
         .join(' ')}
       disabled={disabled}
-      onClick={onSelect}
+      keywords={keywords}
+      onSelect={onSelect}
     >
       {icon && (
         <span className="director-menu-item-icon" aria-hidden="true">
@@ -163,7 +183,7 @@ export function MenuItem({
           <Icon name="check" size={15} />
         </span>
       )}
-    </button>
+    </Command.Item>
   );
 }
 
@@ -194,18 +214,16 @@ export function MenuFileItem({
   const inputRef = useRef<HTMLInputElement>(null);
   return (
     <>
-      <button
-        role="menuitem"
-        type="button"
+      <Command.Item
         className="director-menu-item"
         disabled={disabled}
-        onClick={() => inputRef.current?.click()}
+        onSelect={() => inputRef.current?.click()}
       >
         <span className="director-menu-item-icon" aria-hidden="true">
           <Icon name={icon} size={15} />
         </span>
         <span>{children}</span>
-      </button>
+      </Command.Item>
       <input
         ref={inputRef}
         type="file"
@@ -225,13 +243,27 @@ export function MenuFileItem({
 }
 
 export function MenuSeparator() {
-  return <div role="separator" className="director-menu-separator" />;
+  return <Command.Separator className="director-menu-separator" />;
+}
+
+/*
+ * The furniture between the items — group headings, separators, the note under a disabled entry —
+ * all describes the *unfiltered* list. Once a search narrows the list, a heading whose whole group
+ * scored zero is a label over someone else's item, so the furniture stands down until the field is
+ * empty again. `cmdk` already does this for separators; headings and notes are ours.
+ */
+function useIsSearching() {
+  return useCommandState((state) => state.search.length > 0);
 }
 
 export function MenuSectionLabel({ children }: { children: ReactNode }) {
+  const searching = useIsSearching();
+  if (searching) return null;
   return <p className="director-menu-section-label">{children}</p>;
 }
 
 export function MenuNote({ children }: { children: ReactNode }) {
+  const searching = useIsSearching();
+  if (searching) return null;
   return <div className="director-menu-note">{children}</div>;
 }

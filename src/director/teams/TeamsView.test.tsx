@@ -18,7 +18,7 @@ test('a rejected bulk import does not announce success or close the paste dialog
 
   render(<TeamsView state={state} controller={controller} onAnnounce={announce} />);
   fireEvent.click(screen.getByRole('button', { name: 'Import' }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Paste teams…' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Paste teams…' }));
   fireEvent.change(screen.getByLabelText('Team CSV'), {
     target: { value: 'team_name\nRejected team' },
   });
