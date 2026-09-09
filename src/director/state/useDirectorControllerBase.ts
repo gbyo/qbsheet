@@ -122,6 +122,11 @@ import {
 } from '../transfers/state';
 import type { TransferVolume } from '../transfers/ports';
 import {
+  applyQbtcpHealthUpdate,
+  type QbtcpHealthCursor,
+  type QbtcpIngestionHealth,
+} from '../server/qbtcpHealth';
+import {
   readNativeLiveScorerRooms,
   readNativeServerSnapshot,
   readNativeServerStatus,
@@ -133,6 +138,7 @@ import {
   type NativeRosterAmendmentSnapshot,
   type NativeServerSnapshot,
   type NativeSessionSnapshot,
+  type NativeSnapshotReadResult,
 } from '../platform/native';
 
 export interface NewTournamentInput {
@@ -552,7 +558,7 @@ export interface DirectorController {
   ruleProtest(protestId: DirectorId, ruling: string, scoreAdjustment?: ProtestScoreAdjustment): boolean;
   syncQbtcp(): Promise<void>;
   resolveQbtcpHelp(helpId: DirectorId): Promise<boolean>;
-  qbtcpHealth: { lastSuccessfulAt: string | null; error: string | null };
+  qbtcpHealth: QbtcpIngestionHealth;
   /** Add or re-adopt a place assignments can be written to and results read from. */
   addTransferLocation(input: AddLocationInput): boolean;
   removeTransferLocation(locationId: DirectorId): void;
@@ -875,10 +881,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const documentEpochRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<TournamentCatalogEntry[]>([]);
-  const [qbtcpHealth, setQbtcpHealth] = useState<{
-    lastSuccessfulAt: string | null;
-    error: string | null;
-  }>({ lastSuccessfulAt: null, error: null });
+  const [qbtcpHealth, setQbtcpHealth] = useState<QbtcpIngestionHealth>({
+    lastSuccessfulAt: null,
+    error: null,
+  });
   const stateRef = useRef<DirectorState>(emptyDirectorState());
   const stateRevisionRef = useRef(0);
   const durableRevisionRef = useRef(0);
@@ -902,6 +908,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
     >(),
   );
   const qbtcpSyncInFlightRef = useRef<Promise<void> | null>(null);
+  // A later poll is authoritative even if a transport implementation or test double resolves an
+  // older request after it. Normal polling is serialized as well, but this guard protects the
+  // health channel independently of that implementation detail.
+  const qbtcpSyncSequenceRef = useRef(0);
+  const qbtcpHealthCursorRef = useRef<QbtcpHealthCursor>({
+    sequence: 0,
+    health: { lastSuccessfulAt: null, error: null },
+  });
+  const resetQbtcpHealth = useCallback(() => {
+    const health = { lastSuccessfulAt: null, error: null };
+    qbtcpSyncSequenceRef.current += 1;
+    qbtcpHealthCursorRef.current = { sequence: qbtcpSyncSequenceRef.current, health };
+    setQbtcpHealth(health);
+  }, []);
+  const recordQbtcpHealth = useCallback((sequence: number, health: QbtcpIngestionHealth) => {
+    const next = applyQbtcpHealthUpdate(qbtcpHealthCursorRef.current, { sequence, health });
+    if (next === qbtcpHealthCursorRef.current) return;
+    qbtcpHealthCursorRef.current = next;
+    setQbtcpHealth(next.health);
+  }, []);
   /**
    * The last public snapshot Director derived.
    *
@@ -1355,6 +1381,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (next.tournament && next.tournament.id !== previousTournamentId) {
+        resetQbtcpHealth();
         writerEpochRef.current += 1;
         if (previousTournamentId) {
           settleWriterReady(
@@ -1386,7 +1413,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [ensureTournamentEditable, ensureWriter, persist, settleWriterReady],
+    [ensureTournamentEditable, ensureWriter, persist, resetQbtcpHealth, settleWriterReady],
   );
 
   const setTournamentStatus = useCallback(
@@ -1501,6 +1528,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         });
         stateRef.current = loaded;
         setState(loaded);
+        resetQbtcpHealth();
         publishedSnapshotRef.current = null;
         liveClientRef.current = null;
         localServerPublicationRef.current = null;
@@ -1520,7 +1548,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setDocumentTransition(null);
       }
     },
-    [ensureDocumentTransitionAllowed, refreshTournaments, settleWriterReady],
+    [ensureDocumentTransitionAllowed, refreshTournaments, resetQbtcpHealth, settleWriterReady],
   );
 
   const updateCatalogTournamentStatus = useCallback(
@@ -5250,15 +5278,37 @@ export function useDirectorController(repository = createDirectorRepository()): 
     if (documentTransitionRef.current) return Promise.resolve();
     if (qbtcpSyncInFlightRef.current) return qbtcpSyncInFlightRef.current;
     const epoch = documentEpochRef.current;
+    const sequence = qbtcpSyncSequenceRef.current + 1;
+    qbtcpSyncSequenceRef.current = sequence;
     const task = (async () => {
-      const read = await readNativeServerSnapshot();
-      if (documentTransitionRef.current || epoch !== documentEpochRef.current) return;
+      let read: NativeSnapshotReadResult;
+      try {
+        read = await readNativeServerSnapshot();
+      } catch (reason: unknown) {
+        if (
+          documentTransitionRef.current ||
+          epoch !== documentEpochRef.current ||
+          sequence !== qbtcpSyncSequenceRef.current
+        )
+          return;
+        recordQbtcpHealth(sequence, {
+          ...qbtcpHealthCursorRef.current.health,
+          error: reason instanceof Error ? reason.message : 'The native server snapshot could not be read.',
+        });
+        return;
+      }
+      if (
+        documentTransitionRef.current ||
+        epoch !== documentEpochRef.current ||
+        sequence !== qbtcpSyncSequenceRef.current
+      )
+        return;
       if (read.status === 'error') {
-        setQbtcpHealth((previous) => ({ ...previous, error: read.message }));
+        recordQbtcpHealth(sequence, { ...qbtcpHealthCursorRef.current.health, error: read.message });
         return;
       }
       const snapshot = read.snapshot;
-      setQbtcpHealth({ lastSuccessfulAt: isoNow(), error: null });
+      recordQbtcpHealth(sequence, { lastSuccessfulAt: isoNow(), error: null });
       // QBTCP polling is a read from the native server, but applying its observations changes the
       // Director document (sessions, progress, help, roster amendments, and result inboxes). An
       // archived document remains a historical view, even when the server is still running.
@@ -5288,7 +5338,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       },
     );
     return task;
-  }, [persist]);
+  }, [persist, recordQbtcpHealth]);
 
   const resolveQbtcpHelp = useCallback(
     async (helpId: DirectorId): Promise<boolean> => {
@@ -5496,7 +5546,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         publishedSnapshotRef.current = null;
         liveClientRef.current = null;
         localServerPublicationRef.current = null;
-        setQbtcpHealth({ lastSuccessfulAt: null, error: null });
+        resetQbtcpHealth();
         setError(null);
         if (restored.live?.settings.enabled) {
           // The restore already committed. A projection-save failure must not leave the UI on
@@ -5534,6 +5584,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       ensureWriter,
       refreshCheckpoints,
       refreshTournaments,
+      resetQbtcpHealth,
     ],
   );
 

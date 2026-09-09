@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type SetStateAction } from 'react';
 import { IManualGameInput } from '../game/ManualGame';
 import {
   DraftSaveState,
@@ -11,14 +11,23 @@ import useLeaveWarning from './useLeaveWarning';
 
 /** Each editing surface owns its storage key. Scanning never mounts this hook. */
 export function useManualGameDraft(storageKey: string, initialInput?: IManualGameInput) {
-  const [input, setInput] = useState(() => initialInput ?? readManualGameDraft(storageKey) ?? emptyInput());
+  const [input, setInputState] = useState(
+    () => initialInput ?? readManualGameDraft(storageKey) ?? emptyInput(),
+  );
   const [draftSaveState, setDraftSaveState] = useState<DraftSaveState>('not-saved');
   const dirty = hasManualInput(input);
+  const setupUnsaved = dirty && draftSaveState !== 'saved';
+  const setInput = useCallback((next: SetStateAction<IManualGameInput>) => {
+    // The saved state belongs to the previous input. Mark a new edit unsafe synchronously so a
+    // navigation cannot slip through while React is waiting for the deferred write to run.
+    setDraftSaveState('not-saved');
+    setInputState(next);
+  }, []);
   useLeaveWarning({
     gameInProgress: false,
     localSaveFailed: draftSaveState === 'failed',
     handoffOutstanding: false,
-    setupDirty: dirty,
+    setupUnsaved,
   });
   useEffect(() => {
     const persist = (updateState: boolean) => {

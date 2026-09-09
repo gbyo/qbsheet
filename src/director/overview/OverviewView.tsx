@@ -25,6 +25,7 @@ import {
 import { labelForSection, type SectionId } from '../app/navigation';
 import { currentOperationalRound } from '../transfers/assignment';
 import type { AnnounceInput } from '../notices';
+import type { QbtcpOperationalHealth } from '../server/qbtcpHealth';
 
 function sectionForArea(area: PreflightIssue['area']): SectionId {
   switch (area) {
@@ -84,6 +85,7 @@ export function OverviewView({
   nativeServerReady = false,
   nativeServerAvailable = true,
   qbtcpHealth,
+  qbtcpOperationalHealth,
 }: {
   state: DirectorState;
   controller: DirectorController;
@@ -92,6 +94,7 @@ export function OverviewView({
   nativeServerReady?: boolean;
   nativeServerAvailable?: boolean;
   qbtcpHealth?: { lastSuccessfulAt: string | null; error: string | null };
+  qbtcpOperationalHealth?: QbtcpOperationalHealth | null;
 }) {
   const tournament = state.tournament;
   const round = currentOperationalRound(state) ?? latestRound(state.rounds);
@@ -125,6 +128,18 @@ export function OverviewView({
     .slice(0, 5);
 
   const attention: AttentionItem[] = [
+    ...(qbtcpOperationalHealth?.kind === 'stale'
+      ? [
+          {
+            id: 'qbtcp-sync-stale',
+            title: 'QBTCP snapshot sync is delayed',
+            text: 'Open Rooms to check the native server and restore current scorer activity.',
+            section: 'rooms' as SectionId,
+            tone: 'warning' as const,
+            severity: 'warning' as const,
+          },
+        ]
+      : []),
     ...blockers.map((issue) => {
       const section = sectionForArea(issue.area);
       return {

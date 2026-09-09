@@ -248,6 +248,11 @@ export interface ConfirmRequest {
 
 const ConfirmContext = createContext<((request: ConfirmRequest) => Promise<boolean>) | null>(null);
 
+interface ConfirmEntry {
+  request: ConfirmRequest;
+  resolve: (value: boolean) => void;
+}
+
 /**
  * One confirmation pattern for the whole application, replacing the mixture of
  * browser `confirm()`, inline red buttons, and expand-to-confirm rows.
@@ -262,20 +267,34 @@ const ConfirmContext = createContext<((request: ConfirmRequest) => Promise<boole
  */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
-  const resolveRef = useRef<((value: boolean) => void) | null>(null);
+  // React state is intentionally only the visible request. The ref is the authoritative queue so
+  // same-tick calls cannot both observe an empty queue and overwrite one another before a render.
+  const queueRef = useRef<ConfirmEntry[]>([]);
 
   const confirm = useCallback((next: ConfirmRequest) => {
-    setRequest(next);
     return new Promise<boolean>((resolve) => {
-      resolveRef.current = resolve;
+      const wasEmpty = queueRef.current.length === 0;
+      queueRef.current.push({ request: next, resolve });
+      if (wasEmpty) setRequest(next);
     });
   }, []);
 
   const settle = useCallback((value: boolean) => {
-    setRequest(null);
-    resolveRef.current?.(value);
-    resolveRef.current = null;
+    const current = queueRef.current.shift();
+    if (!current) return;
+    current.resolve(value);
+    setRequest(queueRef.current[0]?.request ?? null);
   }, []);
+
+  useEffect(
+    () => () => {
+      // A provider can disappear while an async Director action is awaiting confirmation. Treat
+      // teardown as cancellation so neither the visible nor queued callers can remain pending.
+      const pending = queueRef.current.splice(0);
+      pending.forEach(({ resolve }) => resolve(false));
+    },
+    [],
+  );
 
   return (
     <ConfirmContext.Provider value={confirm}>
@@ -342,9 +361,17 @@ function ConfirmDialog({
         opener.focus({ preventScroll: true });
       }
     };
-    // The dialog is mounted per request, so this runs once per confirmation.
+    // The dialog stays mounted while queued requests advance, so this runs once for the queue.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useLayoutEffect(() => {
+    // A queued request replaces the copy in the existing modal. Return focus to Cancel for the
+    // new request without closing the modal or restoring focus to the original opener in between.
+    if (dialogRef.current?.open) {
+      dialogRef.current.querySelector<HTMLElement>('[data-confirm-cancel]')?.focus({ preventScroll: true });
+    }
+  }, [request]);
 
   return (
     <dialog
