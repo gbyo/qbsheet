@@ -116,6 +116,7 @@ export function TeamsView({
 
   const addImportedRows = (teams: TeamRecord[], warningCount: number) => {
     const result = controller.addImportedTeams(toImportedTeamInputs(teams));
+    if (!result.ok) return;
     const duplicate = result.skipped
       ? ` ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped.`
       : '';
@@ -812,6 +813,7 @@ function PasteTeamsDialog({
       return;
     }
     const result = controller.addImportedTeams(toImportedTeamInputs(report.value));
+    if (!result.ok) return;
     onAnnounce(
       `${result.inserted} team${result.inserted === 1 ? '' : 's'} imported${result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''}.`,
     );

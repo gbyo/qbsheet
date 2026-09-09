@@ -176,6 +176,9 @@ export interface ImportedTeamInput {
   }>;
 }
 
+export type BulkImportResult =
+  { ok: true; inserted: number; skipped: number } | { ok: false; inserted: 0; skipped: 0 };
+
 export interface NewRoomInput {
   name: string;
   building?: string;
@@ -345,7 +348,7 @@ export interface DirectorController {
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
   mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
-  addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
+  addImportedTeams(teams: ImportedTeamInput[]): BulkImportResult;
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
@@ -398,7 +401,7 @@ export interface DirectorController {
       tiebreaker?: boolean;
       notes?: string;
     }>,
-  ): { inserted: number; skipped: number };
+  ): BulkImportResult;
   updatePacket(
     packetId: DirectorId,
     changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
@@ -1689,11 +1692,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addImportedTeams = useCallback(
-    (inputs: ImportedTeamInput[]): { inserted: number; skipped: number } => {
-      if (inputs.length === 0) return { inserted: 0, skipped: 0 };
+    (inputs: ImportedTeamInput[]): BulkImportResult => {
+      if (inputs.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const teamIds = new Set(draft.teams.map((team) => team.id));
         const teamNames = new Set(draft.teams.map((team) => team.displayName.toLocaleLowerCase()));
         const playerIds = new Set(draft.players.map((player) => player.id));
@@ -1781,7 +1784,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -2593,10 +2596,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         tiebreaker?: boolean;
         notes?: string;
       }>,
-    ): { inserted: number; skipped: number } => {
+    ): BulkImportResult => {
+      if (packets.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const now = isoNow();
         const existingNames = new Set(draft.packets.map((packet) => packet.name.trim().toLocaleLowerCase()));
         for (const input of packets) {
@@ -2633,7 +2637,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
