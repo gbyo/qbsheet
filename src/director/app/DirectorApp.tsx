@@ -27,6 +27,7 @@ import { PacketsView } from '../packets/PacketsView';
 import { ResultsView } from '../results/ResultsView';
 import { useTransfers } from '../transfers/useTransfers';
 import { TransfersView } from '../transfers/TransfersView';
+import { transferArtifactNeedsAttention } from '../transfers/attention';
 import { StandingsView } from '../standings/StandingsView';
 import { downloadArchive, PublishView } from '../publish/PublishView';
 import { LiveView } from '../live/LiveView';
@@ -255,8 +256,8 @@ function DirectorAppContent() {
   const resultReviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const transferPendingCount = state.transfers.artifacts.filter(
-    (artifact) => artifact.status === 'staged',
+  const transferPendingCount = state.transfers.artifacts.filter((artifact) =>
+    transferArtifactNeedsAttention(artifact, state.submissions),
   ).length;
 
   const clearTarget = () => setNavigationTarget(null);

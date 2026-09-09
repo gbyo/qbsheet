@@ -26,6 +26,7 @@ import {
 } from '../components';
 import type { SectionId } from '../app/navigation';
 import { currentOperationalRound, type AssignmentSelection } from './assignment';
+import { transferArtifactNeedsAttention, transferArtifactResolution } from './attention';
 import { describeWarning } from './ingest';
 import { transportLabel, type IncomingArtifact, type TransferLocation } from './model';
 import { planAssignments } from './prepare';
@@ -47,8 +48,8 @@ export function TransfersView({
   onNavigate: (section: SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const pending = state.transfers.artifacts.filter(
-    (artifact) => artifact.status === 'staged' || artifact.status === 'failed',
+  const pending = state.transfers.artifacts.filter((artifact) =>
+    transferArtifactNeedsAttention(artifact, state.submissions),
   );
   const [view, setView] = useState<TransferView>(pending.length > 0 ? 'incoming' : 'outgoing');
   const [dropActive, setDropActive] = useState(false);
@@ -267,14 +268,24 @@ function ArtifactItem({
   const matchup = scheduled
     ? `${teamName(state, scheduled.leftTeamId)} vs ${teamName(state, scheduled.rightTeamId)}`
     : 'Not matched to a scheduled game';
+  const resolution = transferArtifactResolution(artifact, state.submissions);
   return (
     <SummaryItem
       title={<strong>{artifact.fileName}</strong>}
-      status={<StateLabel state={classificationState(artifact)} label={classificationLabel(artifact)} />}
+      status={
+        <StateLabel
+          state={resolution ?? classificationState(artifact)}
+          label={
+            resolution
+              ? `${resolution === 'accepted' ? 'Accepted' : 'Rejected'} in Results`
+              : classificationLabel(artifact)
+          }
+        />
+      }
       summary={`${matchup}${scheduled ? ` · ${[room?.name, round?.name].filter(Boolean).join(' · ')}` : ''} · ${artifact.sourceLabel}`}
       actions={
         <div className="director-actions">
-          {artifact.status === 'staged' && (
+          {transferArtifactNeedsAttention(artifact, state.submissions) && artifact.status === 'staged' && (
             <Button variant="primary" onClick={onReview}>
               Review
             </Button>
