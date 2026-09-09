@@ -1,0 +1,113 @@
+name: Apply fix 522
+
+on:
+  push:
+    branches: [fix/522-switching-loading-copy]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/522-switching-loading-copy
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply transition-state fix and tests
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          controller = Path('src/director/state/useDirectorController.ts')
+          text = controller.read_text()
+          marker = "export interface DirectorPersistenceHealth {\n"
+          if text.count(marker) != 1:
+              raise SystemExit('persistence health marker did not match')
+          text = text.replace(marker, "export type DirectorDocumentTransition = 'switching' | 'recovery' | null;\n\n" + marker, 1)
+          text = text.replace("  recovering: boolean;\n  documentEpoch: number;", "  recovering: boolean;\n  documentTransition: DirectorDocumentTransition;\n  documentEpoch: number;", 1)
+          old_state = "  const [recovering, setRecovering] = useState(false);\n  const [documentEpoch, setDocumentEpoch] = useState(0);"
+          new_state = "  const [documentTransition, setDocumentTransition] = useState<DirectorDocumentTransition>(null);\n  const recovering = documentTransition !== null;\n  const [documentEpoch, setDocumentEpoch] = useState(0);"
+          if text.count(old_state) != 1:
+              raise SystemExit('recovering state declaration did not match')
+          text = text.replace(old_state, new_state, 1)
+          true_count = text.count('setRecovering(true);')
+          false_count = text.count('setRecovering(false);')
+          if true_count < 2 or false_count < 2:
+              raise SystemExit(f'unexpected recovering setter counts: true={true_count}, false={false_count}')
+          text = text.replace('setRecovering(true);', "setDocumentTransition('recovery');")
+          text = text.replace('setRecovering(false);', 'setDocumentTransition(null);')
+          switch_old = "      documentTransitionRef.current = true;\n      documentEpochRef.current += 1;\n      setDocumentTransition('recovery');\n      try {"
+          switch_new = "      documentTransitionRef.current = true;\n      documentEpochRef.current += 1;\n      setDocumentTransition('switching');\n      try {"
+          if text.count(switch_old) != 1:
+              raise SystemExit('switch transition block did not match')
+          text = text.replace(switch_old, switch_new, 1)
+          text = text.replace("    recovering,\n    documentEpoch,", "    recovering,\n    documentTransition,\n    documentEpoch,", 1)
+          controller.write_text(text)
+
+          app = Path('src/director/app/DirectorApp.tsx')
+          text = app.read_text()
+          text = text.replace("import { useDirectorController } from '../state/useDirectorController';", "import { useDirectorController, type DirectorDocumentTransition } from '../state/useDirectorController';", 1)
+          old = """  if (controller.recovering)
+    return (
+      <div className=\"director-loading\" role=\"status\">
+        Saving tournament recovery…
+      </div>
+    );
+"""
+          new = """  if (controller.documentTransition)
+    return (
+      <div className=\"director-loading\" role=\"status\">
+        {documentTransitionLabel(controller.documentTransition)}
+      </div>
+    );
+"""
+          if text.count(old) != 1:
+              raise SystemExit('DirectorApp recovery loading block did not match')
+          text = text.replace(old,new,1)
+          anchor = "function humanRoundStatus(status: string): string {\n"
+          helper = """export function documentTransitionLabel(transition: DirectorDocumentTransition): string {
+  return transition === 'switching' ? 'Opening tournament…' : 'Restoring tournament…';
+}
+
+"""
+          if text.count(anchor) != 1:
+              raise SystemExit('transition label insertion point did not match')
+          app.write_text(text.replace(anchor, helper + anchor, 1))
+          PY
+          cat > src/director/app/DirectorApp.transition.test.ts <<'EOF'
+          import { describe, expect, test } from 'vitest';
+          import { documentTransitionLabel } from './DirectorApp';
+
+          describe('Director document transition copy', () => {
+            test('ordinary switching uses ordinary opening language', () => {
+              expect(documentTransitionLabel('switching')).toBe('Opening tournament…');
+              expect(documentTransitionLabel('switching')).not.toMatch(/recover/i);
+            });
+
+            test('actual recovery keeps recovery-specific semantics', () => {
+              expect(documentTransitionLabel('recovery')).toBe('Restoring tournament…');
+            });
+          });
+          EOF
+      - run: npx prettier --write src/director/state/useDirectorController.ts src/director/app/DirectorApp.tsx src/director/app/DirectorApp.transition.test.ts
+      - run: npx vitest --run src/director/app/DirectorApp.transition.test.ts
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-522.yml
+          git add src/director/state/useDirectorController.ts src/director/app/DirectorApp.tsx src/director/app/DirectorApp.transition.test.ts
+          git commit -m 'fix: distinguish tournament switching from recovery (#522)'
+          git push origin HEAD:fix/522-switching-loading-copy
