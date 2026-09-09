@@ -387,6 +387,16 @@ function DirectorAppContent() {
         }
         banners={
           <>
+            {tournament.status === 'archived' && (
+              <ArchivedTournamentReadOnlyNotice
+                tournamentName={tournament.name}
+                onReopen={() =>
+                  void controller.reopenTournament().then((reopened) => {
+                    if (reopened) announce(`${tournament.name} reopened as a draft.`);
+                  })
+                }
+              />
+            )}
             {(controller.writerStatus === 'blocked' || controller.writerStatus === 'unavailable') && (
               <Callout tone="warning" title="Read-only Director tab" role="alert">
                 {controller.writerStatus === 'blocked'
@@ -507,6 +517,29 @@ function DirectorAppContent() {
         />
       )}
     </>
+  );
+}
+
+export function ArchivedTournamentReadOnlyNotice({
+  tournamentName,
+  onReopen,
+}: {
+  tournamentName: string;
+  onReopen: () => void;
+}) {
+  return (
+    <Callout
+      tone="info"
+      title="Archived tournament — read-only"
+      role="status"
+      actions={
+        <Button variant="secondary" icon="refresh" onClick={onReopen}>
+          Reopen as draft
+        </Button>
+      }
+    >
+      {tournamentName} is open for historical inspection. Reopen it as a draft before making changes.
+    </Callout>
   );
 }
 

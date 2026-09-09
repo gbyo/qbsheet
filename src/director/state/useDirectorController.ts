@@ -330,6 +330,14 @@ export type DirectorDocumentTransition =
   | { kind: 'restoring-checkpoint'; checkpointId: string }
   | { kind: 'recovery-edit'; reason: string };
 
+const archivedTournamentReadOnlyMessage =
+  'This tournament is archived. Reopen it as a draft before making changes.';
+
+interface CommitOptions {
+  /** The only archived write exception: the explicit archived → draft lifecycle transition. */
+  allowArchivedReopen?: boolean;
+}
+
 function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
   switch (transition.kind) {
     case 'switching':
@@ -921,6 +929,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
     return false;
   }, []);
 
+  const ensureTournamentEditable = useCallback((): boolean => {
+    if (stateRef.current.tournament?.status !== 'archived') return true;
+    setError(archivedTournamentReadOnlyMessage);
+    return false;
+  }, []);
+
   const canLeaveCurrentDocument = useCallback((): DocumentTransitionCheck => {
     const revision = stateRevisionRef.current;
     const durableRevision = durableRevisionRef.current;
@@ -1085,7 +1099,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * that it needs publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const commit = useCallback(
-    (mutator: (draft: DirectorState) => void): boolean => {
+    (mutator: (draft: DirectorState) => void, options: CommitOptions = {}): boolean => {
       /*
        * A commit dropped while a document is being replaced is a failure, and says so.
        *
@@ -1098,6 +1112,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(documentTransitionConflictMessage(documentTransitionRef.current));
         return false;
       }
+      if (!options.allowArchivedReopen && !ensureTournamentEditable()) return false;
+      if (options.allowArchivedReopen && stateRef.current.tournament?.status !== 'archived') {
+        setError('Only an archived tournament can be reopened as a draft.');
+        return false;
+      }
       if (!ensureWriter()) return false;
       // A validated user mutation supersedes an older operational error. Persistence completions
       // deliberately do not clear this channel: a late save from a previous mutation must not
@@ -1107,6 +1126,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const next = structuredClone(stateRef.current);
       const auditStart = next.audit.length;
       mutator(next);
+      if (options.allowArchivedReopen && next.tournament?.status !== 'draft') {
+        setError('Reopening an archived tournament must transition it to draft.');
+        return false;
+      }
       if (next.tournament && next.tournament.id !== previousTournamentId) {
         writerEpochRef.current += 1;
         if (previousTournamentId) {
@@ -1139,7 +1162,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [ensureWriter, persist, settleWriterReady],
+    [ensureTournamentEditable, ensureWriter, persist, settleWriterReady],
   );
 
   const setTournamentStatus = useCallback(
@@ -1151,6 +1174,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.status === status) return true;
+      if (current.status === 'archived' && status === 'draft') {
+        setError('Use Reopen as draft to make an archived tournament editable.');
+        return false;
+      }
       const completionBlockers =
         current.status === 'running' && status === 'complete' ? tournamentCompletionBlockers(snapshot) : [];
       const valid =
@@ -1306,6 +1333,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const document = await read(tournamentId);
         if (!document.tournament) throw new Error('The selected catalog document has no tournament.');
         if (document.tournament.status === status) return true;
+        if (document.tournament.status === 'archived' && status !== 'draft') {
+          setError(archivedTournamentReadOnlyMessage);
+          return false;
+        }
+        const from = document.tournament.status;
         document.tournament.status = status;
         document.tournament.updatedAt = isoNow();
         document.audit.push({
@@ -1315,6 +1347,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'tournament-updated',
           summary,
           entityId: tournamentId,
+          details: {
+            from,
+            to: status,
+            ...(from === 'archived' && status === 'draft' ? { reason: 'explicit-reopen' } : {}),
+          },
         });
         assertCatalogClaim();
         await saveDocument(document, false);
@@ -1344,10 +1381,33 @@ export function useDirectorController(repository = createDirectorRepository()): 
     async (tournamentId = stateRef.current.tournament?.id): Promise<boolean> => {
       if (!tournamentId) return false;
       const current = stateRef.current.tournament;
-      if (current?.id === tournamentId) return setTournamentStatus('draft');
+      if (current?.id === tournamentId) {
+        if (current.status !== 'archived') {
+          setError('Only an archived tournament can be reopened as a draft.');
+          return false;
+        }
+        return commit(
+          (draft) => {
+            if (!draft.tournament) return;
+            const now = isoNow();
+            draft.tournament.status = 'draft';
+            draft.tournament.updatedAt = now;
+            draft.audit.push({
+              id: newDirectorId('audit'),
+              at: now,
+              actor: 'Director',
+              type: 'tournament-updated',
+              summary: 'Reopened tournament as a draft.',
+              entityId: draft.tournament.id,
+              details: { from: 'archived', to: 'draft', reason: 'explicit-reopen' },
+            });
+          },
+          { allowArchivedReopen: true },
+        );
+      }
       return updateCatalogTournamentStatus(tournamentId, 'draft', 'Reopened tournament from the catalog.');
     },
-    [setTournamentStatus, updateCatalogTournamentStatus],
+    [commit, updateCatalogTournamentStatus],
   );
 
   const createTournament = useCallback(
@@ -4713,6 +4773,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       const snapshot = read.snapshot;
       setQbtcpHealth({ lastSuccessfulAt: isoNow(), error: null });
+      // QBTCP polling is a read from the native server, but applying its observations changes the
+      // Director document (sessions, progress, help, roster amendments, and result inboxes). An
+      // archived document remains a historical view, even when the server is still running.
+      if (stateRef.current.tournament?.status === 'archived') return;
       const next = structuredClone(stateRef.current);
       let changed = applyNativeSessions(next, snapshot.sessions);
       changed = applyNativePresence(next, snapshot) || changed;
@@ -4791,6 +4855,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const syncTransferVolumesAction = useCallback(
     (volumes: TransferVolume[]) => {
+      // Removable-volume reconciliation changes persisted transfer inventory. It must not make an
+      // archived historical document drift merely because a drive was mounted or removed.
+      if (stateRef.current.tournament?.status === 'archived') return;
       // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
       // a save per poll would rewrite the tournament document every few seconds all day.
       const next = structuredClone(stateRef.current);
@@ -4850,6 +4917,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     async (reason: string) => {
       if (documentTransitionRef.current)
         throw new Error(documentTransitionConflictMessage(documentTransitionRef.current));
+      if (!ensureTournamentEditable()) throw new Error(archivedTournamentReadOnlyMessage);
       if (!ensureWriter()) throw new Error('This tournament is read-only in this Director tab.');
       const snapshot = structuredClone(stateRef.current);
       const next = structuredClone(snapshot);
@@ -4877,12 +4945,20 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshCheckpoints();
       });
     },
-    [assertWriteAuthority, captureWriteAuthority, enqueuePersistence, ensureWriter, refreshCheckpoints],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      enqueuePersistence,
+      ensureTournamentEditable,
+      ensureWriter,
+      refreshCheckpoints,
+    ],
   );
 
   const restoreCheckpoint = useCallback(
     async (checkpointId: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (!ensureTournamentEditable()) return false;
       if (!ensureDocumentTransitionAllowed('restore a recovery point')) return false;
       if (!ensureWriter()) return false;
       if (!repositoryRef.current.restoreCheckpoint) {
@@ -4968,6 +5044,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       assertWriteAuthority,
       captureWriteAuthority,
       ensureDocumentTransitionAllowed,
+      ensureTournamentEditable,
       ensureWriter,
       refreshCheckpoints,
       refreshTournaments,
@@ -4983,6 +5060,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Structural edits must belong to the open tournament.');
         return false;
       }
+      if (!ensureTournamentEditable()) return false;
       if (!ensureWriter()) return false;
       const transition: DirectorDocumentTransition = { kind: 'recovery-edit', reason };
       documentTransitionRef.current = transition;
@@ -5037,7 +5115,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setDocumentTransition(null);
       }
     },
-    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      ensureTournamentEditable,
+      ensureWriter,
+      refreshCheckpoints,
+      refreshTournaments,
+    ],
   );
 
   const setRoundPacket = useCallback(
