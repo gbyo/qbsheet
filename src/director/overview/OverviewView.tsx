@@ -1,8 +1,10 @@
-import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { navigationTargetForOperational, type DirectorNavigationTarget } from '../app/navigationTarget';
 import { useState } from 'react';
 import {
+  deriveRoundOperations,
   deriveTeamStandings,
   latestRound,
+  nextOperationsRound,
   orderDayItems,
   runPreflight,
   type DirectorState,
@@ -67,13 +69,9 @@ interface AttentionItem {
   text: string;
   section: SectionId;
   tone: StatusTone;
-  /** Ranks the list and picks the marker colour. */
   severity: AttentionSeverity;
-  /**
-   * Where the fix is, when the item is about a specific thing. A room that has
-   * asked for help opens *that* room, not the Rooms page — the point of an
-   * attention list is that it ends the search, not that it starts one.
-   */
+  action?: string;
+  /** The exact entity that owns the fix, when one is known. */
   target?: DirectorNavigationTarget;
 }
 
@@ -123,6 +121,29 @@ export function OverviewView({
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
   const [showAllAttention, setShowAllAttention] = useState(false);
 
+  const nextOperationalRound = nextOperationsRound(state);
+  const nextRoundOperations = nextOperationalRound
+    ? deriveRoundOperations(state, nextOperationalRound.id)
+    : null;
+  const nextOperationalIssue = nextRoundOperations
+    ? (nextRoundOperations.blockers[0] ?? nextRoundOperations.warnings[0] ?? null)
+    : null;
+  const firstNextGame = nextOperationalRound
+    ? state.scheduledGames.find(
+        (game) => game.roundId === nextOperationalRound.id && !game.bye && game.status !== 'cancelled',
+      )
+    : null;
+  const nextOperationsTarget: DirectorNavigationTarget | null = nextOperationalIssue?.target
+    ? navigationTargetForOperational(nextOperationalIssue.target)
+    : firstNextGame && nextOperationalRound
+      ? {
+          section: 'rooms',
+          entityType: 'game',
+          entityId: firstNextGame.id,
+          parentId: nextOperationalRound.id,
+        }
+      : null;
+
   const standings = deriveTeamStandings(state)
     .filter((standing) => standing.gamesPlayed > 0)
     .slice(0, 5);
@@ -133,7 +154,7 @@ export function OverviewView({
           {
             id: 'qbtcp-sync-stale',
             title: 'QBTCP snapshot sync is delayed',
-            text: 'Open Rooms to check the native server and restore current scorer activity.',
+            text: 'Open Operations to check the native server and restore current scorer activity.',
             section: 'rooms' as SectionId,
             tone: 'warning' as const,
             severity: 'warning' as const,
@@ -141,7 +162,8 @@ export function OverviewView({
         ]
       : []),
     ...blockers.map((issue) => {
-      const section = sectionForArea(issue.area);
+      const target = issue.entity ? navigationTargetForOperational(issue.entity) : undefined;
+      const section = target?.section ?? sectionForArea(issue.area);
       return {
         id: issue.id,
         title: issue.message,
@@ -149,6 +171,8 @@ export function OverviewView({
         section,
         tone: 'danger' as const,
         severity: 'blocker' as const,
+        action: issue.action,
+        target,
       };
     }),
     ...(controller.error
@@ -209,7 +233,8 @@ export function OverviewView({
     ...issues
       .filter((issue) => issue.severity !== 'blocker')
       .map((issue) => {
-        const section = sectionForArea(issue.area);
+        const target = issue.entity ? navigationTargetForOperational(issue.entity) : undefined;
+        const section = target?.section ?? sectionForArea(issue.area);
         return {
           id: issue.id,
           title: issue.message,
@@ -217,6 +242,8 @@ export function OverviewView({
           section,
           tone: 'info' as const,
           severity: 'info' as const,
+          action: issue.action,
+          target,
         };
       }),
   ].sort((left, right) => severityRank[left.severity] - severityRank[right.severity]);
@@ -258,13 +285,6 @@ export function OverviewView({
                   Start {round.name}
                 </Button>
               )}
-              {/*
-                The panel owns the round's operations — Start, and Finish once
-                every game is in. Navigating to the day is the quiet action
-                below, and the page header already carries "Open <round>" as the
-                one primary thing to do next; offering it twice made the same
-                button appear on one screen with the same name.
-              */}
               {round.status === 'released' && complete && (
                 <Button
                   variant="primary"
@@ -294,11 +314,6 @@ export function OverviewView({
           />
         </Panel>
       ) : (
-        /*
-          Before there is a round, the page header's primary action is what to
-          do next and the attention list says what is missing. A third card
-          repeating "add teams" put the same instruction on screen three times.
-        */
         <EmptyState
           title="No round yet"
           description="Add teams, rooms, and a format, and the day's first round appears here."
@@ -306,17 +321,50 @@ export function OverviewView({
         />
       )}
 
+      {nextRoundOperations?.round && (
+        <Panel
+          title={nextRoundOperations.round.name}
+          description="Next-round readiness"
+          actions={
+            <Button
+              variant={nextOperationalIssue ? 'secondary' : 'quiet'}
+              icon="chevron"
+              onClick={() =>
+                nextOperationsTarget
+                  ? onNavigate(nextOperationsTarget.section, nextOperationsTarget)
+                  : onNavigate('rooms')
+              }
+            >
+              {nextOperationalIssue?.action ?? 'Open Operations'}
+            </Button>
+          }
+        >
+          <MetaRow
+            items={[
+              `${nextRoundOperations.summary.games} game${nextRoundOperations.summary.games === 1 ? '' : 's'}`,
+              state.rooms.length > 0
+                ? `${nextRoundOperations.summary.gamesWithRooms}/${nextRoundOperations.summary.games} rooms assigned`
+                : '',
+              state.staff.length > 0
+                ? `${nextRoundOperations.summary.staffPositionsFilled}/${nextRoundOperations.summary.staffPositionsRequired} staff positions filled`
+                : '',
+              nextRoundOperations.summary.scorekeepersExpected > 0
+                ? `${nextRoundOperations.summary.scorekeepersConnected}/${nextRoundOperations.summary.scorekeepersExpected} scorekeepers connected`
+                : '',
+              `${nextRoundOperations.summary.issues} issue${nextRoundOperations.summary.issues === 1 ? '' : 's'}`,
+            ]}
+          />
+          <p className="director-empty-copy">
+            {nextOperationalIssue?.message ?? 'No operational blockers are known for this round.'}
+          </p>
+        </Panel>
+      )}
+
       {attention.length > 0 && (
         <Section
           title="Needs attention"
           description="Highest-impact issues appear first. Each item opens the workflow that can resolve it."
         >
-          {/*
-            Rows rather than a stack of tinted panels. Five full callouts in a
-            column give every item the same weight and fill the screen with
-            borders; a severity rule down the left says the same thing in 3px,
-            and keeps the list scannable when a tournament has a dozen of them.
-          */}
           <div className="director-attention director-attention-list">
             {(showAllAttention ? attention : attention.slice(0, 5)).map((item) => (
               <div key={item.id} className="director-attention-item" data-severity={item.severity}>
@@ -334,7 +382,7 @@ export function OverviewView({
                     iconAfter="chevron"
                     onClick={() => onNavigate(item.section, item.target)}
                   >
-                    {`Open ${labelForSection(item.section)}`}
+                    {item.action ?? `Open ${labelForSection(item.section)}`}
                   </Button>
                 </div>
               </div>
