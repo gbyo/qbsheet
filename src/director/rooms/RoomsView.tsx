@@ -38,6 +38,12 @@ import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { isNativeDirector, issueNativeRoomPairing } from '../platform/native';
 import type { NativeServerState } from '../server/useNativeServerStatus';
+import {
+  deriveQbtcpOperationalHealth,
+  qbtcpHealthNeedsAttention,
+  qbtcpHealthSummary,
+  type QbtcpOperationalHealth,
+} from '../server/qbtcpHealth';
 import { errorNotice, type AnnounceInput } from '../notices';
 
 type EquipmentKind = DirectorState['equipment'][number]['kind'];
@@ -135,8 +141,12 @@ export function RoomsView({
   const qbtcpStatus = nativeServer?.status ?? null;
   const qbtcpLoading = nativeServer?.loading ?? false;
   const nativeDirector = isNativeDirector();
+  const qbtcpOperationalHealth: QbtcpOperationalHealth | null = nativeServer
+    ? deriveQbtcpOperationalHealth(qbtcpLoading ? null : qbtcpStatus, controller.qbtcpHealth)
+    : null;
   const qbtcpRunning = qbtcpStatus?.running ?? false;
-  const qbtcpHasError = !qbtcpLoading && nativeDirector && !qbtcpRunning && Boolean(qbtcpStatus?.message);
+  const qbtcpNeedsAttention =
+    nativeDirector && qbtcpOperationalHealth ? qbtcpHealthNeedsAttention(qbtcpOperationalHealth) : false;
   const invitations = qbtcpStatus?.pairingInvitations ?? [];
   const assignableRoomIds = useMemo(
     () => new Set(state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id)),
@@ -339,16 +349,20 @@ export function RoomsView({
 
       {nativeServer && (
         <AdvancedSection
-          label={qbtcpRunning || qbtcpHasError ? 'QBTCP local network' : 'Set up QBTCP local network'}
+          label={qbtcpRunning || qbtcpNeedsAttention ? 'QBTCP local network' : 'Set up QBTCP local network'}
           hint={
             qbtcpRunning
-              ? `${qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length} paired room${(qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length) === 1 ? '' : 's'}`
-              : qbtcpHasError
-                ? 'Server needs attention'
+              ? qbtcpOperationalHealth
+                ? qbtcpHealthSummary(qbtcpOperationalHealth)
+                : 'Checking native server'
+              : qbtcpNeedsAttention
+                ? qbtcpOperationalHealth
+                  ? qbtcpHealthSummary(qbtcpOperationalHealth)
+                  : 'Server needs attention'
                 : 'Optional for network-connected scorekeepers'
           }
           icon="network"
-          defaultOpen={qbtcpRunning || qbtcpHasError}
+          defaultOpen={qbtcpRunning || qbtcpNeedsAttention}
         >
           <QbtcpNetwork
             state={state}
@@ -356,12 +370,12 @@ export function RoomsView({
             nativeDirector={nativeDirector}
             qbtcpLoading={qbtcpLoading}
             qbtcpRunning={qbtcpRunning}
-            qbtcpHasError={qbtcpHasError}
+            qbtcpNeedsAttention={qbtcpNeedsAttention}
+            qbtcpOperationalHealth={qbtcpOperationalHealth}
             pairingRooms={pairingRooms}
             invitations={invitations}
             expiredPairingRoomIds={qbtcpStatus?.expiredPairingRoomIds ?? []}
             pairingRoomId={pairingRoomId}
-            controller={controller}
             onToggle={() => void toggleServer()}
             onIssue={(roomId) => void issuePairing(roomId)}
             onCopy={(url, message) => void copyPairingLink(url, message)}
@@ -1328,12 +1342,12 @@ function QbtcpNetwork({
   nativeDirector,
   qbtcpLoading,
   qbtcpRunning,
-  qbtcpHasError,
+  qbtcpNeedsAttention,
+  qbtcpOperationalHealth,
   pairingRooms,
   invitations = [],
   expiredPairingRoomIds = [],
   pairingRoomId,
-  controller,
   onToggle,
   onIssue,
   onCopy,
@@ -1344,12 +1358,12 @@ function QbtcpNetwork({
   nativeDirector: boolean;
   qbtcpLoading: boolean;
   qbtcpRunning: boolean;
-  qbtcpHasError: boolean;
+  qbtcpNeedsAttention: boolean;
+  qbtcpOperationalHealth: QbtcpOperationalHealth | null;
   pairingRooms: DirectorState['rooms'];
   invitations: NonNullable<NativeServerState['status']>['pairingInvitations'];
   expiredPairingRoomIds: string[];
   pairingRoomId: string | null;
-  controller: DirectorController;
   onToggle: () => void;
   onIssue: (roomId: string) => void;
   onCopy: (url: string, message: string) => void;
@@ -1368,12 +1382,28 @@ function QbtcpNetwork({
   };
   return (
     <div className="director-stack">
-      {qbtcpHasError && (
-        <Callout tone="danger" title="QBTCP server needs attention">
-          {status?.message}
+      {qbtcpOperationalHealth?.kind === 'error' && (
+        <Callout
+          tone="danger"
+          title={
+            qbtcpOperationalHealth.source === 'snapshot'
+              ? 'QBTCP snapshot ingestion needs attention'
+              : 'QBTCP server needs attention'
+          }
+        >
+          {qbtcpOperationalHealth.message}
         </Callout>
       )}
-      {controller.qbtcpHealth.error && <Callout tone="danger">{controller.qbtcpHealth.error}</Callout>}
+      {qbtcpOperationalHealth?.kind === 'stale' && (
+        <Callout tone="warning" title="QBTCP snapshot sync delayed">
+          Director has not ingested a fresh native snapshot recently. Check the server connection.
+        </Callout>
+      )}
+      {qbtcpOperationalHealth?.kind === 'unverified' && (
+        <Callout tone="warning" title="QBTCP snapshot sync not verified">
+          The server is running, but Director has not ingested its first snapshot yet.
+        </Callout>
+      )}
       <div className="director-actions">
         {nativeDirector ? (
           <Button
@@ -1400,7 +1430,7 @@ function QbtcpNetwork({
         )}
       </div>
       <Diagnostics
-        defaultOpen={qbtcpHasError}
+        defaultOpen={qbtcpNeedsAttention}
         standalone={false}
         items={[
           {
@@ -1423,6 +1453,10 @@ function QbtcpNetwork({
             value: qbtcpRunning ? (status?.pairedRooms ?? state.qbtcpSessions.length) : '—',
           },
           { term: 'Protocol', value: qbtcpRunning ? (status?.protocol ?? 'QBTCP v1') : '—' },
+          {
+            term: 'Snapshot sync',
+            value: qbtcpOperationalHealth ? qbtcpHealthSummary(qbtcpOperationalHealth) : 'Not available',
+          },
         ]}
       />
       {qbtcpRunning && (status?.addressSelectionRequired || !status?.address) && (

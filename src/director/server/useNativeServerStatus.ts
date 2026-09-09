@@ -21,6 +21,7 @@ import {
   type NativeRoomPairingInvitation,
   type NativeServerStatus,
 } from '../platform/native';
+import { qbtcpPollIntervalMs } from './qbtcpHealth';
 
 export interface NativeServerState {
   status: NativeServerStatus;
@@ -203,7 +204,7 @@ export function useNativeServerStatus(options: {
       void refresh();
     };
     poll();
-    const interval = window.setInterval(poll, 1000);
+    const interval = window.setInterval(poll, qbtcpPollIntervalMs);
     return () => {
       mounted = false;
       window.clearInterval(interval);
