@@ -5,5 +5,6 @@ export * from './planning';
 export * from './roster';
 export * from './scheduling';
 export * from './scoringPresets';
+export * from './scheduleRecovery';
 export * from './stats';
 export * from './validation';

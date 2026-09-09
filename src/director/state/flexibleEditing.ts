@@ -78,6 +78,23 @@ export async function dropTeamFlexibly(
 
     scheduled.status = 'cancelled';
     cancelledScheduledGameIds.push(scheduled.id);
+    const cancellationAuditId = newDirectorId('audit');
+    scheduled.cancellation = {
+      reasonKind: 'team-dropped',
+      teamId,
+      reason: normalizedReason,
+      at: now,
+      auditId: cancellationAuditId,
+    };
+    next.audit.push({
+      id: cancellationAuditId,
+      at: now,
+      actor: 'Director',
+      type: 'schedule-cancelled',
+      summary: `Cancelled ${scheduled.id} because ${team.displayName} was dropped.`,
+      entityId: scheduled.id,
+      details: { reason: normalizedReason, reasonKind: 'team-dropped', teamId, roundId: scheduled.roundId },
+    });
     for (const game of next.games.filter((entry) => entry.scheduledGameId === scheduled.id)) {
       if (game.status === 'accepted' || game.status === 'forfeit') continue;
       game.status = 'cancelled';
@@ -94,7 +111,7 @@ export async function dropTeamFlexibly(
     id: newDirectorId('audit'),
     at: now,
     actor: 'Director',
-    type: 'tournament-updated',
+    type: 'team-dropped',
     summary: `Dropped ${team.displayName}.`,
     entityId: team.id,
     details: { reason: normalizedReason, cancelledScheduledGameIds },
