@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { Icon } from './Icon';
+import { Badge } from './Status';
 
 /**
  * Boolean and single-choice controls.
@@ -264,13 +265,11 @@ export function ChoiceCards<T extends string>({
               disabled={option.disabled}
               onChange={() => onChange(option.value)}
             />
-            <span className="director-choice-box" aria-hidden="true">
-              {value === option.value ? <Icon name="check" size={13} /> : null}
-            </span>
+            <span className="director-choice-box" aria-hidden="true" />
             <span className="director-choice-card-text">
               <strong>
-                {option.title}
-                {option.badge}
+                <span className="director-choice-card-title">{option.title}</span>
+                {option.badge && <Badge tone="neutral" label={option.badge} />}
               </strong>
               {option.description && <small>{option.description}</small>}
             </span>

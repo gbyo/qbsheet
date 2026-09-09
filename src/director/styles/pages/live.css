@@ -1,5 +1,32 @@
 /* Director live surface styles. Rebased on the shared design tokens; page-specific rules only. */
 
+/* ChoiceCards are a radio group, so their indicator must read as one-of-many
+   rather than as a checkbox. Metadata such as Recommended / Advanced uses the
+   shared badge presentation and sits beside the option title deliberately. */
+.director-choice-card-text > strong {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-choice-card .director-choice-box {
+  border-radius: 50%;
+}
+
+.director-choice-card input:checked + .director-choice-box {
+  background: var(--director-accent);
+  border-color: var(--director-accent);
+}
+
+.director-choice-card input:checked + .director-choice-box::after {
+  width: 8px;
+  height: 8px;
+  background: var(--director-on-accent);
+  border-radius: 50%;
+  content: '';
+}
+
 .director-live-qr {
   margin-top: var(--director-space-4);
   padding: var(--director-space-4);
