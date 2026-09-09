@@ -1574,6 +1574,283 @@ describe('Director integration hardening', () => {
     );
   });
 
+  test('manual result retirement is race-safe for overlapping calls', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId) {
+      throw new Error('test setup did not create a room game');
+    }
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions.push({
+      roomId: scheduled.roomId,
+      sessionId: 'overlap-session',
+      matchId: scheduled.id,
+      deviceId: 'device-1',
+      operatorName: 'Scorekeeper',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 1,
+      lastSeenAt: '2026-09-01T11:02:00.000Z',
+      progress: { tossupsRead: 3, leftScore: 20, rightScore: 10 },
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    const retirementResolvers: Array<() => void> = [];
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== 'director_abandon_qbtcp_sessions') throw new Error(`unexpected command ${command}`);
+      return new Promise<void>((resolve) => retirementResolvers.push(resolve));
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+    const input = {
+      scheduledGameId: scheduled.id,
+      scores: [score(scheduled.leftTeamId, 30), score(scheduled.rightTeamId, 15)],
+    };
+
+    let first!: Promise<boolean>;
+    let second!: Promise<boolean>;
+    act(() => {
+      first = Promise.resolve(hook.result.current.addManualResult(input));
+      second = Promise.resolve(hook.result.current.addManualResult(input));
+    });
+    await waitFor(() => expect(retirementResolvers).toHaveLength(2));
+    await act(async () => {
+      retirementResolvers[0]!();
+      expect(await first).toBe(true);
+    });
+    await act(async () => {
+      retirementResolvers[1]!();
+      expect(await second).toBe(false);
+    });
+
+    expect(hook.result.current.state.games).toHaveLength(1);
+    expect(
+      hook.result.current.state.submissions.filter((submission) => submission.status === 'accepted'),
+    ).toHaveLength(1);
+    expect(hook.result.current.error).toMatch(/canonical accepted result|correct that result/i);
+  });
+
+  test('manual result loses safely when the scheduled game is cancelled during retirement', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId) {
+      throw new Error('test setup did not create a room game');
+    }
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions.push({
+      roomId: scheduled.roomId,
+      sessionId: 'cancel-race-session',
+      matchId: scheduled.id,
+      deviceId: 'device-1',
+      operatorName: 'Scorekeeper',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 1,
+      lastSeenAt: '2026-09-01T11:02:00.000Z',
+      progress: null,
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    const retirementResolvers: Array<() => void> = [];
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== 'director_abandon_qbtcp_sessions') throw new Error(`unexpected command ${command}`);
+      return new Promise<void>((resolve) => retirementResolvers.push(resolve));
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+    const input = {
+      scheduledGameId: scheduled.id,
+      scores: [score(scheduled.leftTeamId, 30), score(scheduled.rightTeamId, 15)],
+    };
+    let manual!: Promise<boolean>;
+    let cancellation!: Promise<boolean>;
+    act(() => {
+      manual = Promise.resolve(hook.result.current.addManualResult(input));
+      cancellation = Promise.resolve(hook.result.current.cancelScheduledGame(scheduled.id, 'Room retired'));
+    });
+    await waitFor(() => expect(retirementResolvers).toHaveLength(2));
+    await act(async () => {
+      retirementResolvers[1]!();
+      expect(await cancellation).toBe(true);
+    });
+    await act(async () => {
+      retirementResolvers[0]!();
+      expect(await manual).toBe(false);
+    });
+
+    expect(hook.result.current.state.games).toHaveLength(0);
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'cancelled',
+    );
+    expect(hook.result.current.error).toMatch(/cancelled while the result was being finalized/i);
+  });
+
+  test('manual result loses safely when its assignment changes during retirement', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    const alternateTeam = hook.result.current.state.teams.find((team) => team.id !== scheduled?.leftTeamId);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId || !alternateTeam) {
+      throw new Error('test setup did not create an assignable game');
+    }
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions.push({
+      roomId: scheduled.roomId,
+      sessionId: 'assignment-race-session',
+      matchId: scheduled.id,
+      deviceId: 'device-1',
+      operatorName: 'Scorekeeper',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 1,
+      lastSeenAt: '2026-09-01T11:02:00.000Z',
+      progress: null,
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    let resolveRetirement!: () => void;
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== 'director_abandon_qbtcp_sessions') throw new Error(`unexpected command ${command}`);
+      return new Promise<void>((resolve) => {
+        resolveRetirement = resolve;
+      });
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+    const manual = Promise.resolve(
+      hook.result.current.addManualResult({
+        scheduledGameId: scheduled.id,
+        scores: [score(scheduled.leftTeamId, 30), score(scheduled.rightTeamId, 15)],
+      }),
+    );
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    const changed = structuredClone(hook.result.current.state);
+    const current = changed.scheduledGames.find((game) => game.id === scheduled.id);
+    if (!current) throw new Error('test setup lost scheduled game');
+    current.leftTeamId = alternateTeam.id;
+    current.assignmentRevision += 1;
+    act(() => expect(hook.result.current.importSnapshot(changed)).toBe(true));
+    await act(async () => {
+      resolveRetirement();
+      expect(await manual).toBe(false);
+    });
+
+    expect(hook.result.current.state.games).toHaveLength(0);
+    expect(hook.result.current.error).toMatch(/assignment changed while the result was being finalized/i);
+  });
+
+  test('manual result leaves state unchanged when native QBTCP retirement fails', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId) {
+      throw new Error('test setup did not create a room game');
+    }
+    const rightTeamId = scheduled.rightTeamId;
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions.push({
+      roomId: scheduled.roomId,
+      sessionId: 'failure-session',
+      matchId: scheduled.id,
+      deviceId: 'device-1',
+      operatorName: 'Scorekeeper',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 1,
+      lastSeenAt: '2026-09-01T11:02:00.000Z',
+      progress: null,
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    await waitForDurable(hook);
+    const before = structuredClone(hook.result.current.state);
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== 'director_abandon_qbtcp_sessions') throw new Error(`unexpected command ${command}`);
+      throw new Error('native retirement unavailable');
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    let result!: boolean;
+    await act(async () => {
+      result = await Promise.resolve(
+        hook.result.current.addManualResult({
+          scheduledGameId: scheduled.id,
+          scores: [score(scheduled.leftTeamId, 30), score(rightTeamId, 15)],
+        }),
+      );
+    });
+    expect(result).toBe(false);
+    expect(hook.result.current.state).toEqual(before);
+    expect(hook.result.current.error).toMatch(/retired.*native retirement unavailable/i);
+  });
+
+  test('manual result succeeds after deterministic native QBTCP retirement', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId) {
+      throw new Error('test setup did not create a room game');
+    }
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
+    const live = structuredClone(hook.result.current.state);
+    live.qbtcpSessions.push({
+      roomId: scheduled.roomId,
+      sessionId: 'success-session',
+      matchId: scheduled.id,
+      deviceId: 'device-1',
+      operatorName: 'Scorekeeper',
+      state: 'live',
+      resumable: true,
+      resultReceived: false,
+      progressSequence: 1,
+      lastSeenAt: '2026-09-01T11:02:00.000Z',
+      progress: null,
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(live)).toBe(true));
+    let resolveRetirement!: () => void;
+    const invoke = vi.fn(async (command: string) => {
+      if (command !== 'director_abandon_qbtcp_sessions') throw new Error(`unexpected command ${command}`);
+      return new Promise<void>((resolve) => {
+        resolveRetirement = resolve;
+      });
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', { configurable: true, value: { invoke } });
+
+    const result = Promise.resolve(
+      hook.result.current.addManualResult({
+        scheduledGameId: scheduled.id,
+        scores: [score(scheduled.leftTeamId, 30), score(scheduled.rightTeamId, 15)],
+      }),
+    );
+    await waitFor(() => expect(invoke).toHaveBeenCalled());
+    await act(async () => {
+      resolveRetirement();
+      expect(await result).toBe(true);
+    });
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'accepted',
+    );
+    expect(hook.result.current.state.games).toHaveLength(1);
+  });
+
   test('administrative cancellation retires a live native QBTCP session before freeing its room', async () => {
     const { hook } = await directorWithSetup(2);
     act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
@@ -3372,6 +3649,140 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.games.find((game) => game.id === gameId)?.status).toBe('rejected');
     expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
       'released',
+    );
+  });
+
+  test('associating a submission reconciles both scheduled games and keeps its artifact attached', async () => {
+    const { hook } = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const round = hook.result.current.state.rounds[0];
+    const games = round
+      ? hook.result.current.state.scheduledGames.filter((game) => game.roundId === round.id && !game.bye)
+      : [];
+    const source = games[0];
+    const destination = games[1];
+    if (!round || !source || !destination || !source.rightTeamId || !destination.rightTeamId) {
+      throw new Error('test setup did not create source and destination games');
+    }
+    releaseRoundForResults(hook, round.id);
+    const gameId = 'game-moved-review';
+    const submissionId = 'submission-moved-review';
+    const artifactId = 'artifact-moved-review';
+    const imported = structuredClone(hook.result.current.state);
+    imported.scheduledGames.find((game) => game.id === source.id)!.status = 'submitted';
+    imported.games.push({
+      id: gameId,
+      scheduledGameId: source.id,
+      roundId: source.roundId,
+      packetId: source.packetId,
+      status: 'submitted',
+      scores: [score(source.leftTeamId, 20), score(source.rightTeamId, 10)],
+      playerStats: [],
+      source: 'qbj',
+      detailedStats: 'unknown',
+    });
+    imported.submissions.push({
+      id: submissionId,
+      gameId,
+      receivedAt: '2026-09-01T12:00:00.000Z',
+      fingerprint: 'moved-review-fingerprint',
+      status: 'review',
+      rawSubmission: { source: 'test' },
+    });
+    imported.transfers.artifacts.push({
+      id: artifactId,
+      sourceKind: 'drop',
+      sourceLabel: 'Scorer return',
+      fileName: 'moved-review.qbj',
+      byteLength: 1,
+      digest: 'moved-review-digest',
+      detectedAt: '2026-09-01T12:00:00.000Z',
+      classification: 'needs-review',
+      warnings: ['unknown-match'],
+      status: 'staged',
+      submissionId,
+      scheduledGameId: source.id,
+    });
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(imported, 'Association safety setup')).toBe(
+        true,
+      );
+    });
+
+    act(() => expect(hook.result.current.associateSubmission(submissionId, destination.id)).toBe(true));
+
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === source.id)?.status).toBe(
+      'released',
+    );
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === destination.id)?.status).toBe(
+      'submitted',
+    );
+    expect(hook.result.current.state.games.find((game) => game.id === gameId)).toMatchObject({
+      scheduledGameId: destination.id,
+      roundId: destination.roundId,
+      packetId: destination.packetId,
+      status: 'submitted',
+    });
+    expect(
+      hook.result.current.state.transfers.artifacts.find((artifact) => artifact.id === artifactId),
+    ).toMatchObject({
+      submissionId,
+      scheduledGameId: destination.id,
+    });
+  });
+
+  test('rejecting one of several pending submissions keeps the game submitted until the last one is rejected', async () => {
+    const { hook } = await directorWithSetup(2, 1);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    await waitForDurable(hook);
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not create a game');
+    releaseRoundForResults(hook, scheduled.roundId);
+    const imported = structuredClone(hook.result.current.state);
+    for (const [index, submissionId] of ['pending-one', 'pending-two'].entries()) {
+      const gameId = `pending-game-${index + 1}`;
+      imported.games.push({
+        id: gameId,
+        scheduledGameId: scheduled.id,
+        roundId: scheduled.roundId,
+        packetId: scheduled.packetId,
+        status: 'submitted',
+        scores: [score(scheduled.leftTeamId, 20 + index), score(scheduled.rightTeamId, 10)],
+        playerStats: [],
+        source: 'qbtcp',
+        detailedStats: 'unknown',
+      });
+      imported.submissions.push({
+        id: submissionId,
+        gameId,
+        receivedAt: `2026-09-01T12:0${index}:00.000Z`,
+        fingerprint: `pending-fingerprint-${index}`,
+        status: 'review',
+        rawSubmission: { source: 'test' },
+      });
+    }
+    imported.scheduledGames.find((game) => game.id === scheduled.id)!.status = 'submitted';
+    const room = imported.rooms.find((entry) => entry.id === scheduled.roomId);
+    if (room) room.status = 'finished';
+    await act(async () => {
+      expect(await hook.result.current.editTournamentSnapshot(imported, 'Multiple submission setup')).toBe(
+        true,
+      );
+    });
+
+    act(() => expect(hook.result.current.rejectSubmission('pending-one')).toBe(true));
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'submitted',
+    );
+    expect(hook.result.current.state.rooms.find((room) => room.id === scheduled.roomId)?.status).toBe('live');
+
+    act(() => expect(hook.result.current.rejectSubmission('pending-two')).toBe(true));
+    expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
+      'released',
+    );
+    expect(hook.result.current.state.rooms.find((room) => room.id === scheduled.roomId)?.status).toBe(
+      'available',
     );
   });
 
