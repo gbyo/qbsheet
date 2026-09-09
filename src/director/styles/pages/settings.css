@@ -1,1 +1,48 @@
 /* Director settings surface styles. */
+
+/* Audit rows keep their detail affordance on the right, matching the shared
+   SummaryItem action hierarchy. The disclosure panel still expands below the
+   row copy when opened, so entity ids remain readable instead of becoming a
+   tiny popover. */
+#settings-audit .director-list-item:has(.director-list-main > .director-disclosure) {
+  position: relative;
+  align-items: flex-start;
+}
+
+#settings-audit
+  .director-list-item:has(.director-list-main > .director-disclosure)
+  .director-list-main {
+  padding-right: 168px;
+}
+
+#settings-audit .director-list-main > .director-disclosure {
+  display: contents;
+}
+
+#settings-audit .director-list-main > .director-disclosure > .director-disclosure-trigger {
+  position: absolute;
+  top: var(--director-space-2);
+  right: var(--director-panel-inset);
+  width: auto;
+  min-height: var(--director-control-sm);
+  padding: 0 var(--director-space-2);
+  border: 1px solid transparent;
+}
+
+#settings-audit .director-list-main > .director-disclosure > .director-disclosure-panel {
+  padding: var(--director-space-3) 0 0;
+}
+
+@media (max-width: 640px) {
+  #settings-audit
+    .director-list-item:has(.director-list-main > .director-disclosure)
+    .director-list-main {
+    padding-right: 0;
+  }
+
+  #settings-audit .director-list-main > .director-disclosure > .director-disclosure-trigger {
+    position: static;
+    width: fit-content;
+    margin-top: var(--director-space-2);
+  }
+}
