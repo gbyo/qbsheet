@@ -61,7 +61,7 @@ export function FilePicker({
         size={size}
         disabled={disabled}
         onClick={() => {
-          if (native) void pickDirectorFiles({ native: true, onPick, onError });
+          if (native) void pickDirectorFiles({ native: true, accept, onPick, onError });
           else inputRef.current?.click();
         }}
       >

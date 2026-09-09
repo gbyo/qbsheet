@@ -124,6 +124,11 @@ export interface NativeSelectedFile {
   byteLength: number;
 }
 
+export interface NativeFilePickerFilter {
+  name: string;
+  extensions: string[];
+}
+
 interface NativeBridge {
   invoke(command: string, args?: Record<string, unknown>): Promise<unknown>;
 }
@@ -347,11 +352,13 @@ export async function resolveNativeQbtcpHelp(helpId: string): Promise<NativeHelp
   return value as unknown as NativeHelpSnapshot;
 }
 
-export async function openNativeTournamentFile(): Promise<NativeSelectedFile | null> {
+export async function openNativeTournamentFile(
+  filters: NativeFilePickerFilter[] = [],
+): Promise<NativeSelectedFile | null> {
   const native = bridge();
   if (!native) return null;
   try {
-    const selected = await native.invoke('open_tournament_file');
+    const selected = await native.invoke('open_tournament_file', { filters });
     return selected && typeof selected === 'object' ? (selected as NativeSelectedFile) : null;
   } catch (reason: unknown) {
     throw reason instanceof Error ? reason : new Error('A tournament file could not be opened.');
