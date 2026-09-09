@@ -44,10 +44,14 @@ function teamRowHtml(
   showCalculatedRank: boolean,
   showClassifications: boolean,
 ): string {
+  const teamName = reportEscape(row.teamName);
+  const teamCell = presentation.options.pages.includes('teamDetail')
+    ? `<a href="teamdetail.html#${reportTeamAnchor(row)}">${teamName}</a>`
+    : teamName;
   return (
     `<tr><td class="num">${row.rank}</td>` +
     `${showCalculatedRank ? reportNumberCell(row.calculatedRank ?? row.rank) : ''}` +
-    `<td><a href="teamdetail.html#${reportTeamAnchor(row)}">${reportEscape(row.teamName)}</a></td>` +
+    `<td>${teamCell}</td>` +
     `<td class="num">${reportEscape(recordText(row))}</td><td class="num">${row.gamesPlayed}</td>` +
     `<td class="num">${reportPercent(row.winPercentage, presentation.precision.percentage)}</td>` +
     `${presentation.options.showPointsForAgainstMargin ? `${reportNumberCell(row.pointsFor)}${reportNumberCell(row.pointsAgainst)}${reportNumberCell(row.margin)}` : ''}` +
@@ -91,9 +95,17 @@ function playerRowHtml(
   showPlayerPpb: boolean,
 ): string {
   const team = snapshotTeamLinkFallback(row.teamId);
+  const playerName = reportEscape(row.playerName);
+  const teamName = reportEscape(row.teamName);
+  const playerCell = presentation.options.pages.includes('playerDetail')
+    ? `<a href="playerdetail.html#${reportPlayerAnchor(row)}">${playerName}</a>`
+    : playerName;
+  const teamCell = presentation.options.pages.includes('teamDetail')
+    ? `<a href="teamdetail.html#${reportTeamAnchor(team)}">${teamName}</a>`
+    : teamName;
   return (
-    `<tr><td class="num">${row.rank}</td><td><a href="playerdetail.html#${reportPlayerAnchor(row)}">${reportEscape(row.playerName)}</a></td>` +
-    `<td><a href="teamdetail.html#${reportTeamAnchor(team)}">${reportEscape(row.teamName)}</a></td>` +
+    `<tr><td class="num">${row.rank}</td><td>${playerCell}</td>` +
+    `<td>${teamCell}</td>` +
     `${showGrade ? `<td class="num">${reportEscape(row.schoolYear ?? '—')}</td>` : ''}` +
     `<td class="num">${row.gamesPlayed}</td>${reportNumberCell(row.tossupsHeard)}${reportAnswerCells(row, presentation)}` +
     `${reportNumberCell(row.points)}<td class="num">${reportEscape(reportPointsMetricValue(row, presentation))}</td>${reportNumberCell(row.pptuh, presentation.precision.rate)}` +
@@ -132,6 +144,13 @@ function scoreFor(game: GameStatsRow, teamId: string): string {
   return `${typeof own === 'number' ? own : '—'}–${typeof other === 'number' ? other : '—'}`;
 }
 
+function gameScoreCell(game: GameStatsRow, score: string, presentation: ReportPresentation): string {
+  const escaped = reportEscape(score);
+  return presentation.options.pages.includes('games')
+    ? `<a href="games.html#${reportGameAnchor(game)}">${escaped}</a>`
+    : escaped;
+}
+
 /**
  * Round Report remains fact-only until #686's canonical aggregate DTO lands: each row is a canonical
  * team-game line, grouped by round, so this page still uses the same rules-aware vocabulary without
@@ -155,8 +174,9 @@ export function renderRulesAwareRounds(snapshot: StatsSnapshot): string {
             : '';
           const stats = game.teamStats ?? [];
           if (stats.length === 0) {
+            const score = `${game.teamOnePoints ?? '—'}–${game.teamTwoPoints ?? '—'}`;
             return [
-              `<tr>${stageCell}<td>${reportEscape(game.teamOneName)} vs ${reportEscape(game.teamTwoName)}</td><td>—</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(`${game.teamOnePoints ?? '—'}–${game.teamTwoPoints ?? '—'}`)}</a></td>` +
+              `<tr>${stageCell}<td>${reportEscape(game.teamOneName)} vs ${reportEscape(game.teamTwoName)}</td><td>—</td><td class="num">${gameScoreCell(game, score, presentation)}</td>` +
                 `${presentation.answerColumns.map(() => reportNumberCell(null)).join('')}${reportNumberCell(null)}` +
                 `${presentation.applicability.bonuses ? `${reportNumberCell(null)}${reportNumberCell(null)}${reportNumberCell(null)}` : ''}` +
                 `${presentation.applicability.bouncebacks ? reportNumberCell(null) : ''}` +
@@ -165,7 +185,7 @@ export function renderRulesAwareRounds(snapshot: StatsSnapshot): string {
           }
           return stats.map(
             (line) =>
-              `<tr>${stageCell}<td>${reportEscape(line.teamName)}</td><td>${reportEscape(opponent(game, line.teamId))}</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(scoreFor(game, line.teamId))}</a></td>` +
+              `<tr>${stageCell}<td>${reportEscape(line.teamName)}</td><td>${reportEscape(opponent(game, line.teamId))}</td><td class="num">${gameScoreCell(game, scoreFor(game, line.teamId), presentation)}</td>` +
               `${reportAnswerCells(line, presentation)}${reportNumberCell(line.tossupsHeard)}` +
               `${presentation.applicability.bonuses ? `${reportNumberCell(line.bonusesHeard)}${reportNumberCell(line.bonusPoints)}${reportNumberCell(line.ppb, presentation.precision.ppb)}` : ''}` +
               `${presentation.applicability.bouncebacks ? reportNumberCell(line.bouncebacks) : ''}` +
