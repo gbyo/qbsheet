@@ -101,11 +101,20 @@ describe('rules-aware report presentation', () => {
     ]);
     expect(report.answerColumns.find((column) => column.key === 'superpower')?.pointValue).toBe(30);
 
-    const standings = buildExtendedStatReportBundle(snapshot()).find((page) => page.name === 'standings.html')!.content;
+    const standings = buildExtendedStatReportBundle(snapshot()).find(
+      (page) => page.name === 'standings.html',
+    )!.content;
     expect(standings).toContain('>Super (30)</th>');
     expect(standings).toContain('>Power (20)</th>');
     expect(standings).toContain('>Neg (-5)</th>');
     expect(standings).toContain('title="Superpower · 30 pts"');
+  });
+
+  test('standings keeps games played as a core competitive column', () => {
+    const standings = buildExtendedStatReportBundle(snapshot()).find(
+      (page) => page.name === 'standings.html',
+    )!.content;
+    expect(standings).toContain('<th scope="col" class="num">GP</th>');
   });
 
   test('tossup-only formats omit bonus columns rather than printing permanent zeroes', () => {
@@ -115,6 +124,44 @@ describe('rules-aware report presentation', () => {
     expect(standings).not.toContain('>PPB</th>');
     expect(standings).not.toContain('>BH</th>');
     expect(teams).not.toContain('>Bonus pts</th>');
+  });
+
+  test('individual PPB appears only when a real player bonuses-heard denominator exists', () => {
+    const snap = snapshot();
+    snap.presentation = presentation([{ ...baseDefinition, useBonuses: true }]);
+    snap.players = [
+      {
+        rank: 1,
+        playerId: 'p',
+        playerName: 'Player',
+        teamId: 'a',
+        teamName: 'A',
+        gamesPlayed: 1,
+        tossupsHeard: 24,
+        superpowers: 0,
+        powers: 0,
+        gets: 10,
+        negs: 0,
+        points: 100,
+        ppg: 100,
+        pptuh: 100 / 24,
+        bonusesHeard: 0,
+        bonusPoints: 30,
+        ppb: null,
+        answerCounts: { superpower: 0, power: 0, get: 10, neg: 0 },
+      },
+    ];
+    let individuals = buildExtendedStatReportBundle(snap).find(
+      (page) => page.name === 'individuals.html',
+    )!.content;
+    expect(individuals).toContain('>Bonus pts</th>');
+    expect(individuals).not.toContain('>PPB</th>');
+
+    snap.players[0] = { ...snap.players[0], bonusesHeard: 2, ppb: 15 };
+    individuals = buildExtendedStatReportBundle(snap).find(
+      (page) => page.name === 'individuals.html',
+    )!.content;
+    expect(individuals).toContain('>PPB</th>');
   });
 
   test('bounceback and lightning applicability requires both configured rules and canonical recorded data', () => {
@@ -133,6 +180,55 @@ describe('rules-aware report presentation', () => {
     expect(recorded.applicability.lightning).toBe(true);
   });
 
+  test('Round Report uses stage context and labels canonical bouncebacks as points', () => {
+    const snap = snapshot();
+    snap.presentation = presentation(
+      [{ ...baseDefinition, useBonuses: true, bouncebacks: true }],
+      undefined,
+      { bouncebacksRecorded: true, packetRecorded: false, stageRecorded: true },
+    );
+    snap.games = [
+      {
+        gameId: 'g',
+        phaseId: 'prelims',
+        roundId: 'r1',
+        roundName: 'Round 1',
+        teamOneId: 'a',
+        teamOneName: 'A',
+        teamOnePoints: 300,
+        teamTwoId: 'b',
+        teamTwoName: 'B',
+        teamTwoPoints: 100,
+        winnerId: 'a',
+        status: 'accepted',
+        teamStats: [
+          {
+            teamId: 'a',
+            teamName: 'A',
+            points: 300,
+            superpowers: 0,
+            powers: 0,
+            gets: 10,
+            negs: 0,
+            tossupsHeard: 24,
+            bonusesHeard: 10,
+            bonusPoints: 170,
+            ppb: 17,
+            bouncebacks: 30,
+            answerCounts: { superpower: 0, power: 0, get: 10, neg: 0 },
+          },
+        ],
+      },
+    ];
+    const rounds = buildExtendedStatReportBundle(snap).find(
+      (page) => page.name === 'rounds.html',
+    )!.content;
+    expect(rounds).toContain('<th scope="col">Stage</th>');
+    expect(rounds).toContain('prelims');
+    expect(rounds).toContain('>Bounceback pts</th>');
+    expect(rounds).toContain('<td class="num">30</td>');
+  });
+
   test('mixed historical definitions keep semantic identities and decline incompatible normalization', () => {
     const report = presentation([
       { ...baseDefinition, id: 'old', powerValue: 15, tossupCount: 20 },
@@ -146,7 +242,9 @@ describe('rules-aware report presentation', () => {
 
     const snap = snapshot();
     snap.presentation = report;
-    const standings = buildExtendedStatReportBundle(snap).find((page) => page.name === 'standings.html')!.content;
+    const standings = buildExtendedStatReportBundle(snap).find(
+      (page) => page.name === 'standings.html',
+    )!.content;
     expect(standings).toContain('>Power (20/15)</th>');
     expect(standings).toContain('mixed values: 20, 15');
     expect(standings).toContain('Scoring definitions vary within this report.');
