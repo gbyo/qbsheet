@@ -3196,6 +3196,9 @@ describe('Director integration hardening', () => {
 
   test('start and low-level release both recheck packet reuse', async () => {
     const { hook } = await directorWithSetup(2);
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+    });
     act(() => hook.result.current.generateSchedule({ roundName: 'Round 1' }));
     const firstRound = hook.result.current.state.rounds[0];
     if (!firstRound) throw new Error('test setup did not generate Round 1');
