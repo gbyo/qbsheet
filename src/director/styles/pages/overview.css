@@ -1,0 +1,50 @@
+/*
+ * Overview.
+ *
+ * Almost nothing is needed here: the page is built from the shared attention,
+ * callout, section, and summary surfaces. What remains is the leader list,
+ * which is the one layout unique to this destination.
+ */
+
+.director-leader-list li {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--director-space-3) 0;
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-leader-list li:last-child {
+  border-bottom: 0;
+}
+
+.director-leader-rank {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  color: var(--director-accent);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  background: var(--director-accent-soft);
+  border-radius: 50%;
+}
+
+.director-leader-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The attention list draws its own edge; the rows inside it are separated by
+   rules rather than each carrying a border. */
+.director-attention-list {
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}

@@ -1,0 +1,1409 @@
+/*
+ * Director control layer.
+ *
+ * Everything the operator clicks or types into is styled here, once. The rule
+ * the whole layer follows: a control's *visible* language is Director's, even
+ * when the element underneath is a native input kept for accessibility or
+ * platform behaviour. There are no raw browser dropdowns, checkboxes,
+ * multi-selects, or datalists left visible in the application.
+ */
+
+/* ============================================================ Action hierarchy
+ *
+ *   primary    one per surface — the thing the operator came to do
+ *   secondary  ordinary actions that sit next to it
+ *   quiet      low-emphasis actions, dense toolbars, row actions
+ *   danger     destructive or tournament-altering; solid only inside a
+ *              confirmation, outlined everywhere else
+ *
+ * Anything that navigates is a link, not a button styled to look quiet, and
+ * anything that is merely status is a badge, not a control.
+ */
+
+.director-button {
+  display: inline-flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  height: var(--director-control-md);
+  padding: var(--director-control-pad-md);
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  transition:
+    background var(--director-duration-fast) var(--director-ease),
+    border-color var(--director-duration-fast) var(--director-ease),
+    color var(--director-duration-fast) var(--director-ease);
+}
+
+.director-button > svg {
+  flex: none;
+}
+
+.director-button:not(:disabled):hover {
+  background: var(--director-surface-hover);
+  border-color: var(--director-border-strong);
+}
+
+.director-button:not(:disabled):active {
+  background: var(--director-surface-sunken);
+}
+
+.director-button-primary {
+  color: var(--director-on-accent);
+  background: var(--director-accent);
+  border-color: var(--director-accent);
+}
+
+.director-button-primary:not(:disabled):hover {
+  color: var(--director-on-accent);
+  background: var(--director-accent-hover);
+  border-color: var(--director-accent-hover);
+}
+
+.director-button-primary:not(:disabled):active {
+  background: var(--director-accent-active);
+  border-color: var(--director-accent-active);
+}
+
+.director-button-quiet {
+  color: var(--director-muted);
+  background: transparent;
+  border-color: transparent;
+}
+
+.director-button-quiet:not(:disabled):hover {
+  color: var(--director-ink);
+  background: var(--director-surface-hover);
+  border-color: transparent;
+}
+
+.director-button-danger {
+  color: var(--director-danger-fg);
+  background: var(--director-surface);
+  border-color: var(--director-danger-border);
+}
+
+.director-button-danger:not(:disabled):hover {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-fg);
+}
+
+/* The one solid-red button in Director: the confirm action inside a destructive
+   confirmation dialog. Nothing routine is ever painted this way. */
+.director-button-danger-solid {
+  color: var(--director-on-accent);
+  background: var(--director-danger-solid);
+  border-color: var(--director-danger-solid);
+}
+
+.director-button-danger-solid:not(:disabled):hover {
+  color: var(--director-on-accent);
+  background: var(--director-danger-hover);
+  border-color: var(--director-danger-hover);
+}
+
+.director-button-sm {
+  height: var(--director-control-sm);
+  padding: var(--director-control-pad-sm);
+  font-size: var(--director-text-secondary);
+}
+
+.director-button-lg {
+  height: var(--director-control-lg);
+  padding: var(--director-control-pad-lg);
+  font-size: var(--director-text-body);
+}
+
+.director-button-block {
+  width: 100%;
+}
+
+/* An action that really is navigation. Underlined on hover, accent coloured,
+   body sized — never a 10px blue label pretending to be a control. */
+.director-link,
+.director-inline-action {
+  padding: 0;
+  color: var(--director-accent);
+  font-size: inherit;
+  font-weight: var(--director-weight-medium);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-link:not(:disabled):hover,
+.director-inline-action:not(:disabled):hover {
+  color: var(--director-accent-hover);
+  text-decoration: underline;
+}
+
+/* Icon-only controls: quiet chrome, comfortable target, always an accessible
+   name from the component that renders them. */
+.director-icon-button {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--director-control-md);
+  height: var(--director-control-md);
+  padding: 0;
+  color: var(--director-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--director-radius);
+  transition:
+    background var(--director-duration-fast) var(--director-ease),
+    color var(--director-duration-fast) var(--director-ease);
+}
+
+.director-icon-button:not(:disabled):hover {
+  color: var(--director-ink);
+  background: var(--director-surface-hover);
+}
+
+.director-icon-button[aria-expanded='true'] {
+  color: var(--director-ink);
+  background: var(--director-surface-sunken);
+  border-color: var(--director-border);
+}
+
+.director-icon-button-sm {
+  width: var(--director-target-min);
+  height: var(--director-target-min);
+}
+
+.director-icon-button-danger {
+  color: var(--director-danger-fg);
+}
+
+.director-icon-button-danger:not(:disabled):hover {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+}
+
+/* A row of actions. `director-actions-end` right-aligns; `director-actions-split`
+   pushes the first child left (used for a destructive action in a dialog footer). */
+.director-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-actions-end {
+  justify-content: flex-end;
+}
+
+.director-actions-split {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.director-actions-split > :last-child {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+/* ==================================================================== Toolbars
+   The bar above a list or table: filters on the left, actions on the right. */
+
+.director-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--director-space-3) var(--director-panel-inset);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-toolbar-count {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ Text inputs */
+
+.director-input,
+.director-textarea,
+.director-form-field input:not([type='checkbox']):not([type='radio']),
+.director-form-field textarea {
+  width: 100%;
+  min-width: 0;
+  height: var(--director-control-md);
+  padding: 0 var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  transition: border-color var(--director-duration-fast) var(--director-ease);
+}
+
+.director-textarea,
+.director-form-field textarea {
+  height: auto;
+  min-height: 84px;
+  padding: var(--director-space-2) var(--director-space-3);
+  line-height: var(--director-leading-normal);
+  resize: vertical;
+}
+
+.director-input:hover:not(:disabled),
+.director-form-field input:not([type='checkbox']):not([type='radio']):hover:not(:disabled) {
+  border-color: var(--director-border-strong);
+}
+
+.director-input:focus-visible,
+.director-textarea:focus-visible,
+.director-form-field input:focus-visible,
+.director-form-field textarea:focus-visible {
+  border-color: var(--director-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+.director-input::placeholder,
+.director-textarea::placeholder {
+  color: var(--director-faint);
+}
+
+.director-input-sm {
+  height: var(--director-control-sm);
+  font-size: var(--director-text-secondary);
+}
+
+.director-input-numeric {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.director-input-invalid,
+.director-input[aria-invalid='true'] {
+  border-color: var(--director-danger-fg);
+}
+
+.director-input-invalid:focus-visible,
+.director-input[aria-invalid='true']:focus-visible {
+  box-shadow: 0 0 0 3px rgb(160 58 46 / 20%);
+}
+
+/* Native date and time inputs are kept — the platform pickers are better than
+   anything we would build, and they carry real keyboard and locale behaviour —
+   but the field itself is Director's. */
+.director-input[type='date'],
+.director-input[type='time'],
+.director-input[type='datetime-local'] {
+  padding-right: var(--director-space-2);
+}
+
+.director-input[type='date']::-webkit-calendar-picker-indicator,
+.director-input[type='time']::-webkit-calendar-picker-indicator {
+  padding: 2px;
+  cursor: pointer;
+  border-radius: var(--director-radius-sm);
+  opacity: 0.55;
+}
+
+.director-input[type='date']::-webkit-calendar-picker-indicator:hover,
+.director-input[type='time']::-webkit-calendar-picker-indicator:hover {
+  background: var(--director-surface-hover);
+  opacity: 1;
+}
+
+/* ==================================================================== Fields
+   Label above control, hint below, error replacing the hint. The label is
+   secondary-sized and medium weight — readable, not a 10px whisper. */
+
+.director-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.director-field-label,
+.director-form-field > span:first-child {
+  display: flex;
+  gap: var(--director-space-1);
+  align-items: baseline;
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-field-optional {
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-regular);
+}
+
+.director-field-hint,
+.director-form-field small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  line-height: var(--director-leading-snug);
+}
+
+.director-field-error {
+  display: flex;
+  gap: var(--director-space-1);
+  align-items: flex-start;
+  color: var(--director-danger-fg);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Field grids. `single` is one column (dialogs); the default is a responsive
+   two-column grid that collapses cleanly rather than at a magic breakpoint. */
+.director-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--director-space-4) var(--director-space-5);
+}
+
+.director-form-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.director-field-span-all {
+  grid-column: 1 / -1;
+}
+
+/* One convention, used by every form and dialog in Director:
+   secondary (Cancel) then primary (Save), right-aligned. */
+.director-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* A form-level validation summary, announced and focusable. */
+.director-form-errors {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  padding: var(--director-space-3) var(--director-space-4);
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border: 1px solid var(--director-danger-border);
+  border-radius: var(--director-radius);
+}
+
+.director-form-errors strong {
+  font-size: var(--director-text-secondary);
+}
+
+.director-form-errors ul {
+  margin: 0;
+  padding-left: var(--director-space-4);
+  font-size: var(--director-text-secondary);
+}
+
+/* Says plainly whether an edit has been committed, so the operator never has to
+   guess. Forms show "Unsaved changes" while dirty; immediate controls show
+   "Saved" briefly after applying. */
+.director-save-state {
+  display: inline-flex;
+  gap: var(--director-space-1);
+  align-items: center;
+  margin-right: auto;
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}
+
+.director-save-state[data-state='dirty'] {
+  color: var(--director-warning-fg);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-save-state[data-state='saved'] {
+  color: var(--director-success-fg);
+}
+
+/* ============================================================ Select (listbox)
+   A button that opens a real `role="listbox"` popover. Native `<select>` is
+   gone from Director's visible surface because its popup is drawn by the
+   browser and could not be made to match anything else here. */
+
+.director-select {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.director-select-trigger {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: var(--director-control-md);
+  padding: 0 var(--director-space-2) 0 var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  text-align: left;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-select-trigger:not(:disabled):hover {
+  border-color: var(--director-border-strong);
+}
+
+.director-select-trigger[aria-expanded='true'] {
+  border-color: var(--director-accent);
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+.director-select-trigger > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-select-trigger svg {
+  flex: none;
+  color: var(--director-faint);
+}
+
+.director-select-trigger[data-placeholder='true'] > span:first-child {
+  color: var(--director-faint);
+}
+
+.director-select-sm .director-select-trigger {
+  height: var(--director-control-sm);
+  font-size: var(--director-text-secondary);
+}
+
+.director-select-popover {
+  position: absolute;
+  z-index: var(--director-z-dropdown);
+  display: flex;
+  flex-direction: column;
+  min-width: 100%;
+  max-width: min(420px, 90vw);
+  max-height: 320px;
+  padding: var(--director-space-1);
+  overflow-y: auto;
+  background: var(--director-surface-raised);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-menu);
+}
+
+.director-select-popover[data-placement='top'] {
+  bottom: calc(100% + 4px);
+}
+
+.director-select-popover[data-placement='bottom'] {
+  top: calc(100% + 4px);
+}
+
+.director-select-option {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--director-space-2) var(--director-space-2) var(--director-space-2) var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-select-option > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.director-select-option small {
+  display: block;
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}
+
+.director-select-option[data-active='true'] {
+  background: var(--director-surface-hover);
+}
+
+.director-select-option[aria-selected='true'] {
+  font-weight: var(--director-weight-medium);
+  background: var(--director-surface-selected);
+}
+
+.director-select-option[aria-disabled='true'] {
+  color: var(--director-faint);
+  cursor: not-allowed;
+}
+
+.director-select-option-check {
+  flex: none;
+  color: var(--director-accent);
+}
+
+.director-select-group-label {
+  padding: var(--director-space-2) var(--director-space-3) var(--director-space-1);
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ================================================================== Combobox
+   Select plus a filter field. Used wherever the option list is long enough that
+   scanning it is the wrong interaction — timezones, existing players, schools. */
+
+.director-combobox-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.director-combobox-field > svg {
+  position: absolute;
+  left: var(--director-space-3);
+  color: var(--director-faint);
+  pointer-events: none;
+}
+
+.director-combobox-field input {
+  padding-left: 34px;
+}
+
+.director-combobox-search {
+  padding: var(--director-space-1) var(--director-space-1) var(--director-space-2);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-combobox-empty {
+  padding: var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  text-align: center;
+}
+
+.director-combobox-clear {
+  position: absolute;
+  right: var(--director-space-1);
+}
+
+/* ============================================================== Multi-select
+   A searchable checklist with a tag summary. This is what replaced the
+   `<select multiple size={4}>` controls, which were unusable at tournament
+   scale and looked like nothing else in the application. */
+
+.director-multiselect-trigger {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: var(--director-control-md);
+  padding: 5px var(--director-space-2) 5px var(--director-space-2);
+  text-align: left;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-multiselect-trigger:not(:disabled):hover {
+  border-color: var(--director-border-strong);
+}
+
+.director-multiselect-trigger[aria-expanded='true'] {
+  border-color: var(--director-accent);
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+.director-multiselect-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-1);
+  align-items: center;
+  min-width: 0;
+}
+
+.director-tag {
+  display: inline-flex;
+  gap: var(--director-space-1);
+  align-items: center;
+  max-width: 220px;
+  padding: 2px var(--director-space-2);
+  color: var(--director-ink);
+  font-size: var(--director-text-meta);
+  background: var(--director-surface-sunken);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-pill);
+}
+
+.director-tag > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-tag-all {
+  color: var(--director-info-fg);
+  font-weight: var(--director-weight-medium);
+  background: var(--director-info-bg);
+  border-color: var(--director-info-border);
+}
+
+.director-multiselect-placeholder {
+  padding-left: var(--director-space-1);
+  color: var(--director-faint);
+  font-size: var(--director-text-body);
+}
+
+.director-multiselect-popover {
+  position: absolute;
+  z-index: var(--director-z-dropdown);
+  display: flex;
+  flex-direction: column;
+  min-width: max(100%, 280px);
+  max-width: min(460px, 92vw);
+  background: var(--director-surface-raised);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-menu);
+}
+
+.director-multiselect-popover[data-placement='bottom'] {
+  top: calc(100% + 4px);
+}
+
+.director-multiselect-popover[data-placement='top'] {
+  bottom: calc(100% + 4px);
+}
+
+.director-multiselect-list {
+  max-height: 300px;
+  padding: var(--director-space-1);
+  overflow-y: auto;
+}
+
+.director-multiselect-footer {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--director-space-2) var(--director-space-2);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+/* ================================================= Checkbox, radio and switch
+   The inputs are real, and visually hidden; the box beside them is ours. Focus,
+   keyboard behaviour, and screen-reader semantics come from the platform. */
+
+.director-choice {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: flex-start;
+  min-height: var(--director-target-min);
+  padding: 6px var(--director-space-2);
+  margin-left: calc(var(--director-space-2) * -1);
+  border-radius: var(--director-radius-sm);
+}
+
+.director-choice:hover:not([data-disabled='true']) {
+  background: var(--director-surface-hover);
+}
+
+.director-choice input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+
+.director-choice-box {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  color: transparent;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border-strong);
+  border-radius: var(--director-radius-sm);
+  transition:
+    background var(--director-duration-fast) var(--director-ease),
+    border-color var(--director-duration-fast) var(--director-ease);
+}
+
+.director-choice-radio .director-choice-box {
+  border-radius: 50%;
+}
+
+.director-choice input:checked + .director-choice-box,
+.director-choice input:indeterminate + .director-choice-box {
+  color: var(--director-on-accent);
+  background: var(--director-accent);
+  border-color: var(--director-accent);
+}
+
+.director-choice input:focus-visible + .director-choice-box {
+  outline: var(--director-focus-outline);
+  outline-offset: var(--director-focus-offset);
+}
+
+.director-choice input:disabled + .director-choice-box {
+  background: var(--director-surface-sunken);
+  border-color: var(--director-border);
+}
+
+.director-choice-radio input:checked + .director-choice-box::after {
+  width: 8px;
+  height: 8px;
+  background: var(--director-on-accent);
+  border-radius: 50%;
+  content: '';
+}
+
+.director-choice-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-choice-text > span:first-child {
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  line-height: var(--director-leading-snug);
+}
+
+.director-choice-text small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  line-height: var(--director-leading-snug);
+}
+
+.director-choice[data-disabled='true'] .director-choice-text > span:first-child {
+  color: var(--director-faint);
+}
+
+/* A vertical list of choices, and a fieldset that groups them with a legend
+   styled as a field label. */
+.director-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.director-choice-list-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 2px var(--director-space-4);
+}
+
+.director-fieldset {
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.director-fieldset > legend {
+  padding: 0;
+  margin-bottom: var(--director-space-1);
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  font-weight: var(--director-weight-medium);
+}
+
+/* A dependent choice — "live scores" needing "live game status" — is indented
+   under its parent with a rule, so the dependency is visible rather than
+   explained in helper copy. */
+.director-choice-dependents {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: var(--director-space-3);
+  margin-left: var(--director-space-4);
+  border-left: 2px solid var(--director-border-subtle);
+}
+
+/* ---------------------------------------------------------------- Switch
+   Reserved for controls that apply immediately. A checkbox means "this is part
+   of a form I will save"; a switch means "this took effect". */
+
+.director-switch {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--director-space-2) 0;
+}
+
+.director-switch-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-switch-label > span:first-child {
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+}
+
+.director-switch-label small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  line-height: var(--director-leading-snug);
+}
+
+.director-switch-control {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  background: var(--director-border-strong);
+  border: 0;
+  border-radius: var(--director-radius-pill);
+  transition: background var(--director-duration) var(--director-ease);
+}
+
+.director-switch-control::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgb(16 33 46 / 30%);
+  transition: transform var(--director-duration) var(--director-ease);
+  content: '';
+}
+
+.director-switch-control[aria-checked='true'] {
+  background: var(--director-accent);
+}
+
+.director-switch-control[aria-checked='true']::after {
+  transform: translateX(18px);
+}
+
+.director-switch-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* ============================================================== Choice cards
+   For a small set of mutually exclusive options where each needs a sentence of
+   explanation — the QBSheet Live backend, the tournament shape. A real radio
+   group underneath; one shared look. */
+
+.director-choice-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--director-space-3);
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+
+.director-choice-card {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  padding: var(--director-space-3) var(--director-space-4);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  transition:
+    border-color var(--director-duration-fast) var(--director-ease),
+    background var(--director-duration-fast) var(--director-ease);
+}
+
+.director-choice-card:hover:not([data-disabled='true']) {
+  border-color: var(--director-border-strong);
+}
+
+.director-choice-card[data-selected='true'] {
+  background: var(--director-accent-soft);
+  border-color: var(--director-accent);
+  box-shadow: inset 0 0 0 1px var(--director-accent);
+}
+
+.director-choice-card input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+  opacity: 0;
+}
+
+.director-choice-card input:focus-visible ~ .director-choice-card-text {
+  outline: var(--director-focus-outline);
+  outline-offset: 4px;
+}
+
+.director-choice-card-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  min-width: 0;
+}
+
+.director-choice-card-text > strong {
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-semibold);
+}
+
+.director-choice-card-text > small {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+/* ========================================================== Segmented control
+   Two to four peer views of the same data. Anything longer is a tab list. */
+
+.director-segmented {
+  display: inline-flex;
+  padding: 2px;
+  background: var(--director-surface-sunken);
+  border: 1px solid var(--director-border-subtle);
+  border-radius: var(--director-radius);
+}
+
+.director-segmented button {
+  height: 28px;
+  padding: 0 var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  font-weight: var(--director-weight-medium);
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-segmented button:hover:not([aria-pressed='true']):not(:disabled) {
+  color: var(--director-ink);
+}
+
+.director-segmented button[aria-pressed='true'],
+.director-segmented button[aria-selected='true'] {
+  color: var(--director-ink-strong);
+  background: var(--director-surface);
+  box-shadow: var(--director-shadow-sm);
+}
+
+/* ====================================================================== Tabs
+   One tab implementation. Underline, body-sized labels, real `role="tablist"`
+   keyboard behaviour, and an optional count per tab. */
+
+.director-tablist {
+  display: flex;
+  gap: var(--director-space-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--director-border);
+  scrollbar-width: thin;
+}
+
+.director-tab {
+  display: inline-flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  height: 40px;
+  padding: 0 var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.director-tab:hover:not([aria-selected='true']) {
+  color: var(--director-ink);
+}
+
+.director-tab[aria-selected='true'] {
+  color: var(--director-accent);
+  border-bottom-color: var(--director-accent);
+}
+
+.director-tab-count {
+  padding: 1px 6px;
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  font-variant-numeric: tabular-nums;
+  background: var(--director-surface-sunken);
+  border-radius: var(--director-radius-pill);
+}
+
+.director-tab[aria-selected='true'] .director-tab-count {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+}
+
+.director-tab-count[data-tone='warning'] {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+}
+
+.director-tab-count[data-tone='danger'] {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+}
+
+/* ===================================================================== Menus
+   The overflow/action menu. One implementation, one trigger icon — the literal
+   `•••` text is gone — and real `role="menu"` keyboard behaviour. */
+
+.director-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.director-menu {
+  position: absolute;
+  z-index: var(--director-z-dropdown);
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-width: 340px;
+  padding: var(--director-space-1);
+  background: var(--director-surface-raised);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-menu);
+}
+
+.director-menu[data-align='end'] {
+  right: 0;
+}
+
+.director-menu[data-align='start'] {
+  left: 0;
+}
+
+.director-menu[data-placement='bottom'] {
+  top: calc(100% + 4px);
+}
+
+.director-menu[data-placement='top'] {
+  bottom: calc(100% + 4px);
+}
+
+.director-menu-item {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: var(--director-target-min);
+  padding: var(--director-space-2) var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-menu-item > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.director-menu-item small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  white-space: nowrap;
+}
+
+.director-menu-item:not(:disabled):hover,
+.director-menu-item:focus-visible {
+  background: var(--director-surface-hover);
+}
+
+.director-menu-item[aria-checked='true'],
+.director-menu-item.is-selected {
+  font-weight: var(--director-weight-medium);
+  background: var(--director-surface-selected);
+}
+
+.director-menu-item-danger {
+  color: var(--director-danger-fg);
+}
+
+.director-menu-item-danger:not(:disabled):hover {
+  background: var(--director-danger-bg);
+}
+
+.director-menu-item-icon {
+  flex: none;
+  color: var(--director-faint);
+}
+
+.director-menu-separator {
+  height: 1px;
+  margin: var(--director-space-1) 0;
+  background: var(--director-border-subtle);
+  border: 0;
+}
+
+.director-menu-section-label {
+  padding: var(--director-space-2) var(--director-space-3) var(--director-space-1);
+  margin: 0;
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.director-menu-note {
+  padding: var(--director-space-2) var(--director-space-3);
+  margin-top: var(--director-space-1);
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  line-height: var(--director-leading-snug);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+/* A file-picker rendered as an ordinary Director action. The input stays native
+   so the platform dialog and its keyboard behaviour are real. */
+.director-file-action {
+  position: relative;
+  overflow: hidden;
+}
+
+.director-file-action input[type='file'] {
+  position: absolute;
+  inset: 0;
+  cursor: pointer;
+  opacity: 0;
+}
+
+/* ================================================================ Disclosure
+   Replaces the raw `<details>` elements. Advanced and diagnostic content is
+   deliberately behind one of these, labelled for what it is. */
+
+.director-disclosure {
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+.director-disclosure-standalone {
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-disclosure-trigger {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: var(--director-control-md);
+  padding: var(--director-space-2) var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  font-weight: var(--director-weight-medium);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-disclosure-trigger:hover {
+  color: var(--director-ink);
+  background: var(--director-surface-hover);
+}
+
+.director-disclosure-trigger > svg:first-child {
+  flex: none;
+  transition: transform var(--director-duration) var(--director-ease);
+}
+
+.director-disclosure-trigger[aria-expanded='true'] > svg:first-child {
+  transform: rotate(90deg);
+}
+
+.director-disclosure-trigger > span:first-of-type {
+  flex: 1;
+}
+
+.director-disclosure-panel {
+  padding: var(--director-space-1) var(--director-space-3) var(--director-space-4);
+}
+
+/* ============================================================ Filter controls
+   Page-local list filtering. Deliberately a different control from the global
+   search in the top bar: this one narrows what is on the page, and never
+   navigates. */
+
+.director-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 200px;
+}
+
+.director-search-field > svg:first-child {
+  position: absolute;
+  left: 10px;
+  color: var(--director-faint);
+  pointer-events: none;
+}
+
+.director-search-field input {
+  width: 100%;
+  height: var(--director-control-md);
+  padding: 0 32px 0 32px;
+  color: var(--director-ink);
+  font-size: var(--director-text-body);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.director-search-field input:focus-visible {
+  border-color: var(--director-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+.director-search-clear {
+  position: absolute;
+  right: 2px;
+}
+
+/* ========================================================== Keyboard hints */
+
+kbd,
+.director-kbd {
+  display: inline-flex;
+  align-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  color: var(--director-muted);
+  font-family: var(--director-font-sans);
+  font-size: var(--director-text-micro);
+  font-weight: var(--director-weight-medium);
+  justify-content: center;
+  background: var(--director-surface-sunken);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-sm);
+}
+
+/* ================================================================= Reorder
+   Only rendered while reorder mode is on, which is why none of this is
+   permanent row chrome. */
+
+.director-reorder-handle {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.director-reorder-grip {
+  display: grid;
+  place-items: center;
+  width: var(--director-target-min);
+  height: var(--director-target-min);
+  color: var(--director-faint);
+  cursor: grab;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-reorder-grip:hover {
+  color: var(--director-ink);
+  background: var(--director-surface-hover);
+}
+
+.director-reorder-grip:active {
+  cursor: grabbing;
+}
+
+.director-reorder-up svg {
+  transform: rotate(-90deg);
+}
+
+.director-reorder-down svg {
+  transform: rotate(90deg);
+}
+
+.director-reorder-notice {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  padding: var(--director-space-2) var(--director-space-3);
+  color: var(--director-info-fg);
+  font-size: var(--director-text-secondary);
+  background: var(--director-info-bg);
+  border: 1px solid var(--director-info-border);
+  border-radius: var(--director-radius);
+}
+
+.director-reorder-notice svg {
+  flex: none;
+}
+
+[data-reorder-over='true'] {
+  box-shadow: inset 0 2px 0 0 var(--director-accent);
+}
+
+/* The filter above an always-visible checklist. A class rather than an inline
+   style, so the checklist obeys the same spacing scale as everything else. */
+.director-checklist-search {
+  margin-bottom: var(--director-space-2);
+}

@@ -1,0 +1,10 @@
+/* Director live surface styles. Rebased on the shared design tokens; page-specific rules only. */
+
+.director-live-qr {
+  margin-top: var(--director-space-4);
+  padding: var(--director-space-4);
+  background: #ffffff;
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  width: max-content;
+}

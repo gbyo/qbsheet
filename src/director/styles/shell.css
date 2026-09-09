@@ -1,0 +1,921 @@
+/*
+ * Director application shell.
+ *
+ * # The shape
+ *
+ *   sidebar   brand, tournament switcher, the three-group navigation, Settings,
+ *             and the operator. Identity and destinations.
+ *   topbar    global search on the left; on the right, the operational "now"
+ *             strip — current round, and an attention or QBTCP chip *only* when
+ *             there is something to say.
+ *   content   the page.
+ *
+ * Every global action has exactly one home. The tournament switcher switches
+ * tournaments and offers the tournament/file actions; the operator button owns
+ * operator identity, Settings and Help. There is no duplicate avatar in the top
+ * bar, no second Help button, and no "More" menu re-implementing tournament
+ * management for narrow windows — the narrow layout is the same information
+ * architecture drawn differently.
+ */
+
+.director-app {
+  display: grid;
+  grid-template-columns: var(--director-sidebar) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--director-page);
+}
+
+/* ==================================================================== Sidebar */
+
+.director-sidebar {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-4);
+  height: 100vh;
+  padding: var(--director-space-4) var(--director-space-3);
+  overflow-y: auto;
+  background: var(--director-surface);
+  border-right: 1px solid var(--director-border);
+}
+
+.director-brand {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  padding: 0 var(--director-space-2);
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-semibold);
+}
+
+.director-wordmark {
+  height: 18px;
+}
+
+/* --------------------------------------------------------- Tournament switcher
+   Switches tournaments, and holds the tournament/file actions. The tournament
+   name appears here and in one other place — the Overview subtitle — and
+   nowhere else; the top bar no longer repeats it as a pretend breadcrumb. */
+
+.director-tournament-switcher-wrap {
+  position: relative;
+}
+
+.director-tournament-switcher {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  padding: var(--director-space-2) var(--director-space-3);
+  text-align: left;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-tournament-switcher:hover {
+  background: var(--director-surface-hover);
+  border-color: var(--director-border-strong);
+}
+
+.director-tournament-switcher[aria-expanded='true'] {
+  border-color: var(--director-accent);
+}
+
+.director-tournament-switcher > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-semibold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-tournament-switcher > small {
+  grid-column: 1;
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}
+
+.director-tournament-switcher > svg {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  color: var(--director-faint);
+}
+
+.director-tournament-menu {
+  min-width: 268px;
+  max-height: min(560px, calc(100vh - 120px));
+  overflow-y: auto;
+}
+
+.director-tournament-menu[data-align='start'] {
+  left: 0;
+}
+
+/* ================================================================ Navigation
+   Three groups — Plan, Run, Review — plus Overview above them and Settings
+   below. The group labels are the same words the pages, help, and search
+   results use. */
+
+.director-nav {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--director-space-4);
+}
+
+.director-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.director-nav-label {
+  padding: 0 var(--director-space-3) var(--director-space-1);
+  margin: 0;
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.director-nav-link {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: var(--director-control-md);
+  padding: 0 var(--director-space-3);
+  color: var(--director-muted);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius);
+}
+
+.director-nav-link > svg {
+  flex: none;
+  color: var(--director-faint);
+}
+
+.director-nav-link > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-nav-link:hover {
+  color: var(--director-ink);
+  background: var(--director-surface-hover);
+}
+
+.director-nav-link:hover > svg {
+  color: var(--director-muted);
+}
+
+.director-nav-link.is-active {
+  color: var(--director-accent);
+  background: var(--director-accent-soft);
+}
+
+.director-nav-link.is-active > svg {
+  color: var(--director-accent);
+}
+
+/* The count on a destination is the same badge the rest of the application
+   uses, toned by what the count means. */
+.director-nav-count {
+  flex: none;
+  min-width: 20px;
+  padding: 0 6px;
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: var(--director-surface-sunken);
+  border-radius: var(--director-radius-pill);
+}
+
+.director-nav-count[data-tone='warning'] {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+}
+
+.director-nav-count[data-tone='info'] {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+}
+
+/* ----------------------------------------------------------- Sidebar footer
+   Settings is a real destination in the navigation, not an operator-menu
+   accident. QBTCP is deliberately absent: an optional subsystem does not get
+   permanent sidebar real estate. It surfaces in the top bar when it is running,
+   being configured, or in trouble. */
+
+.director-sidebar-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  padding-top: var(--director-space-3);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
+.director-operator-wrap {
+  position: relative;
+}
+
+.director-operator {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  width: 100%;
+  min-height: var(--director-control-md);
+  padding: var(--director-space-1) var(--director-space-2);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius);
+}
+
+.director-operator:hover,
+.director-operator[aria-expanded='true'] {
+  background: var(--director-surface-hover);
+}
+
+.director-operator > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.director-operator strong {
+  overflow: hidden;
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  font-weight: var(--director-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-operator small {
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+}
+
+.director-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--director-on-accent);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  background: var(--director-accent);
+  border: 0;
+  border-radius: 50%;
+}
+
+.director-operator-menu {
+  bottom: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+}
+
+/* ===================================================================== Topbar */
+
+.director-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.director-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--director-z-sticky);
+  display: flex;
+  gap: var(--director-space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-height: var(--director-topbar-height);
+  padding: var(--director-space-2) var(--director-page-gutter);
+  background: var(--director-surface);
+  border-bottom: 1px solid var(--director-border);
+}
+
+.director-topbar-actions {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+/* The narrow-window navigation toggle. It opens the same navigation tree the
+   sidebar shows, as a drawer. */
+.director-nav-toggle {
+  display: none;
+}
+
+/* ------------------------------------------------------------- Global search
+   A command/entity navigator. It has no relationship to the list filters on the
+   pages — typing here does not narrow the Teams table underneath. */
+
+.director-search-wrap {
+  position: relative;
+  flex: 1;
+  max-width: 460px;
+}
+
+.director-search {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  height: var(--director-control-md);
+  padding: 0 var(--director-space-2) 0 var(--director-space-3);
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-search:focus-within {
+  background: var(--director-surface);
+  border-color: var(--director-accent);
+  box-shadow: 0 0 0 3px rgb(18 95 149 / 18%);
+}
+
+.director-search > svg {
+  flex: none;
+  color: var(--director-faint);
+}
+
+.director-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  font-size: var(--director-text-body);
+  background: none;
+  border: 0;
+}
+
+.director-search input:focus-visible {
+  outline: none;
+}
+
+.director-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.director-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: var(--director-z-dropdown);
+  max-height: 420px;
+  padding: var(--director-space-1);
+  overflow-y: auto;
+  background: var(--director-surface-raised);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-menu);
+}
+
+.director-search-result {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--director-space-2) var(--director-space-3);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-search-result > span:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.director-search-result strong {
+  overflow: hidden;
+  color: var(--director-ink-strong);
+  font-size: var(--director-text-body);
+  font-weight: var(--director-weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.director-search-result small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}
+
+.director-search-result:hover,
+.director-search-result.is-active {
+  background: var(--director-surface-hover);
+}
+
+.director-search-result .director-badge {
+  flex: none;
+}
+
+.director-search-empty {
+  padding: var(--director-space-4);
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------- "Now" strip
+   What the top bar says instead of a fake breadcrumb: the round in progress,
+   and a chip for anything needing attention. Optional subsystems appear here
+   only when they are in use or in trouble. */
+
+.director-now-strip {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+}
+
+.director-now-chip {
+  display: inline-flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  height: var(--director-control-sm);
+  padding: 0 var(--director-space-3);
+  color: var(--director-ink);
+  font-size: var(--director-text-secondary);
+  white-space: nowrap;
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-pill);
+}
+
+.director-now-chip:hover {
+  background: var(--director-surface-hover);
+  border-color: var(--director-border-strong);
+}
+
+.director-now-chip > strong {
+  font-weight: var(--director-weight-semibold);
+}
+
+.director-now-chip[data-tone='warning'] {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+  border-color: var(--director-warning-border);
+}
+
+.director-now-chip[data-tone='danger'] {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-border);
+}
+
+.director-now-chip[data-tone='success'] {
+  color: var(--director-success-fg);
+  background: var(--director-success-bg);
+  border-color: var(--director-success-border);
+}
+
+.director-now-chip[data-tone='info'] {
+  color: var(--director-info-fg);
+  background: var(--director-info-bg);
+  border-color: var(--director-info-border);
+}
+
+/* ==================================================================== Content */
+
+.director-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--director-space-5);
+  padding: var(--director-space-6) var(--director-page-gutter) var(--director-space-8);
+  min-width: 0;
+}
+
+/* Persistence state. A healthy save says nothing at all; a save in flight is a
+   quiet line; a failed save is a danger callout with the recovery actions
+   attached, and it does not go away on its own. */
+.director-persistence-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--director-space-3) var(--director-space-4);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
+
+.director-persistence-banner > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.director-persistence-banner strong {
+  font-size: var(--director-text-body);
+}
+
+.director-persistence-banner p {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+.director-persistence-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+}
+
+.director-persistence-banner-warning {
+  color: var(--director-warning-fg);
+  background: var(--director-warning-bg);
+  border-color: var(--director-warning-border);
+}
+
+.director-persistence-banner-warning p {
+  color: inherit;
+}
+
+.director-persistence-banner-error {
+  color: var(--director-danger-fg);
+  background: var(--director-danger-bg);
+  border-color: var(--director-danger-border);
+}
+
+.director-persistence-banner-error p {
+  color: inherit;
+}
+
+/* ====================================================================== Toast */
+
+.director-toast {
+  position: fixed;
+  right: var(--director-space-6);
+  bottom: var(--director-space-6);
+  z-index: var(--director-z-toast);
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  max-width: 420px;
+  padding: var(--director-space-3) var(--director-space-4);
+  color: var(--director-ink);
+  background: var(--director-surface-raised);
+  border: 1px solid var(--director-border);
+  border-left: 3px solid var(--director-accent);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-menu);
+}
+
+.director-toast p {
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-toast[data-tone='error'],
+.director-toast-error {
+  border-left-color: var(--director-danger-solid);
+}
+
+.director-toast[data-tone='warning'] {
+  border-left-color: var(--director-warning-solid);
+}
+
+.director-toast[data-tone='success'] {
+  border-left-color: var(--director-success-solid);
+}
+
+.director-toast-start {
+  position: static;
+  margin-top: var(--director-space-4);
+}
+
+/* ============================================================ Startup screen
+   The no-tournament experience. Same product, same controls, same type — one
+   Create flow and one Open flow, not two overlapping file affordances. */
+
+.director-app-start {
+  display: block;
+  min-height: 100vh;
+  padding: var(--director-space-8) var(--director-space-6);
+}
+
+.director-start-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-6);
+  width: min(560px, 100%);
+  margin: 0 auto;
+}
+
+.director-start-brand {
+  justify-content: center;
+  font-size: var(--director-text-section);
+}
+
+.director-start-heading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-2);
+  text-align: center;
+}
+
+.director-start-heading h1 {
+  font-size: var(--director-text-display);
+}
+
+.director-start-heading p {
+  color: var(--director-muted);
+  font-size: var(--director-text-body);
+}
+
+.director-start-panel {
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius-lg);
+  box-shadow: var(--director-shadow-sm);
+}
+
+.director-start-open {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: center;
+  justify-content: center;
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+/* ============================================================= Responsive
+ *
+ * One information architecture at every width.
+ *
+ *   ≤ 1180px  the sidebar becomes an icon rail; the same destinations, the same
+ *             order, names in tooltips and accessible labels.
+ *   ≤ 900px   the rail becomes a drawer opened from the top bar. Still the same
+ *             tree — there is no separate narrow-window menu system.
+ */
+
+@media (max-width: 1180px) {
+  :root {
+    --director-page-gutter: 24px;
+  }
+
+  .director-app {
+    grid-template-columns: var(--director-sidebar-rail) minmax(0, 1fr);
+  }
+
+  .director-sidebar {
+    align-items: center;
+    padding: var(--director-space-4) var(--director-space-2);
+  }
+
+  /* The wordmark does not fit a 64px rail; the mark alone would need artwork we
+     do not have, so the brand line is hidden and the application is identified
+     by the tournament switcher directly below it. */
+  .director-brand {
+    display: none;
+  }
+
+  .director-brand > span:not(.visually-hidden),
+  .director-nav-label,
+  .director-nav-link > span,
+  .director-operator > div,
+  .director-tournament-switcher > strong,
+  .director-tournament-switcher > small {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .director-nav,
+  .director-nav-group,
+  .director-sidebar-footer {
+    width: 100%;
+  }
+
+  .director-nav-group {
+    gap: var(--director-space-1);
+    padding-bottom: var(--director-space-3);
+    border-bottom: 1px solid var(--director-border-subtle);
+  }
+
+  .director-nav-group:last-child {
+    border-bottom: 0;
+  }
+
+  .director-nav-link,
+  .director-tournament-switcher,
+  .director-operator {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .director-nav-link {
+    height: var(--director-control-md);
+  }
+
+  .director-tournament-switcher {
+    display: grid;
+    place-items: center;
+    height: var(--director-control-md);
+  }
+
+  .director-tournament-switcher > svg {
+    grid-row: 1;
+    grid-column: 1;
+  }
+
+  .director-nav-count {
+    position: absolute;
+    margin: -14px 0 0 20px;
+  }
+
+  .director-tournament-menu,
+  .director-operator-menu {
+    left: calc(100% + 8px);
+  }
+
+  .director-operator-menu {
+    bottom: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .director-app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* The drawer. Same markup, same order, labels visible again. */
+  .director-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: var(--director-z-overlay);
+    align-items: stretch;
+    width: var(--director-sidebar);
+    padding: var(--director-space-4) var(--director-space-3);
+    box-shadow: var(--director-shadow-modal);
+    transform: translateX(-100%);
+    transition: transform var(--director-duration) var(--director-ease);
+  }
+
+  .director-app[data-nav-open='true'] .director-sidebar {
+    transform: translateX(0);
+  }
+
+  .director-app[data-nav-open='true']::after {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--director-z-overlay) - 1);
+    background: rgb(16 33 46 / 32%);
+    content: '';
+  }
+
+  .director-brand {
+    display: flex;
+  }
+
+  .director-brand > span:not(.visually-hidden),
+  .director-nav-label,
+  .director-nav-link > span,
+  .director-operator > div,
+  .director-tournament-switcher > strong,
+  .director-tournament-switcher > small {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip-path: none;
+  }
+
+  .director-nav-link,
+  .director-operator {
+    justify-content: flex-start;
+    padding: 0 var(--director-space-3);
+  }
+
+  .director-operator {
+    padding: var(--director-space-1) var(--director-space-2);
+  }
+
+  .director-tournament-switcher {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    place-items: stretch;
+    height: auto;
+    padding: var(--director-space-2) var(--director-space-3);
+  }
+
+  .director-tournament-switcher > svg {
+    grid-row: 1 / span 2;
+    grid-column: 2;
+    place-self: center;
+  }
+
+  .director-nav-count {
+    position: static;
+    margin: 0;
+  }
+
+  .director-tournament-menu,
+  .director-operator-menu {
+    left: 0;
+  }
+
+  .director-nav-group {
+    gap: 1px;
+    padding-bottom: 0;
+    border-bottom: 0;
+  }
+
+  .director-nav-toggle {
+    display: inline-grid;
+  }
+
+  .director-now-strip {
+    display: none;
+  }
+
+  .director-search-wrap {
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --director-page-gutter: 16px;
+    --director-panel-inset: 14px;
+  }
+
+  .director-dialog,
+  .director-dialog-sm,
+  .director-dialog-lg,
+  .director-dialog-xl,
+  .director-confirm {
+    width: calc(100vw - var(--director-space-4));
+  }
+
+  .director-dialog-sheet {
+    width: 100vw;
+  }
+}
+
+/* The toast's tone icon. The tone is carried by the left rule and the icon;
+   the message itself stays in the ordinary ink so it reads as a sentence. */
+.director-toast-icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.director-toast[data-tone='error'] .director-toast-icon {
+  color: var(--director-danger-fg);
+}
+
+.director-toast[data-tone='warning'] .director-toast-icon {
+  color: var(--director-warning-fg);
+}
+
+.director-toast[data-tone='success'] .director-toast-icon {
+  color: var(--director-success-fg);
+}
+
+.director-toast[data-tone='info'] .director-toast-icon {
+  color: var(--director-info-fg);
+}
+
+.director-toast > p {
+  flex: 1;
+  min-width: 0;
+}
+
+.director-toast-info {
+  border-left-color: var(--director-info-solid);
+}
+
+.director-toast-warning {
+  border-left-color: var(--director-warning-solid);
+}

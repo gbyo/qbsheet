@@ -8,14 +8,25 @@ export type IconName =
   | 'check'
   | 'chevron'
   | 'clipboard'
+  | 'clock'
+  | 'copy'
+  | 'danger'
+  | 'drag'
   | 'download'
   | 'edit'
   | 'file'
+  | 'filter'
+  | 'flag'
   | 'format'
   | 'help'
   | 'history'
+  | 'info'
   | 'inbox'
+  | 'link'
+  | 'lock'
+  | 'minus'
   | 'more'
+  | 'network'
   | 'pause'
   | 'play'
   | 'plus'
@@ -25,11 +36,17 @@ export type IconName =
   | 'search'
   | 'server'
   | 'settings'
+  | 'sort'
   | 'standings'
+  | 'success'
   | 'teams'
   | 'tournament'
+  | 'trash'
+  | 'undo'
   | 'upload'
+  | 'usb'
   | 'users'
+  | 'warning'
   | 'x';
 
 export function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
@@ -202,6 +219,104 @@ export function Icon({ name, size = 17 }: { name: IconName; size?: number }) {
         <circle cx="8" cy="9" r="3" />
         <circle cx="17" cy="8" r="2.5" />
         <path d="M3.5 19c.3-3 1.8-4.5 4.5-4.5s4.2 1.5 4.5 4.5M14 14.5c2.8 0 4.3 1.5 4.5 4.5" />
+      </>
+    ),
+    clock: (
+      <>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 7.5V12l3 2" />
+      </>
+    ),
+    copy: (
+      <>
+        <rect x="9" y="9" width="11" height="11" rx="1.5" />
+        <path d="M15 9V5.5A1.5 1.5 0 0 0 13.5 4h-8A1.5 1.5 0 0 0 4 5.5v8A1.5 1.5 0 0 0 5.5 15H9" />
+      </>
+    ),
+    danger: (
+      <>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 8v4.5M12 16h.01" />
+      </>
+    ),
+    /* The reorder grip. Reordering is an explicit, keyboard-reachable mode, so
+       this appears only inside it and never as permanent row chrome. */
+    drag: (
+      <>
+        <circle cx="9" cy="6" r="1.2" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="6" r="1.2" fill="currentColor" stroke="none" />
+        <circle cx="9" cy="12" r="1.2" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="12" r="1.2" fill="currentColor" stroke="none" />
+        <circle cx="9" cy="18" r="1.2" fill="currentColor" stroke="none" />
+        <circle cx="15" cy="18" r="1.2" fill="currentColor" stroke="none" />
+      </>
+    ),
+    filter: <path d="M4 6h16l-6 7v6l-4-2v-4z" />,
+    flag: (
+      <>
+        <path d="M6 21V4M6 4h11l-2 4 2 4H6" />
+      </>
+    ),
+    info: (
+      <>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="M12 11v5M12 8h.01" />
+      </>
+    ),
+    link: (
+      <>
+        <path d="M10 14a4 4 0 0 1 0-5.6l2.4-2.4a4 4 0 0 1 5.6 5.6L16.5 13" />
+        <path d="M14 10a4 4 0 0 1 0 5.6L11.6 18A4 4 0 0 1 6 12.4L7.5 11" />
+      </>
+    ),
+    lock: (
+      <>
+        <rect x="5" y="10.5" width="14" height="9.5" rx="1.5" />
+        <path d="M8.5 10.5V7.5a3.5 3.5 0 0 1 7 0v3" />
+      </>
+    ),
+    minus: <path d="M5 12h14" />,
+    network: (
+      <>
+        <rect x="3.5" y="14.5" width="5" height="5.5" rx="1" />
+        <rect x="15.5" y="14.5" width="5" height="5.5" rx="1" />
+        <rect x="9.5" y="4" width="5" height="5.5" rx="1" />
+        <path d="M12 9.5v3M6 14.5v-2h12v2" />
+      </>
+    ),
+    sort: (
+      <>
+        <path d="M8 5v14M8 19l-3-3M8 5l3 3M16 19V5M16 5l3 3M16 19l-3-3" />
+      </>
+    ),
+    success: (
+      <>
+        <circle cx="12" cy="12" r="8.5" />
+        <path d="m8.2 12.2 2.6 2.6 5-5.4" />
+      </>
+    ),
+    trash: (
+      <>
+        <path d="M4.5 7h15M9.5 7V4.5h5V7M6.5 7l.9 12.5A1.5 1.5 0 0 0 8.9 21h6.2a1.5 1.5 0 0 0 1.5-1.5L17.5 7" />
+        <path d="M10.5 11v6M13.5 11v6" />
+      </>
+    ),
+    undo: (
+      <>
+        <path d="M9 7H4v-5" />
+        <path d="M4 7c2.2-2.8 5-4 8.3-3.6 4.5.6 7.7 4.6 7.1 9.1-.6 4.5-4.6 7.7-9.1 7.1-2.2-.3-4.1-1.4-5.4-3" />
+      </>
+    ),
+    usb: (
+      <>
+        <rect x="8.5" y="10" width="7" height="11" rx="1.5" />
+        <path d="M12 10V4M9.5 6.5 12 4l2.5 2.5M11 14h2" />
+      </>
+    ),
+    warning: (
+      <>
+        <path d="M12 4 3.5 19h17L12 4Z" />
+        <path d="M12 9v4M12 16h.01" />
       </>
     ),
     x: (

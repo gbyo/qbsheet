@@ -1,0 +1,27 @@
+/* Director transfers surface styles. Rebased on the shared design tokens; page-specific rules only. */
+
+/*
+ * The drop target is a dashed region rather than a whole-window overlay: the director is reading
+ * the incoming table while they drop, and an overlay would hide the thing they are checking against.
+ */
+.director-dropzone {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  padding: 22px var(--director-panel-inset);
+  border: 1px dashed var(--director-border-strong);
+  border-radius: var(--director-radius);
+  margin: var(--director-panel-inset);
+  color: var(--director-muted);
+  text-align: center;
+}
+
+.director-dropzone p {
+  margin: 0;
+}
+
+.director-dropzone-panel.is-active .director-dropzone {
+  border-color: var(--director-accent);
+  background: var(--director-accent-soft);
+}

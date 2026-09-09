@@ -13,8 +13,30 @@ import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { acceptedGame, playedTournament, scheduledGame, score } from '../../../tests/directorFixtures';
 import { ResultsView } from './ResultsView';
+import { ConfirmProvider } from '../components/Dialog';
 
 afterEach(cleanup);
+
+/** Results is mounted inside the shell's confirmation service in the real app. */
+function renderResults(ui: React.ReactElement) {
+  return render(<ConfirmProvider>{ui}</ConfirmProvider>);
+}
+
+/**
+ * Reject moved out of the row and into the submission's overflow menu when
+ * rows stopped carrying a toolbar of actions. The destructive half of an
+ * Accept/Reject pair is no longer one click away from a director scanning at
+ * speed, which is the point — the behaviour underneath is unchanged.
+ */
+function openReject(): void {
+  fireEvent.click(screen.getByRole('button', { name: /result actions$/ }));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Reject result…' }));
+}
+
+/** Switch to one of the four Results views. */
+function showView(name: RegExp): void {
+  fireEvent.click(screen.getByRole('button', { name }));
+}
 
 function stateForReview(): DirectorState {
   const state = playedTournament();
@@ -42,30 +64,30 @@ function controllerWith(overrides: Partial<DirectorController> = {}): DirectorCo
 describe('rejecting a result', () => {
   test('the first press asks rather than rejecting', () => {
     const controller = controllerWith();
-    render(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
+    renderResults(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    openReject();
 
     expect(controller.rejectSubmission).not.toHaveBeenCalled();
-    expect(screen.getByText('Reject this result')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Reject result' })).toBeTruthy();
   });
 
   test('Cancel leaves the submission exactly as it was', () => {
     const controller = controllerWith();
-    render(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
+    renderResults(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    openReject();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
     expect(controller.rejectSubmission).not.toHaveBeenCalled();
-    expect(screen.queryByText('Reject this result')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Reject result' })).toBeNull();
   });
 
   test('confirming rejects it', () => {
     const controller = controllerWith();
-    render(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
+    renderResults(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    openReject();
     fireEvent.click(screen.getByRole('button', { name: 'Reject result' }));
 
     expect(controller.rejectSubmission).toHaveBeenCalledTimes(1);
@@ -74,9 +96,9 @@ describe('rejecting a result', () => {
 
   test('a typed reason reaches the controller', () => {
     const controller = controllerWith();
-    render(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
+    renderResults(<ResultsView state={stateForReview()} controller={controller} onAnnounce={vi.fn()} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reject' }));
+    openReject();
     fireEvent.change(screen.getByPlaceholderText('Scores transposed; room is re-entering'), {
       target: { value: '  Scores transposed  ' },
     });
@@ -98,36 +120,42 @@ describe('the scheduled games panel', () => {
     return state;
   }
 
-  function scheduleRows(): string[] {
-    const panel = screen.getByText('Scheduled games').closest('.director-panel') as HTMLElement;
-    return within(panel)
-      .getAllByRole('row')
-      .slice(1)
-      .map((row) => row.textContent ?? '');
+  function scheduleRowIds(): string[] {
+    return within(screen.getByRole('list', { name: 'Scheduled games' }))
+      .getAllByRole('listitem')
+      .map(
+        (row) =>
+          row.querySelector('[data-director-navigation-id]')?.getAttribute('data-director-navigation-id') ??
+          '',
+      );
   }
 
-  test('games that still need attention are what the panel opens on', () => {
-    render(
+  test('games that still need attention are what the view opens on', () => {
+    renderResults(
       <ResultsView state={stateWithMixedSchedule()} controller={controllerWith()} onAnnounce={vi.fn()} />,
     );
+    showView(/^Games/);
 
-    const rows = scheduleRows();
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toContain('scheduled-2');
-    expect(screen.getByText('1 unresolved of 3')).toBeTruthy();
+    // The game still out in a room; the accepted and cancelled ones are not
+    // what a director opens this view to see. The row no longer prints the raw
+    // game id, so the identity is checked where deep links read it.
+    expect(scheduleRowIds()).toEqual(['scheduled-2']);
+    // The count the director scans is on the view control itself.
+    expect(screen.getByRole('button', { name: 'Games 1' })).toBeTruthy();
   });
 
   test('the settled games are one press away, not gone', () => {
-    render(
+    renderResults(
       <ResultsView state={stateWithMixedSchedule()} controller={controllerWith()} onAnnounce={vi.fn()} />,
     );
+    showView(/^Games/);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show all scheduled games' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show settled games' }));
 
-    expect(scheduleRows()).toHaveLength(3);
+    expect(scheduleRowIds()).toHaveLength(3);
     // And back again, so the default is a filter rather than a one-way door.
-    fireEvent.click(screen.getByRole('button', { name: 'Show only unresolved' }));
-    expect(scheduleRows()).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Hide settled games' }));
+    expect(scheduleRowIds()).toHaveLength(1);
   });
 });
 
@@ -153,11 +181,13 @@ describe('being navigated to a settled scheduled game', () => {
   };
 
   function scheduleRowIds(): string[] {
-    const panel = screen.getByText('Scheduled games').closest('.director-panel') as HTMLElement;
-    return within(panel)
-      .getAllByRole('row')
-      .slice(1)
-      .map((row) => row.getAttribute('data-director-navigation-id') ?? '');
+    return within(screen.getByRole('list', { name: 'Scheduled games' }))
+      .getAllByRole('listitem')
+      .map(
+        (row) =>
+          row.querySelector('[data-director-navigation-id]')?.getAttribute('data-director-navigation-id') ??
+          '',
+      );
   }
 
   /** Run the highlight hook's animation frame, which is what clears the one-shot target. */
@@ -174,7 +204,7 @@ describe('being navigated to a settled scheduled game', () => {
     const clear = vi.fn(() => {
       current = null;
     });
-    const view = render(
+    const view = renderResults(
       <ResultsView
         state={state}
         controller={controllerWith()}
@@ -183,18 +213,21 @@ describe('being navigated to a settled scheduled game', () => {
         onClearNavigationTarget={clear}
       />,
     );
+    showView(/^Games/);
     expect(scheduleRowIds()).toContain('scheduled-1');
 
     await settleNavigation();
     expect(clear).toHaveBeenCalled();
     view.rerender(
-      <ResultsView
-        state={state}
-        controller={controllerWith()}
-        onAnnounce={vi.fn()}
-        navigationTarget={current}
-        onClearNavigationTarget={clear}
-      />,
+      <ConfirmProvider>
+        <ResultsView
+          state={state}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          navigationTarget={current}
+          onClearNavigationTarget={clear}
+        />
+      </ConfirmProvider>,
     );
 
     // Still there, beside the game that was unresolved all along.
@@ -207,7 +240,7 @@ describe('being navigated to a settled scheduled game', () => {
     const clear = vi.fn(() => {
       current = null;
     });
-    const view = render(
+    const view = renderResults(
       <ResultsView
         state={state}
         controller={controllerWith()}
@@ -216,31 +249,35 @@ describe('being navigated to a settled scheduled game', () => {
         onClearNavigationTarget={clear}
       />,
     );
+    showView(/^Games/);
     await settleNavigation();
     view.rerender(
-      <ResultsView
-        state={state}
-        controller={controllerWith()}
-        onAnnounce={vi.fn()}
-        navigationTarget={current}
-        onClearNavigationTarget={clear}
-      />,
+      <ConfirmProvider>
+        <ResultsView
+          state={state}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          navigationTarget={current}
+          onClearNavigationTarget={clear}
+        />
+      </ConfirmProvider>,
     );
 
-    // The control names the state the panel is actually in, which is not "unresolved only".
-    fireEvent.click(screen.getByRole('button', { name: 'Show only unresolved' }));
+    // The control names the state the view is actually in, which is not "unresolved only".
+    fireEvent.click(screen.getByRole('button', { name: 'Hide settled games' }));
 
     expect(scheduleRowIds()).toEqual(['scheduled-live']);
-    expect(screen.getByRole('button', { name: 'Show all scheduled games' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show settled games' })).toBeTruthy();
   });
 
-  test('with no navigation target the panel is unresolved only, as before', () => {
-    render(
+  test('with no navigation target the view is unresolved only, as before', () => {
+    renderResults(
       <ResultsView state={stateWithSettledTarget()} controller={controllerWith()} onAnnounce={vi.fn()} />,
     );
+    showView(/^Games/);
 
     expect(scheduleRowIds()).toEqual(['scheduled-live']);
-    expect(screen.getByRole('button', { name: 'Show all scheduled games' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Show settled games' })).toBeTruthy();
   });
 });
 
@@ -258,8 +295,10 @@ test('open protests are counted where a director is already looking', () => {
 
   render(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
 
-  expect(screen.getByText(/1 open protest ·/)).toBeTruthy();
-  // The panel itself is still there with the protest in it.
+  // The count is on the view control, where a director scanning Results sees it
+  // without opening the protests view.
+  expect(screen.getByRole('button', { name: 'Protests 1' })).toBeTruthy();
+  showView(/^Protests/);
   expect(screen.getByText('Answer was equivalent', { exact: false })).toBeTruthy();
 });
 
@@ -271,7 +310,7 @@ test('round navigation scopes manual entry to that round even when an earlier ro
     scheduledGame('requested', 'team-a', 'team-b', { roundId: 'round-2', status: 'released' }),
   ];
   const controller = controllerWith({ addManualResult: vi.fn(() => true) });
-  render(
+  renderResults(
     <ResultsView
       state={state}
       controller={controller}
@@ -280,8 +319,12 @@ test('round navigation scopes manual entry to that round even when an earlier ro
     />,
   );
   fireEvent.click(screen.getByRole('button', { name: 'Enter result' }));
+
+  // Both rounds pair the same two teams, so the round is what distinguishes the
+  // choices — and only the requested round's game is on offer.
   const game = screen.getByRole('combobox', { name: 'Scheduled game' });
-  expect(game).toHaveValue('requested');
-  expect(within(game).getAllByRole('option')).toHaveLength(1);
-  expect(screen.getByText('Awaiting result')).toBeTruthy();
+  fireEvent.click(game);
+  const options = within(screen.getByRole('listbox', { name: 'Scheduled game' })).getAllByRole('option');
+  expect(options).toHaveLength(1);
+  expect(options[0]).toHaveTextContent('Round 2');
 });

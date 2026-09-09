@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import {
   defaultRules,
@@ -155,13 +155,15 @@ describe('Stats workspace', () => {
   test('single-stage tournaments show no scope selector and honest unknowns', () => {
     renderStats(tournamentState(), stubController());
     expect(screen.queryByLabelText('Scope')).toBeNull();
-    expect(screen.getByRole('heading', { name: '2 teams' })).toBeTruthy();
+    // The count is on the view control that switches between the two tables.
+    expect(screen.getByRole('button', { name: 'Teams 2' })).toBeTruthy();
     expect(screen.getAllByText('Aiken').length).toBeGreaterThan(0);
     // The current screen presents tables. Scope, classification, and unknown-value
     // presentation helpers remain covered without expecting removed tab controls.
     const state = tournamentState();
     expect(buildStatsScopes(state).showSelector).toBe(false);
     expect(usedClassifications(state).map((value) => classificationLabels[value])).toEqual(['Small School']);
+    fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
     expect(screen.getByText('A. Player')).toBeTruthy();
     expect(formatPptuh(0, derivePlayerStandings(state)[0])).toBe('—');
   });

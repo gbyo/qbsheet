@@ -1,16 +1,25 @@
 /**
- * What Publish offers, and what each offer actually writes.
+ * What Exports offers, and what each offer actually writes.
  *
  * Three of the four claims here are about things the page used to say and not do: a standings CSV
  * that was a roster CSV, a `Print current view` that promised room sheets from a page that draws
  * none, and an export list explaining what a tournament archive contains to somebody who has no
  * tournament open.
+ *
+ * The destination is called Exports now, because it writes local files. QBSheet Live is what
+ * publishes.
  */
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { emptyDirectorState } from '../domain';
 import { playedTournament } from '../../../tests/directorFixtures';
 import { downloadArchive, PublishView } from './PublishView';
+
+/** Each export is a row naming the file and carrying the one action that writes it. */
+function clickExport(name: string): void {
+  const row = screen.getByText(name).closest('[role="listitem"]') as HTMLElement;
+  fireEvent.click(within(row).getByRole('button'));
+}
 
 interface Saved {
   name: string;
@@ -68,8 +77,7 @@ afterEach(() => {
 test('Team standings CSV writes standings columns, not roster-import columns', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  const row = screen.getByText('Team standings CSV').closest('.director-publish-row') as HTMLElement;
-  fireEvent.click(row.querySelector('button') as HTMLButtonElement);
+  clickExport('Team standings CSV');
 
   const file = saved.at(-1);
   expect(file?.name).toBe('Ninety-Six-Invitational-standings.csv');
@@ -80,19 +88,17 @@ test('Team standings CSV writes standings columns, not roster-import columns', (
 test('the roster CSV is offered under a name that describes it', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  const row = screen.getByText('Team & roster CSV').closest('.director-publish-row') as HTMLElement;
-  fireEvent.click(row.querySelector('button') as HTMLButtonElement);
+  clickExport('Team & roster CSV');
 
   const file = saved.at(-1);
   expect(file?.name).toBe('Ninety-Six-Invitational-teams.csv');
   expect(file?.text.split('\r\n')[0]).toContain('player_name');
 });
 
-test('player statistics can be exported from Publish too', () => {
+test('player statistics can be exported from Exports too', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  const row = screen.getByText('Player stats CSV').closest('.director-publish-row') as HTMLElement;
-  fireEvent.click(row.querySelector('button') as HTMLButtonElement);
+  clickExport('Player stats CSV');
 
   const file = saved.at(-1);
   expect(file?.name).toBe('Ninety-Six-Invitational-player-stats.csv');
@@ -102,11 +108,11 @@ test('player statistics can be exported from Publish too', () => {
 test('the archive has one entry point rather than two that do the same thing', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  expect(screen.getByRole('button', { name: 'Export archive' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Export tournament archive' })).toBeTruthy();
   expect(screen.queryByText('Portable archive')).toBeNull();
 });
 
-test('Publish does not offer to print reports it does not render', () => {
+test('Exports does not offer to print reports it does not render', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
   expect(screen.queryByRole('button', { name: 'Print' })).toBeNull();
@@ -116,10 +122,12 @@ test('Publish does not offer to print reports it does not render', () => {
 test('with no tournament open, the page is the empty state and nothing else', () => {
   render(<PublishView state={emptyDirectorState()} onAnnounce={vi.fn()} />);
 
-  expect(screen.getByText('Nothing to publish')).toBeTruthy();
+  expect(screen.getByText('Nothing to export')).toBeTruthy();
+  // The standalone "What is included" card is gone; that information now lives
+  // on the export rows themselves, which an empty page does not render.
   expect(screen.queryByText('What is included')).toBeNull();
   expect(screen.queryByText(/Team standings use accepted results only/)).toBeNull();
-  expect(screen.queryByText('Exports')).toBeNull();
+  expect(screen.queryByRole('list', { name: 'Export formats' })).toBeNull();
 });
 
 /**

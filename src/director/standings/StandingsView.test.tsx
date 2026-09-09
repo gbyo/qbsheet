@@ -6,7 +6,7 @@
  * application.
  */
 import { afterEach, expect, test, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { derivePlayerStandings, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
@@ -45,8 +45,17 @@ function tournamentWithPlayers(count: number): DirectorState {
   return state;
 }
 
+/**
+ * Teams and players are peer views of the same destination now, so the player
+ * table is one press away rather than a second table stacked below the first.
+ */
 function playerTable(): HTMLElement {
-  return document.querySelector('.director-player-table') as HTMLElement;
+  fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
+  return screen.getByRole('table', { name: 'Player statistics' });
+}
+
+function teamTable(): HTMLElement {
+  return screen.getByRole('table', { name: 'Team standings' });
 }
 
 test('a twelfth-place player is on the page rather than silently dropped', () => {
@@ -74,14 +83,24 @@ test('the ordering is the derivation’s, and the page says how many players it 
     .filter((name) => name.startsWith('Player '));
   expect(generated).toEqual(expected);
   expect(names).toHaveLength(14);
-  expect(screen.getByText('14 players')).toBeTruthy();
+  // The count is on the view control, where a director choosing between the two
+  // tables can already see it.
+  expect(screen.getByRole('button', { name: 'Players 14' })).toBeTruthy();
 });
 
+/**
+ * Both exports are still here, by name — but as a compact menu rather than two
+ * large buttons competing with the tables. Exports is the destination that owns
+ * the export model; this is the shortcut for a director already looking at the
+ * numbers.
+ */
 test('the two exports are offered by name rather than as one unexplained CSV', () => {
   render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
 
-  expect(screen.getByRole('button', { name: 'Export team standings CSV' })).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Export player stats CSV' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: 'Export' }));
+
+  expect(screen.getByRole('menuitem', { name: 'Team standings CSV' })).toBeTruthy();
+  expect(screen.getByRole('menuitem', { name: 'Player stats CSV' })).toBeTruthy();
 });
 
 /**
@@ -97,8 +116,7 @@ test('a team that has not played shows an unknown win rate, not 0.0%', () => {
 
   render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
 
-  const table = document.querySelector('.director-standings-table') as HTMLElement;
-  const row = within(table).getByText('Abbeville').closest('tr') as HTMLElement;
+  const row = within(teamTable()).getByText('Abbeville').closest('tr') as HTMLElement;
   const cells = within(row).getAllByRole('cell');
   // #, Team, W–L, Win %
   expect(cells[3]?.textContent).toBe('—');
@@ -108,7 +126,6 @@ test('a team that has not played shows an unknown win rate, not 0.0%', () => {
 test('a team that has played still shows the rate it earned', () => {
   render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
 
-  const table = document.querySelector('.director-standings-table') as HTMLElement;
-  const row = within(table).getByText('Ninety Six').closest('tr') as HTMLElement;
+  const row = within(teamTable()).getByText('Ninety Six').closest('tr') as HTMLElement;
   expect(within(row).getAllByRole('cell')[3]?.textContent).toBe('100.0%');
 });

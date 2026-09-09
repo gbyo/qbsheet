@@ -1,15 +1,119 @@
-import { useState } from 'react';
-import { availableTimeZones, isValidTimeZone, timeZoneLabel, type DirectorState } from '../domain';
+import type { DirectorNavigationTarget } from '../app/navigationTarget';
+import { useEffect, useState } from 'react';
+import { isValidTimeZone, timeZoneLabel, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
-import { Button, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
-import { PageHeader } from '../components/PageHeader';
+import {
+  AdvancedSection,
+  Button,
+  Callout,
+  DateField,
+  Diagnostics,
+  EmptyState,
+  Field,
+  FieldGrid,
+  Page,
+  PageHeader,
+  Panel,
+  Segmented,
+  StateLabel,
+  SummaryItem,
+  SummaryList,
+  TextInput,
+  TimeZoneField,
+  useConfirm,
+} from '../components';
 import { errorNotice, type AnnounceInput } from '../notices';
 
-/** How many audit rows a first look at Settings draws, and how many each `Load more` adds. */
+/** How many audit entries are rendered initially and on each Load more. */
 export const auditPageSize = 100;
 
+type SettingsSection = 'general' | 'recovery' | 'audit' | 'system';
+
 export function SettingsView({
+  state,
+  controller,
+  onAnnounce,
+  operatorProfile,
+  onSaveOperator,
+  navigationTarget,
+  onClearNavigationTarget,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  operatorProfile?: OperatorProfile;
+  onSaveOperator?: (profile: OperatorProfile) => void;
+  navigationTarget?: DirectorNavigationTarget | null;
+  onClearNavigationTarget?: () => void;
+}) {
+  /*
+   * Settings is the canonical surface for tournament and operator identity, so
+   * the tournament and operator menus deep-link to a section of it rather than
+   * opening their own copies of these forms.
+   *
+   * The section is adjusted during render rather than from an effect: the
+   * effect version painted the General section once before switching, which
+   * reads as a flash on every arrival from a menu.
+   */
+  const targetSection = settingsSectionForTarget(navigationTarget);
+  const [sectionState, setSectionState] = useState<{
+    target: SettingsSection | null;
+    section: SettingsSection;
+  }>({ target: targetSection, section: targetSection ?? 'general' });
+  if (targetSection && targetSection !== sectionState.target) {
+    setSectionState({ target: targetSection, section: targetSection });
+  }
+  const section = sectionState.section;
+  const setSection = (next: SettingsSection) => setSectionState({ target: targetSection, section: next });
+  useEffect(() => {
+    if (targetSection) onClearNavigationTarget?.();
+  }, [targetSection, onClearNavigationTarget]);
+
+  return (
+    <Page>
+      <PageHeader
+        title="Settings"
+        description="Tournament and local operator settings, with recovery and system diagnostics separated from ordinary configuration."
+      />
+
+      {controller.error && (
+        <Callout tone="danger" title="Saving needs attention">
+          {controller.error} Recovery remains available below.
+        </Callout>
+      )}
+
+      <Segmented<SettingsSection>
+        value={section}
+        onChange={setSection}
+        ariaLabel="Settings section"
+        options={[
+          { value: 'general', label: 'General' },
+          { value: 'recovery', label: `Recovery ${(controller.checkpoints ?? []).length}` },
+          { value: 'audit', label: `Audit ${state.audit.length}` },
+          { value: 'system', label: 'System' },
+        ]}
+      />
+
+      {section === 'general' && (
+        <GeneralSettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          operatorProfile={operatorProfile}
+          onSaveOperator={onSaveOperator}
+        />
+      )}
+      {section === 'recovery' && (
+        <RecoverySettings state={state} controller={controller} onAnnounce={onAnnounce} />
+      )}
+      {section === 'audit' && <AuditHistory state={state} />}
+      {section === 'system' && <SystemDiagnostics state={state} controller={controller} />}
+    </Page>
+  );
+}
+
+function GeneralSettings({
   state,
   controller,
   onAnnounce,
@@ -22,7 +126,7 @@ export function SettingsView({
   operatorProfile?: OperatorProfile;
   onSaveOperator?: (profile: OperatorProfile) => void;
 }) {
-  const tournamentDraftKey = [
+  const tournamentKey = [
     state.tournament?.id ?? '',
     state.tournament?.name ?? '',
     state.tournament?.date ?? '',
@@ -32,18 +136,8 @@ export function SettingsView({
     state.tournament?.questionSet ?? '',
     state.tournament?.timeZone ?? 'UTC',
   ].join('|');
-  /*
-   * How much of the audit history is on screen.
-   *
-   * The table is newest-first over the whole history, and the history only grows: a tournament that
-   * has run all day arrives at Settings with thousands of rows, every one of which was being built
-   * and laid out before the page could paint. Nothing is dropped -- the count above the table is
-   * still `state.audit.length` -- but the rows come in pages, which is a `Load more` press for the
-   * rare director who is reading back through the morning and nothing at all for everybody else.
-   */
-  const [auditShown, setAuditShown] = useState(auditPageSize);
   const [tournamentDraft, setTournamentDraft] = useState({
-    key: tournamentDraftKey,
+    key: tournamentKey,
     name: state.tournament?.name ?? '',
     date: state.tournament?.date ?? '',
     endDate: state.tournament?.endDate ?? '',
@@ -53,10 +147,10 @@ export function SettingsView({
     timeZone: state.tournament?.timeZone ?? 'UTC',
   });
   const details =
-    tournamentDraft.key === tournamentDraftKey
+    tournamentDraft.key === tournamentKey
       ? tournamentDraft
       : {
-          key: tournamentDraftKey,
+          key: tournamentKey,
           name: state.tournament?.name ?? '',
           date: state.tournament?.date ?? '',
           endDate: state.tournament?.endDate ?? '',
@@ -66,22 +160,24 @@ export function SettingsView({
           timeZone: state.tournament?.timeZone ?? 'UTC',
         };
   const updateDetails = (changes: Partial<Omit<typeof details, 'key'>>) =>
-    setTournamentDraft({ ...details, ...changes, key: tournamentDraftKey });
-  const operatorDraftKey = `${operatorProfile?.displayName ?? ''}|${operatorProfile?.role ?? ''}`;
+    setTournamentDraft({ ...details, ...changes, key: tournamentKey });
+
+  const operatorKey = `${operatorProfile?.displayName ?? ''}|${operatorProfile?.role ?? ''}`;
   const [operatorDraft, setOperatorDraft] = useState({
-    key: operatorDraftKey,
+    key: operatorKey,
     name: operatorProfile?.displayName ?? 'Local operator',
     role: operatorProfile?.role ?? '',
   });
   const operator =
-    operatorDraft.key === operatorDraftKey
+    operatorDraft.key === operatorKey
       ? operatorDraft
       : {
-          key: operatorDraftKey,
+          key: operatorKey,
           name: operatorProfile?.displayName ?? 'Local operator',
           role: operatorProfile?.role ?? '',
         };
-  const save = () => {
+
+  const saveTournament = () => {
     if (!details.name.trim()) {
       onAnnounce(errorNotice('Enter a tournament name first.'));
       return;
@@ -90,394 +186,375 @@ export function SettingsView({
       onAnnounce(errorNotice('Choose a recognized IANA timezone.'));
       return;
     }
-    if (
-      !controller.updateTournament({
-        name: details.name,
-        date: details.date,
-        endDate: details.endDate,
-        venue: details.venue,
-        organizer: details.organizer,
-        questionSet: details.questionSet,
-        timeZone: details.timeZone,
-      })
-    ) {
-      onAnnounce(errorNotice('Tournament details were not updated; review the Director error.'));
-      return;
-    }
-    onAnnounce('Tournament details updated locally; saving now.');
+    const saved = controller.updateTournament({
+      name: details.name,
+      date: details.date,
+      endDate: details.endDate,
+      venue: details.venue,
+      organizer: details.organizer,
+      questionSet: details.questionSet,
+      timeZone: details.timeZone,
+    });
+    onAnnounce(
+      saved
+        ? 'Tournament details updated locally; saving now.'
+        : errorNotice('Tournament details were not updated; review the Director error.'),
+    );
   };
-  /*
-   * Newest first, then the page. Slicing from the end and reversing that slice keeps the ordering
-   * identical to reversing the whole array and taking the head, without building the whole array.
-   */
-  const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
+
   return (
-    <>
-      <PageHeader
-        eyebrow="Settings"
-        title="Settings"
-        description="Tournament identity, storage, and the local Director runtime."
-      />
-      <div className="director-page-stack">
-        <div className="director-two-column">
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Tournament</p>
-                <h2>Details</h2>
-              </div>
-            </div>
-            {state.tournament ? (
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  save();
-                }}
-              >
-                <PanelBody>
-                  <div className="director-form-grid director-form-grid-single">
-                    <FormField label="Name">
-                      <input
-                        value={details.name}
-                        onChange={(event) => updateDetails({ name: event.target.value })}
-                      />
-                    </FormField>
-                    <FormField label="Date">
-                      <input
-                        type="date"
-                        value={details.date}
-                        onChange={(event) => updateDetails({ date: event.target.value })}
-                      />
-                    </FormField>
-                    <FormField label="End date (optional, for multi-day events)">
-                      <input
-                        type="date"
-                        value={details.endDate}
-                        onChange={(event) => updateDetails({ endDate: event.target.value })}
-                      />
-                    </FormField>
-                    <FormField label="Venue">
-                      <input
-                        value={details.venue}
-                        onChange={(event) => updateDetails({ venue: event.target.value })}
-                      />
-                    </FormField>
-                    <FormField label="Organizer">
-                      <input
-                        value={details.organizer}
-                        onChange={(event) => updateDetails({ organizer: event.target.value })}
-                      />
-                    </FormField>
-                    <FormField label="Question set (optional)">
-                      <input
-                        value={details.questionSet}
-                        onChange={(event) => updateDetails({ questionSet: event.target.value })}
-                        placeholder="e.g. ACF Fall 2025"
-                      />
-                    </FormField>
-                    <FormField
-                      label="Tournament timezone"
-                      hint={`${timeZoneLabel(details.timeZone)}. Changing this affects how future schedule inputs are interpreted; stored instants are not shifted.`}
-                    >
-                      <input
-                        list="director-time-zone-options"
-                        value={details.timeZone}
-                        onChange={(event) => updateDetails({ timeZone: event.target.value })}
-                        aria-label="Tournament timezone"
-                      />
-                    </FormField>
-                    <datalist id="director-time-zone-options">
-                      {availableTimeZones().map((zone) => (
-                        <option key={zone} value={zone}>
-                          {timeZoneLabel(zone)}
-                        </option>
-                      ))}
-                    </datalist>
-                  </div>
-                </PanelBody>
-                <PanelFooter className="director-form-actions">
-                  <Button variant="primary" type="submit">
-                    Save details
-                  </Button>
-                </PanelFooter>
-              </form>
-            ) : (
-              <PanelBody>
-                <p className="director-empty-copy">No tournament is open.</p>
-              </PanelBody>
-            )}
-          </section>
-          <div className="director-page-stack">
-            <section className="director-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Operator</p>
-                  <h2>Local identity</h2>
-                </div>
-                <StateLabel state="info" label="App setting" />
-              </div>
-              <PanelBody>
-                <p className="director-panel-footnote">
-                  Used to attribute new Director decisions. It is not authentication and is never copied into
-                  QBJ, tournament archives, or QBSheet Live.
-                </p>
-                <div className="director-form-grid director-form-grid-two">
-                  <FormField label="Display name">
-                    <input
-                      value={operator.name}
-                      onChange={(event) =>
-                        setOperatorDraft({ ...operator, key: operatorDraftKey, name: event.target.value })
-                      }
-                    />
-                  </FormField>
-                  <FormField label="Role">
-                    <input
-                      value={operator.role}
-                      onChange={(event) =>
-                        setOperatorDraft({ ...operator, key: operatorDraftKey, role: event.target.value })
-                      }
-                      placeholder="Tournament director"
-                    />
-                  </FormField>
-                </div>
-              </PanelBody>
-              <PanelFooter>
-                <Button
-                  variant="secondary"
-                  disabled={!onSaveOperator || !operator.name.trim()}
-                  onClick={() => {
-                    onSaveOperator?.({
-                      displayName: operator.name.trim(),
-                      role: operator.role.trim() || undefined,
-                    });
-                    onAnnounce('Operator identity saved locally.');
-                  }}
-                >
-                  Save operator
-                </Button>
-              </PanelFooter>
-            </section>
-            <section className="director-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Storage</p>
-                  <h2>
-                    {controller.repositoryKind === 'tauri-sqlite'
-                      ? 'SQLite'
-                      : controller.repositoryKind === 'indexeddb'
-                        ? 'IndexedDB'
-                        : 'Memory'}
-                  </h2>
-                </div>
-                <StateLabel
-                  state={controller.error ? 'help' : 'finished'}
-                  label={controller.error ? 'Needs attention' : controller.saving ? 'Saving' : 'Healthy'}
+    <div className="director-stack">
+      <Panel
+        title="Tournament details"
+        description="This is the canonical tournament identity form used by every Settings/Tournament entry point."
+        id="settings-tournament"
+      >
+        {state.tournament ? (
+          <form
+            className="director-stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveTournament();
+            }}
+          >
+            <FieldGrid>
+              <Field label="Name">
+                <TextInput
+                  value={details.name}
+                  onChange={(event) => updateDetails({ name: event.target.value })}
                 />
-              </div>
-              <PanelBody>
-                <dl className="director-detail-list director-detail-list-large">
-                  <div>
-                    <dt>Last saved</dt>
-                    <dd>
-                      {state.metadata.lastSavedAt
-                        ? new Date(state.metadata.lastSavedAt).toLocaleString()
-                        : 'Not yet'}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Schema</dt>
-                    <dd>Director v{state.schemaVersion}</dd>
-                  </div>
-                </dl>
-                {controller.error && <p className="director-error-copy">{controller.error}</p>}
-              </PanelBody>
-            </section>
-          </div>
-        </div>
-        <section className="director-panel" aria-label="Recovery">
-          <div className="director-panel-heading">
-            <div>
-              <h2>Recovery</h2>
-              <p className="director-muted">
-                Latest recovery point:{' '}
-                {controller.checkpoints?.[0]
-                  ? new Date(controller.checkpoints[0].createdAt).toLocaleString()
-                  : 'None yet'}
-              </p>
+              </Field>
+              <Field label="Venue" optional>
+                <TextInput
+                  value={details.venue}
+                  onChange={(event) => updateDetails({ venue: event.target.value })}
+                />
+              </Field>
+              <Field
+                label="Date"
+                render={({ id, describedBy }) => (
+                  <DateField
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={details.date}
+                    onChange={(event) => updateDetails({ date: event.target.value })}
+                  />
+                )}
+              />
+              <Field
+                label="End date"
+                optional
+                hint="For multi-day tournaments."
+                render={({ id, describedBy }) => (
+                  <DateField
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={details.endDate}
+                    onChange={(event) => updateDetails({ endDate: event.target.value })}
+                  />
+                )}
+              />
+              <Field label="Organizer" optional>
+                <TextInput
+                  value={details.organizer}
+                  onChange={(event) => updateDetails({ organizer: event.target.value })}
+                />
+              </Field>
+              <Field label="Question set" optional>
+                <TextInput
+                  value={details.questionSet}
+                  onChange={(event) => updateDetails({ questionSet: event.target.value })}
+                  placeholder="e.g. ACF Fall 2025"
+                />
+              </Field>
+              <Field
+                label="Tournament timezone"
+                spanAll
+                hint={`${timeZoneLabel(details.timeZone)}. Future schedule inputs use this zone; stored instants are not shifted.`}
+                render={({ id, labelId, describedBy, invalid }) => (
+                  <TimeZoneField
+                    id={id}
+                    ariaLabelledBy={labelId}
+                    ariaDescribedBy={describedBy}
+                    invalid={invalid}
+                    value={details.timeZone}
+                    onChange={(timeZone) => updateDetails({ timeZone })}
+                  />
+                )}
+              />
+            </FieldGrid>
+            <div className="director-form-actions">
+              <Button variant="primary" type="submit">
+                Save tournament details
+              </Button>
             </div>
-            <Button
-              disabled={!state.tournament || controller.recovering}
-              onClick={() => {
-                void controller
-                  .checkpoint('Manual recovery point')
-                  .then(() => onAnnounce('Recovery point created.'))
-                  .catch((reason: unknown) =>
-                    onAnnounce(
-                      errorNotice(
-                        reason instanceof Error ? reason.message : 'Recovery point could not be saved.',
-                      ),
-                    ),
-                  );
-              }}
-            >
-              Create recovery point
+          </form>
+        ) : (
+          <EmptyState
+            title="No tournament open"
+            description="Open or create a tournament before editing tournament details."
+          />
+        )}
+      </Panel>
+
+      <Panel
+        title="Local operator"
+        description="Used to attribute Director decisions. This is a local app setting, not authentication, and is not exported with tournament data."
+        id="settings-operator"
+        actions={<StateLabel state="info" label="Local app setting" />}
+      >
+        {/*
+          A real form, so Enter saves the way it does everywhere else in
+          Director. The save contract is the same one the dialogs follow:
+          collect, then commit on Save, with the primary action disabled rather
+          than accepting a press it cannot honour.
+        */}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!onSaveOperator || !operator.name.trim()) return;
+            onSaveOperator({
+              displayName: operator.name.trim(),
+              role: operator.role.trim() || undefined,
+            });
+            onAnnounce('Operator identity saved locally.');
+          }}
+        >
+          <FieldGrid>
+            <Field label="Display name">
+              <TextInput
+                value={operator.name}
+                onChange={(event) =>
+                  setOperatorDraft({ ...operator, key: operatorKey, name: event.target.value })
+                }
+              />
+            </Field>
+            <Field label="Role" optional>
+              <TextInput
+                value={operator.role}
+                onChange={(event) =>
+                  setOperatorDraft({ ...operator, key: operatorKey, role: event.target.value })
+                }
+                placeholder="Tournament director"
+              />
+            </Field>
+          </FieldGrid>
+          <div className="director-form-actions">
+            <Button variant="primary" type="submit" disabled={!onSaveOperator || !operator.name.trim()}>
+              Save operator
             </Button>
           </div>
-          <PanelBody>
-            <p>
-              Recovery points preserve this tournament, including rounds, results, and transfer history.
-              Restoring replaces the open tournament. Operator settings and credentials stay unchanged.
-            </p>
-            <p className="director-muted">
-              {controller.repositoryKind === 'tauri-sqlite'
-                ? 'Stored in the local SQLite database. Keep a portable archive separately for loss of the computer or disk.'
-                : controller.repositoryKind === 'memory'
-                  ? 'Memory only: recovery points disappear when this session ends.'
-                  : 'Stored in this browser profile. Clearing browser data removes both the tournament and its recovery points.'}
-            </p>
-            {(controller.checkpoints ?? []).length === 0 ? (
-              <p>No recovery points yet.</p>
-            ) : (
-              <ul className="director-list">
-                {(controller.checkpoints ?? []).slice(0, 10).map((entry) => (
-                  <li key={entry.id}>
-                    <span>
-                      <strong>{entry.reason}</strong>
-                      <br />
-                      <time dateTime={entry.createdAt}>{new Date(entry.createdAt).toLocaleString()}</time>
-                    </span>
-                    <Button
-                      disabled={controller.recovering}
-                      onClick={() => {
-                        if (
-                          !confirm(
-                            `Restore tournament to the checkpoint from ${new Date(entry.createdAt).toLocaleString()}? A recovery point of the current state will be created first.`,
-                          )
-                        )
-                          return;
-                        void controller
-                          .restoreCheckpoint(entry.id)
-                          .then((restored) =>
-                            onAnnounce(
-                              restored
-                                ? 'Tournament restored. The previous state is also available in Recovery.'
-                                : errorNotice(
-                                    'The tournament could not be restored; review the Director error.',
-                                  ),
-                            ),
-                          );
-                      }}
-                    >
-                      Restore
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </PanelBody>
-        </section>
-        <section className="director-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">Audit history</p>
-              <h2>All meaningful changes</h2>
-            </div>
-            <span className="director-muted">
-              {visibleAudit.length === state.audit.length
-                ? `${state.audit.length} event${state.audit.length === 1 ? '' : 's'}`
-                : `${visibleAudit.length} of ${state.audit.length} events`}
-            </span>
-          </div>
-          {state.audit.length === 0 ? (
-            <PanelBody>
-              <p className="director-empty-copy">No changes recorded yet.</p>
-            </PanelBody>
-          ) : (
-            <div className="director-table-wrap">
-              <table className="director-table">
-                <thead>
-                  <tr>
-                    <th>When</th>
-                    <th>Action</th>
-                    <th>Actor</th>
-                    <th>Entity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleAudit.map((event) => (
-                    <tr key={event.id}>
-                      <td>{new Date(event.at).toLocaleString()}</td>
-                      <td>
-                        <strong>{event.summary}</strong>
-                      </td>
-                      <td>{event.actor}</td>
-                      <td className="director-mono">{event.entityId ?? '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {visibleAudit.length < state.audit.length && (
-            <PanelFooter>
-              <Button variant="secondary" onClick={() => setAuditShown((shown) => shown + auditPageSize)}>
-                Load more
-              </Button>
-              <span className="director-muted">
-                {state.audit.length - visibleAudit.length} earlier event
-                {state.audit.length - visibleAudit.length === 1 ? '' : 's'}
-              </span>
-            </PanelFooter>
-          )}
-        </section>
-        <div className="director-two-column">
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Storage & recovery</p>
-                <h2>Local durability</h2>
-              </div>
-            </div>
-            <PanelBody>
-              <p>
-                Director stores tournament recovery points locally. Browser preview uses browser storage; the
-                desktop app uses SQLite. Portable archives contain tournament data only, not the operator
-                profile or Live credential.
-              </p>
-            </PanelBody>
-          </section>
-          <section className="director-panel">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Local network</p>
-                <h2>QBTCP and Live</h2>
-              </div>
-            </div>
-            <PanelBody>
-              <p>
-                QBTCP room control and the optional local QBSheet Live server are separate listeners. Start
-                and inspect them from their operational sections; spectator URLs never contain management
-                credentials.
-              </p>
-            </PanelBody>
-          </section>
-        </div>
-        <section className="director-panel">
-          <div className="director-panel-heading">
-            <div>
-              <p className="director-eyebrow">About & diagnostics</p>
-              <h2>Build information</h2>
-            </div>
-          </div>
-          <PanelBody>
-            <p>
-              Director schema v{state.schemaVersion} · {controller.repositoryKind}. If support is needed,
-              export diagnostics from the desktop app without sending private tournament content unless
-              requested.
-            </p>
-          </PanelBody>
-        </section>
-      </div>
-    </>
+        </form>
+      </Panel>
+    </div>
   );
+}
+
+function RecoverySettings({
+  state,
+  controller,
+  onAnnounce,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+}) {
+  const confirmAction = useConfirm();
+  const checkpoints = controller.checkpoints ?? [];
+  return (
+    <Panel
+      id="settings-recovery"
+      title="Recovery"
+      description="Recovery points preserve the tournament, including rounds, results, and transfer history. Restoring does not change operator settings or publishing credentials."
+      actions={
+        <Button
+          variant="primary"
+          icon="plus"
+          disabled={!state.tournament || controller.recovering}
+          onClick={() => {
+            void controller
+              .checkpoint('Manual recovery point')
+              .then(() => onAnnounce('Recovery point created.'))
+              .catch((reason: unknown) =>
+                onAnnounce(
+                  errorNotice(
+                    reason instanceof Error ? reason.message : 'Recovery point could not be saved.',
+                  ),
+                ),
+              );
+          }}
+        >
+          Create recovery point
+        </Button>
+      }
+      flush
+    >
+      {controller.repositoryKind === 'memory' && (
+        <Callout tone="warning">
+          This Director session is using memory-only storage. Recovery points disappear when the session ends.
+        </Callout>
+      )}
+      {checkpoints.length === 0 ? (
+        <div className="director-empty-in-panel">
+          <p className="director-empty-copy">No recovery points yet.</p>
+        </div>
+      ) : (
+        <SummaryList ariaLabel="Recovery points">
+          {checkpoints.slice(0, 25).map((entry) => (
+            <SummaryItem
+              key={entry.id}
+              title={<strong>{entry.reason}</strong>}
+              summary={new Date(entry.createdAt).toLocaleString()}
+              actions={
+                <Button
+                  variant="secondary"
+                  icon="undo"
+                  disabled={controller.recovering}
+                  onClick={() =>
+                    void (async () => {
+                      const approved = await confirmAction({
+                        title: `Restore the recovery point from ${new Date(entry.createdAt).toLocaleString()}?`,
+                        body: 'Director creates a recovery point of the current state first.',
+                        consequence:
+                          'The open tournament will be replaced by the selected recovery point. Operator settings and credentials stay unchanged.',
+                        confirmLabel: 'Restore tournament',
+                        tone: 'danger',
+                      });
+                      if (!approved) return;
+                      const restored = await controller.restoreCheckpoint(entry.id);
+                      onAnnounce(
+                        restored
+                          ? 'Tournament restored. The previous state is also available in Recovery.'
+                          : errorNotice('The tournament could not be restored; review the Director error.'),
+                      );
+                    })()
+                  }
+                >
+                  Restore…
+                </Button>
+              }
+            />
+          ))}
+        </SummaryList>
+      )}
+    </Panel>
+  );
+}
+
+function AuditHistory({ state }: { state: DirectorState }) {
+  const [auditShown, setAuditShown] = useState(auditPageSize);
+  const visibleAudit = state.audit.slice(Math.max(0, state.audit.length - auditShown)).reverse();
+  if (state.audit.length === 0) {
+    return (
+      <EmptyState
+        title="No audit history yet"
+        description="Meaningful tournament and Director decisions will be retained here."
+      />
+    );
+  }
+  return (
+    <Panel
+      id="settings-audit"
+      title="Audit history"
+      description={`${visibleAudit.length === state.audit.length ? state.audit.length : `${visibleAudit.length} of ${state.audit.length}`} meaningful change${state.audit.length === 1 ? '' : 's'}, newest first.`}
+      flush
+    >
+      <SummaryList ariaLabel="Audit history">
+        {visibleAudit.map((event) => (
+          <SummaryItem
+            key={event.id}
+            title={<strong>{event.summary}</strong>}
+            summary={`${new Date(event.at).toLocaleString()} · ${event.actor}`}
+          >
+            {event.entityId && (
+              <Diagnostics
+                label="Audit record details"
+                standalone={false}
+                items={[{ term: 'Entity ID', value: event.entityId, mono: true }]}
+              />
+            )}
+          </SummaryItem>
+        ))}
+      </SummaryList>
+      {visibleAudit.length < state.audit.length && (
+        <div className="director-panel-footer">
+          <Button variant="secondary" onClick={() => setAuditShown((shown) => shown + auditPageSize)}>
+            Load more
+          </Button>
+          <span className="director-text-meta">
+            {state.audit.length - visibleAudit.length} earlier event
+            {state.audit.length - visibleAudit.length === 1 ? '' : 's'}
+          </span>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function SystemDiagnostics({ state, controller }: { state: DirectorState; controller: DirectorController }) {
+  const storageLabel =
+    controller.repositoryKind === 'tauri-sqlite'
+      ? 'Desktop local storage'
+      : controller.repositoryKind === 'indexeddb'
+        ? 'Browser local storage'
+        : 'Memory-only session';
+  return (
+    <div className="director-stack">
+      <Panel
+        title="System status"
+        description="Implementation details live here so ordinary tournament settings do not have to explain storage engines or schema versions."
+        actions={
+          <StateLabel
+            state={controller.error ? 'help' : controller.saving ? 'pending' : 'finished'}
+            label={controller.error ? 'Needs attention' : controller.saving ? 'Saving' : 'Healthy'}
+          />
+        }
+      >
+        <p className="director-text-secondary">
+          {state.metadata.lastSavedAt
+            ? `Last saved ${new Date(state.metadata.lastSavedAt).toLocaleString()}.`
+            : 'This tournament has not been saved yet.'}
+        </p>
+        {controller.error && <Callout tone="danger">{controller.error}</Callout>}
+      </Panel>
+      <Diagnostics
+        label="Storage & build diagnostics"
+        hint="Useful for support and troubleshooting; not part of normal tournament configuration."
+        defaultOpen
+        items={[
+          { term: 'Storage mode', value: storageLabel },
+          { term: 'Storage implementation', value: controller.repositoryKind, mono: true },
+          { term: 'Director schema', value: state.schemaVersion, mono: true },
+          {
+            term: 'Last saved',
+            value: state.metadata.lastSavedAt
+              ? new Date(state.metadata.lastSavedAt).toLocaleString()
+              : 'Never',
+          },
+          { term: 'Audit events', value: state.audit.length },
+        ]}
+      />
+      <AdvancedSection
+        label="Local network boundaries"
+        hint="QBTCP room control and QBSheet Live use separate listeners and credentials."
+        icon="network"
+      >
+        <p>
+          Start and inspect QBTCP from Rooms and QBSheet Live from its own destination. Public spectator URLs
+          never contain management credentials.
+        </p>
+      </AdvancedSection>
+    </div>
+  );
+}
+
+function settingsSectionForTarget(
+  target: DirectorNavigationTarget | null | undefined,
+): SettingsSection | null {
+  if (!target || target.section !== 'settings' || target.entityType !== 'setting') return null;
+  if (target.entityId === 'recovery') return 'recovery';
+  if (target.entityId === 'audit') return 'audit';
+  if (target.entityId === 'system' || target.entityId === 'storage') return 'system';
+  if (target.entityId === 'tournament' || target.entityId === 'operator') return 'general';
+  return null;
 }

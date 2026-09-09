@@ -5,13 +5,18 @@
  * packet that was already selected: a control shaped like an action that could not act. And `Import
  * QBJ` accepted `application/json`, which put every unrelated JSON file on the machine in front of
  * a director looking for a packet list.
+ *
+ * The redesign also renamed the concept. `Current` and `Use next` never said what they governed;
+ * the packet is the default for *newly generated rounds*, and a round can still be given a
+ * different packet from Tournament day. The names now say that.
  */
 import { afterEach, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { tournamentState } from '../../../tests/directorFixtures';
 import { PacketsView } from './PacketsView';
+import { ConfirmProvider } from '../components/Dialog';
 
 afterEach(cleanup);
 
@@ -50,32 +55,46 @@ function controllerWith(): DirectorController {
   } as unknown as DirectorController;
 }
 
-function renderPackets(controller = controllerWith()) {
-  render(<PacketsView state={stateWithPackets()} controller={controller} onAnnounce={vi.fn()} />);
+function renderPackets(controller = controllerWith(), state = stateWithPackets(), onAnnounce = vi.fn()) {
+  render(
+    <ConfirmProvider>
+      <PacketsView state={state} controller={controller} onAnnounce={onAnnounce} />
+    </ConfirmProvider>,
+  );
   return controller;
 }
 
-test('the current packet is a status, not a button', () => {
+/** Low-frequency packet actions live in the row's overflow menu, not in row chrome. */
+function openPacketMenu(name: string): void {
+  fireEvent.click(screen.getByRole('button', { name: `${name} actions` }));
+}
+
+test('the default packet is a status, not a button', () => {
   renderPackets();
 
-  expect(screen.queryByRole('button', { name: 'Current' })).toBeNull();
-  const label = screen.getByText('Current');
+  expect(screen.queryByRole('button', { name: /Default for new rounds/ })).toBeNull();
+  const label = screen.getByText('Default for new rounds');
   expect(label.closest('button')).toBeNull();
-  expect(label.className).toContain('director-state');
+  expect(label.closest('.director-state')).not.toBeNull();
 });
 
-test('a packet that is not current still offers Use next', () => {
+test('a packet that is not the default can be made the default', () => {
   const controller = renderPackets();
 
-  const useNext = screen.getAllByRole('button', { name: 'Use next' });
-  expect(useNext).toHaveLength(1);
-  useNext[0].click();
+  // The packet already in force does not offer it, so the action cannot be a no-op.
+  openPacketMenu('Packet A');
+  expect(screen.queryByRole('menuitem', { name: 'Make default for new rounds' })).toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+
+  openPacketMenu('Packet B');
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Make default for new rounds' }));
   expect(controller.selectPacket).toHaveBeenCalledWith('packet-2');
 });
 
 test('Import QBJ asks for QBJ files rather than any JSON on the machine', () => {
   renderPackets();
 
+  fireEvent.click(screen.getByRole('button', { name: /^Import/ }));
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   expect(input.accept).toBe('.qbj,application/vnd.quizbowl.qbj+json');
   expect(input.accept).not.toContain('application/json');
@@ -88,18 +107,17 @@ test('Import QBJ asks for QBJ files rather than any JSON on the machine', () => 
  * `role="status"`, or a toned notice. Every rejection on this page passed a bare string, so
  * "Retired packets cannot be selected" arrived looking exactly like "Packet A selected".
  */
-test('selecting a retired packet is announced as an error, not a success', () => {
-  const onAnnounce = vi.fn();
+test('a retired packet is not offered as a default at all', () => {
   const state = stateWithPackets();
   state.packets[1].retired = true;
 
-  render(<PacketsView state={state} controller={controllerWith()} onAnnounce={onAnnounce} />);
-  screen.getAllByRole('button', { name: 'Use next' })[0].click();
+  renderPackets(controllerWith(), state);
+  openPacketMenu('Packet B');
 
-  expect(onAnnounce).toHaveBeenCalledWith({
-    message: 'Retired packets cannot be selected; restore it first.',
-    tone: 'error',
-  });
+  // Prevented rather than refused: the action a retired packet cannot perform
+  // is not presented, so there is no press that fails.
+  expect(screen.queryByRole('menuitem', { name: 'Make default for new rounds' })).toBeNull();
+  expect(screen.getByRole('menuitem', { name: /Restore/ })).toBeTruthy();
 });
 
 test('a packet the controller refuses to add is announced as an error', () => {
@@ -109,10 +127,11 @@ test('a packet the controller refuses to add is announced as an error', () => {
     addPacket: vi.fn(() => false),
   } as unknown as DirectorController;
 
-  render(<PacketsView state={stateWithPackets()} controller={controller} onAnnounce={onAnnounce} />);
+  renderPackets(controller, stateWithPackets(), onAnnounce);
   fireEvent.click(screen.getByRole('button', { name: 'Add packet' }));
   fireEvent.change(screen.getByLabelText('Packet name'), { target: { value: 'Packet C' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Save packet' }));
+  const dialog = document.querySelector('dialog[open]') as HTMLElement;
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add packet' }));
 
   expect(onAnnounce).toHaveBeenCalledWith({
     message: 'Packet was not added; review the Director error.',

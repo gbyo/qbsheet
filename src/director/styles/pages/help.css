@@ -1,0 +1,62 @@
+/* Director help dialog styles. The dialog chrome itself comes from the shared dialog layer. */
+
+/* Help sections: readable body copy inside the shared dialog. */
+.director-help-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-5);
+}
+
+.director-help-dialog-body section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-2);
+}
+
+.director-help-dialog-body h3 {
+  font-size: var(--director-text-subhead);
+}
+
+.director-help-dialog-body p,
+.director-help-dialog-body li {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-relaxed);
+}
+
+.director-help-dialog-body ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  margin: 0;
+  padding-left: var(--director-space-5);
+}
+
+.director-help-toc {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-1) var(--director-space-3);
+  padding: var(--director-space-3) var(--director-space-4);
+  background: var(--director-surface-soft);
+  border: 1px solid var(--director-border-subtle);
+  border-radius: var(--director-radius);
+}
+
+.director-help-toc a {
+  color: var(--director-accent);
+  font-size: var(--director-text-secondary);
+  text-decoration: none;
+}
+
+.director-help-toc a:hover {
+  text-decoration: underline;
+}
+
+.director-help-shortcuts kbd + kbd {
+  margin-left: 4px;
+}
+
+.director-help-footnote {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}

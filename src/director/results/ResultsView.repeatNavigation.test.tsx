@@ -6,6 +6,7 @@ import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import type { DirectorController } from '../state/useDirectorController';
 import { playedTournament, scheduledGame } from '../../../tests/directorFixtures';
 import { ResultsView } from './ResultsView';
+import { ConfirmProvider } from '../components/Dialog';
 
 afterEach(cleanup);
 
@@ -22,11 +23,17 @@ function stateWithSettledTarget(): DirectorState {
 }
 
 function scheduleRowIds(): string[] {
-  const panel = screen.getByText('Scheduled games').closest('.director-panel') as HTMLElement;
-  return within(panel)
-    .getAllByRole('row')
-    .slice(1)
-    .map((row) => row.getAttribute('data-director-navigation-id') ?? '');
+  return within(screen.getByRole('list', { name: 'Scheduled games' }))
+    .getAllByRole('listitem')
+    .map(
+      (row) =>
+        row.querySelector('[data-director-navigation-id]')?.getAttribute('data-director-navigation-id') ?? '',
+    );
+}
+
+/** Games are one of the four Results views. */
+function showGames(): void {
+  fireEvent.click(screen.getByRole('button', { name: /^Games/ }));
 }
 
 async function settleNavigation(): Promise<void> {
@@ -42,13 +49,15 @@ function Harness({ state }: { state: DirectorState }) {
       <button type="button" onClick={() => setNavigationTarget(settledTarget)}>
         Navigate to settled game
       </button>
-      <ResultsView
-        state={state}
-        controller={{} as DirectorController}
-        onAnnounce={vi.fn()}
-        navigationTarget={navigationTarget}
-        onClearNavigationTarget={() => setNavigationTarget(null)}
-      />
+      <ConfirmProvider>
+        <ResultsView
+          state={state}
+          controller={{} as DirectorController}
+          onAnnounce={vi.fn()}
+          navigationTarget={navigationTarget}
+          onClearNavigationTarget={() => setNavigationTarget(null)}
+        />
+      </ConfirmProvider>
     </>
   );
 }
@@ -57,11 +66,12 @@ test('the same settled game can be revealed again after returning to unresolved 
   render(<Harness state={stateWithSettledTarget()} />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Navigate to settled game' }));
+  showGames();
   expect(scheduleRowIds()).toContain('scheduled-1');
   await settleNavigation();
   expect(scheduleRowIds()).toEqual(['scheduled-1', 'scheduled-live']);
 
-  fireEvent.click(screen.getByRole('button', { name: 'Show only unresolved' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Hide settled games' }));
   expect(scheduleRowIds()).toEqual(['scheduled-live']);
 
   fireEvent.click(screen.getByRole('button', { name: 'Navigate to settled game' }));

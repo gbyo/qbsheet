@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import { defaultRules, emptyDirectorState, type DirectorState } from '../src/director/domain';
 import { FormatView } from '../src/director/format/FormatView';
@@ -68,22 +68,35 @@ function renderFormat(state: DirectorState) {
 }
 
 describe('FormatView progressive disclosure', () => {
-  test('one ordinary stage hides stage machinery entirely', () => {
+  test('one ordinary stage keeps stage machinery out of the page entirely', () => {
     renderFormat(formatState([phase('phase-1', 'Tournament', 1)]));
 
-    expect(screen.getByRole('heading', { name: 'Single stage' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Add playoff stage' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Stage settings' })).toBeNull();
-    expect(screen.queryByRole('heading', { name: 'Plan sequence' })).toBeNull();
+    // Nothing about stages is on screen: no stage list, no per-stage settings,
+    // and no "phase" anywhere in the copy a director reads.
+    expect(screen.queryByRole('heading', { name: 'Tournament stage' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /^Selected stage/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add playoff stage' })).toBeNull();
     expect(screen.queryByText(/phase/i, { selector: 'h1,h2,h3,p,button,label' })).toBeNull();
+
+    // It is still reachable, and the disclosure says why it is not needed.
+    const stages = screen.getByRole('button', { name: /Stages & advancement/ });
+    expect(stages).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByText(/A one-stage tournament does not need stage concepts/)).toBeInTheDocument();
+
+    fireEvent.click(stages);
+    expect(screen.getByRole('button', { name: 'Add playoff stage' })).toBeTruthy();
   });
 
-  test('a second stage reveals stage navigation and settings', () => {
+  test('a second stage reveals stage navigation and settings without being asked', () => {
     renderFormat(formatState([phase('phase-1', 'Prelims', 1), phase('phase-2', 'Playoffs', 2)]));
 
-    expect(screen.getByRole('heading', { name: 'Plan sequence' })).toBeVisible();
-    expect(screen.getByRole('heading', { name: 'Stage settings' })).toBeVisible();
+    // The tournament now has stages, so the section is open on arrival.
+    expect(screen.getByRole('button', { name: /Stages & advancement/ })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByRole('heading', { name: 'Stage sequence' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /^Selected stage/ })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Add stage' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Single stage' })).toBeNull();
   });
 });

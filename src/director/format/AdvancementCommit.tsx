@@ -3,7 +3,7 @@ import type { DirectorController } from '../state/useDirectorController';
 import type { AdvancementPreview, DirectorState } from '../domain';
 import type { AnnounceInput } from '../notices';
 import { errorNotice, infoNotice } from '../notices';
-import { Button, FormField } from '../components/Controls';
+import { Button, Field, Select, TextInput } from '../components';
 
 /**
  * Manual rebracketing: the preview proposes where each qualifier goes, the
@@ -89,69 +89,64 @@ export function AdvancementCommit({
   const rule = source?.advancementRule;
   return (
     <div className="director-advancement-commit">
-      <div className="director-panel-heading director-panel-heading-compact">
-        <div>
-          <p className="director-eyebrow">Rebracket</p>
-          <h3>Advance to {target.name}</h3>
-        </div>
-      </div>
+      <h3>Advance to {target.name}</h3>
       {rule && (
-        <p className="director-table-subtext">
+        <p className="director-text-secondary">
           Top {rule.qualifiersPerPool} from each pool
-          {(rule.wildcards ?? 0) > 0 ? ` · best ${rule.wildcards} remaining teams` : ''} · only placement
-          changes, results stay untouched.
+          {(rule.wildcards ?? 0) > 0 ? ` · best ${rule.wildcards} remaining teams` : ''}. Placement changes
+          are audited; results stay untouched.
         </p>
       )}
-      <FormField label="Target stage">
-        <select
-          value={target.id}
-          onChange={(event) => {
-            setTargetPhaseId(event.target.value);
-            setMoves({});
-          }}
-        >
-          {targets.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.name}
-            </option>
-          ))}
-        </select>
-      </FormField>
-      {targetPools.map((pool) => (
-        <div key={pool.id}>
-          <h4>{pool.name}</h4>
-          <ul className="director-compact-list">
-            {(byPool.get(pool.id) ?? []).map((team, index) => (
-              <li key={team.id}>
-                {index + 1}. {team.displayName}
-                {wildcardIds.has(team.id) ? ' (wildcard)' : ''}{' '}
-                <select
-                  aria-label={`Place ${team.displayName} in`}
-                  value={proposal[team.id] ?? pool.id}
-                  onChange={(event) => setMoves((current) => ({ ...current, [team.id]: event.target.value }))}
-                >
-                  {targetPools.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.name}
-                    </option>
-                  ))}
-                </select>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      <Field
+        label="Target stage"
+        render={({ id, labelId, describedBy }) => (
+          <Select
+            id={id}
+            ariaLabelledBy={labelId}
+            ariaDescribedBy={describedBy}
+            value={target.id}
+            options={targets.map((entry) => ({ value: entry.id, label: entry.name }))}
+            onChange={(value) => {
+              setTargetPhaseId(value);
+              setMoves({});
+            }}
+          />
+        )}
+      />
+      <div className="director-stack director-stack-tight">
+        {targetPools.map((pool) => (
+          <div className="director-inset" key={pool.id}>
+            <h4>{pool.name}</h4>
+            <ul className="director-compact-list">
+              {(byPool.get(pool.id) ?? []).map((team, index) => (
+                <li key={team.id}>
+                  <span>
+                    {index + 1}. {team.displayName}
+                    {wildcardIds.has(team.id) ? ' (wildcard)' : ''}
+                  </span>
+                  <Select
+                    ariaLabel={`Place ${team.displayName} in`}
+                    value={proposal[team.id] ?? pool.id}
+                    options={targetPools.map((option) => ({ value: option.id, label: option.name }))}
+                    onChange={(value) => setMoves((current) => ({ ...current, [team.id]: value }))}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
       {(needsReason || reason !== '') && (
-        <FormField
+        <Field
           label="Director decision"
-          hint="Required when the cutoff is tied or a team is placed outside the preview."
+          hint="Required when the cutoff is tied or placement differs from the preview."
         >
-          <input
+          <TextInput
             value={reason}
             onChange={(event) => setReason(event.target.value)}
             placeholder="Why this placement differs from the preview"
           />
-        </FormField>
+        </Field>
       )}
       <Button variant="primary" onClick={commit}>
         Commit {preview.qualifiers.length} placements to {target.name}

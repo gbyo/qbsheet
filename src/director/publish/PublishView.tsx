@@ -1,7 +1,5 @@
 import { deriveTeamStandings, type DirectorState } from '../domain';
-import { Button, EmptyState, PanelBody } from '../components/Controls';
-import { Icon } from '../components/Icon';
-import { PageHeader } from '../components/PageHeader';
+import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
@@ -18,11 +16,10 @@ export function PublishView({
 }) {
   const hasTournament = state.tournament !== null;
   return (
-    <>
+    <Page>
       <PageHeader
-        eyebrow="Review"
-        title="Publish"
-        description="Generate files locally for teams, staff, and tournament records."
+        title="Exports"
+        description="Create local files for teams, staff, interoperability, and tournament backup. Public publishing lives in QBSheet Live."
         actions={
           <Button
             variant="primary"
@@ -30,136 +27,87 @@ export function PublishView({
             disabled={!hasTournament}
             onClick={() => void downloadArchive(state, onAnnounce)}
           >
-            Export archive
+            Export tournament archive
           </Button>
         }
       />
-      <div className="director-page-stack">
-        {!hasTournament ? (
-          /*
-           * Nothing else on this page is about anything. The checklist below used to render here
-           * too, describing what a tournament export contains to somebody who has no tournament.
-           */
-          <EmptyState
-            title="Nothing to publish"
-            description="Create or open a tournament before exporting reports."
-          />
-        ) : (
-          <>
-            <section className="director-panel director-publish-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Offline publishing</p>
-                  <h2>Exports</h2>
-                </div>
-                <span className="director-muted">Local files</span>
-              </div>
-              <div className="director-publish-rows">
-                <PublishAction
-                  title="Team standings"
-                  description="Printable HTML table with the configured tiebreak order."
-                  action="Download HTML"
-                  icon="publish"
-                  onClick={() => downloadHtml(state, onAnnounce)}
-                />
-                {/*
-                  The same serialization Standings & stats offers, so "team standings CSV" means one
-                  thing wherever a director exports it. See `standingsCsv`.
-                */}
-                <PublishAction
-                  title="Team standings CSV"
-                  description="Records, scoring, and bonus columns for spreadsheets."
-                  action="Download CSV"
-                  icon="download"
-                  onClick={() => downloadTeamStandingsCsv(state, onAnnounce)}
-                />
-                <PublishAction
-                  title="Player stats CSV"
-                  description="Per-player powers, gets, negs, and points from accepted games."
-                  action="Download CSV"
-                  icon="download"
-                  onClick={() => downloadPlayerStatsCsv(state, onAnnounce)}
-                />
-                <PublishAction
-                  title="Team & roster CSV"
-                  description="Team and player rows in the format the team importer reads back."
-                  action="Download CSV"
-                  icon="download"
-                  onClick={() => downloadTeamCsv(state, onAnnounce)}
-                />
-                <PublishAction
-                  title="QBJ tournament"
-                  description="Interoperable tournament, roster, schedule, and accepted-result data."
-                  action="Download QBJ"
-                  icon="file"
-                  onClick={() => downloadQbj(state, onAnnounce)}
-                />
-                <PublishAction
-                  title="SQBS roster"
-                  description="Positional roster export for SQBS-compatible tools."
-                  action="Download SQBS"
-                  icon="download"
-                  onClick={() => downloadSqbs(state, onAnnounce)}
-                />
-              </div>
-            </section>
-            <section className="director-panel">
-              <div className="director-panel-heading">
-                <div>
-                  <p className="director-eyebrow">Offline publishing</p>
-                  <h2>What is included</h2>
-                </div>
-              </div>
-              <PanelBody>
-                <ul className="director-publish-checklist">
-                  <li>
-                    <Icon name="check" size={16} />
-                    <span>Team standings use accepted results only.</span>
-                  </li>
-                  <li>
-                    <Icon name="check" size={16} />
-                    <span>Original QBTCP submissions stay in the archive.</span>
-                  </li>
-                  <li>
-                    <Icon name="check" size={16} />
-                    <span>Audit history and schema version travel with the tournament.</span>
-                  </li>
-                </ul>
-              </PanelBody>
-            </section>
-          </>
-        )}
-      </div>
-    </>
+
+      {!hasTournament ? (
+        <EmptyState
+          title="Nothing to export"
+          description="Create or open a tournament before generating local files."
+        />
+      ) : (
+        <Panel
+          title="Local files"
+          description="Standings and player-stat CSVs use the same canonical serializers as the shortcuts on Standings. Archives retain raw submissions and audit history."
+          flush
+        >
+          <SummaryList ariaLabel="Export formats">
+            <ExportAction
+              title="Team standings HTML"
+              description="Printable static standings table using accepted results and the configured tiebreak order."
+              action="Download HTML"
+              onClick={() => downloadHtml(state, onAnnounce)}
+            />
+            <ExportAction
+              title="Team standings CSV"
+              description="Canonical team records and scoring columns for spreadsheets."
+              action="Download CSV"
+              onClick={() => downloadTeamStandingsCsv(state, onAnnounce)}
+            />
+            <ExportAction
+              title="Player stats CSV"
+              description="Canonical per-player powers, gets, negs, bonus points, games, and PPG."
+              action="Download CSV"
+              onClick={() => downloadPlayerStatsCsv(state, onAnnounce)}
+            />
+            <ExportAction
+              title="Team & roster CSV"
+              description="Teams and players in the same CSV shape the Director team importer reads."
+              action="Download CSV"
+              onClick={() => downloadTeamCsv(state, onAnnounce)}
+            />
+            <ExportAction
+              title="QBJ tournament"
+              description="Interoperable tournament, roster, schedule, packet, and accepted-result data."
+              action="Download QBJ"
+              onClick={() => downloadQbj(state, onAnnounce)}
+            />
+            <ExportAction
+              title="SQBS roster"
+              description="Positional roster export for SQBS-compatible tools."
+              action="Download SQBS"
+              onClick={() => downloadSqbs(state, onAnnounce)}
+            />
+          </SummaryList>
+        </Panel>
+      )}
+    </Page>
   );
 }
 
-function PublishAction({
+function ExportAction({
   title,
   description,
   action,
-  icon,
   onClick,
 }: {
   title: string;
   description: string;
   action: string;
-  icon: 'publish' | 'download' | 'file';
   onClick: () => void;
 }) {
   return (
-    <div className="director-publish-row">
-      <div className="director-publish-action-icon">
-        <Icon name={icon} size={19} />
-      </div>
-      <div>
-        <h2>{title}</h2>
-        <p>{description}</p>
-      </div>
-      <Button variant="secondary" onClick={onClick}>
-        {action}
-      </Button>
-    </div>
+    <SummaryItem
+      title={<strong>{title}</strong>}
+      summary={description}
+      actions={
+        <Button variant="secondary" icon="download" onClick={onClick}>
+          {action}
+        </Button>
+      }
+    />
   );
 }
 
@@ -193,6 +141,7 @@ export async function downloadArchive(
     );
   }
 }
+
 function downloadHtml(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   const standings = deriveTeamStandings(state);
   const title = escapeHtml(state.tournament?.name ?? 'Tournament standings');
@@ -206,6 +155,7 @@ function downloadHtml(state: DirectorState, onAnnounce: (announcement: AnnounceI
   downloadText(html, `${standingsFileStem(state)}-standings.html`, 'text/html;charset=utf-8');
   onAnnounce('Static standings HTML exported.');
 }
+
 function downloadTeamStandingsCsv(
   state: DirectorState,
   onAnnounce: (announcement: AnnounceInput) => void,
@@ -213,6 +163,7 @@ function downloadTeamStandingsCsv(
   downloadText(teamStandingsCsv(state), `${standingsFileStem(state)}-standings.csv`, csvMediaType);
   onAnnounce('Team standings CSV exported.');
 }
+
 function downloadPlayerStatsCsv(
   state: DirectorState,
   onAnnounce: (announcement: AnnounceInput) => void,
@@ -220,11 +171,12 @@ function downloadPlayerStatsCsv(
   downloadText(playerStatsCsv(state), `${standingsFileStem(state)}-player-stats.csv`, csvMediaType);
   onAnnounce('Player statistics CSV exported.');
 }
+
 function downloadTeamCsv(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
-  // Named for what it holds. This is the roster importer's format, not a standings table.
   downloadText(exportTeamCsv(state), `${standingsFileStem(state)}-teams.csv`, csvMediaType);
   onAnnounce('Team and roster CSV exported.');
 }
+
 function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(
     exportQbj(state),
@@ -233,10 +185,12 @@ function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceIn
   );
   onAnnounce('QBJ tournament exported.');
 }
+
 function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(exportSqbs(state), `${standingsFileStem(state)}.sqbs`, 'text/plain;charset=utf-8');
   onAnnounce('SQBS roster exported.');
 }
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')

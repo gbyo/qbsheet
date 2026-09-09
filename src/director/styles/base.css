@@ -1,0 +1,224 @@
+/*
+ * Director base layer: reset, document typography, focus, and the type-scale
+ * utilities every surface composes from.
+ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#director-root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--director-page);
+  color: var(--director-ink);
+  font-family: var(--director-font-sans);
+  font-size: var(--director-text-body);
+  line-height: var(--director-leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  margin: 0;
+}
+
+button:not(:disabled),
+label.director-button,
+summary {
+  cursor: pointer;
+}
+
+/* One focus treatment for the whole application. Custom controls that paint
+   their own surface use `--director-focus-ring` instead of an outline; both are
+   the same accent at the same weight, so keyboard travel looks continuous. */
+:where(button, input, select, textarea, a, summary, [tabindex]):focus-visible,
+[data-director-navigation-focus]:focus-visible {
+  outline: var(--director-focus-outline);
+  outline-offset: var(--director-focus-offset);
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+}
+
+button:disabled:hover {
+  color: inherit;
+  background: inherit;
+  border-color: inherit;
+}
+
+.visually-hidden,
+.director-visually-hidden,
+.director-visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ Type scale
+   Headings are set once here so a page never has to pick a size. Anything that
+   wants a non-heading level uses the `director-text-*` utilities. */
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  color: var(--director-ink-strong);
+  font-weight: var(--director-weight-semibold);
+  line-height: var(--director-leading-tight);
+  letter-spacing: -0.01em;
+}
+
+h1 {
+  font-size: var(--director-text-title);
+}
+
+h2 {
+  font-size: var(--director-text-section);
+}
+
+h3,
+h4 {
+  font-size: var(--director-text-subhead);
+}
+
+p {
+  margin: 0;
+}
+
+.director-text-secondary {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+  line-height: var(--director-leading-snug);
+}
+
+.director-text-meta {
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  line-height: var(--director-leading-snug);
+}
+
+/* Numeric columns and identifiers. `tabular-nums` keeps scores and counts from
+   shifting column width row to row. */
+.director-mono,
+.director-numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+.director-mono {
+  font-family: var(--director-font-mono);
+  font-size: var(--director-text-meta);
+}
+
+/*
+ * The eyebrow used to appear above almost every block, which stopped it
+ * conveying anything. It survives only where it genuinely names a group the
+ * heading below does not — so it is quieter, and pages are expected to use it
+ * sparingly.
+ */
+.director-eyebrow {
+  margin: 0;
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.director-loading {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  color: var(--director-muted);
+  font-size: var(--director-text-section);
+}
+
+/* Error copy is a genuine failure message, not decoration: it reads at body
+   size in the danger tone with a tinted rule, never as small gray text. */
+.director-error-copy {
+  display: flex;
+  gap: var(--director-space-2);
+  padding: var(--director-space-3) var(--director-space-4);
+  color: var(--director-danger-fg);
+  font-size: var(--director-text-body);
+  background: var(--director-danger-bg);
+  border: 1px solid var(--director-danger-border);
+  border-radius: var(--director-radius);
+}
+
+.director-warning-copy {
+  display: flex;
+  gap: var(--director-space-2);
+  padding: var(--director-space-3) var(--director-space-4);
+  color: var(--director-warning-fg);
+  font-size: var(--director-text-body);
+  background: var(--director-warning-bg);
+  border: 1px solid var(--director-warning-border);
+  border-radius: var(--director-radius);
+}
+
+/* `muted` is a text *level*, not a size hack: secondary size, secondary ink, and
+   it wraps like ordinary copy. It used to be a 12px nowrap gray, which is how
+   operational information ended up unreadable. */
+.director-muted {
+  color: var(--director-muted);
+  font-size: var(--director-text-secondary);
+}
+
+/*
+ * Deep-link highlighting. Global search, Overview attention items, and
+ * "Fix room"-style links all scroll to an entity and flash it. Preserved
+ * exactly: the redesign moves where these targets live, never whether they
+ * resolve.
+ */
+.is-navigation-target {
+  background: color-mix(in srgb, var(--director-accent) 12%, var(--director-surface));
+  outline: 3px solid color-mix(in srgb, var(--director-accent) 72%, transparent);
+  outline-offset: -3px;
+  animation: director-navigation-target 1.6s ease-out;
+}
+
+@keyframes director-navigation-target {
+  from {
+    background: color-mix(in srgb, var(--director-accent) 28%, var(--director-surface));
+  }
+
+  to {
+    background: color-mix(in srgb, var(--director-accent) 12%, var(--director-surface));
+  }
+}

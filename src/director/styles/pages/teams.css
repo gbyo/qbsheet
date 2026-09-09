@@ -1,0 +1,34 @@
+/*
+ * Teams.
+ *
+ * Roster entry is the one layout unique to this destination: a grid of rows
+ * that has to stay aligned across a variable number of players. Everything
+ * else — fields, fieldsets, inline actions, dialogs — comes from the shared
+ * layers, so the page-level overrides of those are gone.
+ */
+
+.director-roster-entry {
+  display: grid;
+  gap: var(--director-space-2);
+}
+
+.director-roster-entry-row {
+  display: grid;
+  grid-template-columns: 24px minmax(170px, 1.2fr) minmax(64px, 0.35fr) auto minmax(150px, 0.85fr) auto;
+  gap: var(--director-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.director-roster-entry-number {
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .director-roster-entry-row {
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+}

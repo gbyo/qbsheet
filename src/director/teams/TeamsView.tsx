@@ -1,9 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { DirectorController, NewPlayerInput } from '../state/useDirectorController';
 import { unresolvedScheduledGameForTeam, type DirectorState } from '../domain';
-import { Button, EmptyState, FormField, PanelBody, PanelFooter, StateLabel } from '../components/Controls';
-import { DirectorMenu } from '../components/DirectorMenu';
-import { PageHeader } from '../components/PageHeader';
+import {
+  ActionMenu,
+  Button,
+  Checkbox,
+  DataTable,
+  Dialog,
+  DialogSection,
+  EmptyState,
+  Field,
+  FieldGrid,
+  IdentityCell,
+  MenuFileItem,
+  MenuItem,
+  NumberInput,
+  Page,
+  PageHeader,
+  Panel,
+  SearchField,
+  StateLabel,
+  TextArea,
+  TextInput,
+  Toolbar,
+  useConfirm,
+  type Column,
+} from '../components';
 import { importQbj, importSqbsTeams, importTeamsCsv, type TeamRecord } from '@qbsheet/tournament-formats';
 import { toImportedTeamInputs } from './teamImport';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
@@ -32,44 +54,41 @@ function newPlayerDraft(): PlayerDraft {
   };
 }
 
-const dialogStyle = {
-  width: 'min(960px, calc(100vw - 32px))',
-  maxWidth: 960,
-  maxHeight: 'calc(100vh - 32px)',
-  overflow: 'auto',
-};
-
 export function TeamsView({
   state,
   controller,
-  search,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
-  search: string;
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
 }) {
+  const [search, setSearch] = useState('');
   const [teamDialog, setTeamDialog] = useState<{ mode: 'new' } | { mode: 'edit'; teamId: string } | null>(
     null,
   );
   const [pasteOpen, setPasteOpen] = useState(false);
   const [schoolsOpen, setSchoolsOpen] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const importOpenerRef = useRef<HTMLElement | null>(null);
-  const csvInputRef = useRef<HTMLInputElement>(null);
-  const sqbsInputRef = useRef<HTMLInputElement>(null);
-  const qbjInputRef = useRef<HTMLInputElement>(null);
 
   const visibleTeams = useMemo(() => {
     const needle = search.trim().toLocaleLowerCase();
     return state.teams.filter((team) => {
       if (!needle) return true;
-      return [team.displayName, organizationNameFor(state, team.organizationId), team.teamLetter, team.status]
+      const players = state.players
+        .filter((player) => player.teamId === team.id)
+        .map((player) => player.name)
+        .join(' ');
+      return [
+        team.displayName,
+        organizationNameFor(state, team.organizationId),
+        team.teamLetter,
+        team.status,
+        players,
+      ]
         .join(' ')
         .toLocaleLowerCase()
         .includes(needle);
@@ -154,184 +173,169 @@ export function TeamsView({
     }
   };
 
+  const columns: Column<DirectorState['teams'][number]>[] = [
+    {
+      key: 'team',
+      header: 'Team',
+      priority: 1,
+      render: (team) => (
+        <IdentityCell
+          title={
+            <button
+              type="button"
+              className="director-inline-action director-team-name-action"
+              onClick={() => openTeamDialog({ mode: 'edit', teamId: team.id })}
+            >
+              {team.displayName}
+            </button>
+          }
+          detail={team.teamLetter ? `Team ${team.teamLetter}` : team.notes || undefined}
+        />
+      ),
+    },
+    {
+      key: 'organization',
+      header: 'School / club',
+      priority: 2,
+      render: (team) => organizationNameFor(state, team.organizationId) || '—',
+    },
+    {
+      key: 'players',
+      header: 'Roster',
+      priority: 2,
+      render: (team) => {
+        const activePlayers = state.players.filter(
+          (player) => player.teamId === team.id && player.active,
+        ).length;
+        return `${activePlayers} player${activePlayers === 1 ? '' : 's'}`;
+      },
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      priority: 2,
+      render: (team) => (
+        <StateLabel
+          state={team.status}
+          label={
+            team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
+          }
+        />
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      priority: 1,
+      actions: true,
+      render: (team) => (
+        <TeamActions
+          state={state}
+          team={team}
+          controller={controller}
+          onEdit={() => openTeamDialog({ mode: 'edit', teamId: team.id })}
+          onAnnounce={onAnnounce}
+        />
+      ),
+    },
+  ];
+
   return (
-    <>
+    <Page>
       <PageHeader
-        eyebrow="Plan"
         title="Teams"
-        description={`${state.teams.length} team${state.teams.length === 1 ? '' : 's'} · changes persist locally as you work`}
+        description={`${state.teams.length} team${state.teams.length === 1 ? '' : 's'} · ${state.teams.filter((team) => team.status === 'confirmed').length} confirmed`}
         actions={
           <>
             <Button variant="primary" icon="plus" onClick={() => openTeamDialog({ mode: 'new' })}>
               Add team
             </Button>
-            <span
-              ref={(node) => {
-                importOpenerRef.current = node;
-              }}
+            <ActionMenu
+              label="Import teams"
+              triggerLabel="Import"
+              triggerVariant="secondary"
+              triggerIcon="upload"
             >
-              <Button
-                variant="secondary"
-                icon="upload"
-                aria-haspopup="menu"
-                aria-expanded={importOpen}
-                onClick={() => setImportOpen((open) => !open)}
-              >
-                Import
-              </Button>
-            </span>
-            {importOpen && (
-              <DirectorMenu
-                label="Import teams"
-                openerRef={importOpenerRef}
-                onClose={() => setImportOpen(false)}
-              >
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="director-menu-item"
-                  onClick={() => {
-                    setImportOpen(false);
-                    setPasteOpen(true);
-                  }}
-                >
-                  Paste teams…
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="director-menu-item"
-                  onClick={() => {
-                    setImportOpen(false);
-                    csvInputRef.current?.click();
-                  }}
-                >
-                  CSV file…
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="director-menu-item"
-                  onClick={() => {
-                    setImportOpen(false);
-                    sqbsInputRef.current?.click();
-                  }}
-                >
-                  SQBS file…
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="director-menu-item"
-                  onClick={() => {
-                    setImportOpen(false);
-                    qbjInputRef.current?.click();
-                  }}
-                >
-                  QBJ file…
-                </button>
-              </DirectorMenu>
-            )}
+              {(close) => (
+                <>
+                  <MenuItem
+                    icon="edit"
+                    onSelect={() => {
+                      close();
+                      setPasteOpen(true);
+                    }}
+                  >
+                    Paste teams…
+                  </MenuItem>
+                  <MenuFileItem
+                    accept=".csv,text/csv"
+                    onFile={(files) => {
+                      close();
+                      void importCsv(files[0]);
+                    }}
+                  >
+                    CSV file…
+                  </MenuFileItem>
+                  <MenuFileItem
+                    accept=".sqbs,.txt,text/plain"
+                    onFile={(files) => {
+                      close();
+                      void importSqbs(files[0]);
+                    }}
+                  >
+                    SQBS file…
+                  </MenuFileItem>
+                  <MenuFileItem
+                    accept=".qbj,application/json"
+                    onFile={(files) => {
+                      close();
+                      void importQbjRoster(files[0]);
+                    }}
+                  >
+                    QBJ file…
+                  </MenuFileItem>
+                </>
+              )}
+            </ActionMenu>
             <Button variant="quiet" onClick={() => setSchoolsOpen(true)}>
               Schools &amp; clubs
             </Button>
-            <input
-              ref={csvInputRef}
-              className="director-visually-hidden-input"
-              type="file"
-              accept=".csv,text/csv"
-              onChange={(event) => {
-                void importCsv(event.target.files?.[0]);
-                event.currentTarget.value = '';
-              }}
-            />
-            <input
-              ref={sqbsInputRef}
-              className="director-visually-hidden-input"
-              type="file"
-              accept=".sqbs,.txt,text/plain"
-              onChange={(event) => {
-                void importSqbs(event.target.files?.[0]);
-                event.currentTarget.value = '';
-              }}
-            />
-            <input
-              ref={qbjInputRef}
-              className="director-visually-hidden-input"
-              type="file"
-              accept=".qbj,application/json"
-              onChange={(event) => {
-                void importQbjRoster(event.target.files?.[0]);
-                event.currentTarget.value = '';
-              }}
-            />
           </>
         }
       />
 
-      <datalist id="director-school-options">
-        {state.organizations
-          .filter((organization) => !organization.archived)
-          .map((organization) => (
-            <option key={organization.id} value={organization.name} />
-          ))}
-      </datalist>
-
-      <div className="director-page-stack">
-        {state.teams.length === 0 ? (
-          <EmptyState title="No teams yet" description="Add a team or import an existing roster.">
-            <Button variant="primary" icon="plus" onClick={() => openTeamDialog({ mode: 'new' })}>
-              Add first team
-            </Button>
-          </EmptyState>
-        ) : (
-          <section className="director-panel" data-testid="director-teams">
-            <div className="director-panel-heading">
-              <div>
-                <p className="director-eyebrow">Teams</p>
-                <h2>{visibleTeams.length} shown</h2>
-              </div>
-              <span className="director-muted">
-                {state.teams.filter((team) => team.status === 'confirmed').length} confirmed
-              </span>
-            </div>
-            <div className="director-table-wrap">
-              <table className="director-table director-team-table">
-                <thead>
-                  <tr>
-                    <th>Team</th>
-                    <th>School / club</th>
-                    <th>Players</th>
-                    <th>Seed</th>
-                    <th>Status</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleTeams.length ? (
-                    visibleTeams.map((team) => (
-                      <TeamRow
-                        key={team.id}
-                        state={state}
-                        team={team}
-                        controller={controller}
-                        onEdit={() => openTeamDialog({ mode: 'edit', teamId: team.id })}
-                        onAnnounce={onAnnounce}
-                      />
-                    ))
-                  ) : (
-                    <tr className="director-table-empty-row">
-                      <td colSpan={6}>
-                        <p className="director-empty-copy">No teams match the current search.</p>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-      </div>
+      {state.teams.length === 0 ? (
+        <EmptyState title="No teams yet" description="Add a team or import an existing roster.">
+          <Button variant="primary" icon="plus" onClick={() => openTeamDialog({ mode: 'new' })}>
+            Add first team
+          </Button>
+        </EmptyState>
+      ) : (
+        <Panel flush className="director-teams-panel" data-testid="director-teams">
+          <Toolbar
+            filters={
+              <SearchField
+                value={search}
+                onChange={setSearch}
+                label="Filter teams"
+                placeholder="Filter by team, school, or player"
+              />
+            }
+            count={
+              search.trim()
+                ? `${visibleTeams.length} of ${state.teams.length} teams`
+                : `${state.teams.length} team${state.teams.length === 1 ? '' : 's'}`
+            }
+          />
+          <DataTable
+            items={visibleTeams}
+            columns={columns}
+            rowKey={(team) => team.id}
+            ariaLabel="Teams"
+            empty={<p className="director-empty-copy">No teams match the current search.</p>}
+          />
+        </Panel>
+      )}
 
       {activeTeamDialog && (
         <TeamDialog
@@ -358,11 +362,11 @@ export function TeamsView({
           onClose={() => setSchoolsOpen(false)}
         />
       )}
-    </>
+    </Page>
   );
 }
 
-function TeamRow({
+function TeamActions({
   state,
   team,
   controller,
@@ -375,145 +379,104 @@ function TeamRow({
   onEdit: () => void;
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const openerRef = useRef<HTMLElement | null>(null);
-  const players = state.players.filter((player) => player.teamId === team.id);
-  const activePlayers = players.filter((player) => player.active).length;
+  const confirmAction = useConfirm();
+
+  const changeStatus = async () => {
+    const affectedGames = state.scheduledGames.filter((game) => {
+      const round = state.rounds.find((entry) => entry.id === game.roundId);
+      return (
+        round?.status !== 'closed' &&
+        !game.bye &&
+        game.status !== 'cancelled' &&
+        game.status !== 'accepted' &&
+        (game.leftTeamId === team.id || game.rightTeamId === team.id)
+      );
+    });
+    const operationalGame = unresolvedScheduledGameForTeam(state, team.id);
+    if (team.status !== 'dropped' && operationalGame) {
+      const round = state.rounds.find((entry) => entry.id === operationalGame.roundId);
+      onAnnounce(
+        errorNotice(
+          `Cannot drop ${team.displayName} while ${round?.name ?? 'the current game'} is unresolved. ` +
+            'Accept the result, record a forfeit, or cancel/replay it through recovery first.',
+        ),
+      );
+      return;
+    }
+    const futureGames = affectedGames.filter((game) => game.status === 'scheduled');
+    if (team.status !== 'dropped') {
+      const roundNames = [
+        ...new Set(
+          futureGames
+            .map((game) => state.rounds.find((round) => round.id === game.roundId)?.name)
+            .filter((name): name is string => Boolean(name)),
+        ),
+      ];
+      const approved = await confirmAction({
+        title: `Drop ${team.displayName}?`,
+        body: futureGames.length
+          ? `${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} in ${roundNames.join(', ') || 'later rounds'} will be reconciled.`
+          : 'No unstarted games are currently scheduled for this team.',
+        consequence:
+          'Completed games remain in tournament history. Future rounds may need regeneration or reconciliation.',
+        confirmLabel: 'Drop team',
+        tone: 'danger',
+      });
+      if (!approved) return;
+    }
+    let changed = false;
+    try {
+      changed =
+        team.status === 'dropped'
+          ? controller.restoreTeam(team.id)
+          : await dropTeamFlexibly(controller, team.id);
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(
+          reason instanceof Error
+            ? `Team status was not changed: ${reason.message}`
+            : 'Team status was not changed.',
+        ),
+      );
+      return;
+    }
+    if (!changed) {
+      onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
+      return;
+    }
+    onAnnounce(
+      team.status === 'dropped'
+        ? `${team.displayName} restored. Future pool or round assignments can now be repaired as needed.`
+        : `${team.displayName} dropped.${futureGames.length ? ` ${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} reconciled; repair those rounds when ready.` : ''}`,
+    );
+  };
+
   return (
-    <tr>
-      <td>
-        <button type="button" className="director-inline-action" onClick={onEdit}>
-          <strong>{team.displayName}</strong>
-        </button>
-        {team.teamLetter && <small className="director-table-subtext">Team {team.teamLetter}</small>}
-        {team.notes && <small className="director-table-subtext">{team.notes}</small>}
-      </td>
-      <td>{organizationNameFor(state, team.organizationId) || '—'}</td>
-      <td>
-        <button type="button" className="director-inline-action" onClick={onEdit}>
-          {activePlayers} player{activePlayers === 1 ? '' : 's'}
-        </button>
-      </td>
-      <td>{team.seed ?? '—'}</td>
-      <td>
-        <StateLabel
-          state={team.status}
-          label={
-            team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
-          }
-        />
-      </td>
-      <td>
-        <span
-          ref={(node) => {
-            openerRef.current = node;
-          }}
-        >
-          <button
-            type="button"
-            className="director-button director-button-quiet director-table-action"
-            aria-label={`Actions for ${team.displayName}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => setMenuOpen((open) => !open)}
+    <ActionMenu label={`Actions for ${team.displayName}`} triggerLabel={`Actions for ${team.displayName}`}>
+      {(close) => (
+        <>
+          <MenuItem
+            icon="edit"
+            onSelect={() => {
+              close();
+              onEdit();
+            }}
           >
-            <span aria-hidden="true">•••</span>
-          </button>
-        </span>
-        {menuOpen && (
-          <DirectorMenu
-            label={`Actions for ${team.displayName}`}
-            openerRef={openerRef}
-            onClose={() => setMenuOpen(false)}
+            Edit team…
+          </MenuItem>
+          <MenuItem
+            icon={team.status === 'dropped' ? 'undo' : 'x'}
+            tone={team.status === 'dropped' ? 'default' : 'danger'}
+            onSelect={() => {
+              close();
+              void changeStatus();
+            }}
           >
-            <button
-              type="button"
-              role="menuitem"
-              className="director-menu-item"
-              onClick={() => {
-                setMenuOpen(false);
-                onEdit();
-              }}
-            >
-              Edit team…
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="director-menu-item"
-              onClick={async () => {
-                setMenuOpen(false);
-                const affectedGames = state.scheduledGames.filter((game) => {
-                  const round = state.rounds.find((entry) => entry.id === game.roundId);
-                  return (
-                    round?.status !== 'closed' &&
-                    !game.bye &&
-                    game.status !== 'cancelled' &&
-                    game.status !== 'accepted' &&
-                    (game.leftTeamId === team.id || game.rightTeamId === team.id)
-                  );
-                });
-                const operationalGame = unresolvedScheduledGameForTeam(state, team.id);
-                if (team.status !== 'dropped' && operationalGame) {
-                  const round = state.rounds.find((entry) => entry.id === operationalGame.roundId);
-                  onAnnounce(
-                    errorNotice(
-                      `Cannot drop ${team.displayName} while ${round?.name ?? 'the current game'} is unresolved. ` +
-                        'Accept the result, record a forfeit, or cancel/replay it through recovery first.',
-                    ),
-                  );
-                  return;
-                }
-                const futureGames = affectedGames.filter((game) => game.status === 'scheduled');
-                if (team.status !== 'dropped') {
-                  const roundNames = [
-                    ...new Set(
-                      futureGames
-                        .map((game) => state.rounds.find((round) => round.id === game.roundId)?.name)
-                        .filter((name): name is string => Boolean(name)),
-                    ),
-                  ];
-                  const futureSummary = futureGames.length
-                    ? `${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} in ${roundNames.join(', ') || 'later rounds'} will be reconciled.`
-                    : 'No unstarted games are currently scheduled for this team.';
-                  const confirmed = window.confirm(
-                    `Drop ${team.displayName}? ${futureSummary} Completed games remain in tournament history. Future rounds may need regeneration or reconciliation.`,
-                  );
-                  if (!confirmed) return;
-                }
-                let changed = false;
-                try {
-                  changed =
-                    team.status === 'dropped'
-                      ? controller.restoreTeam(team.id)
-                      : await dropTeamFlexibly(controller, team.id);
-                } catch (reason: unknown) {
-                  onAnnounce(
-                    errorNotice(
-                      reason instanceof Error
-                        ? `Team status was not changed: ${reason.message}`
-                        : 'Team status was not changed.',
-                    ),
-                  );
-                  return;
-                }
-                if (!changed) {
-                  onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
-                  return;
-                }
-                onAnnounce(
-                  team.status === 'dropped'
-                    ? `${team.displayName} restored. Future pool or round assignments can now be repaired as needed.`
-                    : `${team.displayName} dropped.${futureGames.length ? ` ${futureGames.length} unstarted game${futureGames.length === 1 ? '' : 's'} reconciled; repair those rounds when ready.` : ''}`,
-                );
-              }}
-            >
-              {team.status === 'dropped' ? 'Restore team' : 'Drop team'}
-            </button>
-          </DirectorMenu>
-        )}
-      </td>
-    </tr>
+            {team.status === 'dropped' ? 'Restore team' : 'Drop team'}
+          </MenuItem>
+        </>
+      )}
+    </ActionMenu>
   );
 }
 
@@ -530,7 +493,6 @@ function TeamDialog({
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const team = teamId ? state.teams.find((entry) => entry.id === teamId) : undefined;
   const [organizationName, setOrganizationName] = useState(() =>
     team ? organizationNameFor(state, team.organizationId) : '',
@@ -557,18 +519,6 @@ function TeamDialog({
     return [...existing, ...Array.from({ length: Math.max(2, 5 - existing.length) }, newPlayerDraft)];
   });
   const [rosterPaste, setRosterPaste] = useState('');
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (!dialog.open) dialog.showModal();
-    const cancel = (event: Event) => {
-      event.preventDefault();
-      onClose();
-    };
-    dialog.addEventListener('cancel', cancel);
-    return () => dialog.removeEventListener('cancel', cancel);
-  }, [onClose]);
 
   const suggestedName = (school: string, letter: string) => {
     const organization = state.organizations.find(
@@ -706,182 +656,121 @@ function TeamDialog({
   };
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="director-operator-dialog"
-      style={dialogStyle}
-      aria-labelledby="team-dialog-title"
+    <Dialog
+      title={team ? team.displayName : 'Team and roster'}
+      description={team ? 'Edit team details and roster.' : 'Add a team and its initial roster.'}
+      size="xl"
+      onClose={onClose}
+      onSubmit={save}
+      submitLabel={team ? 'Save changes' : 'Add team'}
     >
-      <div className="director-help-dialog-header">
-        <div>
-          <p className="director-eyebrow">{team ? 'Edit team' : 'New team'}</p>
-          <h2 id="team-dialog-title">{team ? team.displayName : 'Team and roster'}</h2>
-        </div>
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-      </div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          save();
-        }}
-      >
-        <PanelBody>
-          <fieldset className="director-fieldset">
-            <legend>Team details</legend>
-            <div className="director-form-grid director-team-registration-grid">
-              <FormField label="School / club">
-                <input
-                  list="director-school-options"
-                  value={organizationName}
-                  onChange={(event) => {
-                    setOrganizationName(event.target.value);
-                    if (!displayNameCustomized) setDisplayName(suggestedName(event.target.value, teamLetter));
-                  }}
-                />
-              </FormField>
-              <FormField label="Team letter">
-                <input
-                  value={teamLetter}
-                  maxLength={4}
-                  onChange={(event) => {
-                    setTeamLetter(event.target.value);
-                    if (!displayNameCustomized)
-                      setDisplayName(suggestedName(organizationName, event.target.value));
-                  }}
-                />
-              </FormField>
-              <FormField label="Display name">
-                <input
-                  required
-                  value={displayName}
-                  onChange={(event) => {
-                    setDisplayName(event.target.value);
-                    setDisplayNameCustomized(true);
-                  }}
-                />
-              </FormField>
-              <FormField label="Seed">
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={seed}
-                  onChange={(event) => setSeed(event.target.value)}
-                />
-              </FormField>
-              <FormField label="Notes">
-                <input value={notes} onChange={(event) => setNotes(event.target.value)} />
-              </FormField>
-            </div>
-          </fieldset>
+      <DialogSection title="Team details">
+        <FieldGrid>
+          <Field label="School / club">
+            <TextInput
+              value={organizationName}
+              onChange={(event) => {
+                setOrganizationName(event.target.value);
+                if (!displayNameCustomized) setDisplayName(suggestedName(event.target.value, teamLetter));
+              }}
+              placeholder="School or club"
+            />
+          </Field>
+          <Field label="Team letter" optional>
+            <TextInput
+              value={teamLetter}
+              maxLength={4}
+              onChange={(event) => {
+                setTeamLetter(event.target.value);
+                if (!displayNameCustomized)
+                  setDisplayName(suggestedName(organizationName, event.target.value));
+              }}
+            />
+          </Field>
+          <Field label="Display name">
+            <TextInput
+              required
+              value={displayName}
+              onChange={(event) => {
+                setDisplayName(event.target.value);
+                setDisplayNameCustomized(true);
+              }}
+            />
+          </Field>
+          <Field label="Seed" optional hint="Used only by formats that seed teams.">
+            <NumberInput min={1} step={1} value={seed} onChange={(event) => setSeed(event.target.value)} />
+          </Field>
+          <Field label="Notes" optional spanAll>
+            <TextInput value={notes} onChange={(event) => setNotes(event.target.value)} />
+          </Field>
+        </FieldGrid>
+      </DialogSection>
 
-          <fieldset className="director-fieldset director-roster-fieldset">
-            <legend>Roster</legend>
-            <div className="director-form-grid director-form-grid-two">
-              <FormField label="Paste player names" hint="One player per line.">
-                <textarea
-                  className="director-textarea"
-                  rows={3}
-                  value={rosterPaste}
-                  onChange={(event) => setRosterPaste(event.target.value)}
+      <DialogSection title="Roster" description="Player changes are committed when you save the team.">
+        <Field label="Paste player names" hint="One player per line.">
+          <TextArea rows={3} value={rosterPaste} onChange={(event) => setRosterPaste(event.target.value)} />
+        </Field>
+        <Button variant="secondary" type="button" onClick={pasteRoster}>
+          Add pasted names
+        </Button>
+        <div className="director-roster-entry">
+          {players
+            .filter((player) => !player.removed)
+            .map((player, index) => (
+              <div className="director-roster-entry-row" key={player.key}>
+                <span className="director-roster-entry-number" aria-hidden="true">
+                  {index + 1}
+                </span>
+                <TextInput
+                  aria-label={`Player ${index + 1} name`}
+                  value={player.name}
+                  onChange={(event) => updatePlayer(player.key, { name: event.target.value })}
+                  placeholder="Player name"
                 />
-              </FormField>
-              <div className="director-row-actions">
-                <Button variant="secondary" type="button" onClick={pasteRoster}>
-                  Add pasted names
+                <TextInput
+                  aria-label={`Player ${index + 1} roster number`}
+                  value={player.rosterNumber}
+                  onChange={(event) => updatePlayer(player.key, { rosterNumber: event.target.value })}
+                  placeholder="No."
+                />
+                <Checkbox
+                  checked={player.captain}
+                  label="Captain"
+                  onChange={(checked) => updatePlayer(player.key, { captain: checked })}
+                />
+                {player.id && (
+                  <Checkbox
+                    checked={player.active}
+                    label="Active"
+                    onChange={(checked) => updatePlayer(player.key, { active: checked })}
+                  />
+                )}
+                <TextInput
+                  aria-label={`Player ${index + 1} notes`}
+                  value={player.notes}
+                  onChange={(event) => updatePlayer(player.key, { notes: event.target.value })}
+                  placeholder="Notes"
+                />
+                <Button
+                  variant="quiet"
+                  type="button"
+                  onClick={() => updatePlayer(player.key, { removed: true })}
+                >
+                  Remove
                 </Button>
               </div>
-            </div>
-            <div className="director-roster-entry">
-              {players
-                .filter((player) => !player.removed)
-                .map((player, index) => (
-                  <div className="director-roster-entry-row" key={player.key}>
-                    <span className="director-roster-entry-number" aria-hidden="true">
-                      {index + 1}
-                    </span>
-                    <label className="director-roster-name-field">
-                      <span className="director-visually-hidden">Player {index + 1} name</span>
-                      <input
-                        value={player.name}
-                        onChange={(event) => updatePlayer(player.key, { name: event.target.value })}
-                        placeholder="Player name"
-                      />
-                    </label>
-                    <label className="director-roster-number-field">
-                      <span className="director-visually-hidden">Roster number</span>
-                      <input
-                        value={player.rosterNumber}
-                        onChange={(event) => updatePlayer(player.key, { rosterNumber: event.target.value })}
-                        placeholder="No."
-                      />
-                    </label>
-                    <label className="director-checkbox-field director-roster-captain-field">
-                      <input
-                        type="checkbox"
-                        checked={player.captain}
-                        onChange={(event) => updatePlayer(player.key, { captain: event.target.checked })}
-                      />
-                      <span>Captain</span>
-                    </label>
-                    {player.id && (
-                      <label className="director-checkbox-field">
-                        <input
-                          type="checkbox"
-                          checked={player.active}
-                          onChange={(event) => updatePlayer(player.key, { active: event.target.checked })}
-                        />
-                        <span>Active</span>
-                      </label>
-                    )}
-                    <label className="director-roster-notes-field">
-                      <span className="director-visually-hidden">Player notes</span>
-                      <input
-                        value={player.notes}
-                        onChange={(event) => updatePlayer(player.key, { notes: event.target.value })}
-                        placeholder="Notes"
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className="director-inline-action"
-                      onClick={() => updatePlayer(player.key, { removed: true })}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-            </div>
-            <Button
-              variant="quiet"
-              type="button"
-              icon="plus"
-              onClick={() => {
-                setPlayers((current) => [...current, newPlayerDraft()]);
-                requestAnimationFrame(() => {
-                  const fields = dialogRef.current?.querySelectorAll<HTMLInputElement>(
-                    '.director-roster-name-field input',
-                  );
-                  fields?.[fields.length - 1]?.focus();
-                });
-              }}
-            >
-              Add player
-            </Button>
-          </fieldset>
-        </PanelBody>
-        <PanelFooter className="director-form-actions">
-          <Button variant="primary" type="submit">
-            {team ? 'Save changes' : 'Add team'}
-          </Button>
-          <span className="director-muted">
-            Editing stays in this dialog; the team list never shifts underneath you.
-          </span>
-        </PanelFooter>
-      </form>
-    </dialog>
+            ))}
+        </div>
+        <Button
+          variant="quiet"
+          type="button"
+          icon="plus"
+          onClick={() => setPlayers((current) => [...current, newPlayerDraft()])}
+        >
+          Add player
+        </Button>
+      </DialogSection>
+    </Dialog>
   );
 }
 
@@ -894,19 +783,7 @@ function PasteTeamsDialog({
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const [paste, setPaste] = useState('');
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (!dialog.open) dialog.showModal();
-    const cancel = (event: Event) => {
-      event.preventDefault();
-      onClose();
-    };
-    dialog.addEventListener('cancel', cancel);
-    return () => dialog.removeEventListener('cancel', cancel);
-  }, [onClose]);
   const importPaste = () => {
     const report = importTeamsCsv(paste);
     if (!report.ok) {
@@ -922,47 +799,18 @@ function PasteTeamsDialog({
     onClose();
   };
   return (
-    <dialog
-      ref={dialogRef}
-      className="director-operator-dialog"
-      style={dialogStyle}
-      aria-labelledby="paste-teams-title"
+    <Dialog
+      title="Paste teams"
+      description="Paste RFC 4180 CSV with a header row. Use team_name, organization_id, and letter for the basic columns."
+      size="lg"
+      onClose={onClose}
+      onSubmit={importPaste}
+      submitLabel="Import teams"
     >
-      <div className="director-help-dialog-header">
-        <div>
-          <p className="director-eyebrow">Import</p>
-          <h2 id="paste-teams-title">Paste teams</h2>
-        </div>
-        <Button variant="secondary" onClick={onClose}>
-          Cancel
-        </Button>
-      </div>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          importPaste();
-        }}
-      >
-        <PanelBody>
-          <p className="director-panel-description">
-            Paste RFC 4180 CSV with a header row. Use <code>team_name</code>, <code>organization_id</code>,
-            and <code>letter</code> for the basic columns.
-          </p>
-          <textarea
-            className="director-textarea"
-            rows={9}
-            value={paste}
-            onChange={(event) => setPaste(event.target.value)}
-            aria-label="Team CSV"
-          />
-        </PanelBody>
-        <PanelFooter>
-          <Button variant="primary" type="submit">
-            Import teams
-          </Button>
-        </PanelFooter>
-      </form>
-    </dialog>
+      <Field label="Team CSV">
+        <TextArea rows={9} value={paste} onChange={(event) => setPaste(event.target.value)} />
+      </Field>
+    </Dialog>
   );
 }
 
@@ -977,69 +825,43 @@ function SchoolsDialog({
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const [selectedId, setSelectedId] = useState<string | null>(state.organizations[0]?.id ?? null);
   const selected = state.organizations.find((organization) => organization.id === selectedId);
   const [newName, setNewName] = useState('');
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (!dialog.open) dialog.showModal();
-    const cancel = (event: Event) => {
-      event.preventDefault();
-      onClose();
-    };
-    dialog.addEventListener('cancel', cancel);
-    return () => dialog.removeEventListener('cancel', cancel);
-  }, [onClose]);
   return (
-    <dialog
-      ref={dialogRef}
-      className="director-operator-dialog"
-      style={dialogStyle}
-      aria-labelledby="schools-title"
-    >
-      <div className="director-help-dialog-header">
-        <div>
-          <p className="director-eyebrow">Teams</p>
-          <h2 id="schools-title">Schools &amp; clubs</h2>
+    <Dialog title="Schools & clubs" size="lg" onClose={onClose} cancelLabel="Done">
+      <div className="director-organization-workspace">
+        <div className="director-organization-list" role="list" aria-label="Schools and clubs">
+          {state.organizations.length ? (
+            state.organizations.map((organization) => (
+              <button
+                key={organization.id}
+                type="button"
+                className="director-organization-list-item"
+                data-selected={organization.id === selectedId || undefined}
+                onClick={() => setSelectedId(organization.id)}
+              >
+                <strong>{organization.name}</strong>
+                {organization.archived && <StateLabel state="archived" label="Archived" />}
+              </button>
+            ))
+          ) : (
+            <p className="director-empty-copy">No schools or clubs yet.</p>
+          )}
         </div>
-        <Button variant="secondary" onClick={onClose}>
-          Done
-        </Button>
-      </div>
-      <PanelBody>
-        <div className="director-form-grid director-form-grid-two">
-          <div>
-            {state.organizations.length ? (
-              state.organizations.map((organization) => (
-                <button
-                  key={organization.id}
-                  type="button"
-                  className="director-inline-action"
-                  onClick={() => setSelectedId(organization.id)}
-                >
-                  {organization.name}
-                  {organization.archived ? ' · archived' : ''}
-                </button>
-              ))
-            ) : (
-              <p className="director-empty-copy">No schools or clubs yet.</p>
-            )}
-          </div>
-          <div>
-            {selected ? (
-              <OrganizationEditor
-                key={selected.id}
-                organization={selected}
-                controller={controller}
-                onAnnounce={onAnnounce}
-              />
-            ) : null}
-            <hr />
-            <FormField label="Add school or club">
-              <input value={newName} onChange={(event) => setNewName(event.target.value)} />
-            </FormField>
+        <div>
+          {selected ? (
+            <OrganizationEditor
+              key={selected.id}
+              organization={selected}
+              controller={controller}
+              onAnnounce={onAnnounce}
+            />
+          ) : null}
+          <DialogSection title="Add school or club">
+            <Field label="Name">
+              <TextInput value={newName} onChange={(event) => setNewName(event.target.value)} />
+            </Field>
             <Button
               variant="secondary"
               type="button"
@@ -1053,10 +875,10 @@ function SchoolsDialog({
             >
               Add
             </Button>
-          </div>
+          </DialogSection>
         </div>
-      </PanelBody>
-    </dialog>
+      </div>
+    </Dialog>
   );
 }
 
@@ -1075,42 +897,45 @@ function OrganizationEditor({
   const [notes, setNotes] = useState(organization.notes ?? '');
   return (
     <form
+      className="director-stack"
       onSubmit={(event) => {
         event.preventDefault();
         if (controller.updateOrganization(organization.id, { name, shortName, city, notes }))
           onAnnounce(`${name.trim()} updated.`);
       }}
     >
-      <div className="director-form-grid director-form-grid-two">
-        <FormField label="Name">
-          <input value={name} onChange={(event) => setName(event.target.value)} />
-        </FormField>
-        <FormField label="Short name">
-          <input value={shortName} onChange={(event) => setShortName(event.target.value)} />
-        </FormField>
-        <FormField label="City">
-          <input value={city} onChange={(event) => setCity(event.target.value)} />
-        </FormField>
-        <FormField label="Notes">
-          <input value={notes} onChange={(event) => setNotes(event.target.value)} />
-        </FormField>
-      </div>
-      <div className="director-row-actions">
-        <Button variant="primary" type="submit">
-          Save
-        </Button>
-        <Button
-          variant="quiet"
-          type="button"
-          onClick={() => {
-            const archived = !organization.archived;
-            if (controller.setOrganizationArchived(organization.id, archived))
-              onAnnounce(`${organization.name} ${archived ? 'archived' : 'restored'}.`);
-          }}
-        >
-          {organization.archived ? 'Restore' : 'Archive'}
-        </Button>
-      </div>
+      <DialogSection title="School or club details">
+        <FieldGrid>
+          <Field label="Name">
+            <TextInput value={name} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Field label="Short name" optional>
+            <TextInput value={shortName} onChange={(event) => setShortName(event.target.value)} />
+          </Field>
+          <Field label="City" optional>
+            <TextInput value={city} onChange={(event) => setCity(event.target.value)} />
+          </Field>
+          <Field label="Notes" optional>
+            <TextInput value={notes} onChange={(event) => setNotes(event.target.value)} />
+          </Field>
+        </FieldGrid>
+        <div className="director-form-actions">
+          <Button
+            variant="quiet"
+            type="button"
+            onClick={() => {
+              const archived = !organization.archived;
+              if (controller.setOrganizationArchived(organization.id, archived))
+                onAnnounce(`${organization.name} ${archived ? 'archived' : 'restored'}.`);
+            }}
+          >
+            {organization.archived ? 'Restore' : 'Archive'}
+          </Button>
+          <Button variant="primary" type="submit">
+            Save
+          </Button>
+        </div>
+      </DialogSection>
     </form>
   );
 }
