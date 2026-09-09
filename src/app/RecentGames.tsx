@@ -133,6 +133,7 @@ export default function RecentGames(props: {
     return downloadStoredGameQbj(record);
   };
   const [retrying, setRetrying] = useState<ReadonlySet<string>>(() => new Set());
+  const [retryErrors, setRetryErrors] = useState<Readonly<Record<string, string>>>({});
   const [downloadErrors, setDownloadErrors] = useState<Readonly<Record<string, string>>>({});
   if (records.length === 0) return null;
 
@@ -207,9 +208,20 @@ export default function RecentGames(props: {
                   className="shell-button is-primary"
                   disabled={retrying.has(record.id)}
                   onClick={async () => {
+                    setRetryErrors((prev) => {
+                      if (!(record.id in prev)) return prev;
+                      const next = { ...prev };
+                      delete next[record.id];
+                      return next;
+                    });
                     setRetrying((prev) => new Set(prev).add(record.id));
                     try {
                       await onRetry(record);
+                    } catch {
+                      setRetryErrors((prev) => ({
+                        ...prev,
+                        [record.id]: 'That result could not be retried. Check the connection and try again.',
+                      }));
                     } finally {
                       setRetrying((prev) => {
                         if (!prev.has(record.id)) return prev;
@@ -226,6 +238,11 @@ export default function RecentGames(props: {
                       ? 'Retry sending result'
                       : 'Try again'}
                 </button>
+              )}
+              {retryErrors[record.id] && (
+                <p className="recent-status-detail" role="alert">
+                  {retryErrors[record.id]}
+                </p>
               )}
               <button
                 type="button"
