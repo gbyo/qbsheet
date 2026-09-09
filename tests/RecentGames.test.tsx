@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
 import RecentGames from '../src/app/RecentGames';
-import { IStoredGameRecord } from '../src/game/GameStore';
+import { manualGameRetentionMs, IStoredGameRecord } from '../src/game/GameStore';
+import { IGamePackage } from '../src/game/GamePackage';
 import { validPackage } from './packages';
 
 function record(overrides: Partial<IStoredGameRecord> = {}): IStoredGameRecord {
@@ -130,6 +131,60 @@ describe('Recent Games operational ledger', () => {
       }),
     ).toHaveTextContent('That result could not be retried. Check the connection and try again.');
     expect(retry).toBeEnabled();
+  });
+
+  describe('Recent Games retention deadline', () => {
+    /** A hand-entered game keeps its local copy for a month, past New Year when completed late. */
+    function manualRecord(completedAt: string): IStoredGameRecord {
+      const manualPackage = { ...validPackage(), origin: 'manual' } as IGamePackage;
+      return record({ package: manualPackage, completedAt });
+    }
+
+    function retentionLine(): string {
+      return document.querySelector('.recent-when')?.textContent ?? '';
+    }
+
+    function localNoon(year: number, monthIndex: number, day: number): string {
+      return new Date(year, monthIndex, day, 12).toISOString();
+    }
+
+    test('keeps a same-year deadline concise', () => {
+      const thisYear = new Date().getFullYear();
+      render(<RecentGames records={[manualRecord(localNoon(thisYear, 0, 15))]} onOpen={vi.fn()} />);
+
+      const deadline = new Date(
+        new Date(thisYear, 0, 15, 12).getTime() + manualGameRetentionMs,
+      ).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      expect(retentionLine()).toContain(`Kept on this device until ${deadline}`);
+      expect(retentionLine()).not.toMatch(/until \w+ \d{1,2}, \d{4}/);
+    });
+
+    test('includes the next year when a December completion keeps into January', () => {
+      const thisYear = new Date().getFullYear();
+      render(<RecentGames records={[manualRecord(localNoon(thisYear, 11, 28))]} onOpen={vi.fn()} />);
+
+      const deadline = new Date(
+        new Date(thisYear, 11, 28, 12).getTime() + manualGameRetentionMs,
+      ).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      expect(deadline).toContain(String(thisYear + 1));
+      expect(retentionLine()).toContain(`Kept on this device until ${deadline}`);
+    });
+
+    test('keeps an older retained record unambiguous in a later year', () => {
+      render(<RecentGames records={[manualRecord(localNoon(2000, 11, 28))]} onOpen={vi.fn()} />);
+
+      const deadline = new Date(
+        new Date(2000, 11, 28, 12).getTime() + manualGameRetentionMs,
+      ).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+      expect(deadline).toContain('2001');
+      expect(retentionLine()).toContain(`Kept on this device until ${deadline}`);
+    });
+
+    test('omits the retention line for an invalid completion timestamp', () => {
+      render(<RecentGames records={[manualRecord('not-a-date')]} onOpen={vi.fn()} />);
+
+      expect(retentionLine()).not.toContain('Kept on this device');
+    });
   });
 
   test('offers the file again as a quiet named button on every row, without the word again', () => {

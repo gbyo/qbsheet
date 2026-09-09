@@ -44,7 +44,11 @@ export interface SelectOption<T extends string = string> {
   /** A second line: the packet's source, the room's building, the zone's offset. */
   detail?: string;
   disabled?: boolean;
-  /** Options carrying the same group are rendered under one label. */
+  /**
+   * Options carrying the same group are rendered under one label, even when
+   * they are not contiguous in the option list: grouping is by label, in
+   * first-appearance order, so callers never need to pre-sort options.
+   */
   group?: string;
 }
 
@@ -83,14 +87,27 @@ function useDismiss(open: boolean, close: () => void, refs: React.RefObject<HTML
   }, [open]);
 }
 
+/**
+ * Group options by label, preserving first-appearance group order and option
+ * order within each group.
+ *
+ * Non-contiguous options sharing a label merge into one group (and separate
+ * ungrouped runs merge into one ungrouped section), so every emitted group
+ * key is unique and React reconciliation stays stable across filtering and
+ * rerenders.
+ */
 function groupOptions<T extends string>(
   options: SelectOption<T>[],
 ): [string | undefined, SelectOption<T>[]][] {
   const groups: [string | undefined, SelectOption<T>[]][] = [];
+  const indexByGroup = new Map<string | undefined, number>();
   for (const option of options) {
-    const last = groups.at(-1);
-    if (last && last[0] === option.group) last[1].push(option);
-    else groups.push([option.group, [option]]);
+    const existing = indexByGroup.get(option.group);
+    if (existing !== undefined) groups[existing][1].push(option);
+    else {
+      indexByGroup.set(option.group, groups.length);
+      groups.push([option.group, [option]]);
+    }
   }
   return groups;
 }

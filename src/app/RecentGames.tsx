@@ -28,6 +28,20 @@ function timeOfDay(iso: string | undefined): string {
   return at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * Month and day, with a year whenever the date's year differs from any
+ * reference year. Shared by completion and retention labels so the two cannot
+ * drift into different disambiguation rules.
+ */
+function monthDayLabel(date: Date, references: Date[]): string {
+  const includeYear = references.some((reference) => reference.getFullYear() !== date.getFullYear());
+  return date.toLocaleDateString([], {
+    month: 'short',
+    day: 'numeric',
+    ...(includeYear ? { year: 'numeric' } : {}),
+  });
+}
+
 function completedLabel(iso: string | undefined): string {
   if (!iso) return '';
   const at = new Date(iso);
@@ -38,13 +52,7 @@ function completedLabel(iso: string | undefined): string {
     at.getFullYear() === today.getFullYear() &&
     at.getMonth() === today.getMonth() &&
     at.getDate() === today.getDate();
-  return sameDay
-    ? `today at ${time}`
-    : `${at.toLocaleDateString([], {
-        month: 'short',
-        day: 'numeric',
-        ...(at.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}),
-      })} at ${time}`;
+  return sameDay ? `today at ${time}` : `${monthDayLabel(at, [today])} at ${time}`;
 }
 
 function attemptText(count: number): string {
@@ -60,12 +68,12 @@ function primaryState(record: IStoredGameRecord): { label: string; tone: 'succes
 }
 
 function retentionDate(record: IStoredGameRecord): string {
-  const completed = new Date(record.completedAt ?? '').getTime();
-  if (!Number.isFinite(completed)) return '';
-  return new Date(completed + retentionMsFor(record.package)).toLocaleDateString([], {
-    month: 'short',
-    day: 'numeric',
-  });
+  const completed = new Date(record.completedAt ?? '');
+  if (!Number.isFinite(completed.getTime())) return '';
+  const deadline = new Date(completed.getTime() + retentionMsFor(record.package));
+  // A late-December completion keeps into January, so the deadline needs a
+  // year whenever it differs from either the completion year or this year.
+  return monthDayLabel(deadline, [completed, new Date()]);
 }
 
 function serverStatus(record: IStoredGameRecord): { title: string; detail?: string; secondary?: string } {

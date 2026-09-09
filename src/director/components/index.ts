@@ -51,6 +51,7 @@ export {
   Dialog,
   DialogSection,
   ConfirmProvider,
+  ConfirmTestProvider,
   useConfirm,
   type ConfirmRequest,
   type ConfirmTone,
