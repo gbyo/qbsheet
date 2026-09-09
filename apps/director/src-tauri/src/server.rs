@@ -236,7 +236,17 @@ impl ServerRuntime {
         document: Option<Value>,
         store: Arc<crate::store::DirectorStore>,
     ) -> Result<ServerStatus, ServerError> {
-        self.start_on_port_with_store(document, DEFAULT_QBTCP_PORT, Some(store))
+        self.start_with_store_on_port(document, store, DEFAULT_QBTCP_PORT)
+            .await
+    }
+
+    pub(crate) async fn start_with_store_on_port(
+        &self,
+        document: Option<Value>,
+        store: Arc<crate::store::DirectorStore>,
+        requested_port: u16,
+    ) -> Result<ServerStatus, ServerError> {
+        self.start_on_port_with_store(document, requested_port, Some(store))
             .await
     }
 

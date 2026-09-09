@@ -6,12 +6,12 @@ import { MemoryDirectorRepository } from '../persistence';
 import { useDirectorController } from './useDirectorController';
 
 const localServerMocks = vi.hoisted(() => ({
-  start: vi.fn(async () => ({})),
+  start: vi.fn(async () => ({ running: true, address: '127.0.0.1', port: 8790 })),
   stop: vi.fn(async () => undefined),
   clear: vi.fn(async () => undefined),
   publish: vi.fn(async () => ({ revision: 1, publicUrl: 'http://127.0.0.1:8790' })),
   status: vi.fn(async () => ({ running: false, address: '127.0.0.1', port: 8790 })),
-  origin: vi.fn(() => 'http://127.0.0.1:8790'),
+  origin: vi.fn((status: { address: string; port: number }) => `http://${status.address}:${status.port}`),
 }));
 
 const credentialMocks = vi.hoisted(() => ({
@@ -105,6 +105,12 @@ async function repositoryWithLocalSwitchTarget(repository: FailingOpenRepository
 
 afterEach(() => {
   vi.clearAllMocks();
+  localServerMocks.start.mockResolvedValue({ running: true, address: '127.0.0.1', port: 8790 });
+  localServerMocks.publish.mockResolvedValue({
+    revision: 1,
+    publicUrl: 'http://127.0.0.1:8790',
+  });
+  localServerMocks.origin.mockReturnValue('http://127.0.0.1:8790');
 });
 
 describe('archived tournament Live side-effect guard', () => {
@@ -170,11 +176,14 @@ describe('archived tournament Live side-effect guard', () => {
 
     const hook = renderHook(() => useDirectorController(repository));
     await waitFor(() => expect(hook.result.current.loading).toBe(false));
+
     await act(async () =>
       expect(await hook.result.current.switchTournament('target-tournament')).toBe(false),
     );
 
     expect(hook.result.current.state.tournament?.id).not.toBe('target-tournament');
+    expect(hook.result.current.state.live?.backend?.origin).toBe('http://127.0.0.1:8790');
+    expect(hook.result.current.state.live?.publicUrl).toBe('http://127.0.0.1:8790');
     expect(localServerMocks.clear).toHaveBeenCalledWith(false);
     expect(localServerMocks.stop).toHaveBeenCalled();
     expect(localServerMocks.start.mock.calls.length).toBeGreaterThanOrEqual(2);
