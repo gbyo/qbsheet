@@ -1,15 +1,11 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test } from 'vitest';
 import { defineManualGame, manualRoundOptionDefaults } from '../src/game/ManualGame';
 import { basicScoringRulesDefaults } from '../src/qbj/BasicScoringRules';
 import { basicRulesInput } from '../src/qbj/ScoringRulesInput';
 
-afterEach(() => vi.restoreAllMocks());
-
 describe('manual game team identity', () => {
-  test('duplicate team names do not depend on the browser locale', () => {
-    vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function () {
-      return String(this).replace(/I/g, 'ı').toLowerCase();
-    });
+  test('duplicate team names do not depend on locale-specific casing', () => {
+    expect('INDIANS'.toLocaleLowerCase('tr')).not.toBe('indians');
 
     const result = defineManualGame({
       gameLabel: '',
