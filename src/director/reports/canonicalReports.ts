@@ -14,11 +14,20 @@ import {
   applyFinalPlacement,
   derivePlayerStandings,
   deriveTeamStandings,
+  gameDetailedCountsKnown,
   orderDayItems,
   playerPoints,
   type DirectorState,
+  type GameRecord,
 } from '../domain';
-import type { GameStatsRow, PlayerStatsRow, StatsSnapshot, TeamStatsRow } from '@qbsheet/tournament-formats';
+import type {
+  GamePlayerStatsRow,
+  GameStatsRow,
+  GameTeamStatsRow,
+  PlayerStatsRow,
+  StatsSnapshot,
+  TeamStatsRow,
+} from '@qbsheet/tournament-formats';
 import { classificationLabels, teamClassificationsOf } from '../standings/statsDisplay';
 
 export interface CanonicalReportScope {
@@ -28,6 +37,12 @@ export interface CanonicalReportScope {
 }
 
 export const overallReportScope: CanonicalReportScope = { label: 'Overall' };
+
+function teamTossupsHeard(game: GameRecord, teamId: string): number | null {
+  const lines = game.playerStats.filter((stat) => stat.teamId === teamId);
+  if (lines.length === 0 || lines.some((stat) => stat.tossupsHeard === null)) return null;
+  return lines.reduce((sum, stat) => sum + (stat.tossupsHeard ?? 0), 0);
+}
 
 export function buildCanonicalSnapshot(
   state: DirectorState,
@@ -45,6 +60,12 @@ export function buildCanonicalSnapshot(
 
   const roundName = new Map(state.rounds.map((round) => [round.id, round.name]));
   const roundPhase = new Map(state.rounds.map((round) => [round.id, round.phaseId]));
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const packetName = new Map(state.packets.map((packet) => [packet.id, packet.name]));
+  const teamName = (teamId: string | undefined): string =>
+    state.teams.find((team) => team.id === teamId)?.displayName ?? teamId ?? '';
+  const playerName = (playerId: string): string =>
+    state.players.find((player) => player.id === playerId)?.name ?? playerId;
   const dayIndex = new Map<string, number>();
   orderDayItems(state.rounds, state.timeline).forEach((entry, index) => {
     if (entry.kind === 'round' && entry.round) dayIndex.set(entry.round.id, index);
@@ -60,7 +81,7 @@ export function buildCanonicalSnapshot(
         ? { calculatedRank: calculatedRank.get(standing.teamId) }
         : {}),
       teamId: standing.teamId,
-      teamName: state.teams.find((team) => team.id === standing.teamId)?.displayName ?? standing.teamId,
+      teamName: teamName(standing.teamId),
       ...(classifications.length > 0 ? { classifications } : {}),
       gamesPlayed: standing.gamesPlayed,
       wins: standing.wins,
@@ -99,7 +120,7 @@ export function buildCanonicalSnapshot(
         playerId: standing.playerId,
         playerName: player?.name ?? standing.playerId,
         teamId: standing.teamId,
-        teamName: state.teams.find((team) => team.id === standing.teamId)?.displayName ?? standing.teamId,
+        teamName: teamName(standing.teamId),
         ...(typeof player?.schoolYear === 'number' ? { schoolYear: player.schoolYear } : {}),
         gamesPlayed: standing.gamesPlayed,
         tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
@@ -129,13 +150,50 @@ export function buildCanonicalSnapshot(
     )
     .map((game) => {
       const [left, right] = game.scores;
-      const teamName = (teamId: string | undefined): string =>
-        state.teams.find((team) => team.id === teamId)?.displayName ?? teamId ?? '';
+      const scheduled = scheduledById.get(game.scheduledGameId);
+      const detailedCountsKnown = gameDetailedCountsKnown(game);
+      const resolvedPacketId = game.packetId ?? scheduled?.packetId ?? undefined;
+      const teamStats: GameTeamStatsRow[] = game.scores.map((score) => {
+        const tossupsHeard = teamTossupsHeard(game, score.teamId);
+        return {
+          teamId: score.teamId,
+          teamName: teamName(score.teamId),
+          points: score.score,
+          superpowers: detailedCountsKnown ? score.superpowers : null,
+          powers: detailedCountsKnown ? score.powers : null,
+          gets: detailedCountsKnown ? score.gets : null,
+          negs: detailedCountsKnown ? score.negs : null,
+          tossupsHeard,
+          bonusesHeard: detailedCountsKnown ? score.bonuses : null,
+          bonusPoints: detailedCountsKnown ? score.bonusPoints : null,
+          ppb: detailedCountsKnown && score.bonuses > 0 ? score.bonusPoints / score.bonuses : null,
+          bouncebacks: detailedCountsKnown ? score.bouncebacks : null,
+        };
+      });
+      const playerStats: GamePlayerStatsRow[] = game.playerStats.map((stat) => ({
+        playerId: stat.playerId,
+        playerName: playerName(stat.playerId),
+        teamId: stat.teamId,
+        teamName: teamName(stat.teamId),
+        tossupsHeard: stat.tossupsHeard,
+        superpowers: detailedCountsKnown ? stat.superpowers : null,
+        powers: detailedCountsKnown ? stat.powers : null,
+        gets: detailedCountsKnown ? stat.gets : null,
+        negs: detailedCountsKnown ? stat.negs : null,
+        bonusPoints: detailedCountsKnown ? stat.bonusPoints : null,
+        points: detailedCountsKnown ? playerPoints(stat, rules) : null,
+      }));
       return {
         gameId: game.id,
         ...(roundPhase.get(game.roundId) ? { phaseId: roundPhase.get(game.roundId) } : {}),
         roundId: game.roundId,
+        ...(scheduled?.poolId ? { poolId: scheduled.poolId } : {}),
         ...(roundName.get(game.roundId) ? { roundName: roundName.get(game.roundId) } : {}),
+        ...(resolvedPacketId ? { packetId: resolvedPacketId } : {}),
+        ...(resolvedPacketId && packetName.get(resolvedPacketId)
+          ? { packetName: packetName.get(resolvedPacketId) }
+          : {}),
+        ...(game.forfeitedTeamId ? { forfeitedTeamId: game.forfeitedTeamId } : {}),
         teamOneId: left?.teamId ?? '',
         teamOneName: teamName(left?.teamId),
         ...(left?.score === undefined ? {} : { teamOnePoints: left.score }),
@@ -148,6 +206,13 @@ export function buildCanonicalSnapshot(
         status: game.status,
         detail:
           game.detailedStats === 'incomplete' || game.detailedStats === 'unknown' ? 'partial' : 'complete',
+        // Director's current persisted GameRecord does not yet retain exact
+        // tossups-read/overtime counts. Preserve that absence explicitly so
+        // report consumers never infer them from conversions or player TUH.
+        tossupsRead: null,
+        overtimeTossupsRead: null,
+        teamStats,
+        playerStats,
       };
     });
 
