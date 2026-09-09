@@ -68,6 +68,13 @@ Anything that navigates is a `Link`. Anything that only reports state is a
 `Badge`. A row with more than one visible action wants an `ActionMenu` — the
 literal `•••` is gone; the trigger is the shared `more` icon.
 
+Every `ActionMenu` popover is searchable: it is a `cmdk` command list, so it
+opens onto a filter field, the entries rank by fuzzy score as you type, and
+Enter runs the top match. `MenuItem` takes `keywords` for the terms an operator
+would type that are not in the visible label. Group headings (`MenuSectionLabel`),
+separators, and `MenuNote` describe the unfiltered list, so they stand down
+while a search is in flight.
+
 ### No raw browser controls
 
 There are no visible native dropdowns, checkboxes, multi-selects, datalists,
@@ -188,6 +195,11 @@ layer down, never removed.
 - Confirmations focus **Cancel**, not the destructive action.
 - Custom selects are real `combobox`/`listbox` pairs with
   `aria-activedescendant` and type-ahead. Focus never leaves the trigger.
+- Menus are the same pair, not `menu`/`menuitem`: a surface whose contents
+  narrow as you type is a combobox, and `cmdk` supplies the arrow travel,
+  Home/End, and active-descendant announcement. Focus opens on the filter field
+  and returns to the opener on close; the first Escape clears a query in
+  flight, the second closes.
 - Reordering has a keyboard route of equal capability, not a worse one.
 - Motion is switched off wholesale under `prefers-reduced-motion`.
 

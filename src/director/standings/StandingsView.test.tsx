@@ -119,8 +119,8 @@ test('the two exports are offered by name rather than as one unexplained CSV', (
 
   fireEvent.click(screen.getByRole('button', { name: 'Export' }));
 
-  expect(screen.getByRole('menuitem', { name: 'Team standings CSV' })).toBeTruthy();
-  expect(screen.getByRole('menuitem', { name: 'Player stats CSV' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: 'Team standings CSV' })).toBeTruthy();
+  expect(screen.getByRole('option', { name: 'Player stats CSV' })).toBeTruthy();
 });
 
 /**

@@ -83,11 +83,11 @@ test('a packet that is not the default can be made the default', () => {
 
   // The packet already in force does not offer it, so the action cannot be a no-op.
   openPacketMenu('Packet A');
-  expect(screen.queryByRole('menuitem', { name: 'Make default for new rounds' })).toBeNull();
+  expect(screen.queryByRole('option', { name: 'Make default for new rounds' })).toBeNull();
   fireEvent.keyDown(document, { key: 'Escape' });
 
   openPacketMenu('Packet B');
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Make default for new rounds' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Make default for new rounds' }));
   expect(controller.selectPacket).toHaveBeenCalledWith('packet-2');
 });
 
@@ -116,8 +116,8 @@ test('a retired packet is not offered as a default at all', () => {
 
   // Prevented rather than refused: the action a retired packet cannot perform
   // is not presented, so there is no press that fails.
-  expect(screen.queryByRole('menuitem', { name: 'Make default for new rounds' })).toBeNull();
-  expect(screen.getByRole('menuitem', { name: /Restore/ })).toBeTruthy();
+  expect(screen.queryByRole('option', { name: 'Make default for new rounds' })).toBeNull();
+  expect(screen.getByRole('option', { name: /Restore/ })).toBeTruthy();
 });
 
 test('a packet the controller refuses to add is announced as an error', () => {

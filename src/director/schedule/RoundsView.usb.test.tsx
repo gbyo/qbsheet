@@ -89,12 +89,12 @@ async function open(onCommit?: () => void) {
  */
 function openRoundUsb(round = 'Round 4'): void {
   fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Put round on USB…' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Put round on USB…' }));
 }
 
 function roundActionMenuItems(round = 'Round 4'): string[] {
   fireEvent.click(screen.getByRole('button', { name: `${round} actions` }));
-  return screen.getAllByRole('menuitem').map((item) => item.textContent ?? '');
+  return screen.getAllByRole('option').map((item) => item.textContent ?? '');
 }
 
 test('requested round writes through the real runtime even when another round is current, then returned files await review', async () => {

@@ -31,7 +31,7 @@ function renderResults(ui: React.ReactElement) {
  */
 function openReject(): void {
   fireEvent.click(screen.getByRole('button', { name: /result actions$/ }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Reject result…' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Reject result…' }));
 }
 
 /** Switch to one of the four Results views. */

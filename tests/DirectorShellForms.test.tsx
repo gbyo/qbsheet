@@ -59,7 +59,7 @@ async function openDirector() {
 async function openOperatorForm() {
   await openDirector();
   fireEvent.click(screen.getByRole('button', { name: /^Operator:/ }));
-  fireEvent.click(screen.getByRole('menuitem', { name: 'Operator profile…' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Operator profile…' }));
   return (await screen.findByLabelText('Display name')) as HTMLInputElement;
 }
 
