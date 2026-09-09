@@ -1,11 +1,23 @@
 import { describe, expect, test } from 'vitest';
-import { playedTournament, acceptedGame, player, playerStat, scheduledGame, score, team } from '../../../tests/directorFixtures';
+import {
+  acceptedGame,
+  playedTournament,
+  player,
+  playerStat,
+  scheduledGame,
+  score,
+  team,
+} from '../../../tests/directorFixtures';
 import type { DirectorState } from '../domain';
 import { buildCanonicalRoundStatsSnapshot } from './canonicalRoundReports';
 
 const generatedAt = '2026-09-09T20:00:00.000Z';
 
-function historicalQbj(regulationTossups: number, tossupsRead: number, packet = 'Packet 18'): unknown {
+function historicalQbj(
+  regulationTossups: number,
+  tossupsRead: number,
+  packet = 'Packet 18',
+): unknown {
   return {
     version: '2.1.1',
     objects: [
@@ -99,7 +111,10 @@ function multiScopeState(): DirectorState {
     closedAt: generatedAt,
   });
   state.teams.push(team('team-c', 'C'), team('team-d', 'D'));
-  state.players.push(player('player-c', 'team-c', 'C Player'), player('player-d', 'team-d', 'D Player'));
+  state.players.push(
+    player('player-c', 'team-c', 'C Player'),
+    player('player-d', 'team-d', 'D Player'),
+  );
   state.scheduledGames.push(
     scheduledGame('scheduled-2', 'team-c', 'team-d', { roundId: 'round-2', poolId: null }),
   );
@@ -178,13 +193,24 @@ describe('buildCanonicalRoundStatsSnapshot', () => {
     expect(pool.roundStats!.total.games).toBe(1);
   });
 
-  test('marks current tournament rules as an explicit legacy fallback when no per-game proof exists', () => {
+  test('does not reinterpret a legacy accepted game using current tournament rules', () => {
     const state = playedTournament();
+    state.tournament!.rules.tossupCount = 42;
+    state.tournament!.rules.maximumTossupCount = 42;
     state.tournament!.rules.overtime = false;
+
     const snapshot = buildCanonicalRoundStatsSnapshot(state, { label: 'Overall' }, generatedAt);
-    expect(snapshot.games[0]!.roundStatDefinition).toMatchObject({
-      source: 'legacy-tournament',
-      regulationTossups: state.tournament!.rules.tossupCount,
+    expect(snapshot.games[0]!.roundStatDefinition).toEqual({
+      regulationTossups: null,
+      regulationLengthFixed: null,
+      overtimeEnabled: null,
+      powers: null,
+      superpowers: null,
+      bonuses: null,
+      maximumBonusScore: null,
+      source: 'unknown',
     });
+    expect(snapshot.roundStats!.rows[0]!.regulationTossups).toBeNull();
+    expect(snapshot.roundStats!.rows[0]!.pointsPerTeamPerXTuh).toBeNull();
   });
 });
