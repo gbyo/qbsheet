@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
+  deriveOperationalRoom,
   qbtcpSessionHasUnresolvedWork,
   roomIsAssignable,
+  type DirectorId,
   type DirectorState,
+  type OperationalRoomView,
   type StaffRole,
 } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
@@ -36,7 +39,6 @@ import {
 } from '../components';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
-import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { isNativeDirector, issueNativeRoomPairing, resetNativeQbtcpCredentials } from '../platform/native';
 import type { NativeServerState } from '../server/useNativeServerStatus';
 import {
@@ -46,6 +48,24 @@ import {
   type QbtcpOperationalHealth,
 } from '../server/qbtcpHealth';
 import { errorNotice, type AnnounceInput } from '../notices';
+import {
+  AssignmentDialog,
+  DutyPanel,
+  OperationalEquipmentSummary,
+  OperationalRoomSummary,
+  OperationalStaffSummary,
+  OperationsEmptyState,
+  OperationsScopeControl,
+  PrepareOperationsPanel,
+  ResourceImpactDialog,
+  RoundReadinessSummary,
+  equipmentKindLabel,
+  staffRoleOptions,
+  useOperationsContext,
+  type OperationsContext,
+  type OperationsScope,
+  type PendingUnavailability,
+} from './operations';
 
 type EquipmentKind = DirectorState['equipment'][number]['kind'];
 type LogisticsView = 'rooms' | 'staff' | 'equipment' | 'requests';
@@ -118,6 +138,9 @@ export function RoomsView({
   const [view, setView] = useState<LogisticsView>('rooms');
   const [viewDirection, setViewDirection] = useState<'forward' | 'backward' | null>(null);
   const [filter, setFilter] = useState<RoomFilter>('all');
+  const [scope, setScope] = useState<OperationsScope>('current');
+  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [pendingUnavailability, setPendingUnavailability] = useState<PendingUnavailability | null>(null);
   const [editingRoomId, setEditingRoomId] = useState<string | null | 'new'>(null);
   const [editingStaffId, setEditingStaffId] = useState<string | null | 'new'>(null);
   const [editingEquipmentId, setEditingEquipmentId] = useState<string | null | 'new'>(null);
@@ -140,6 +163,11 @@ export function RoomsView({
     setViewDirection(null);
     setView('rooms');
   }
+
+  // One derivation for the whole page. Rooms, staff, equipment, duties, the readiness summary and
+  // the prepare panel are all views of this, which is what keeps them from disagreeing.
+  const operationsContext = useOperationsContext(state, scope);
+  const { operations } = operationsContext;
 
   const qbtcpStatus = nativeServer?.status ?? null;
   const qbtcpLoading = nativeServer?.loading ?? false;
@@ -164,18 +192,23 @@ export function RoomsView({
   const pendingAmendments = rosterAmendments.filter((entry) => entry.status === 'pending').length;
   const attentionCount = openHelpCount + pendingAmendments;
 
-  const filteredRooms = state.rooms.filter((room) => {
-    if (room.id === targetRoomId) return true;
+  // Filters read the derived readiness rather than the persisted `Room.status`, which is written
+  // by six independent workflows and drifts from what the room is actually doing.
+  const roomViews = operations.rooms;
+  const activeRoomCount = roomViews.filter((entry) =>
+    ['playing', 'awaiting-result', 'connected'].includes(entry.readiness),
+  ).length;
+  const attentionRoomCount = roomViews.filter((entry) =>
+    ['help', 'blocked', 'offline'].includes(entry.readiness),
+  ).length;
+  const filteredRoomViews = roomViews.filter((entry) => {
+    if (entry.room.id === targetRoomId) return true;
     if (filter === 'all') return true;
-    if (filter === 'assignable') return assignableRoomIds.has(room.id);
-    const hasOpenHelp = state.qbtcpHelpRequests.some(
-      (request) => request.roomId === room.id && request.status === 'open',
-    );
-    const hasActiveGame = state.scheduledGames.some(
-      (game) => game.roomId === room.id && !game.bye && !['accepted', 'cancelled'].includes(game.status),
-    );
-    if (filter === 'active') return hasActiveGame || room.status === 'live';
-    return hasOpenHelp || room.status === 'help' || room.status === 'offline';
+    if (filter === 'assignable') return entry.assignable;
+    if (filter === 'active') {
+      return ['playing', 'awaiting-result', 'connected'].includes(entry.readiness);
+    }
+    return ['help', 'blocked', 'offline'].includes(entry.readiness);
   });
 
   const toggleServer = async () => {
@@ -263,6 +296,24 @@ export function RoomsView({
     setView(nextView);
   };
 
+  /**
+   * Route an operational deep link.
+   *
+   * A target inside Operations switches to the right subview rather than leaving the page; a
+   * target elsewhere hands off to the shell. This is what makes "Replace Bob" land on Bob instead
+   * of on the Operations page with Bob somewhere in it.
+   */
+  const navigateToTarget = (target: DirectorNavigationTarget) => {
+    if (target.section !== 'rooms') {
+      onNavigate?.(target.section);
+      return;
+    }
+    const nextView: LogisticsView =
+      target.entityType === 'staff' ? 'staff' : target.entityType === 'equipment' ? 'equipment' : 'rooms';
+    changeView(nextView);
+    if (target.entityType === 'game' && target.entityId) setEditingAssignmentId(target.entityId);
+  };
+
   const primaryAdd =
     view === 'rooms' ? (
       <Button variant="primary" icon="plus" onClick={() => setEditingRoomId('new')}>
@@ -278,13 +329,32 @@ export function RoomsView({
       </Button>
     ) : undefined;
 
+  const summaryLine = [
+    `${state.staff.length} staff total`,
+    `${operations.summary.moderators} moderator${operations.summary.moderators === 1 ? '' : 's'}`,
+    `${operations.summary.scorekeepers} scorekeeper${operations.summary.scorekeepers === 1 ? '' : 's'}`,
+    ...(operations.summary.runners > 0 ? [`${operations.summary.runners} runner`] : []),
+    ...(operations.summary.hq > 0 ? [`${operations.summary.hq} HQ`] : []),
+    `${operations.summary.unstaffedActiveRooms} unstaffed active room${operations.summary.unstaffedActiveRooms === 1 ? '' : 's'}`,
+  ].join(' · ');
+
   return (
     <Page>
       <PageHeader
-        title="Rooms"
-        description={`${state.rooms.length} room${state.rooms.length === 1 ? '' : 's'} · ${state.staff.length} staff · ${state.equipment.length} equipment resource${state.equipment.length === 1 ? '' : 's'}`}
+        title="Operations"
+        description={
+          state.rooms.length === 0 && state.staff.length === 0
+            ? 'Rooms, staff, equipment, and who is operating where.'
+            : summaryLine
+        }
         actions={primaryAdd}
       />
+
+      <OperationsScopeControl state={state} scope={scope} onChange={setScope} />
+
+      {operationsContext.roundId && operations.summary.games > 0 && (
+        <RoundReadinessSummary operations={operations} roundName={operationsContext.roundName} />
+      )}
 
       <Segmented<LogisticsView>
         value={view}
@@ -300,39 +370,65 @@ export function RoomsView({
 
       <div key={view} className="director-logistics-view" data-direction={viewDirection ?? undefined}>
         {view === 'rooms' && (
-          <RoomsLogisticsView
-            state={state}
-            controller={controller}
-            rooms={filteredRooms}
-            filter={filter}
-            setFilter={setFilter}
-            assignableRoomIds={assignableRoomIds}
-            onNavigate={onNavigate}
-            onAnnounce={onAnnounce}
-            navigationTarget={navigationTarget}
-            onClearNavigationTarget={onClearNavigationTarget}
-            onEdit={(roomId) => setEditingRoomId(roomId)}
-            onAdd={() => setEditingRoomId('new')}
-          />
+          <>
+            <PrepareOperationsPanel
+              state={state}
+              controller={controller}
+              context={operationsContext}
+              onAnnounce={onAnnounce}
+              onNavigate={navigateToTarget}
+            />
+            <RoomsLogisticsView
+              state={state}
+              controller={controller}
+              context={operationsContext}
+              roomViews={filteredRoomViews}
+              filter={filter}
+              setFilter={setFilter}
+              assignableCount={roomViews.filter((entry) => entry.assignable).length}
+              activeCount={activeRoomCount}
+              attentionCount={attentionRoomCount}
+              onNavigate={navigateToTarget}
+              onAnnounce={onAnnounce}
+              navigationTarget={navigationTarget}
+              onClearNavigationTarget={onClearNavigationTarget}
+              onEditRoom={(roomId) => setEditingRoomId(roomId)}
+              onEditAssignment={(gameId) => setEditingAssignmentId(gameId)}
+              onPair={nativeServer ? (roomId) => void issuePairing(roomId) : undefined}
+              onAdd={() => setEditingRoomId('new')}
+            />
+            <DutyPanel
+              state={state}
+              controller={controller}
+              context={operationsContext}
+              onAnnounce={onAnnounce}
+            />
+          </>
         )}
 
         {view === 'staff' && (
           <ResourceView
             title="Staff"
-            description="People available for moderator, scorekeeper, runner, and HQ assignments."
+            description="Where each person is working now and next, and what is blocking them."
             emptyTitle="No staff yet"
             emptyDescription="Add staff only when you want Director to track room assignments."
             addLabel="Add staff member"
             onAdd={() => setEditingStaffId('new')}
           >
             <SummaryList ariaLabel="Staff">
-              {state.staff.map((member) => (
-                <StaffSummary
-                  key={member.id}
-                  member={member}
+              {operations.staff.map((staffView) => (
+                <OperationalStaffSummary
+                  key={staffView.staff.id}
+                  view={staffView}
                   controller={controller}
                   onAnnounce={onAnnounce}
-                  onEdit={() => setEditingStaffId(member.id)}
+                  onNavigate={navigateToTarget}
+                  onEdit={() => setEditingStaffId(staffView.staff.id)}
+                  onMarkUnavailable={() =>
+                    setPendingUnavailability({ kind: 'staff', id: staffView.staff.id })
+                  }
+                  navigationTarget={navigationTarget}
+                  onClearNavigationTarget={onClearNavigationTarget}
                 />
               ))}
             </SummaryList>
@@ -342,20 +438,26 @@ export function RoomsView({
         {view === 'equipment' && (
           <ResourceView
             title="Equipment"
-            description="Buzzers, scoring devices, and other resources that can be assigned to rooms."
+            description="Where each resource is now and next, and which rounds depend on it."
             emptyTitle="No equipment yet"
             emptyDescription="Equipment tracking is optional until you need it."
             addLabel="Add equipment"
             onAdd={() => setEditingEquipmentId('new')}
           >
             <SummaryList ariaLabel="Equipment">
-              {state.equipment.map((item) => (
-                <EquipmentSummary
-                  key={item.id}
-                  item={item}
+              {operations.equipment.map((equipmentView) => (
+                <OperationalEquipmentSummary
+                  key={equipmentView.equipment.id}
+                  view={equipmentView}
                   controller={controller}
                   onAnnounce={onAnnounce}
-                  onEdit={() => setEditingEquipmentId(item.id)}
+                  onNavigate={navigateToTarget}
+                  onEdit={() => setEditingEquipmentId(equipmentView.equipment.id)}
+                  onMarkUnavailable={() =>
+                    setPendingUnavailability({ kind: 'equipment', id: equipmentView.equipment.id })
+                  }
+                  navigationTarget={navigationTarget}
+                  onClearNavigationTarget={onClearNavigationTarget}
                 />
               ))}
             </SummaryList>
@@ -435,6 +537,26 @@ export function RoomsView({
           onClose={() => setEditingStaffId(null)}
         />
       )}
+      {editingAssignmentId && (
+        <AssignmentDialog
+          key={editingAssignmentId}
+          state={state}
+          controller={controller}
+          scheduledGameId={editingAssignmentId}
+          onAnnounce={onAnnounce}
+          onClose={() => setEditingAssignmentId(null)}
+        />
+      )}
+      {pendingUnavailability && (
+        <ResourceImpactDialog
+          key={`${pendingUnavailability.kind}-${pendingUnavailability.id}`}
+          state={state}
+          controller={controller}
+          pending={pendingUnavailability}
+          onAnnounce={onAnnounce}
+          onClose={() => setPendingUnavailability(null)}
+        />
+      )}
       {editingEquipmentId && (
         <EquipmentDialog
           key={editingEquipmentId}
@@ -455,43 +577,49 @@ export function RoomsView({
 function RoomsLogisticsView({
   state,
   controller,
-  rooms,
+  context,
+  roomViews,
   filter,
   setFilter,
-  assignableRoomIds,
+  assignableCount,
+  activeCount,
+  attentionCount,
   onNavigate,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
-  onEdit,
+  onEditRoom,
+  onEditAssignment,
+  onPair,
   onAdd,
 }: {
   state: DirectorState;
   controller: DirectorController;
-  rooms: DirectorState['rooms'];
+  context: OperationsContext;
+  roomViews: OperationalRoomView[];
   filter: RoomFilter;
   setFilter: (filter: RoomFilter) => void;
-  assignableRoomIds: Set<string>;
-  onNavigate?: (section: SectionId) => void;
+  assignableCount: number;
+  activeCount: number;
+  attentionCount: number;
+  onNavigate: (target: DirectorNavigationTarget) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
-  onEdit: (roomId: string) => void;
+  onEditRoom: (roomId: string) => void;
+  onEditAssignment: (scheduledGameId: DirectorId) => void;
+  onPair?: (roomId: string) => void;
   onAdd: () => void;
 }) {
-  if (state.rooms.length === 0) {
-    return (
-      <EmptyState title="No rooms yet" description="Add the rooms that can host games.">
-        <Button variant="primary" icon="plus" onClick={onAdd}>
-          Add first room
-        </Button>
-      </EmptyState>
-    );
-  }
+  if (state.rooms.length === 0) return <OperationsEmptyState onAdd={onAdd} />;
   return (
     <Panel
       title="Rooms"
-      description="Current work and future assignability are shown separately."
+      description={
+        context.roundName
+          ? `What each room is doing in ${context.roundName}, and what happens next.`
+          : 'What each room is doing, and what happens next.'
+      }
       actions={
         <Segmented<RoomFilter>
           value={filter}
@@ -499,21 +627,15 @@ function RoomsLogisticsView({
           ariaLabel="Room filter"
           options={[
             { value: 'all', label: 'All' },
-            { value: 'assignable', label: `Assignable ${assignableRoomIds.size}` },
-            {
-              value: 'active',
-              label: `Active ${state.rooms.filter((room) => state.scheduledGames.some((game) => game.roomId === room.id && !game.bye && !['accepted', 'cancelled'].includes(game.status))).length}`,
-            },
-            {
-              value: 'attention',
-              label: `Attention ${state.rooms.filter((room) => room.status === 'help' || room.status === 'offline' || state.qbtcpHelpRequests.some((request) => request.roomId === room.id && request.status === 'open')).length}`,
-            },
+            { value: 'assignable', label: `Assignable ${assignableCount}` },
+            { value: 'active', label: `Active ${activeCount}` },
+            { value: 'attention', label: `Attention ${attentionCount}` },
           ]}
         />
       }
       flush
     >
-      {rooms.length === 0 ? (
+      {roomViews.length === 0 ? (
         <div className="director-empty-in-panel">
           <p className="director-empty-copy">No rooms match this filter.</p>
           <Button variant="quiet" onClick={() => setFilter('all')}>
@@ -522,162 +644,56 @@ function RoomsLogisticsView({
         </div>
       ) : (
         <SummaryList ariaLabel="Rooms">
-          {rooms.map((room) => (
-            <RoomSummary
-              key={room.id}
+          {roomViews.map((view) => (
+            <OperationalRoomSummary
+              key={view.room.id}
               state={state}
-              room={room}
+              view={view}
+              context={context}
               controller={controller}
-              onNavigate={onNavigate}
               onAnnounce={onAnnounce}
+              onNavigate={onNavigate}
+              onEditRoom={() => onEditRoom(view.room.id)}
+              onEditAssignment={onEditAssignment}
+              onPair={onPair && view.assignable ? () => onPair(view.room.id) : undefined}
               navigationTarget={navigationTarget}
               onClearNavigationTarget={onClearNavigationTarget}
-              onEdit={() => onEdit(room.id)}
+              extra={
+                view.room.accessibility ||
+                view.room.directions ||
+                view.room.notes ||
+                roomQbtcpHasDetail(state, view.room.id) ? (
+                  <Diagnostics
+                    label="Room details & QBTCP"
+                    standalone={false}
+                    hint="Wayfinding, notes, and connection telemetry."
+                  >
+                    {view.room.accessibility && (
+                      <p>
+                        <strong>Accessibility:</strong> {view.room.accessibility}
+                      </p>
+                    )}
+                    {view.room.directions && (
+                      <p>
+                        <strong>Directions:</strong> {view.room.directions}
+                      </p>
+                    )}
+                    {view.room.notes && (
+                      <p>
+                        <strong>Notes:</strong> {view.room.notes}
+                      </p>
+                    )}
+                    {roomQbtcpHasDetail(state, view.room.id) && (
+                      <RoomQbtcpTelemetry state={state} roomId={view.room.id} />
+                    )}
+                  </Diagnostics>
+                ) : undefined
+              }
             />
           ))}
         </SummaryList>
       )}
     </Panel>
-  );
-}
-
-function RoomSummary({
-  state,
-  room,
-  controller,
-  onNavigate,
-  onAnnounce,
-  navigationTarget,
-  onClearNavigationTarget,
-  onEdit,
-}: {
-  state: DirectorState;
-  room: DirectorState['rooms'][number];
-  controller: DirectorController;
-  onNavigate?: (section: SectionId) => void;
-  onAnnounce: (announcement: AnnounceInput) => void;
-  navigationTarget?: DirectorNavigationTarget | null;
-  onClearNavigationTarget?: () => void;
-  onEdit: () => void;
-}) {
-  const highlighted = useNavigationHighlight(
-    navigationTarget,
-    'rooms',
-    'room',
-    room.id,
-    onClearNavigationTarget,
-  );
-  const assignable = roomIsAssignable(state, room.id);
-  const activeGames = state.scheduledGames.filter(
-    (game) => game.roomId === room.id && !game.bye && !['accepted', 'cancelled'].includes(game.status),
-  );
-  const openHelp = state.qbtcpHelpRequests.some(
-    (request) => request.roomId === room.id && request.status === 'open',
-  );
-  const currentWork = activeGames[0]
-    ? `${matchupLabel(state, activeGames[0])} · ${activeGames[0].status}`
-    : room.status === 'live'
-      ? 'Game in progress'
-      : 'No unresolved game';
-  const people = [
-    staffName(state, room.moderatorId) ? `Moderator: ${staffName(state, room.moderatorId)}` : null,
-    staffName(state, room.scorekeeperId) ? `Scorekeeper: ${staffName(state, room.scorekeeperId)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
-  const location = [room.building, room.floor].filter(Boolean).join(' · ');
-
-  return (
-    <SummaryItem
-      className={highlighted ? 'is-navigation-target' : ''}
-      selected={openHelp}
-      title={
-        <strong data-director-navigation-id={room.id} data-director-navigation-focus tabIndex={-1}>
-          {room.name}
-        </strong>
-      }
-      status={
-        <StateLabel
-          state={openHelp ? 'help' : room.status}
-          label={openHelp ? 'Needs help' : humanRoomStatus(room.status)}
-        />
-      }
-      summary={
-        <>
-          <span>{location || 'No location details'}</span>
-          <span> · Current: {currentWork}</span>
-          <span>
-            {' '}
-            · Next round:{' '}
-            {assignable ? 'Assignable' : room.available ? 'Waiting for current work' : 'Unavailable'}
-          </span>
-          {people && <span> · {people}</span>}
-        </>
-      }
-      actions={
-        <div className="director-actions">
-          <Button variant="secondary" icon="edit" onClick={onEdit}>
-            Edit
-          </Button>
-          <ActionMenu label={`${room.name} actions`} triggerLabel={`${room.name} actions`}>
-            {(close) => (
-              <>
-                <MenuItem
-                  icon={room.available ? 'pause' : 'play'}
-                  onSelect={() => {
-                    close();
-                    if (controller.updateRoom(room.id, { available: !room.available })) {
-                      onAnnounce(
-                        `${room.name} marked ${room.available ? 'unavailable' : 'available'} for future assignment.`,
-                      );
-                    } else
-                      onAnnounce(errorNotice(`${room.name} was not changed; review the Director error.`));
-                  }}
-                >
-                  {room.available ? 'Mark unavailable' : 'Mark available'}
-                </MenuItem>
-                {onNavigate && activeGames.length > 0 && (
-                  <MenuItem
-                    icon="upload"
-                    onSelect={() => {
-                      close();
-                      onNavigate('transfers');
-                    }}
-                  >
-                    Prepare assignment files
-                  </MenuItem>
-                )}
-              </>
-            )}
-          </ActionMenu>
-        </div>
-      }
-    >
-      {(room.accessibility || room.directions || room.notes || roomQbtcpHasDetail(state, room.id)) && (
-        <Diagnostics
-          label="Room details & QBTCP"
-          standalone={false}
-          hint="Wayfinding, notes, and connection telemetry."
-        >
-          {room.accessibility && (
-            <p>
-              <strong>Accessibility:</strong> {room.accessibility}
-            </p>
-          )}
-          {room.directions && (
-            <p>
-              <strong>Directions:</strong> {room.directions}
-            </p>
-          )}
-          {room.notes && (
-            <p>
-              <strong>Notes:</strong> {room.notes}
-            </p>
-          )}
-          {roomQbtcpHasDetail(state, room.id) && <RoomQbtcpTelemetry state={state} roomId={room.id} />}
-        </Diagnostics>
-      )}
-    </SummaryItem>
   );
 }
 
@@ -887,56 +903,6 @@ function ResourceView({
   );
 }
 
-function StaffSummary({
-  member,
-  controller,
-  onAnnounce,
-  onEdit,
-}: {
-  member: DirectorState['staff'][number];
-  controller: DirectorController;
-  onAnnounce: (announcement: AnnounceInput) => void;
-  onEdit: () => void;
-}) {
-  return (
-    <SummaryItem
-      title={<strong>{member.name}</strong>}
-      status={
-        <StateLabel
-          state={member.available ? 'available' : 'offline'}
-          label={member.available ? 'Available' : 'Unavailable'}
-        />
-      }
-      summary={[member.roles.map(roleLabel).join(' · '), member.notes].filter(Boolean).join(' · ')}
-      actions={
-        <div className="director-actions">
-          <Button variant="secondary" icon="edit" onClick={onEdit}>
-            Edit
-          </Button>
-          <ActionMenu label={`${member.name} actions`} triggerLabel={`${member.name} actions`}>
-            {(close) => (
-              <MenuItem
-                icon={member.available ? 'pause' : 'play'}
-                onSelect={() => {
-                  close();
-                  if (controller.updateStaff(member.id, { available: !member.available })) {
-                    onAnnounce(
-                      `${member.name} marked ${member.available ? 'unavailable' : 'available'} for future assignment.`,
-                    );
-                  } else
-                    onAnnounce(errorNotice(`${member.name} was not changed; review the Director error.`));
-                }}
-              >
-                {member.available ? 'Mark unavailable' : 'Mark available'}
-              </MenuItem>
-            )}
-          </ActionMenu>
-        </div>
-      }
-    />
-  );
-}
-
 function StaffDialog({
   member,
   controller,
@@ -1015,55 +981,6 @@ function StaffDialog({
         onChange={(available) => setDraft((current) => ({ ...current, available }))}
       />
     </Dialog>
-  );
-}
-
-function EquipmentSummary({
-  item,
-  controller,
-  onAnnounce,
-  onEdit,
-}: {
-  item: DirectorState['equipment'][number];
-  controller: DirectorController;
-  onAnnounce: (announcement: AnnounceInput) => void;
-  onEdit: () => void;
-}) {
-  return (
-    <SummaryItem
-      title={<strong>{item.name}</strong>}
-      status={
-        <StateLabel
-          state={item.available ? 'available' : 'offline'}
-          label={item.available ? 'Available' : 'Unavailable'}
-        />
-      }
-      summary={[equipmentKindLabel(item.kind), item.notes].filter(Boolean).join(' · ')}
-      actions={
-        <div className="director-actions">
-          <Button variant="secondary" icon="edit" onClick={onEdit}>
-            Edit
-          </Button>
-          <ActionMenu label={`${item.name} actions`} triggerLabel={`${item.name} actions`}>
-            {(close) => (
-              <MenuItem
-                icon={item.available ? 'pause' : 'play'}
-                onSelect={() => {
-                  close();
-                  if (controller.updateEquipment(item.id, { available: !item.available })) {
-                    onAnnounce(
-                      `${item.name} marked ${item.available ? 'unavailable' : 'available'} for future assignment.`,
-                    );
-                  } else onAnnounce(errorNotice(`${item.name} was not changed; review the Director error.`));
-                }}
-              >
-                {item.available ? 'Mark unavailable' : 'Mark available'}
-              </MenuItem>
-            )}
-          </ActionMenu>
-        </div>
-      }
-    />
   );
 }
 
@@ -1557,6 +1474,9 @@ function QbtcpNetwork({
                 const remainingSeconds = invitation
                   ? Math.max(0, Math.ceil((Date.parse(invitation.expiresAt) - now) / 1000))
                   : null;
+                // Who the round expects here, so the invitation is handed to the right person
+                // rather than to whoever is standing nearest the laptop.
+                const expected = expectedScorekeeperName(state, room.id);
                 return (
                   <SummaryItem
                     key={room.id}
@@ -1570,11 +1490,16 @@ function QbtcpNetwork({
                       />
                     }
                     summary={
-                      invitation
-                        ? `Code ${invitation.pairingCode} · ${formatPairingRemaining(remainingSeconds ?? 0)}`
-                        : expired
-                          ? 'The old code and link are no longer usable. Issue a fresh invitation.'
-                          : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'
+                      <>
+                        {expected && <span>Expected scorekeeper: {expected} · </span>}
+                        <span>
+                          {invitation
+                            ? `Code ${invitation.pairingCode} · ${formatPairingRemaining(remainingSeconds ?? 0)}`
+                            : expired
+                              ? 'The old code and link are no longer usable. Issue a fresh invitation.'
+                              : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'}
+                        </span>
+                      </>
                     }
                     actions={
                       <div className="director-actions">
@@ -1610,6 +1535,16 @@ function QbtcpNetwork({
       )}
     </div>
   );
+}
+
+/**
+ * The scorekeeper the current round's assignment expects in a room.
+ *
+ * Read from the operational derivation so the pairing panel names the same person the room row
+ * and preflight do.
+ */
+function expectedScorekeeperName(state: DirectorState, roomId: string): string | null {
+  return deriveOperationalRoom(state, roomId)?.scorekeeper?.name ?? null;
 }
 
 function formatPairingRemaining(seconds: number): string {
@@ -1682,13 +1617,6 @@ function roomQbtcpHasDetail(state: DirectorState, roomId: string): boolean {
   );
 }
 
-const staffRoleOptions: Array<{ value: StaffRole; label: string }> = [
-  { value: 'moderator', label: 'Moderator' },
-  { value: 'scorekeeper', label: 'Scorekeeper' },
-  { value: 'runner', label: 'Runner' },
-  { value: 'hq', label: 'HQ staff' },
-];
-
 function StaffRoleField({
   roles,
   onChange,
@@ -1714,12 +1642,6 @@ function StaffRoleField({
   );
 }
 
-function roleLabel(role: StaffRole): string {
-  return staffRoleOptions.find((option) => option.value === role)?.label ?? role;
-}
-function equipmentKindLabel(kind: EquipmentKind): string {
-  return kind === 'buzzer' ? 'Buzzer' : kind === 'device' ? 'Laptop / tablet' : 'Other';
-}
 function staffForRole(
   state: DirectorState,
   role: 'moderator' | 'scorekeeper',
@@ -1729,17 +1651,11 @@ function staffForRole(
     (member) => (member.roles.includes(role) && member.available) || member.id === selectedId,
   );
 }
-function staffName(state: DirectorState, id: string | null): string {
-  return id ? (state.staff.find((member) => member.id === id)?.name ?? '') : '';
-}
 function teamName(state: DirectorState, id: string): string {
   return state.teams.find((team) => team.id === id)?.displayName ?? 'Unknown team';
 }
 function matchupLabel(state: DirectorState, game: DirectorState['scheduledGames'][number]): string {
   return `${teamName(state, game.leftTeamId)} vs ${game.rightTeamId ? teamName(state, game.rightTeamId) : 'Bye'}`;
-}
-function humanRoomStatus(status: string): string {
-  return status.charAt(0).toUpperCase() + status.slice(1).replaceAll('-', ' ');
 }
 function qbtcpSessionLabel(state: DirectorState['qbtcpSessions'][number]['state']): string {
   return state === 'result-received' ? 'Result received' : state.charAt(0).toUpperCase() + state.slice(1);

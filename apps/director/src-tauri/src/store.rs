@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 9;
+const SCHEMA_VERSION: i64 = 10;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -623,7 +623,9 @@ fn sync_normalized_state(
     // publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
     crate::live::sync_publication(transaction, state)?;
     transaction.execute_batch(
-        "DELETE FROM player_statistics;
+        "DELETE FROM operational_assignment_equipment;
+         DELETE FROM operational_assignments;
+         DELETE FROM player_statistics;
          DELETE FROM game_results;
          DELETE FROM result_submissions;
          DELETE FROM protests;
@@ -789,8 +791,8 @@ fn sync_normalized_state(
         transaction.execute(
             "INSERT INTO rooms
                 (id, name, building, floor, accessibility_notes, directions, status, notes,
-                 available, moderator_id, scorekeeper_id, equipment_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 available, moderator_id, scorekeeper_id, equipment_id, default_equipment_ids_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 id,
                 text(room, "name").unwrap_or_else(|| id.clone()),
@@ -804,6 +806,10 @@ fn sync_normalized_state(
                 text(room, "moderatorId"),
                 text(room, "scorekeeperId"),
                 text(room, "equipmentId"),
+                room.get("defaultEquipmentIds")
+                    .filter(|value| value.is_array())
+                    .map(json_text)
+                    .unwrap_or_else(|| "[]".to_owned()),
             ],
         )?;
     }
@@ -855,6 +861,60 @@ fn sync_normalized_state(
                 text(equipment, "notes").unwrap_or_default(),
             ],
         )?;
+    }
+
+    // Round-scoped operational assignments. No foreign keys are declared on round_id/room_id/staff
+    // ids on purpose: the projection is rebuilt wholesale on every save, and a declared reference
+    // would make the *order* of these loops able to fail a tournament save.
+    for assignment in objects(state, "operationalAssignments") {
+        let Some(id) = text(assignment, "id") else {
+            continue;
+        };
+        let Some(round_id) = text(assignment, "roundId") else {
+            continue;
+        };
+        transaction.execute(
+            "INSERT INTO operational_assignments
+                (id, round_id, kind, scheduled_game_id, room_id, moderator_id, scorekeeper_id,
+                 staff_ids_json, pinned_json, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                round_id,
+                text(assignment, "kind").unwrap_or_else(|| "room".to_owned()),
+                text(assignment, "scheduledGameId"),
+                text(assignment, "roomId"),
+                text(assignment, "moderatorId"),
+                text(assignment, "scorekeeperId"),
+                assignment
+                    .get("staffIds")
+                    .filter(|value| value.is_array())
+                    .map(json_text)
+                    .unwrap_or_else(|| "[]".to_owned()),
+                assignment
+                    .get("pinned")
+                    .filter(|value| value.is_object())
+                    .map(json_text)
+                    .unwrap_or_else(|| "{}".to_owned()),
+                text(assignment, "notes").unwrap_or_default(),
+            ],
+        )?;
+        let equipment_ids = assignment
+            .get("equipmentIds")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for (position, equipment_id) in equipment_ids.iter().enumerate() {
+            let Some(equipment_id) = equipment_id.as_str() else {
+                continue;
+            };
+            transaction.execute(
+                "INSERT OR IGNORE INTO operational_assignment_equipment
+                    (assignment_id, equipment_id, position)
+                 VALUES (?1, ?2, ?3)",
+                params![id, equipment_id, position as i64],
+            )?;
+        }
     }
 
     for packet in objects(state, "packets") {
@@ -1197,8 +1257,9 @@ fn sync_normalized_state(
         transaction.execute(
             "INSERT INTO qbtcp_sessions
                 (id, room_id, game_id, device_id, state, assignment_revision, last_seen_at, metadata_json,
-                 match_id, operator_name, resumable, result_received, progress_sequence, progress_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                 match_id, operator_name, resumable, result_received, progress_sequence, progress_json,
+                 staff_id, expected_staff_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 id,
                 text(session, "roomId"),
@@ -1217,6 +1278,8 @@ fn sync_normalized_state(
                     .get("progress")
                     .map(json_text)
                     .unwrap_or_else(|| "null".to_owned()),
+                text(session, "staffId"),
+                text(session, "expectedStaffId"),
             ],
         )?;
     }
@@ -1985,7 +2048,74 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
     }
 
+    if current < 10 {
+        // Round-scoped operational assignments. A room row says what a room is; these rows say how
+        // it is being used for one round, which is what lets staff and equipment move between
+        // rounds. Equipment is a child table rather than a JSON column because a room can hold
+        // several resources and the exclusivity check is a query over them.
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS operational_assignments (
+                id TEXT PRIMARY KEY,
+                round_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'room' CHECK (kind IN ('room', 'hq', 'runner')),
+                scheduled_game_id TEXT,
+                room_id TEXT,
+                moderator_id TEXT,
+                scorekeeper_id TEXT,
+                staff_ids_json TEXT NOT NULL DEFAULT '[]',
+                pinned_json TEXT NOT NULL DEFAULT '{}',
+                notes TEXT NOT NULL DEFAULT ''
+            );
+            CREATE INDEX IF NOT EXISTS operational_assignments_round
+                ON operational_assignments(round_id);
+            CREATE INDEX IF NOT EXISTS operational_assignments_room
+                ON operational_assignments(room_id);
+            CREATE TABLE IF NOT EXISTS operational_assignment_equipment (
+                assignment_id TEXT NOT NULL
+                    REFERENCES operational_assignments(id) ON DELETE CASCADE,
+                equipment_id TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (assignment_id, equipment_id)
+            );
+            INSERT INTO schema_migrations(version) VALUES (10);",
+        )?;
+        // Added column by column rather than in the batch above: a database whose migration ledger
+        // was rewound (which recovery tooling and the migration tests both do) still has these
+        // columns, and re-running the batch must not fail the open.
+        add_column_if_missing(
+            &transaction,
+            "rooms",
+            "default_equipment_ids_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )?;
+        add_column_if_missing(&transaction, "qbtcp_sessions", "staff_id", "TEXT")?;
+        add_column_if_missing(&transaction, "qbtcp_sessions", "expected_staff_id", "TEXT")?;
+    }
+
     transaction.commit()?;
+    Ok(())
+}
+
+/// Add a column only when the table does not already have it.
+///
+/// SQLite has no `ADD COLUMN IF NOT EXISTS`, and a migration that fails on an already-present
+/// column would make an open fail for any database whose migration ledger has been rewound.
+fn add_column_if_missing(
+    transaction: &rusqlite::Transaction<'_>,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), StoreError> {
+    let present: i64 = transaction.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        params![table, column],
+        |row| row.get(0),
+    )?;
+    if present == 0 {
+        transaction.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+        ))?;
+    }
     Ok(())
 }
 
@@ -2063,6 +2193,8 @@ mod tests {
             "protests",
             "audit_events",
             "tournament_documents",
+            "operational_assignments",
+            "operational_assignment_equipment",
         ] {
             let exists: i64 = connection
                 .query_row(
@@ -2180,6 +2312,95 @@ mod tests {
             .checkpoint_state(&document, "First real recovery point")
             .unwrap();
         assert_eq!(store.list_checkpoints("event").unwrap().len(), 1);
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[test]
+    fn operational_assignments_project_into_queryable_rows() {
+        let path = temporary_database_path("operations");
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let state = json!({
+            "schemaVersion": 9,
+            "tournament": {"id": "tournament-1", "name": "Operations"},
+            "rooms": [{
+                "id": "room-201",
+                "name": "Room 201",
+                "available": true,
+                "defaultEquipmentIds": ["equipment-1", "equipment-2"]
+            }],
+            "operationalAssignments": [
+                {
+                    "id": "assignment-1",
+                    "roundId": "round-1",
+                    "kind": "room",
+                    "scheduledGameId": "game-1",
+                    "roomId": "room-201",
+                    "moderatorId": "staff-alice",
+                    "scorekeeperId": "staff-bob",
+                    "equipmentIds": ["equipment-1", "equipment-2"],
+                    "pinned": {"room": true}
+                },
+                {
+                    "id": "assignment-hq",
+                    "roundId": "round-1",
+                    "kind": "hq",
+                    "staffIds": ["staff-cara"],
+                    "equipmentIds": []
+                }
+            ],
+            "qbtcpSessions": [{
+                "sessionId": "session-1",
+                "roomId": "room-201",
+                "deviceId": "device-1",
+                "state": "paired",
+                "lastSeenAt": "2026-09-09T10:00:00.000Z",
+                "progress": null,
+                "helpRequestId": null,
+                "staffId": "staff-bob",
+                "expectedStaffId": "staff-bob"
+            }]
+        });
+        store.save_state(&state).expect("state saves");
+
+        let connection = store.connection.lock().expect("database lock");
+        let (kind, room_id, moderator): (String, String, String) = connection
+            .query_row(
+                "SELECT kind, room_id, moderator_id FROM operational_assignments WHERE id = 'assignment-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("assignment row projects");
+        assert_eq!(kind, "room");
+        assert_eq!(room_id, "room-201");
+        assert_eq!(moderator, "staff-alice");
+
+        let equipment: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM operational_assignment_equipment WHERE assignment_id = 'assignment-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("equipment rows project");
+        assert_eq!(equipment, 2, "multiple resources per room are projected");
+
+        let duty_kind: String = connection
+            .query_row(
+                "SELECT kind FROM operational_assignments WHERE id = 'assignment-hq'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("non-room duty projects");
+        assert_eq!(duty_kind, "hq");
+
+        let staff_id: String = connection
+            .query_row("SELECT staff_id FROM qbtcp_sessions", [], |row| row.get(0))
+            .expect("session identity projects");
+        assert_eq!(staff_id, "staff-bob");
+
+        drop(connection);
+        // The document is the boundary, so it must survive the projection unchanged.
+        assert_eq!(store.load_state().expect("state loads"), Some(state));
         drop(store);
         cleanup(&path);
     }
