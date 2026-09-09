@@ -37,7 +37,7 @@ jobs:
           cp qbsheet/scripts/generate-issue-505-modaq-fixture.ts modaq/generate-qbsheet-fixture.ts
           cd modaq
           yarn install --frozen-lockfile
-          yarn ts-node -r tsconfig-paths/register generate-qbsheet-fixture.ts "$GITHUB_WORKSPACE/qbsheet/packages/tournament-formats/tests/fixtures/current-modaq-match.qbj"
+          yarn ts-node --transpile-only -r tsconfig-paths/register generate-qbsheet-fixture.ts "$GITHUB_WORKSPACE/qbsheet/packages/tournament-formats/tests/fixtures/current-modaq-match.qbj"
 
       - name: Apply compatibility patch
         run: |
