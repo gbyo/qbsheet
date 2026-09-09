@@ -83,7 +83,12 @@ import {
 } from '../live/publication';
 import { classifyFailure, publishOnce, recoverStaleInFlight } from '../live/worker';
 import { newPublication } from '../live/LiveView';
-import { buildBootstrapUrl, QbliveClient, type QbliveSnapshot } from '@qbsheet/qblive-protocol';
+import {
+  buildBootstrapUrl,
+  QbliveClient,
+  QbliveClientError,
+  type QbliveSnapshot,
+} from '@qbsheet/qblive-protocol';
 import {
   claimLiveBackend,
   ensureLiveCredentialStore,
@@ -363,6 +368,15 @@ interface CommitOptions {
   allowArchivedReopen?: boolean;
   /** A synchronous whole-document replacement may commit while its transition barrier is held. */
   documentTransition?: DirectorDocumentTransition;
+}
+
+interface LiveSetupRecovery {
+  publicationId: string;
+  origin: string;
+}
+
+function remoteCleanupAlreadyComplete(reason: unknown): boolean {
+  return reason instanceof QbliveClientError && (reason.code === 'not-found' || reason.code === 'gone');
 }
 
 function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
@@ -943,6 +957,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const publishedSnapshotRef = useRef<QbliveSnapshot | null>(null);
   const liveClientRef = useRef<QbliveClient | null>(null);
   const liveSetupInFlightRef = useRef<Promise<void> | null>(null);
+  // If remote cleanup fails after a claim was adopted into the OS keychain but before Director
+  // could commit it, retain only the public recovery coordinates. The credential remains in the
+  // keychain and the next setup attempt retries cleanup before creating a second publication.
+  const liveSetupRecoveryRef = useRef<LiveSetupRecovery | null>(null);
   const liveDrainInFlightRef = useRef<Promise<void> | null>(null);
   const localServerPublicationRef = useRef<string | null>(null);
   const localServerRecoveryBlockedRef = useRef<string | null>(null);
@@ -1350,6 +1368,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [enqueuePersistence],
   );
 
+  /** Finish an already-mutated Director document through the canonical Live boundary. */
+  const finalizeDirectorStateMutation = useCallback(
+    (next: DirectorState): boolean => {
+      if (next.live?.settings.enabled) {
+        const derived = derivePublication(next, publishedSnapshotRef.current);
+        if (derived.live) {
+          next.live = derived.live;
+          publishedSnapshotRef.current = derived.snapshot;
+        }
+      }
+      const revision = stateRevisionRef.current + 1;
+      stateRevisionRef.current = revision;
+      stateRef.current = next;
+      setState(next);
+      void persist(next, revision).catch(() => undefined);
+      return true;
+    },
+    [persist],
+  );
+
   const retryPersistence = useCallback(async (): Promise<boolean> => {
     if (!ensureWriter()) return false;
     const snapshot = structuredClone(stateRef.current);
@@ -1427,21 +1465,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
       for (const event of next.audit.slice(auditStart)) {
         if (event.actor === 'Director') event.actor = actor;
       }
-      if (next.live?.settings.enabled) {
-        const derived = derivePublication(next, publishedSnapshotRef.current);
-        if (derived.live) {
-          next.live = derived.live;
-          publishedSnapshotRef.current = derived.snapshot;
-        }
-      }
-      const revision = stateRevisionRef.current + 1;
-      stateRevisionRef.current = revision;
-      stateRef.current = next;
-      setState(next);
-      void persist(next, revision).catch(() => undefined);
-      return true;
+      return finalizeDirectorStateMutation(next);
     },
-    [ensureTournamentEditable, ensureWriter, persist, resetQbtcpHealth, settleWriterReady],
+    [
+      ensureTournamentEditable,
+      ensureWriter,
+      finalizeDirectorStateMutation,
+      resetQbtcpHealth,
+      settleWriterReady,
+    ],
   );
 
   const setTournamentStatus = useCallback(
@@ -5414,6 +5446,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       // Director document (sessions, progress, help, roster amendments, and result inboxes). An
       // archived document remains a historical view, even when the server is still running.
       if (stateRef.current.tournament?.status === 'archived') return;
+      if (snapshot.tournamentId && snapshot.tournamentId !== stateRef.current.tournament?.id) return;
       const next = structuredClone(stateRef.current);
       let changed = applyNativeSessions(next, snapshot.sessions);
       changed = applyNativePresence(next, snapshot) || changed;
@@ -5423,11 +5456,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       changed = applyNativeResults(next, snapshot) || changed;
       changed = expireQbtcpSessions(next) || changed;
       if (!changed) return;
-      const revision = stateRevisionRef.current + 1;
-      stateRevisionRef.current = revision;
-      stateRef.current = next;
-      setState(next);
-      void persist(next, revision).catch(() => undefined);
+      // QBTCP observations are authoritative Director mutations too. Finish them through the same
+      // projection/outbox/persistence boundary as user mutations, while keeping all network I/O in
+      // the independent Live worker.
+      finalizeDirectorStateMutation(next);
     })();
     qbtcpSyncInFlightRef.current = task;
     void task.then(
@@ -5439,7 +5471,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       },
     );
     return task;
-  }, [persist, recordQbtcpHealth]);
+  }, [finalizeDirectorStateMutation, recordQbtcpHealth]);
 
   const resolveQbtcpHelp = useCallback(
     async (helpId: DirectorId): Promise<boolean> => {
@@ -6235,6 +6267,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (next.tournament && next.tournament.id !== previousTournamentId) {
         writerGraceDocumentRef.current = next.tournament.id;
       }
+      // Import replaces the active whole document synchronously. Invalidate native polling and
+      // any external setup that was awaiting against the previous document before adopting it.
+      documentEpochRef.current += 1;
+      setDocumentEpoch(documentEpochRef.current);
       stateRef.current = next;
       setState(next);
       void persist(next, revision).catch(() => undefined);
@@ -6549,45 +6585,192 @@ export function useDirectorController(repository = createDirectorRepository()): 
         // Live setup performs process/network work before the publication can be committed.
         // Reject archived documents before starting a listener, claiming a backend, or touching
         // credentials so the central read-only invariant also covers external side effects.
+        if (documentTransitionRef.current) {
+          return Promise.reject(new Error(documentTransitionConflictMessage(documentTransitionRef.current)));
+        }
         if (!ensureTournamentEditable()) {
           return Promise.reject(new Error(archivedTournamentReadOnlyMessage));
         }
         if (liveSetupInFlightRef.current) {
           return Promise.reject(new Error('A QBSheet Live setup attempt is already in progress.'));
         }
+        const initiatingTournamentId = stateRef.current.tournament?.id;
+        if (!initiatingTournamentId) {
+          return Promise.reject(new Error('Create a tournament before setting up QBSheet Live.'));
+        }
+        const initiatingDocumentEpoch = documentEpochRef.current;
+        const pendingRecovery = liveSetupRecoveryRef.current;
         const task = (async () => {
           const publication = newPublication(isoNow());
           const attemptId = publication.publicationId;
-          if (backend.kind === 'local') {
-            const status = await startLocalLiveServer();
-            publication.backend = { ...backend, origin: localLiveOrigin(status) };
-            publication.lifecycle = 'live';
-            localServerPublicationRef.current = attemptId;
-          } else {
-            if (!setupToken) throw new Error('Enter the backend one-time setup token.');
-            await ensureLiveCredentialStore();
-            const claim = await claimLiveBackend({
-              origin: backend.origin,
-              publicationId: attemptId,
-              setupToken,
-              displayName: backend.displayName,
+          let claim: { managementToken: string; origin: string } | null = null;
+          let credentialStored = false;
+          let localServerWasRunning = false;
+          let localServerOwned = false;
+
+          const assertOwnership = (): void => {
+            if (
+              documentTransitionRef.current ||
+              documentEpochRef.current !== initiatingDocumentEpoch ||
+              stateRef.current.tournament?.id !== initiatingTournamentId
+            ) {
+              throw new Error(
+                'QBSheet Live setup was cancelled because the initiating tournament changed while setup was in progress.',
+              );
+            }
+          };
+
+          const recoverPreviousRemoteClaim = async (): Promise<void> => {
+            if (!pendingRecovery) return;
+            const token = await readLiveCredential(pendingRecovery.publicationId);
+            if (!token) {
+              throw new Error(
+                `A previous QBSheet Live cleanup is still pending for publication ${pendingRecovery.publicationId}; its management credential is unavailable.`,
+              );
+            }
+            try {
+              await new QbliveClient({
+                backendOrigin: pendingRecovery.origin,
+                publicationId: pendingRecovery.publicationId,
+                managementToken: token,
+              }).destroy();
+            } catch (reason: unknown) {
+              if (!remoteCleanupAlreadyComplete(reason)) {
+                throw new Error(
+                  `A previous QBSheet Live cleanup is still pending for publication ${pendingRecovery.publicationId}. ${
+                    reason instanceof Error ? reason.message : 'The backend could not be cleaned up.'
+                  }`,
+                );
+              }
+            }
+            await forgetLiveCredential(pendingRecovery.publicationId);
+            liveSetupRecoveryRef.current = null;
+          };
+
+          const rollback = async (): Promise<string[]> => {
+            const failures: string[] = [];
+            if (claim) {
+              let remoteGone = false;
+              try {
+                await new QbliveClient({
+                  backendOrigin: claim.origin,
+                  publicationId: attemptId,
+                  managementToken: claim.managementToken,
+                }).destroy();
+                remoteGone = true;
+              } catch (reason: unknown) {
+                remoteGone = remoteCleanupAlreadyComplete(reason);
+                if (!remoteGone) {
+                  const message =
+                    reason instanceof Error ? reason.message : 'The backend could not be cleaned up.';
+                  failures.push(
+                    `Remote cleanup failed for Live publication ${attemptId}: ${message} The stored management credential was retained so cleanup can be retried.`,
+                  );
+                  if (credentialStored) {
+                    liveSetupRecoveryRef.current = {
+                      publicationId: attemptId,
+                      origin: claim.origin,
+                    };
+                  }
+                }
+              }
+              if (remoteGone && credentialStored) {
+                try {
+                  await forgetLiveCredential(attemptId);
+                } catch (reason: unknown) {
+                  const message =
+                    reason instanceof Error ? reason.message : 'The local credential could not be removed.';
+                  failures.push(
+                    `Remote cleanup completed for Live publication ${attemptId}, but the local credential could not be forgotten: ${message} The stored credential was retained so cleanup can be retried.`,
+                  );
+                  liveSetupRecoveryRef.current = { publicationId: attemptId, origin: claim.origin };
+                }
+              }
+            }
+            const canTouchLocalServer = () =>
+              localServerPublicationRef.current === null || localServerPublicationRef.current === attemptId;
+            if (backend.kind === 'local') {
+              if (localServerOwned && canTouchLocalServer()) {
+                try {
+                  await clearLocalLive(false);
+                } catch (reason: unknown) {
+                  failures.push(
+                    `Local Live cleanup could not clear the failed setup: ${
+                      reason instanceof Error ? reason.message : 'the listener could not be cleared.'
+                    }`,
+                  );
+                }
+                if (canTouchLocalServer()) {
+                  try {
+                    await stopLocalLiveServer();
+                  } catch (reason: unknown) {
+                    failures.push(
+                      `Local Live cleanup could not stop the failed setup: ${
+                        reason instanceof Error ? reason.message : 'the server could not be stopped.'
+                      }`,
+                    );
+                  }
+                }
+              }
+              if (localServerPublicationRef.current === attemptId) {
+                localServerPublicationRef.current = null;
+              }
+            }
+            return failures;
+          };
+
+          try {
+            await recoverPreviousRemoteClaim();
+            assertOwnership();
+            if (backend.kind === 'local') {
+              const before = await readLocalLiveServerStatus();
+              localServerWasRunning = before.running;
+              const status = await startLocalLiveServer();
+              localServerOwned = !localServerWasRunning && status.running;
+              publication.backend = { ...backend, origin: localLiveOrigin(status) };
+              publication.lifecycle = 'live';
+              localServerPublicationRef.current = attemptId;
+              assertOwnership();
+            } else {
+              if (!setupToken) throw new Error('Enter the backend one-time setup token.');
+              await ensureLiveCredentialStore();
+              assertOwnership();
+              claim = await claimLiveBackend({
+                origin: backend.origin,
+                publicationId: attemptId,
+                setupToken,
+                displayName: backend.displayName,
+              });
+              publication.backend = { ...backend, origin: claim.origin };
+              assertOwnership();
+              publication.credential = await storeLiveCredential(attemptId, claim.managementToken);
+              credentialStored = true;
+              publication.lifecycle = 'live';
+              assertOwnership();
+            }
+            assertOwnership();
+            publishedSnapshotRef.current = null;
+            liveClientRef.current = null;
+            const committed = commit((draft) => {
+              draft.live = publication;
+              draft.audit.push({
+                id: newDirectorId('audit'),
+                at: isoNow(),
+                actor: 'Director',
+                type: 'exported',
+                summary: `Configured QBSheet Live on ${backend.kind === 'local' ? 'the local network' : publication.backend?.origin}.`,
+              });
             });
-            publication.backend = { ...backend, origin: claim.origin };
-            publication.credential = await storeLiveCredential(attemptId, claim.managementToken);
-            publication.lifecycle = 'live';
+            if (!committed) {
+              throw new Error(
+                'QBSheet Live setup could not be committed to the initiating tournament. No Live publication was saved.',
+              );
+            }
+          } catch (reason: unknown) {
+            const failures = await rollback();
+            const message = reason instanceof Error ? reason.message : 'QBSheet Live setup failed.';
+            throw new Error([message, ...failures].join(' '));
           }
-          publishedSnapshotRef.current = null;
-          liveClientRef.current = null;
-          commit((draft) => {
-            draft.live = publication;
-            draft.audit.push({
-              id: newDirectorId('audit'),
-              at: isoNow(),
-              actor: 'Director',
-              type: 'exported',
-              summary: `Configured QBSheet Live on ${backend.kind === 'local' ? 'the local network' : publication.backend?.origin}.`,
-            });
-          });
         })();
         liveSetupInFlightRef.current = task;
         return task.finally(() => {
