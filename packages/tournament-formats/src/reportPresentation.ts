@@ -127,6 +127,7 @@ export interface ReportMetadata {
 
 export interface ReportPresentationCapabilities {
   /** True only when the canonical report DTO can actually carry this statistic. */
+  bouncebacksRecorded?: boolean;
   lightningRecorded?: boolean;
   packetRecorded?: boolean;
   stageRecorded?: boolean;
@@ -222,7 +223,7 @@ export function buildReportPresentation({
       ? 'Scoring definitions vary within this report. Answer counts stay grouped by stable semantic category; mixed point values are not merged by number, and points-per-X is omitted when regulation tossup counts disagree.'
       : undefined;
   const bonuses = definitions.some((definition) => definition.useBonuses);
-  const bouncebacks = bonuses && definitions.some((definition) => definition.bouncebacks);
+  const bouncebacksConfigured = bonuses && definitions.some((definition) => definition.bouncebacks);
   const lightningConfigured = definitions.some((definition) => definition.lightning);
   const overtime = definitions.some((definition) => definition.overtime);
   return {
@@ -233,8 +234,8 @@ export function buildReportPresentation({
       tossupCounts.length === 1 ? { tossups: tossupCounts[0], label: `Pts/${tossupCounts[0]}` } : null,
     applicability: {
       bonuses,
-      bouncebacks,
-      // The rules enabling lightning are not evidence that a result stored lightning detail.
+      // Configuration alone is not evidence that a historical result retained this statistic.
+      bouncebacks: bouncebacksConfigured && capabilities.bouncebacksRecorded === true,
       lightning: lightningConfigured && capabilities.lightningRecorded === true,
       overtime,
       packet: options.showPacket && capabilities.packetRecorded === true,
