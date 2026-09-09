@@ -1,36 +1,50 @@
 # QBSheet Director
 
-This directory is the standalone Tauri 2 desktop application for tournament directors. It launches
-the approved Director React surface from the repository's `src/director` tree while keeping the
-desktop build, native runtime, capabilities, and data paths independent from the QBSheet Web scorer.
+This directory is the Tauri 2 desktop application for tournament directors. It launches the approved
+Director React surface from the repository's `src/director` tree while keeping the desktop build,
+native runtime, capabilities, and data paths independent from the QBSheet Web scorer. That
+independence is a product and runtime boundary, not a packaging one: Director ships as its own
+application, and it builds as a workspace of this repository.
 
 ## Development
 
-From the repository root:
+Director is a workspace of the repository root, and the root install is the only install. From the
+repository root:
 
 ```sh
-npm install --prefix apps/director
-npm run dev --prefix apps/director
+npm ci
+npm run director:dev
 ```
 
-That serves Director's user interface in a browser at <http://127.0.0.1:1420/>, which is how the UI
-is developed and how `playwright.director.config.ts` drives it. It is not a way to run a tournament:
-the durable store and the QBTCP listener are native, so the browser-served UI reports the limit
-rather than pretending. To run the real desktop application, install the platform prerequisites
-documented by Tauri and run:
+There is no package-local install. `npm install --prefix apps/director` cannot work, and neither can
+a lockfile committed beside this README, for two reasons that are both structural rather than
+incidental:
+
+- `src/main.tsx` imports `../../../src/director/DirectorApp`. The application Director compiles is
+  the root repository's `src/director` tree, so the surface being built lives outside this package
+  and resolves its own imports from the root `node_modules` no matter what this package installed.
+- That surface depends on `@qbsheet/tournament-core` and `@qbsheet/tournament-formats`, which are
+  built out of `packages/` by the root `prepare` script and published to no registry. A
+  non-workspace install has nowhere to resolve them from.
+
+`npm ci` at the root is what `.github/workflows/ci.yml`'s `director-ui` job runs, so the documented
+path and the tested path are the same one.
+
+`npm run director:dev` serves Director's user interface in a browser at <http://127.0.0.1:1420/>,
+which is how the UI is developed and how `playwright.director.config.ts` drives it. It is not a way
+to run a tournament: the durable store and the QBTCP listener are native, so the browser-served UI
+reports the limit rather than pretending. To run the real desktop application, install the platform
+prerequisites documented by Tauri and run:
 
 ```sh
-npm run tauri:dev --prefix apps/director
+npm run director:tauri:dev
 ```
 
 The native build uses the package-local Vite output and can be produced with:
 
 ```sh
-npm run tauri:build --prefix apps/director
+npm run director:tauri:build
 ```
-
-The first install creates `apps/director/package-lock.json`; it is intentionally local to this
-standalone package and does not alter the scorer's root lockfile or build configuration.
 
 ## Native boundary
 
