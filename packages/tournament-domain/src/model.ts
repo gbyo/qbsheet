@@ -543,6 +543,14 @@ export interface GameRecord {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   source: 'qbtcp' | 'manual' | 'qbj' | 'paper';
+  /**
+   * Issued definition revision the scorer used, when the returned document carried one (#670).
+   * The per-game historical semantics themselves arrive with #671; this is the correlation
+   * key that lets statistics resolve the right definition instead of current defaults.
+   */
+  definitionRevision?: number;
+  /** Digest over the competitive semantics the scorer actually used (#670). */
+  definitionDigest?: string;
   /** Manual/paper results may have a known final score without detailed scoresheet stats. */
   detailedStats?: DetailedStatsStatus;
   transportResultId?: string;
@@ -561,6 +569,10 @@ export interface ResultSubmission {
   receivedAt: string;
   fingerprint: string;
   status: SubmissionStatus;
+  /** Issued definition revision echoed by the room, when the returned document carried one (#670). */
+  definitionRevision?: number;
+  /** Digest over the competitive semantics the room actually scored under (#670). */
+  definitionDigest?: string;
   rawSubmission: unknown;
   warnings?: string[];
   conflictWith?: string;

@@ -1752,17 +1752,15 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, Projected
         .collect()
 }
 
-/// Rules pinned at issue time for one scheduled game (#667).
+/// Snapshot pinned at issue time for one scheduled game (#667).
 ///
 /// A game whose definition was pinned must be generated from its snapshot, never from whatever
 /// the tournament defaults have become since. An explicit `definitionSnapshotId` reference wins;
-/// otherwise the newest non-superseded revision for the game wins. Returns the snapshot's
-/// stored rules object, which shares the Director camelCase shape `generated_scoring_rules`
-/// already accepts.
-fn snapshot_rules_for<'a>(
+/// otherwise the newest non-superseded revision for the game wins.
+fn snapshot_for<'a>(
     root: &'a Map<String, Value>,
     scheduled: &Map<String, Value>,
-) -> Option<&'a Value> {
+) -> Option<&'a Map<String, Value>> {
     let scheduled_id = string_field(Some(scheduled), "id")?;
     let definitions = root.get("gameDefinitions")?.as_array()?;
     if let Some(wanted) = string_field(Some(scheduled), "definitionSnapshotId") {
@@ -1773,8 +1771,7 @@ fn snapshot_rules_for<'a>(
                 string_field(Some(entry), "scheduledGameId").as_deref()
                     == Some(scheduled_id.as_str())
                     && string_field(Some(entry), "id").as_deref() == Some(wanted.as_str())
-            })
-            .and_then(|entry| entry.get("rules"));
+            });
     }
     let mut best: Option<&Map<String, Value>> = None;
     for entry in definitions.iter().filter_map(Value::as_object) {
@@ -1797,7 +1794,18 @@ fn snapshot_rules_for<'a>(
             best = Some(entry);
         }
     }
-    best.and_then(|entry| entry.get("rules"))
+    best
+}
+
+/// Rules pinned at issue time for one scheduled game.
+///
+/// Returns the snapshot's stored rules object, which shares the Director camelCase shape
+/// `generated_scoring_rules` already accepts.
+fn snapshot_rules_for<'a>(
+    root: &'a Map<String, Value>,
+    scheduled: &Map<String, Value>,
+) -> Option<&'a Value> {
+    snapshot_for(root, scheduled).and_then(|entry| entry.get("rules"))
 }
 
 fn generated_assignment(
@@ -1872,6 +1880,20 @@ fn generated_assignment(
         "assignment_revision": u64_field(Some(scheduled), "assignmentRevision").unwrap_or(1),
         "room_id": room_id
     });
+    // The definition identity the room must score under and echo back (#670). Present exactly
+    // when the file builder would also emit it: a pinned snapshot is active for this game.
+    if let Some(snapshot) = snapshot_for(root, scheduled) {
+        if let Some(revision) = snapshot
+            .get("revision")
+            .and_then(Value::as_u64)
+            .filter(|id| *id > 0)
+        {
+            qbtcp_extension["definition_revision"] = json!(revision);
+        }
+        if let Some(digest) = snapshot.get("digest").and_then(Value::as_str) {
+            qbtcp_extension["definition_digest"] = json!(digest);
+        }
+    }
     if let Some(timed) = timed_from_rules(rules_value) {
         qbtcp_extension["scorekeeper"] = json!({"timed": timed});
     }
@@ -3372,6 +3394,7 @@ mod tests {
                     "id": "def-1",
                     "scheduledGameId": "scheduled-1",
                     "revision": 1,
+                    "digest": "digest-one",
                     "rules": {"tossupValue": 10, "tossupCount": 24, "bonusParts": 3}
                 },
                 {
@@ -3413,6 +3436,19 @@ mod tests {
                 .get("regulation_tossup_count")
                 .and_then(Value::as_u64),
             Some(24)
+        );
+        let generated_match = objects
+            .iter()
+            .find(|object| object.get("type").and_then(Value::as_str) == Some("Match"))
+            .expect("match object");
+        let extension = generated_match.get("_qbtcp").expect("qbtcp extension");
+        assert_eq!(
+            extension.get("definition_revision").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            extension.get("definition_digest").and_then(Value::as_str),
+            Some("digest-one")
         );
     }
 

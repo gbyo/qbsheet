@@ -118,6 +118,30 @@ describe('definition pinning', () => {
     expect(definitionRulesFor(state, 'scheduled-1')?.powerValue).toBe(15);
   });
 
+  test('issued assignments carry the definition identity; previews carry none', () => {
+    const state = releasableTournament();
+    const preview = buildAssignment(state, 'scheduled-1');
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+    const previewMatch = (
+      preview.assignment.document as { objects: Array<Record<string, unknown>> }
+    ).objects.find((entry) => entry.type === 'Match')!;
+    expect((previewMatch._qbtcp as Record<string, unknown>).definition_revision).toBeUndefined();
+
+    pinIssuedDefinitions(state, ['scheduled-1']);
+    const issued = buildAssignment(state, 'scheduled-1');
+    expect(issued.ok).toBe(true);
+    if (!issued.ok) return;
+    const issuedMatch = (
+      issued.assignment.document as { objects: Array<Record<string, unknown>> }
+    ).objects.find((entry) => entry.type === 'Match')!;
+    const snapshot = activeDefinitionSnapshot(state, 'scheduled-1')!;
+    expect(issuedMatch._qbtcp).toMatchObject({
+      definition_revision: snapshot.revision,
+      definition_digest: snapshot.digest,
+    });
+  });
+
   test('a game naming a missing snapshot fails closed instead of using live rules', () => {
     const state = releasableTournament();
     pinIssuedDefinitions(state, ['scheduled-1']);

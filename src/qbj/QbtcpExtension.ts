@@ -23,7 +23,10 @@
  * extension whose name collides with that table would be silently rewritten and the original
  * deleted. So the field names below are checked against it, and any field added later must be too.
  * `round_revision`, `assignment_revision`, `room_id`, `handoff_instruction`, `procedure` and `timed`
- * are all absent from that table and are therefore safe.
+ * are all absent from that table and are therefore safe. `definition_revision` and
+ * `definition_digest` are equally novel: standard QBJ has no definition keys (a Match cannot name
+ * the revision of the competitive truth it was scored under), so there is nothing in a known-key
+ * table for them to collide with.
  *
  * This is a documented compatibility compromise with a deployed parser, not a preference.
  *
@@ -68,6 +71,21 @@ export interface IQbtcpExtension {
   roundRevision?: number;
   /** Which issue of this room's assignment was sent, separate from the round's pairing revision. */
   assignmentRevision?: number;
+  /**
+   * Which issued competitive-definition revision the room scored under (#670).
+   *
+   * QBJ cannot express "the second issue of the rules for this game" canonically: the pairing
+   * can be current while the scoring definition differs, so overloading `assignment_revision`
+   * would conflate two independent staleness axes.
+   */
+  definitionRevision?: number;
+  /**
+   * Digest over the canonical competitive semantics actually used (#667).
+   *
+   * The revision is convenient and auditable; the digest proves equality. A result that echoes
+   * a digest Director never issued is review-required, never silently equivalent.
+   */
+  definitionDigest?: string;
   /** A stable room identity, which survives "Room 204" being renamed to "Library". */
   roomId?: string;
   /** Halves, clock and timeouts. Operations, not scoring; QBJ models scoring. */
@@ -118,6 +136,10 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   if (Number.isInteger(raw.assignment_revision) && Number(raw.assignment_revision) >= 1) {
     extension.assignmentRevision = Number(raw.assignment_revision);
   }
+  if (Number.isInteger(raw.definition_revision) && Number(raw.definition_revision) >= 1) {
+    extension.definitionRevision = Number(raw.definition_revision);
+  }
+  if (nonBlankString(raw.definition_digest)) extension.definitionDigest = raw.definition_digest;
   if (nonBlankString(raw.room_id)) extension.roomId = raw.room_id;
   if (
     typeof raw.handoff_instruction === 'string' &&
@@ -193,6 +215,14 @@ export function buildQbtcpExtension(extension: Omit<IQbtcpExtension, 'version'>)
   }
   if (extension.assignmentRevision !== undefined && Number.isInteger(extension.assignmentRevision)) {
     block.assignment_revision = extension.assignmentRevision;
+    carriesSomething = true;
+  }
+  if (extension.definitionRevision !== undefined && Number.isInteger(extension.definitionRevision)) {
+    block.definition_revision = extension.definitionRevision;
+    carriesSomething = true;
+  }
+  if (nonBlankString(extension.definitionDigest)) {
+    block.definition_digest = extension.definitionDigest;
     carriesSomething = true;
   }
   if (nonBlankString(extension.roomId)) {

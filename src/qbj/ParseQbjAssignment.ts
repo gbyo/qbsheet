@@ -612,6 +612,16 @@ export function defineGame(
       name: tournamentName,
     },
     ...(stringField(match.id) ? { scheduledMatchId: stringField(match.id) } : {}),
+    // Both halves of the identity or neither: a revision without a digest cannot prove
+    // equality, and a digest without a revision cannot name what was issued.
+    ...(extension?.definitionRevision !== undefined && extension?.definitionDigest
+      ? {
+          definition: {
+            revision: extension.definitionRevision,
+            digest: extension.definitionDigest,
+          },
+        }
+      : {}),
     round: {
       number: roundNumber,
       name: roundName,

@@ -26,6 +26,7 @@
  * builder provably cannot leak" is a property of today's builder.
  */
 import {
+  activeDefinitionSnapshot,
   definitionRulesFor,
   orderDayItems,
   type DirectorId,
@@ -375,6 +376,10 @@ export function buildAssignment(
   if (state.players.filter((player) => player.teamId === scheduled.rightTeamId).length === 0)
     warnings.push(`${rightName} has no roster; the room will enter players by hand.`);
 
+  // The definition identity the room must score under and echo back (#670). Present exactly
+  // when the game was issued from a pinned snapshot; an unissued preview carries live rules
+  // with no identity to echo, which ingest treats as weaker provenance.
+  const issuedDefinition = activeDefinitionSnapshot(state, scheduled.id);
   const matchObject: Record<string, unknown> = {
     type: 'Match',
     id: scheduled.id,
@@ -386,6 +391,12 @@ export function buildAssignment(
       version: 1,
       round_revision: round.revision > 0 ? round.revision : 1,
       assignment_revision: scheduled.assignmentRevision > 0 ? scheduled.assignmentRevision : 1,
+      ...(issuedDefinition
+        ? {
+            definition_revision: issuedDefinition.revision,
+            definition_digest: issuedDefinition.digest,
+          }
+        : {}),
       ...(room ? { room_id: room.id } : {}),
       ...(options.handoffInstruction ? { handoff_instruction: options.handoffInstruction } : {}),
       scorekeeper: { timed: rules.timed },

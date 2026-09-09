@@ -234,6 +234,10 @@ export interface ScoreOptions {
   /** Override the round revision the result claims, to simulate a file scored from an old bracket. */
   roundRevision?: number;
   assignmentRevision?: number;
+  /** Override the issued definition revision the result echoes (#670). */
+  definitionRevision?: number | null;
+  /** Override the definition digest the result echoes; null drops it (#670). */
+  definitionDigest?: string | null;
   tournamentId?: string;
 }
 
@@ -288,6 +292,14 @@ export function scoreAssignment(assignment: Record<string, unknown>, options: Sc
   if (extension) {
     if (options.roundRevision !== undefined) extension.round_revision = options.roundRevision;
     if (options.assignmentRevision !== undefined) extension.assignment_revision = options.assignmentRevision;
+    if (options.definitionRevision !== undefined) {
+      if (options.definitionRevision === null) delete extension.definition_revision;
+      else extension.definition_revision = options.definitionRevision;
+    }
+    if (options.definitionDigest !== undefined) {
+      if (options.definitionDigest === null) delete extension.definition_digest;
+      else extension.definition_digest = options.definitionDigest;
+    }
   }
   if (options.tournamentId !== undefined) {
     const tournament = document.objects.find((object) => object.type === 'Tournament');
