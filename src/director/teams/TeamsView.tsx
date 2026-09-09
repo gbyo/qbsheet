@@ -5,6 +5,7 @@ import {
   ActionMenu,
   Button,
   Checkbox,
+  Combobox,
   DataTable,
   Dialog,
   DialogSection,
@@ -347,6 +348,7 @@ export function TeamsView({
           teamId={activeTeamDialog.mode === 'edit' ? activeTeamDialog.teamId : undefined}
           onAnnounce={onAnnounce}
           onClose={closeTeamDialog}
+          onCreateOrganization={() => setSchoolsOpen(true)}
         />
       )}
       {pasteOpen && (
@@ -489,17 +491,17 @@ function TeamDialog({
   teamId,
   onAnnounce,
   onClose,
+  onCreateOrganization,
 }: {
   state: DirectorState;
   controller: DirectorController;
   teamId?: string;
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
+  onCreateOrganization: () => void;
 }) {
   const team = teamId ? state.teams.find((entry) => entry.id === teamId) : undefined;
-  const [organizationName, setOrganizationName] = useState(() =>
-    team ? organizationNameFor(state, team.organizationId) : '',
-  );
+  const [organizationId, setOrganizationId] = useState<string | null>(() => team?.organizationId ?? null);
   const [teamLetter, setTeamLetter] = useState(team?.teamLetter ?? '');
   const [displayName, setDisplayName] = useState(team?.displayName ?? '');
   const [displayNameCustomized, setDisplayNameCustomized] = useState(Boolean(team));
@@ -525,12 +527,25 @@ function TeamDialog({
   });
   const [rosterPaste, setRosterPaste] = useState('');
 
-  const suggestedName = (school: string, letter: string) => {
-    const organization = state.organizations.find(
-      (entry) =>
-        !entry.archived && entry.name.trim().toLocaleLowerCase() === school.trim().toLocaleLowerCase(),
-    );
-    return [organization?.shortName || school.trim(), letter.trim()].filter(Boolean).join(' ');
+  const suggestedName = (selectedOrganizationId: string | null, letter: string) => {
+    const organization = state.organizations.find((entry) => entry.id === selectedOrganizationId);
+    return [organization?.shortName || organization?.name || '', letter.trim()].filter(Boolean).join(' ');
+  };
+
+  const organizationOptions = state.organizations
+    .filter((organization) => !organization.archived || organization.id === organizationId)
+    .map((organization) => ({
+      value: organization.id,
+      label: organization.shortName ? `${organization.shortName} — ${organization.name}` : organization.name,
+      detail: [organization.city, organization.archived ? 'Archived association' : undefined]
+        .filter(Boolean)
+        .join(' · '),
+      disabled: Boolean(organization.archived),
+    }));
+  const createOrganizationOption = {
+    value: '__create-organization__',
+    label: 'Create a new school / club…',
+    detail: 'Opens Schools & clubs manager',
   };
 
   const updatePlayer = (key: string, changes: Partial<PlayerDraft>) => {
@@ -589,7 +604,7 @@ function TeamDialog({
       if (
         !controller.addTeam({
           displayName: name,
-          organizationName,
+          organizationId,
           teamLetter,
           seed: parsedSeed,
           notes,
@@ -609,7 +624,7 @@ function TeamDialog({
     if (
       !controller.updateTeam(team.id, {
         displayName: name,
-        organizationName,
+        organizationId,
         teamLetter,
         seed: parsedSeed,
         notes,
@@ -671,14 +686,25 @@ function TeamDialog({
     >
       <DialogSection title="Team details">
         <FieldGrid>
-          <Field label="School / club">
-            <TextInput
-              value={organizationName}
-              onChange={(event) => {
-                setOrganizationName(event.target.value);
-                if (!displayNameCustomized) setDisplayName(suggestedName(event.target.value, teamLetter));
+          <Field
+            label="School / club"
+            hint="Choose an existing organization, or use the explicit create action."
+          >
+            <Combobox
+              value={organizationId ?? ''}
+              options={[...organizationOptions, createOrganizationOption]}
+              ariaLabel="School / club"
+              placeholder="Search schools and clubs…"
+              allowClear
+              onChange={(value) => {
+                if (value === createOrganizationOption.value) {
+                  onCreateOrganization();
+                  return;
+                }
+                const nextId = value || null;
+                setOrganizationId(nextId);
+                if (!displayNameCustomized) setDisplayName(suggestedName(nextId, teamLetter));
               }}
-              placeholder="School or club"
             />
           </Field>
           <Field label="Team letter" optional>
@@ -687,8 +713,7 @@ function TeamDialog({
               maxLength={4}
               onChange={(event) => {
                 setTeamLetter(event.target.value);
-                if (!displayNameCustomized)
-                  setDisplayName(suggestedName(organizationName, event.target.value));
+                if (!displayNameCustomized) setDisplayName(suggestedName(organizationId, event.target.value));
               }}
             />
           </Field>

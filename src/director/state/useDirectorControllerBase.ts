@@ -165,6 +165,7 @@ export interface NewTournamentInput {
 
 export interface NewTeamInput {
   displayName: string;
+  organizationId?: string | null;
   organizationName?: string;
   teamLetter?: string;
   seed?: number | null;
@@ -2113,13 +2114,23 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const requestedOrganization = input.organizationName?.trim();
-      const archivedOrganization = requestedOrganization
-        ? snapshot.organizations.find(
-            (organization) =>
-              organization.id === requestedOrganization ||
-              organization.name.trim().toLocaleLowerCase() === requestedOrganization.toLocaleLowerCase(),
-          )
+      const requestedOrganizationId = input.organizationId?.trim();
+      const selectedOrganization = requestedOrganizationId
+        ? snapshot.organizations.find((organization) => organization.id === requestedOrganizationId)
         : undefined;
+      if (requestedOrganizationId && !selectedOrganization) {
+        setError('That school or club is no longer in the tournament workspace.');
+        return false;
+      }
+      const archivedOrganization =
+        selectedOrganization ??
+        (requestedOrganization
+          ? snapshot.organizations.find(
+              (organization) =>
+                organization.id === requestedOrganization ||
+                organization.name.trim().toLocaleLowerCase() === requestedOrganization.toLocaleLowerCase(),
+            )
+          : undefined);
       if (archivedOrganization?.archived) {
         setError(
           `School / club “${archivedOrganization.name}” is archived; reopen it before assigning a new team.`,
@@ -2143,7 +2154,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const now = isoNow();
         let organizationId: DirectorId | null = null;
         const organizationName = input.organizationName?.trim();
-        if (organizationName) {
+        if (input.organizationId !== undefined) {
+          organizationId = input.organizationId?.trim() || null;
+        } else if (organizationName) {
           const existing = draft.organizations.find(
             (organization) =>
               organization.name.trim().toLocaleLowerCase() === organizationName.toLocaleLowerCase(),
@@ -2323,13 +2336,23 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const requestedOrganization = changes.organizationName?.trim();
-      const archivedOrganization = requestedOrganization
-        ? snapshot.organizations.find(
-            (organization) =>
-              organization.id === requestedOrganization ||
-              organization.name.trim().toLocaleLowerCase() === requestedOrganization.toLocaleLowerCase(),
-          )
+      const requestedOrganizationId = changes.organizationId?.trim();
+      const selectedOrganization = requestedOrganizationId
+        ? snapshot.organizations.find((organization) => organization.id === requestedOrganizationId)
         : undefined;
+      if (requestedOrganizationId && !selectedOrganization) {
+        setError('That school or club is no longer in the tournament workspace.');
+        return false;
+      }
+      const archivedOrganization =
+        selectedOrganization ??
+        (requestedOrganization
+          ? snapshot.organizations.find(
+              (organization) =>
+                organization.id === requestedOrganization ||
+                organization.name.trim().toLocaleLowerCase() === requestedOrganization.toLocaleLowerCase(),
+            )
+          : undefined);
       if (archivedOrganization?.archived && archivedOrganization.id !== current.organizationId) {
         setError(
           `School / club “${archivedOrganization.name}” is archived; reopen it before assigning this team.`,
@@ -2344,7 +2367,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
       return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
-        if (changes.organizationName !== undefined) {
+        if (changes.organizationId !== undefined) {
+          team.organizationId = changes.organizationId?.trim() || null;
+        } else if (changes.organizationName !== undefined) {
           const organizationName = changes.organizationName.trim();
           if (!organizationName) team.organizationId = null;
           else {

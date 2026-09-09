@@ -86,6 +86,74 @@ test('Schools & clubs exposes a real list and the current organization selection
   expect(riverside).toHaveAttribute('aria-current', 'true');
 });
 
+test('team editor searches organizations, stores the selected id, and exposes explicit creation', () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  const state = directorFixture({ games: 0 });
+  state.teams = [];
+  state.organizations = [
+    { id: 'org-northview', name: 'Northview High School', shortName: 'NV', city: 'Rochester', notes: '' },
+    { id: 'org-lakeside', name: 'Lakeside Academy', shortName: 'LA', city: 'Buffalo', notes: '' },
+    { id: 'org-archived', name: 'Old School', shortName: 'OS', notes: '', archived: true },
+  ];
+  const addTeam = vi.fn(() => true);
+  const controller = { addTeam } as unknown as DirectorController;
+
+  render(<TeamsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add first team' }));
+  const dialog = screen.getByRole('dialog');
+  const organization = within(dialog).getByRole('combobox', { name: 'School / club' });
+  fireEvent.focus(organization);
+  expect(within(dialog).getByRole('option', { name: /Northview High School/ })).toBeInTheDocument();
+  expect(within(dialog).getByRole('option', { name: /Lakeside Academy/ })).toBeInTheDocument();
+  expect(within(dialog).queryByRole('option', { name: /Old School/ })).not.toBeInTheDocument();
+  fireEvent.pointerDown(within(dialog).getByRole('option', { name: /Create a new school \/ club/ }));
+  expect(screen.getByRole('dialog', { name: 'Schools & clubs' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+
+  fireEvent.change(organization, { target: { value: 'rochester' } });
+  expect(within(dialog).getByRole('option', { name: /Northview High School/ })).toBeInTheDocument();
+  expect(within(dialog).queryByRole('option', { name: /Lakeside Academy/ })).not.toBeInTheDocument();
+  fireEvent.change(organization, { target: { value: '' } });
+  fireEvent.pointerDown(within(dialog).getByRole('option', { name: /Northview High School/ }));
+  fireEvent.change(within(dialog).getByRole('textbox', { name: /Team letter/ }), { target: { value: 'A' } });
+  expect(within(dialog).getByDisplayValue('NV A')).toBeInTheDocument();
+  fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Custom A' } });
+  fireEvent.change(within(dialog).getByRole('textbox', { name: /Team letter/ }), { target: { value: 'B' } });
+  expect(within(dialog).getByDisplayValue('Custom A')).toBeInTheDocument();
+  fireEvent.change(within(dialog).getByLabelText('Display name'), { target: { value: 'Team A' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add team' }));
+  expect(addTeam).toHaveBeenCalledWith(
+    expect.objectContaining({ organizationId: 'org-northview', teamLetter: 'B' }),
+  );
+  const submitted = (addTeam.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0];
+  expect(submitted).not.toHaveProperty('organizationName');
+});
+
+test('editing a team keeps its archived organization visible as a marked association', () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  const state = directorFixture();
+  const team = state.teams[0]!;
+  team.organizationId = 'org-archived';
+  state.organizations = [
+    { id: 'org-archived', name: 'Old School', shortName: 'OS', notes: '', archived: true },
+  ];
+
+  render(<TeamsView state={state} controller={{} as DirectorController} onAnnounce={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: team.displayName }));
+  const dialog = screen.getByRole('dialog');
+  const organization = within(dialog).getByRole('combobox', { name: 'School / club' });
+  expect(organization).toHaveAttribute('placeholder', 'OS — Old School');
+  fireEvent.focus(organization);
+  expect(within(dialog).getByRole('option', { name: /Old School.*Archived association/ })).toHaveAttribute(
+    'aria-disabled',
+    'true',
+  );
+});
+
 test('navigation opens a team repeatedly and pasted names preserve pending removals and unsaved drafts', async () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;
