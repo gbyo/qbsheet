@@ -1,6 +1,48 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { Command } from 'cmdk';
 import { Icon } from './Icon';
+
+const FLOATING_GAP = 4;
+const FLOATING_MARGIN = 8;
+
+export type FloatingMenuPosition = {
+  left: number;
+  top: number;
+  placement: 'bottom' | 'top';
+};
+
+/** Calculate a viewport-safe position for a fixed-position menu. Kept pure so edge cases are easy to test. */
+export function getFloatingMenuPosition(
+  opener: DOMRect,
+  menu: Pick<DOMRect, 'width' | 'height'>,
+  align: 'start' | 'end',
+  preferredPlacement: 'bottom' | 'top',
+  viewport = { width: window.innerWidth, height: window.innerHeight },
+): FloatingMenuPosition {
+  const roomBelow = viewport.height - opener.bottom - FLOATING_GAP - FLOATING_MARGIN;
+  const roomAbove = opener.top - FLOATING_GAP - FLOATING_MARGIN;
+  const placement =
+    preferredPlacement === 'bottom'
+      ? roomBelow < menu.height && roomAbove > roomBelow
+        ? 'top'
+        : 'bottom'
+      : roomAbove < menu.height && roomBelow > roomAbove
+        ? 'bottom'
+        : 'top';
+  const unclampedLeft = align === 'end' ? opener.right - menu.width : opener.left;
+  const left = Math.min(
+    Math.max(FLOATING_MARGIN, unclampedLeft),
+    Math.max(FLOATING_MARGIN, viewport.width - menu.width - FLOATING_MARGIN),
+  );
+  const unclampedTop =
+    placement === 'bottom' ? opener.bottom + FLOATING_GAP : opener.top - menu.height - FLOATING_GAP;
+  const top = Math.min(
+    Math.max(FLOATING_MARGIN, unclampedTop),
+    Math.max(FLOATING_MARGIN, viewport.height - menu.height - FLOATING_MARGIN),
+  );
+  return { left, top, placement };
+}
 
 /**
  * One Director popover menu with real menu behavior.
@@ -35,6 +77,7 @@ export function DirectorMenu({
   id,
   align = 'start',
   placement = 'bottom',
+  floating = false,
   openerRef,
   onClose,
   searchPlaceholder,
@@ -46,6 +89,8 @@ export function DirectorMenu({
   /** Which edge the popover is anchored to; read by the stylesheet. */
   align?: 'start' | 'end';
   placement?: 'bottom' | 'top';
+  /** Render in the document layer and position against the trigger viewport. */
+  floating?: boolean;
   openerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   /** Overrides the filter field's placeholder, e.g. "Search tournaments". */
@@ -57,6 +102,7 @@ export function DirectorMenu({
   const onCloseRef = useRef(onClose);
   const searchRef = useRef('');
   const [search, setSearch] = useState('');
+  const [position, setPosition] = useState<FloatingMenuPosition | null>(null);
 
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
@@ -112,7 +158,42 @@ export function DirectorMenu({
     };
   }, [openerRef]);
 
-  return (
+  useLayoutEffect(() => {
+    if (!floating) return;
+    const updatePosition = () => {
+      const opener = openerRef.current;
+      const menu = menuRef.current;
+      if (!opener || !menu) return;
+      const next = getFloatingMenuPosition(
+        opener.getBoundingClientRect(),
+        menu.getBoundingClientRect(),
+        align,
+        placement,
+      );
+      setPosition(next);
+    };
+    let frame = 0;
+    const schedulePosition = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updatePosition);
+    };
+    schedulePosition();
+    window.addEventListener('resize', schedulePosition);
+    document.addEventListener('scroll', schedulePosition, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', schedulePosition);
+      document.removeEventListener('scroll', schedulePosition, true);
+    };
+  }, [align, floating, placement, openerRef, search]);
+
+  const menuStyle: CSSProperties | undefined = !floating
+    ? undefined
+    : position
+      ? { left: position.left, top: position.top }
+      : { left: FLOATING_MARGIN, top: FLOATING_MARGIN, opacity: 0, pointerEvents: 'none' };
+
+  const menu = (
     <Command
       ref={menuRef}
       id={id}
@@ -120,7 +201,9 @@ export function DirectorMenu({
       label={`Search ${label.toLocaleLowerCase()}`}
       className={className}
       data-align={align}
-      data-placement={placement}
+      data-floating={floating || undefined}
+      data-placement={position?.placement ?? placement}
+      style={menuStyle}
       loop
     >
       <div className="director-menu-search">
@@ -139,4 +222,5 @@ export function DirectorMenu({
       </Command.List>
     </Command>
   );
+  return floating ? createPortal(menu, document.body) : menu;
 }
