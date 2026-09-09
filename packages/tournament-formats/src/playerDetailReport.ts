@@ -1,11 +1,21 @@
 import type { GamePlayerStatsRow } from './reportDetail.js';
+import {
+  answerCount,
+  reportNumber,
+  reportPresentationOf,
+  type ReportPresentation,
+} from './reportPresentation.js';
 import type { GameStatsRow, PlayerStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 import {
   renderReportPage,
+  reportAnswerCells,
+  reportAnswerHeaders,
   reportEscape,
   reportGameAnchor,
   reportNumberCell,
   reportPlayerAnchor,
+  reportPointsMetricLabel,
+  reportPointsMetricValue,
   reportScopeNote,
   reportTeamAnchor,
 } from './reportHtml.js';
@@ -36,17 +46,17 @@ function scoreText(game: GameStatsRow): string {
   return `${left}–${right}`;
 }
 
-function summary(row: PlayerStatsRow, showSuperpowers: boolean): string {
+function summary(row: PlayerStatsRow, presentation: ReportPresentation): string {
   const pieces = [
     `${row.gamesPlayed} games`,
     row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`,
-    ...(showSuperpowers ? [`${row.superpowers} superpowers`] : []),
-    `${row.powers} powers`,
-    `${row.gets} gets`,
-    `${row.negs} negs`,
+    ...presentation.answerColumns.map(
+      (column) => `${reportNumber(answerCount(row, column.key))} ${column.label.toLowerCase()}${answerCount(row, column.key) === 1 ? '' : 's'}`,
+    ),
     `${row.points} pts`,
-    `${row.ppg.toFixed(1)} PPG`,
-    row.pptuh === null ? 'PPTUH —' : `${row.pptuh.toFixed(2)} PPTUH`,
+    `${reportPointsMetricValue(row, presentation)} ${reportPointsMetricLabel(presentation)}`,
+    row.pptuh === null ? 'PPTUH —' : `${row.pptuh.toFixed(presentation.precision.rate)} PPTUH`,
+    ...(presentation.applicability.bonuses ? [`${row.bonusPoints} bonus pts`] : []),
   ];
   return pieces.join(' · ');
 }
@@ -55,8 +65,7 @@ function playerGameRows(
   snapshot: StatsSnapshot,
   row: PlayerStatsRow,
   games: readonly GameStatsRow[],
-  showSuperpowers: boolean,
-  showStage: boolean,
+  presentation: ReportPresentation,
 ): string {
   return games
     .map((game) => {
@@ -66,13 +75,12 @@ function playerGameRows(
       const opponentTeam = teamRowFor(snapshot, opponent.id);
       return (
         `<tr><td>${reportEscape(game.roundName ?? game.roundId ?? 'Game')}</td>` +
-        `${showStage ? `<td>${reportEscape(game.phaseId ?? '—')}</td>` : ''}` +
+        `${presentation.applicability.stage ? `<td>${reportEscape(game.phaseId ?? '—')}</td>` : ''}` +
         `<td><a href="teamdetail.html#${reportTeamAnchor(opponentTeam)}">${reportEscape(opponent.name)}</a></td>` +
         `<td>${reportEscape(resultFor(game, row.teamId))}</td>` +
         `<td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(scoreText(game))}</a></td>` +
-        `${reportNumberCell(line.tossupsHeard)}` +
-        `${showSuperpowers ? reportNumberCell(line.superpowers) : ''}` +
-        `${reportNumberCell(line.powers)}${reportNumberCell(line.gets)}${reportNumberCell(line.negs)}${reportNumberCell(line.points)}</tr>`
+        `${reportNumberCell(line.tossupsHeard)}${reportAnswerCells(line, presentation)}${reportNumberCell(line.points)}` +
+        `${presentation.applicability.bonuses ? reportNumberCell(line.bonusPoints) : ''}</tr>`
       );
     })
     .join('');
@@ -81,15 +89,14 @@ function playerGameRows(
 function playerSection(
   snapshot: StatsSnapshot,
   row: PlayerStatsRow,
-  showSuperpowers: boolean,
-  showStage: boolean,
+  presentation: ReportPresentation,
 ): string {
   const team = teamRowFor(snapshot, row.teamId);
   const actualGames = snapshot.games.filter((game) => playerLine(game, row.playerId) !== undefined);
   const teamGames = snapshot.games.filter(
     (game) => game.teamOneId === row.teamId || game.teamTwoId === row.teamId,
   );
-  const rows = playerGameRows(snapshot, row, actualGames, showSuperpowers, showStage);
+  const rows = playerGameRows(snapshot, row, actualGames, presentation);
   const omittedNote =
     teamGames.length > actualGames.length
       ? `<p class="meta">${teamGames.length - actualGames.length} other team game${teamGames.length - actualGames.length === 1 ? '' : 's'} ${teamGames.length - actualGames.length === 1 ? 'is' : 'are'} not listed because the canonical result does not contain a player line for this player.</p>`
@@ -98,21 +105,17 @@ function playerSection(
   return (
     `<section id="${reportPlayerAnchor(row)}" aria-label="${reportEscape(row.playerName)}"><h2>${reportEscape(row.playerName)}</h2>` +
     `<p><a href="teamdetail.html#${reportTeamAnchor(team)}">${reportEscape(row.teamName)}</a>` +
-    `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''} · ${reportEscape(summary(row, showSuperpowers))}</p>` +
+    `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''} · ${reportEscape(summary(row, presentation))}</p>` +
     `<h3>Game-by-game</h3>` +
-    `${actualGames.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${showStage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th><th scope="col" class="num">TUH</th>${showSuperpowers ? '<th scope="col" class="num">Superpowers</th>' : ''}<th scope="col" class="num">Powers</th><th scope="col" class="num">Gets</th><th scope="col" class="num">Negs</th><th scope="col" class="num">Pts</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="meta">No canonical player-game lines.</p>'}` +
+    `${actualGames.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th><th scope="col" class="num">TUH</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">Pts</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">Bonus pts</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="meta">No canonical player-game lines.</p>'}` +
     `${omittedNote}</section>`
   );
 }
 
-/** Player Detail is driven by actual player-game rows, never the team's schedule. */
+/** Player Detail is driven by actual player-game rows and the shared report presentation. */
 export function renderPlayerDetailReport(snapshot: StatsSnapshot): string {
-  const showSuperpowers = snapshot.players.some((player) => player.superpowers > 0);
-  const phases = new Set(snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)));
-  const showStage = phases.size > 1;
-  const sections = snapshot.players
-    .map((row) => playerSection(snapshot, row, showSuperpowers, showStage))
-    .join('');
+  const presentation = reportPresentationOf(snapshot);
+  const sections = snapshot.players.map((row) => playerSection(snapshot, row, presentation)).join('');
   return renderReportPage(
     snapshot,
     'Players',
