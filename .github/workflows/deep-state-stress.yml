@@ -67,6 +67,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git checkout 0ceab2ce812b6d35e6c315c8d7bf8f57a55a8f1e -- .github/workflows/deep-state-stress.yml
           git rm -f .github/workflows/fix-516.yml
+          rm -f scripts/tmp-trigger-516.txt
           git add -A
           git commit -m 'fix: block unsafe Director document transitions (#516)'
           git push origin HEAD:fix/516-block-switch-after-save-failure
