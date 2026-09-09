@@ -235,6 +235,26 @@ describe('Director integration hardening', () => {
     window.localStorage.removeItem('qbsheet.operatorProfile.v1');
   });
 
+  test('schedule generation reports failure when a document transition refuses its commit', async () => {
+    const { hook } = await directorWithSetup(2);
+    const snapshot = structuredClone(hook.result.current.state);
+    let edit: Promise<boolean>;
+    let generated: ReturnType<DirectorController['generateSchedule']>;
+
+    act(() => {
+      edit = hook.result.current.editTournamentSnapshot(
+        snapshot,
+        'Hold the mutation boundary for this test.',
+      );
+      generated = hook.result.current.generateSchedule();
+    });
+
+    expect(generated!.generated).toBe(false);
+    expect(generated!.conflicts.join(' ')).toMatch(/could not be saved/i);
+    expect(hook.result.current.state.rounds).toHaveLength(0);
+    await act(async () => expect(await edit!).toBe(true));
+  });
+
   test('portable archives preserve operational state losslessly', () => {
     const state = emptyDirectorState();
     state.tournament = {
@@ -1455,7 +1475,7 @@ describe('Director integration hardening', () => {
     expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
   });
 
-  test('an explicit USB round can start with partial room assignments without QBTCP', async () => {
+  test('an explicit USB round cannot start until its current assignments are prepared', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => {
       expect(hook.result.current.generateSchedule({ deliveryMode: 'manual' }).generated).toBe(true);
@@ -1473,11 +1493,9 @@ describe('Director integration hardening', () => {
     await act(async () => {
       result = await hook.result.current.startRound(roundId);
     });
-    expect(result?.ok).toBe(true);
-    expect(result?.manual).not.toBe(true);
-    expect(result?.pendingHandoffs).toHaveLength(1);
-    expect(result?.summary).toMatch(/handoff/i);
-    expect(hook.result.current.state.rounds[0].status).toBe('released');
+    expect(result?.ok).toBe(false);
+    expect(result?.summary).toMatch(/not been prepared/i);
+    expect(hook.result.current.state.rounds[0].status).not.toBe('released');
   });
 
   test('an electronic first round cannot start while the native QBTCP server is down', async () => {
