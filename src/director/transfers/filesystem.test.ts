@@ -168,6 +168,48 @@ describe('writing assignments', () => {
     ).toContain('"game-5-1"');
   });
 
+  it('repeated USB preparation exports only unresolved games and preserves their identity', async () => {
+    const state = directorFixture({ games: 3 });
+    const completed = state.scheduledGames[0]!;
+    completed.status = 'accepted';
+    state.games.push({
+      id: 'result-game-5-1',
+      scheduledGameId: completed.id,
+      roundId: completed.roundId,
+      packetId: completed.packetId,
+      status: 'accepted',
+      scores: [],
+      playerStats: [],
+      source: 'manual',
+    });
+    const fileSystem = new MemoryTransferFileSystem();
+    fileSystem.addVolume(mount, { name: 'SanDisk Ultra', availableBytes: 4_000_000 });
+    const request = {
+      basePath: mount,
+      destinationLabel: 'SanDisk Ultra',
+      selection: { kind: 'round' as const, roundId: 'round-5' },
+      directorBuild: 'test',
+    };
+
+    const first = await prepareAssignments(state, fileSystem, request);
+    const second = await prepareAssignments(state, fileSystem, request);
+
+    expect(first.written).toHaveLength(2);
+    expect(second.written).toHaveLength(2);
+    expect(first.skipped).toEqual(second.skipped);
+    expect(first.message).toContain('1 completed game skipped');
+    expect(second.message).toContain('1 completed game skipped');
+    expect(second.written.map((entry) => entry.assignment.scheduledGameId)).toEqual(['game-5-2', 'game-5-3']);
+    expect(second.written.map((entry) => entry.assignment.assignmentRevision)).toEqual([1, 1]);
+    expect(
+      fileSystem
+        .allPaths()
+        .filter((path) => path.endsWith('.qbj'))
+        .every((path) => !path.includes('Ninety Six A vs Greenwood A')),
+    ).toBe(true);
+    expect(JSON.parse(fileSystem.readSync(exchangePaths(mount).manifest)!).assignments).toHaveLength(2);
+  });
+
   it('leaves a read-only drive untouched and says so', async () => {
     const state = directorFixture();
     const fileSystem = new MemoryTransferFileSystem();
