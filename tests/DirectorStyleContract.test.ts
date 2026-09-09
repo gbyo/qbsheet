@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 interface StyleDeclaration {
@@ -8,17 +9,19 @@ interface StyleDeclaration {
   value: string;
 }
 
-const pageStyleDirectory = new URL('../src/director/styles/pages/', import.meta.url);
+const pageStyleDirectory = join(process.cwd(), 'src/director/styles/pages');
 
 function pageStyles(): { file: string; css: string }[] {
   return readdirSync(pageStyleDirectory)
     .filter((file) => file.endsWith('.css'))
     .sort()
-    .map((file) => ({ file, css: readFileSync(new URL(file, pageStyleDirectory), 'utf8') }));
+    .map((file) => ({ file, css: readFileSync(join(pageStyleDirectory, file), 'utf8') }));
 }
 
 function declarations(file: string, css: string): StyleDeclaration[] {
-  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => '\n'.repeat(comment.split('\n').length - 1));
+  const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, (comment) =>
+    '\n'.repeat(comment.split('\n').length - 1),
+  );
   return [...withoutComments.matchAll(/([\w-]+)\s*:\s*([^;{}]+);/g)].map((match) => ({
     file,
     line: withoutComments.slice(0, match.index ?? 0).split('\n').length,
@@ -35,7 +38,8 @@ describe('Director page stylesheet contract', () => {
   const allDeclarations = pageStyles().flatMap(({ file, css }) => declarations(file, css));
 
   test('page styles get palette and elevation values from Director tokens', () => {
-    const visualProperty = /^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline|box-shadow|fill|stroke)$/;
+    const visualProperty =
+      /^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline|box-shadow|fill|stroke)$/;
     const literalColour = /(?:#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(|\b(?:white|black)\b)/i;
     const violations = allDeclarations
       .filter(({ property, value }) => visualProperty.test(property) && literalColour.test(value))
