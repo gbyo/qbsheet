@@ -9,4 +9,5 @@ export * from './yft';
 export * from './stats';
 export * from './reportDetail';
 export * from './boxScoreReport';
+export * from './roundReport';
 export * from './printableStatReport';
