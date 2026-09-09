@@ -211,6 +211,106 @@ function teamObject(state: DirectorState, teamId: DirectorId): Record<string, un
 export interface AssignmentBuildOptions {
   /** Free text shown to the room. Never interpreted; carried in `_qbtcp.handoff_instruction`. */
   handoffInstruction?: string;
+  /**
+   * Explicit maintenance override for rebuilding a completed game's assignment. Normal transfer
+   * selections never set this: a completed game keeps its canonical assignment identity and is
+   * intentionally absent from ordinary handoff exports.
+   */
+  allowHistoricalReExport?: boolean;
+}
+
+export interface AssignmentEligibilityOptions {
+  /** Explicitly permit a completed game's assignment for forensic/historical re-export. */
+  allowHistoricalReExport?: boolean;
+}
+
+export type AssignmentExportEligibility = { eligible: true } | { eligible: false; reason: string };
+
+function assignmentRecords(state: DirectorState, scheduledGameId: DirectorId) {
+  return state.games.filter((record) => record.scheduledGameId === scheduledGameId);
+}
+
+/**
+ * Decide whether an assignment may be issued as ordinary scorer handoff work.
+ *
+ * This is deliberately based on both the scheduled row and the result/transport records below
+ * it. The scheduled status is the fast path, but a stale projection must not make an accepted
+ * result look playable again. Live and result-pending work is also excluded: a blank assignment
+ * cannot resume a scorer's local progress, so those cases need an explicit recovery workflow.
+ */
+export function assignmentExportEligibility(
+  state: DirectorState,
+  game: ScheduledGame,
+  options: AssignmentEligibilityOptions = {},
+): AssignmentExportEligibility {
+  if (game.bye) return { eligible: false, reason: 'A bye has no game to score.' };
+  if (game.status === 'cancelled') return { eligible: false, reason: 'That game is cancelled.' };
+  if (!game.rightTeamId) return { eligible: false, reason: 'That game has only one team.' };
+
+  const records = assignmentRecords(state, game.id);
+  const recordIds = new Set(records.map((record) => record.id));
+  const hasCompletedResult =
+    game.status === 'accepted' ||
+    records.some((record) => record.status === 'accepted' || record.status === 'forfeit') ||
+    state.submissions.some(
+      (submission) => recordIds.has(submission.gameId) && submission.status === 'accepted',
+    );
+  if (hasCompletedResult) {
+    return options.allowHistoricalReExport
+      ? { eligible: true }
+      : {
+          eligible: false,
+          reason: 'That game is already completed; its canonical assignment must not be reissued.',
+        };
+  }
+
+  if (game.status === 'submitted' || records.some((record) => record.status === 'submitted')) {
+    return {
+      eligible: false,
+      reason: 'A result is awaiting review; a fresh assignment could conflict with it.',
+    };
+  }
+  if (game.status === 'live' || records.some((record) => record.status === 'live')) {
+    return {
+      eligible: false,
+      reason: 'That game is already in progress; use the scorer recovery workflow instead.',
+    };
+  }
+
+  const pendingSubmission = state.submissions.some(
+    (submission) =>
+      recordIds.has(submission.gameId) &&
+      (submission.status === 'received' || submission.status === 'review'),
+  );
+  if (pendingSubmission) {
+    return {
+      eligible: false,
+      reason: 'A result is awaiting review; a fresh assignment could conflict with it.',
+    };
+  }
+
+  const resumableSession = state.qbtcpSessions.find(
+    (session) => session.matchId === game.id && session.state === 'result-received',
+  );
+  if (resumableSession) {
+    return {
+      eligible: false,
+      reason: 'A result has already been received; review it before issuing another assignment.',
+    };
+  }
+  const sessionWithProgress = state.qbtcpSessions.find(
+    (session) =>
+      session.matchId === game.id &&
+      (session.progress !== null || (session.progressSequence !== undefined && session.progressSequence > 0)),
+  );
+  if (sessionWithProgress) {
+    return {
+      eligible: false,
+      reason: 'That game has scorer progress; use the scorer recovery workflow instead.',
+    };
+  }
+
+  return { eligible: true };
 }
 
 /**
@@ -233,8 +333,10 @@ export function buildAssignment(
   if (!tournament) return fail('There is no open tournament.');
   const scheduled = state.scheduledGames.find((game) => game.id === scheduledGameId);
   if (!scheduled) return fail('That scheduled game is no longer in the schedule.');
-  if (scheduled.bye) return fail('A bye has no game to score.');
-  if (scheduled.status === 'cancelled') return fail('That game is cancelled.');
+  const eligibility = assignmentExportEligibility(state, scheduled, {
+    allowHistoricalReExport: options.allowHistoricalReExport,
+  });
+  if (!eligibility.eligible) return fail(eligibility.reason);
   if (!scheduled.rightTeamId) return fail('That game has only one team.');
   const round = state.rounds.find((entry) => entry.id === scheduled.roundId);
   if (!round) return fail('That game is not in a round.');
@@ -367,6 +469,42 @@ export type AssignmentSelection =
   | { kind: 'games'; scheduledGameIds: DirectorId[] }
   | { kind: 'unconnected-rooms'; roundId?: DirectorId };
 
+export function selectScheduledGameCandidates(
+  state: DirectorState,
+  selection: AssignmentSelection,
+): ScheduledGame[] {
+  switch (selection.kind) {
+    case 'current-round': {
+      const round = currentOperationalRound(state);
+      return round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
+    }
+    case 'round':
+      return state.scheduledGames.filter((game) => game.roundId === selection.roundId);
+    case 'released': {
+      const releasedRoundIds = new Set(
+        state.rounds.filter((round) => round.status === 'released').map((round) => round.id),
+      );
+      return state.scheduledGames.filter((game) => releasedRoundIds.has(game.roundId));
+    }
+    case 'games': {
+      const wanted = new Set(selection.scheduledGameIds);
+      return state.scheduledGames.filter((game) => wanted.has(game.id));
+    }
+    case 'unconnected-rooms': {
+      const roundId = selection.roundId ?? currentOperationalRound(state)?.id;
+      const connectedRoomIds = new Set(
+        state.qbtcpSessions
+          .filter((session) => session.state !== 'abandoned')
+          .map((session) => session.roomId)
+          .filter(Boolean),
+      );
+      return state.scheduledGames.filter(
+        (game) => game.roundId === roundId && (!game.roomId || !connectedRoomIds.has(game.roomId)),
+      );
+    }
+  }
+}
+
 export function currentOperationalRound(state: DirectorState): Round | undefined {
   const rounds = orderDayItems(state.rounds, state.timeline).flatMap((item) =>
     item.round ? [item.round] : [],
@@ -388,37 +526,12 @@ export function currentOperationalRound(state: DirectorState): Round | undefined
  * initiative. Preparing files for rooms that are connected right now is the backup workflow, and it
  * is the most valuable one: the stick is made before the round, when nothing has gone wrong yet.
  */
-export function selectScheduledGames(state: DirectorState, selection: AssignmentSelection): ScheduledGame[] {
-  const playable = (game: ScheduledGame) => !game.bye && game.rightTeamId && game.status !== 'cancelled';
-  switch (selection.kind) {
-    case 'current-round': {
-      const round = currentOperationalRound(state);
-      return round ? state.scheduledGames.filter((game) => game.roundId === round.id && playable(game)) : [];
-    }
-    case 'round':
-      return state.scheduledGames.filter((game) => game.roundId === selection.roundId && playable(game));
-    case 'released': {
-      const releasedRoundIds = new Set(
-        state.rounds.filter((round) => round.status === 'released').map((round) => round.id),
-      );
-      return state.scheduledGames.filter((game) => releasedRoundIds.has(game.roundId) && playable(game));
-    }
-    case 'games': {
-      const wanted = new Set(selection.scheduledGameIds);
-      return state.scheduledGames.filter((game) => wanted.has(game.id) && playable(game));
-    }
-    case 'unconnected-rooms': {
-      const roundId = selection.roundId ?? currentOperationalRound(state)?.id;
-      const connectedRoomIds = new Set(
-        state.qbtcpSessions
-          .filter((session) => session.state !== 'abandoned')
-          .map((session) => session.roomId)
-          .filter(Boolean),
-      );
-      return state.scheduledGames.filter(
-        (game) =>
-          game.roundId === roundId && playable(game) && (!game.roomId || !connectedRoomIds.has(game.roomId)),
-      );
-    }
-  }
+export function selectScheduledGames(
+  state: DirectorState,
+  selection: AssignmentSelection,
+  options: AssignmentEligibilityOptions = {},
+): ScheduledGame[] {
+  return selectScheduledGameCandidates(state, selection).filter(
+    (game) => assignmentExportEligibility(state, game, options).eligible,
+  );
 }
