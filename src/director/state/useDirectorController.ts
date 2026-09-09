@@ -17,6 +17,7 @@ import {
   phaseCanComplete,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  roundCloseBlockers,
   roomAssignmentConflicts,
   roomAssignmentIsValid,
   roomHasUnresolvedWork,
@@ -3764,36 +3765,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only a released round can be closed.');
         return false;
       }
-      if (!roundScheduleIsValid(snapshot, roundId)) {
-        setError('This round contains an invalid matchup or round membership and cannot be closed.');
-        return false;
-      }
-      const resolvedBracket = snapshot.tournament?.formatId
-        ? resolveDirectorBracket(snapshot, snapshot.tournament.formatId)
-        : null;
-      const cancelledBracketGame = snapshot.scheduledGames.find((game) => {
-        if (game.roundId !== roundId || !game.bracketKey || game.status !== 'cancelled') return false;
-        // A legacy cancelled row may be followed by an explicit replacement. Allow the old
-        // historical row to close only once the authoritative resolver has a decisive outcome for
-        // that bracket key; a merely accepted but stale replacement must still be repaired.
-        return !resolvedBracket?.games.some(
-          (resolved) =>
-            resolved.key === game.bracketKey &&
-            resolved.winnerTeamId !== null &&
-            resolved.loserTeamId !== null,
-        );
-      });
-      if (cancelledBracketGame) {
-        setError(
-          'This elimination round contains a cancelled game without a bracket outcome. Generate a replacement or record an explicit forfeit/administrative resolution before closing it.',
-        );
-        return false;
-      }
-      const unresolved = snapshot.scheduledGames.some(
-        (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
-      );
-      if (unresolved) {
-        setError('Every game must have an accepted result or be cancelled before the round closes.');
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        setError(blockers.join(' '));
         return false;
       }
       return commit((draft) => {
@@ -5270,10 +5244,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const remaining = snapshot.scheduledGames.filter(
         (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
       ).length;
-      if (remaining > 0) {
-        const reason =
-          `${round.name} still has ${remaining} game${remaining === 1 ? '' : 's'} ` +
-          `without an accepted result.`;
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        const reason = blockers.join(' ');
+        setError(reason);
         return { finished: false, roundId, roundName: round.name, remaining, summary: reason, reason };
       }
       if (!closeRoundAction(roundId)) {
@@ -6290,6 +6264,14 @@ function validateDetailedStats(
     return 'Detailed statistics cannot be marked complete when tossups heard is unknown.';
   }
   return null;
+}
+
+/** Keep structural schedule validation and operational close blockers as one controller guard. */
+function roundCloseBlockersForController(state: DirectorState, roundId: DirectorId): string[] {
+  if (!roundScheduleIsValid(state, roundId)) {
+    return ['This round contains an invalid matchup or round membership and cannot be closed.'];
+  }
+  return roundCloseBlockers(state, roundId);
 }
 
 function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
