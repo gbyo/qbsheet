@@ -5,11 +5,7 @@ import {
   type StatsSnapshot,
 } from '@qbsheet/tournament-formats';
 import type { DirectorState, GameRecord } from '../domain';
-import {
-  buildCanonicalSnapshot,
-  overallReportScope,
-  type CanonicalReportScope,
-} from './canonicalReports';
+import { buildCanonicalSnapshot, overallReportScope, type CanonicalReportScope } from './canonicalReports';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -109,11 +105,7 @@ function qbjRoundDefinition(game: GameRecord): RoundStatDefinition | null {
   return {
     regulationTossups: regulation,
     regulationLengthFixed:
-      regulation === null
-        ? null
-        : maximumRegulation === null
-          ? null
-          : regulation === maximumRegulation,
+      regulation === null ? null : maximumRegulation === null ? null : regulation === maximumRegulation,
     overtimeEnabled: minimumOvertime === null ? null : minimumOvertime > 0,
     powers,
     superpowers,
@@ -145,14 +137,8 @@ function unknownHistoricalDefinition(): RoundStatDefinition {
   };
 }
 
-function enrichGame(
-  game: GameStatsRow,
-  source: GameRecord | undefined,
-  state: DirectorState,
-): GameStatsRow {
-  const phaseName = game.phaseId
-    ? state.phases.find((phase) => phase.id === game.phaseId)?.name
-    : undefined;
+function enrichGame(game: GameStatsRow, source: GameRecord | undefined, state: DirectorState): GameStatsRow {
+  const phaseName = game.phaseId ? state.phases.find((phase) => phase.id === game.phaseId)?.name : undefined;
   if (!source) {
     return {
       ...game,

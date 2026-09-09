@@ -19,11 +19,7 @@ const baseDefinition: RoundStatDefinition = {
   source: 'game',
 };
 
-function team(
-  teamId: string,
-  points: number,
-  values: Partial<GameTeamStatsRow> = {},
-): GameTeamStatsRow {
+function team(teamId: string, points: number, values: Partial<GameTeamStatsRow> = {}): GameTeamStatsRow {
   return {
     teamId,
     teamName: teamId,

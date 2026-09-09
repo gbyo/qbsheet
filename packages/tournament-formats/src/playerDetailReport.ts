@@ -81,9 +81,7 @@ function playerGameRows(
         ? `<a href="teamdetail.html#${reportTeamAnchor(opponentTeam)}">${opponentName}</a>`
         : opponentName;
       const score = reportEscape(scoreText(game));
-      const scoreCell = gamesIncluded
-        ? `<a href="games.html#${reportGameAnchor(game)}">${score}</a>`
-        : score;
+      const scoreCell = gamesIncluded ? `<a href="games.html#${reportGameAnchor(game)}">${score}</a>` : score;
       return (
         `<tr><td>${reportEscape(game.roundName ?? game.roundId ?? 'Game')}</td>` +
         `${presentation.applicability.stage ? `<td>${reportEscape(game.phaseId ?? '—')}</td>` : ''}` +

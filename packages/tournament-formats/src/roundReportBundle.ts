@@ -128,10 +128,14 @@ function roundReportHtml(report: RoundStatsReport): string {
     'Rates use aggregate numerators and denominators; the Overall row is recomputed from all games rather than averaging round percentages.',
     '“—” means a required denominator or detailed field is not known for every included game; QBSheet does not report a known-subset value as the whole round.',
     ...(forfeits > 0
-      ? [`${forfeits} pure forfeit${forfeits === 1 ? '' : 's'} count as results but are excluded from scoring and conversion denominators.`]
+      ? [
+          `${forfeits} pure forfeit${forfeits === 1 ? '' : 's'} count as results but are excluded from scoring and conversion denominators.`,
+        ]
       : []),
     ...(report.hasMixedRegulation
-      ? ['The report scope contains different regulation tossup counts, so definition-dependent Overall per-X metrics are unavailable.']
+      ? [
+          'The report scope contains different regulation tossup counts, so definition-dependent Overall per-X metrics are unavailable.',
+        ]
       : []),
     ...(partial
       ? ['At least one row has partial source detail; unavailable cells are intentionally shown as —.']
