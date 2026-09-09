@@ -1,0 +1,263 @@
+name: Apply fix 516
+
+on:
+  push:
+    branches: [fix/516-block-switch-after-save-failure]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/516-block-switch-after-save-failure
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply durable document-transition guard and tests
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          path = Path('src/director/state/useDirectorController.ts')
+          text = path.read_text()
+          text = text.replace("  retryPersistence(): Promise<boolean>;\n  writerStatus:", "  retryPersistence(): Promise<boolean>;\n  canLeaveCurrentDocument(): boolean;\n  writerStatus:", 1)
+          marker = """  const retryPersistence = useCallback(async (): Promise<boolean> => {
+    if (!ensureWriter()) return false;
+    const snapshot = structuredClone(stateRef.current);
+    const revision = stateRevisionRef.current;
+    try {
+      await persist(snapshot, revision);
+      setError(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [ensureWriter, persist]);
+
+"""
+          addition = marker + """  const canLeaveCurrentDocument = useCallback((): boolean => {
+    if (!stateRef.current.tournament) return true;
+    const revision = stateRevisionRef.current;
+    const durableRevision = durableRevisionRef.current;
+    if (durableRevision >= revision) return true;
+    setError(
+      `This tournament has unsaved changes that exist only in memory (revision ${revision}; last durable revision ${durableRevision}). Retry the save or export a recovery archive before leaving it.`,
+    );
+    return false;
+  }, []);
+
+"""
+          if text.count(marker) != 1:
+              raise SystemExit('retryPersistence insertion point did not match')
+          text = text.replace(marker, addition, 1)
+
+          switch_marker = """        // All writes queued before the switch belong to the outgoing document. Waiting here prevents
+        // a late save from racing the incoming document selection.
+        await persistenceQueueRef.current;
+        if (stateRef.current.live?.backend?.kind === 'local') {
+"""
+          switch_replacement = """        // All writes queued before the switch belong to the outgoing document. Waiting here prevents
+        // a late save from racing the incoming document selection. The queue deliberately absorbs
+        // rejected writes, so durable revision truth is checked separately before the document can leave memory.
+        await persistenceQueueRef.current;
+        if (!canLeaveCurrentDocument()) return false;
+        if (stateRef.current.live?.backend?.kind === 'local') {
+"""
+          if text.count(switch_marker) != 1:
+              raise SystemExit('switch persistence boundary did not match')
+          text = text.replace(switch_marker, switch_replacement, 1)
+          text = text.replace('[refreshTournaments, settleWriterReady],\n  );\n\n  const updateCatalogTournamentStatus', '[canLeaveCurrentDocument, refreshTournaments, settleWriterReady],\n  );\n\n  const updateCatalogTournamentStatus', 1)
+
+          create_marker = """  const createTournament = useCallback(
+    (input: NewTournamentInput) => {
+      const now = isoNow();
+"""
+          create_replacement = """  const createTournament = useCallback(
+    (input: NewTournamentInput) => {
+      if (!canLeaveCurrentDocument()) return;
+      const now = isoNow();
+"""
+          if text.count(create_marker) != 1:
+              raise SystemExit('createTournament start did not match')
+          text = text.replace(create_marker, create_replacement, 1)
+          text = text.replace('    [commit],\n  );\n\n  const updateTournament = useCallback(', '    [canLeaveCurrentDocument, commit],\n  );\n\n  const updateTournament = useCallback(', 1)
+
+          restore_marker = """  const restoreCheckpoint = useCallback(
+    async (checkpointId: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
+"""
+          restore_replacement = """  const restoreCheckpoint = useCallback(
+    async (checkpointId: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!canLeaveCurrentDocument()) return false;
+      if (!ensureWriter()) return false;
+"""
+          if text.count(restore_marker) != 1:
+              raise SystemExit('restoreCheckpoint start did not match')
+          text = text.replace(restore_marker, restore_replacement, 1)
+
+          edit_marker = """  const editTournamentSnapshot = useCallback(
+    async (value: DirectorState, reason: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
+"""
+          edit_replacement = """  const editTournamentSnapshot = useCallback(
+    async (value: DirectorState, reason: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!canLeaveCurrentDocument()) return false;
+      if (!ensureWriter()) return false;
+"""
+          if text.count(edit_marker) != 1:
+              raise SystemExit('editTournamentSnapshot start did not match')
+          text = text.replace(edit_marker, edit_replacement, 1)
+
+          import_marker = """  const importSnapshot = useCallback(
+    (value: unknown) => {
+      if (!ensureWriter()) return false;
+"""
+          import_replacement = """  const importSnapshot = useCallback(
+    (value: unknown) => {
+      if (!canLeaveCurrentDocument()) return false;
+      if (!ensureWriter()) return false;
+"""
+          if text.count(import_marker) != 1:
+              raise SystemExit('importSnapshot start did not match')
+          text = text.replace(import_marker, import_replacement, 1)
+
+          # Add the guard to dependency arrays for the async whole-document paths and import path.
+          text = text.replace('[assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],', '[assertWriteAuthority, canLeaveCurrentDocument, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],', 1)
+          text = text.replace('[ensureWriter, persist, settleWriterReady, tournaments],', '[canLeaveCurrentDocument, ensureWriter, persist, settleWriterReady, tournaments],', 1)
+          # restore has a similar dependency list without refreshTournaments on current main.
+          text = text.replace('[assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints],', '[assertWriteAuthority, canLeaveCurrentDocument, captureWriteAuthority, ensureWriter, refreshCheckpoints],', 1)
+
+          text = text.replace('    retryPersistence,\n    writerStatus,', '    retryPersistence,\n    canLeaveCurrentDocument,\n    writerStatus,', 1)
+          path.write_text(text)
+          PY
+          cat > tests/DirectorDocumentTransitions.test.tsx <<'EOF'
+          import { act, renderHook, waitFor } from '@testing-library/react';
+          import { describe, expect, test } from 'vitest';
+          import type { DirectorState } from '../src/director/domain';
+          import { MemoryDirectorRepository } from '../src/director/persistence';
+          import { useDirectorController } from '../src/director/state/useDirectorController';
+          import { directorFixture } from '../src/director/transfers/testFixtures';
+
+          class FailingRepository extends MemoryDirectorRepository {
+            failWrites = false;
+
+            override async save(state: DirectorState): Promise<void> {
+              if (this.failWrites) throw new Error('Injected Director save failure.');
+              await super.save(state);
+            }
+          }
+
+          async function setup() {
+            const repository = new FailingRepository();
+            const first = directorFixture();
+            first.tournament!.id = 'tournament-first';
+            first.tournament!.name = 'First tournament';
+            const second = structuredClone(first);
+            second.tournament!.id = 'tournament-second';
+            second.tournament!.name = 'Second tournament';
+            await repository.saveDocument(first, true);
+            await repository.saveDocument(second, false);
+            const hook = renderHook(() => useDirectorController(repository));
+            await waitFor(() => expect(hook.result.current.loading).toBe(false));
+            return { hook, repository, first, second };
+          }
+
+          async function makeLatestRevisionFail(
+            hook: Awaited<ReturnType<typeof setup>>['hook'],
+            repository: FailingRepository,
+          ) {
+            repository.failWrites = true;
+            act(() => {
+              expect(hook.result.current.updateTournament({ venue: 'Unsaved venue' })).toBe(true);
+            });
+            await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+            expect(hook.result.current.persistence.durableRevision).toBeLessThan(
+              hook.result.current.persistence.revision,
+            );
+          }
+
+          describe('Director durable document transition boundary', () => {
+            test('blocks tournament switching while the latest revision exists only in memory', async () => {
+              const { hook, repository, second } = await setup();
+              await makeLatestRevisionFail(hook, repository);
+
+              let switched = true;
+              await act(async () => {
+                switched = await hook.result.current.switchTournament(second.tournament!.id);
+              });
+
+              expect(switched).toBe(false);
+              expect(hook.result.current.state.tournament?.id).toBe('tournament-first');
+              expect(hook.result.current.state.tournament?.venue).toBe('Unsaved venue');
+              expect(hook.result.current.persistence.status).toBe('failed');
+              expect(hook.result.current.error).toMatch(/exist only in memory/i);
+            });
+
+            test('blocks New and import from replacing an unsaved document', async () => {
+              const { hook, repository, first } = await setup();
+              await makeLatestRevisionFail(hook, repository);
+
+              act(() => {
+                hook.result.current.createTournament({
+                  name: 'Should not replace',
+                  date: '2026-09-09',
+                  venue: '',
+                  organizer: '',
+                });
+              });
+              expect(hook.result.current.state.tournament?.id).toBe(first.tournament!.id);
+
+              const imported = directorFixture();
+              imported.tournament!.id = 'imported-tournament';
+              let importedResult = true;
+              act(() => {
+                importedResult = hook.result.current.importSnapshot(imported);
+              });
+              expect(importedResult).toBe(false);
+              expect(hook.result.current.state.tournament?.id).toBe(first.tournament!.id);
+            });
+
+            test('a successful retry makes the current revision durable and permits switching', async () => {
+              const { hook, repository, second } = await setup();
+              await makeLatestRevisionFail(hook, repository);
+              repository.failWrites = false;
+
+              await act(async () => {
+                expect(await hook.result.current.retryPersistence()).toBe(true);
+              });
+              await waitFor(() => expect(hook.result.current.persistence.status).toBe('saved'));
+              expect(hook.result.current.canLeaveCurrentDocument()).toBe(true);
+
+              await act(async () => {
+                expect(await hook.result.current.switchTournament(second.tournament!.id)).toBe(true);
+              });
+              expect(hook.result.current.state.tournament?.id).toBe(second.tournament!.id);
+            });
+          });
+          EOF
+      - run: npx prettier --write src/director/state/useDirectorController.ts tests/DirectorDocumentTransitions.test.tsx
+      - run: npx vitest --run tests/DirectorDocumentTransitions.test.tsx
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-516.yml
+          git add src/director/state/useDirectorController.ts tests/DirectorDocumentTransitions.test.tsx
+          git commit -m 'fix: block unsafe Director document transitions (#516)'
+          git push origin HEAD:fix/516-block-switch-after-save-failure
