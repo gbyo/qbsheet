@@ -162,7 +162,6 @@ export function DirectorShell({
       <aside className="director-sidebar">
         <div className="director-brand">
           <BrandLogo className="director-wordmark" />
-          <span>Director</span>
         </div>
 
         <div className="director-tournament-switcher-wrap">
