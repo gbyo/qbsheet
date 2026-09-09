@@ -6,6 +6,7 @@ import {
 } from './useDirectorControllerBase';
 import {
   advancementCommitBlocker,
+  advancementCorrectionBlocker,
   partialAdvancementCommitBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
@@ -110,6 +111,21 @@ export function useDirectorController(
         }
         allow();
         return base.commitAdvancement(input);
+      },
+      editAcceptedResult(gameId, scores, note) {
+        const blocker = advancementCorrectionBlocker(base.state, gameId);
+        if (blocker) return reject(blocker);
+        allow();
+        return base.editAcceptedResult(gameId, scores, note);
+      },
+      ruleProtest(protestId, ruling, scoreAdjustment) {
+        if (scoreAdjustment) {
+          const protest = base.state.protests.find((entry) => entry.id === protestId);
+          const blocker = protest ? advancementCorrectionBlocker(base.state, protest.gameId) : null;
+          if (blocker) return reject(blocker);
+        }
+        allow();
+        return base.ruleProtest(protestId, ruling, scoreAdjustment);
       },
     };
   }, [base, safetyError]);

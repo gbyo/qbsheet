@@ -69,11 +69,6 @@ export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: Di
   return `Finish ${source.name} before committing advancement.${suffix}`;
 }
 
-/**
- * The synchronous legacy commit cannot represent an empty target pool. Refuse a call that would
- * omit an already-populated target pool; the advancement UI uses the checkpoint-backed complete
- * commit path that explicitly writes every target pool, including empty ones.
- */
 export function partialAdvancementCommitBlocker(
   state: DirectorState,
   targetPhaseId: DirectorId,
@@ -100,6 +95,37 @@ export function partialAdvancementCommitBlocker(
   return stalePool
     ? `Recommitting advancement would leave teams in ${stalePool.name} as well. Use the complete advancement commit path so every target pool is replaced atomically.`
     : null;
+}
+
+/**
+ * A result correction after advancement has been materialized changes the competitive basis under
+ * downstream membership. Until advancement has an explicit stale/reconcile state, refuse that
+ * rewrite and direct the operator through the recovery checkpoint so playoffs can never silently
+ * diverge from the corrected standings.
+ */
+export function advancementCorrectionBlocker(state: DirectorState, gameId: DirectorId): string | null {
+  const game = state.games.find((entry) => entry.id === gameId);
+  const scheduled = game
+    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
+    : undefined;
+  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+  const source = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
+  if (!source) return null;
+
+  const advancement = [...state.audit].reverse().find((entry) => {
+    if (entry.type !== 'advancement-committed' || !entry.details || typeof entry.details !== 'object') {
+      return false;
+    }
+    return (entry.details as Record<string, unknown>).sourcePhaseId === source.id;
+  });
+  if (!advancement) return null;
+  const target = advancement.entityId
+    ? state.phases.find((entry) => entry.id === advancement.entityId)
+    : undefined;
+  return (
+    `${source.name} already has committed advancement${target ? ` into ${target.name}` : ''}. ` +
+    'Restore the recovery point from before advancement, correct this result, then recommit advancement before downstream play.'
+  );
 }
 
 export function scheduledGameIdForSubmission(
