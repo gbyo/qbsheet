@@ -28,7 +28,9 @@ import type {
   StatsSnapshot,
   TeamStatsRow,
 } from '@qbsheet/tournament-formats';
+import { matchObject } from '../transfers/parse';
 import { classificationLabels, teamClassificationsOf } from '../standings/statsDisplay';
+import { deriveRoundReportData } from './roundReportData';
 
 export interface CanonicalReportScope {
   phaseId?: string;
@@ -42,6 +44,12 @@ function teamTossupsHeard(game: GameRecord, teamId: string): number | null {
   const lines = game.playerStats.filter((stat) => stat.teamId === teamId);
   if (lines.length === 0 || lines.some((stat) => stat.tossupsHeard === null)) return null;
   return lines.reduce((sum, stat) => sum + (stat.tossupsHeard ?? 0), 0);
+}
+
+function qbjNonNegativeInteger(game: GameRecord, field: string): number | null {
+  const match = matchObject(game.rawQbj);
+  const value = match?.[field];
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 export function buildCanonicalSnapshot(
@@ -206,11 +214,10 @@ export function buildCanonicalSnapshot(
         status: game.status,
         detail:
           game.detailedStats === 'incomplete' || game.detailedStats === 'unknown' ? 'partial' : 'complete',
-        // Director's current persisted GameRecord does not yet retain exact
-        // tossups-read/overtime counts. Preserve that absence explicitly so
-        // report consumers never infer them from conversions or player TUH.
-        tossupsRead: null,
-        overtimeTossupsRead: null,
+        // Exact denominators come only from the accepted result's own QBJ evidence. A legacy/manual
+        // score without that field stays unknown; report generation never substitutes today's rules.
+        tossupsRead: qbjNonNegativeInteger(game, 'tossups_read'),
+        overtimeTossupsRead: qbjNonNegativeInteger(game, 'overtime_tossups_read'),
         teamStats,
         playerStats,
       };
@@ -227,6 +234,7 @@ export function buildCanonicalSnapshot(
     teams,
     players,
     games,
+    roundReport: deriveRoundReportData(state, scope),
     extensions: {
       scopeLabel: scope.label,
       finalPlacementApplied: isOverall && state.tournament?.finalPlacement !== undefined,
