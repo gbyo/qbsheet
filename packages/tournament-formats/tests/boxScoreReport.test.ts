@@ -264,7 +264,9 @@ describe('printable game box scores', () => {
   });
 
   test('does not turn roster membership into a player appearance', () => {
-    const games = buildPrintableStatReportBundle(snapshot()).find((page) => page.name === 'games.html')!.content;
+    const games = buildPrintableStatReportBundle(snapshot()).find(
+      (page) => page.name === 'games.html',
+    )!.content;
     expect(games).not.toContain('Bench Player');
   });
 
