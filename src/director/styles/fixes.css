@@ -1,0 +1,70 @@
+/*
+ * Post-redesign polish for shell/popover composition.
+ *
+ * These rules intentionally stay small and structural: they correct places
+ * where shared primitives are composed inside scrolling containers without
+ * changing the primitives' visual language.
+ */
+
+/* Menus are mounted inside the sidebar. While one is open, let it escape the
+   sidebar's scroll/clipping box so it can float over the main app. */
+.director-sidebar:has(.director-tournament-menu),
+.director-sidebar:has(.director-operator-menu) {
+  overflow: visible;
+}
+
+/* Custom selects/comboboxes/multi-selects are mounted inside dialog bodies.
+   The dialog itself already allows visible overflow; temporarily release the
+   body clipping only while one of those popovers is open. */
+.director-dialog-body:has(.director-select-trigger[aria-expanded='true']),
+.director-dialog-body:has(.director-combobox-field [aria-expanded='true']),
+.director-dialog-body:has(.director-multiselect-trigger[aria-expanded='true']) {
+  overflow: visible;
+}
+
+/* A flush panel is correct for the tiebreaker rows, but not for the reorder
+   instruction notice that precedes them. Give that notice the normal panel
+   inset without taking the list itself out of flush mode. */
+.director-panel > .director-reorder-notice {
+  margin: var(--director-space-4) var(--director-panel-inset) var(--director-space-3);
+}
+
+/* Keep global search visually centred on desktop regardless of whether the
+   optional operational-now strip happens to have anything to show. */
+@media (min-width: 901px) {
+  .director-topbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 460px) minmax(0, 1fr);
+  }
+
+  .director-search-wrap {
+    grid-column: 2;
+    width: 100%;
+    max-width: none;
+    justify-self: center;
+  }
+
+  .director-now-strip {
+    grid-column: 3;
+    min-width: 0;
+    justify-self: end;
+  }
+}
+
+/* Narrow layouts keep the navigation toggle on the left and let search use the
+   remaining row instead of trying to preserve the three-column desktop grid. */
+@media (max-width: 900px) {
+  .director-topbar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .director-nav-toggle {
+    grid-column: 1;
+  }
+
+  .director-search-wrap {
+    grid-column: 2;
+    width: 100%;
+  }
+}
