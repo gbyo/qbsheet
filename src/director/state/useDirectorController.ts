@@ -3046,6 +3046,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           // The single legacy field keeps the first resource so an older build reading this
           // document still sees a sensible default rather than nothing.
           room.equipmentId = unique[0] ?? null;
+        } else if (changes.equipmentId !== undefined) {
+          room.defaultEquipmentIds = changes.equipmentId ? [changes.equipmentId] : [];
         }
         // Availability controls future assignment. Do not overwrite a live scorer, open help
         // request, or finished room; only mirror the explicit choice for an otherwise idle room.

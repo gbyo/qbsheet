@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  type OperationalAssignment,
-  type Room,
-  type Round,
-  type ScheduledGame,
-  type StaffMember,
-} from './model';
+import { type OperationalAssignment, type Room, type StaffMember } from './model';
 import { operationsFixture, session } from './operations.fixtures';
 import {
   currentOperationsRound,
@@ -41,46 +35,6 @@ function room(id: string, name: string, overrides: Partial<Room> = {}): Room {
 
 function staff(id: string, name: string, roles: StaffMember['roles']): StaffMember {
   return { id, name, roles, available: true };
-}
-
-function round(id: string, number: number, status: Round['status']): Round {
-  return {
-    id,
-    phaseId: 'phase-1',
-    name: `Round ${number}`,
-    number,
-    revision: 1,
-    status,
-    packetId: null,
-    scheduledGameIds: [],
-    dayOrder: number,
-    scheduledStart: null,
-    releasedAt: status === 'released' ? '2026-09-09T10:00:00.000Z' : null,
-    startedAt: null,
-    closedAt: status === 'closed' ? '2026-09-09T11:00:00.000Z' : null,
-  };
-}
-
-function game(
-  id: string,
-  roundId: string,
-  leftTeamId: string,
-  rightTeamId: string | null,
-  roomId: string | null,
-  overrides: Partial<ScheduledGame> = {},
-): ScheduledGame {
-  return {
-    id,
-    roundId,
-    roomId,
-    packetId: null,
-    leftTeamId,
-    rightTeamId,
-    bye: false,
-    status: 'scheduled',
-    assignmentRevision: 1,
-    ...overrides,
-  };
 }
 
 function assignment(

@@ -186,7 +186,7 @@ function migrateV7ToV8(value: Record<string, unknown>): Record<string, unknown> 
 function migrateV8ToV9(value: Record<string, unknown>): Record<string, unknown> {
   const next = structuredClone(value);
   const rooms = arrayOfRecords(next.rooms, 'rooms');
-  const normalizedRooms = rooms.map((room) => {
+  const normalizedRooms: Array<Record<string, unknown>> = rooms.map((room) => {
     const existing = Array.isArray(room.defaultEquipmentIds)
       ? room.defaultEquipmentIds.filter((id): id is string => typeof id === 'string')
       : null;
