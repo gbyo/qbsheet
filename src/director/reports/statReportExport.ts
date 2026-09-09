@@ -1,5 +1,6 @@
 import {
   buildExtendedStatReportBundle,
+  buildRoundAwareStatReportBundle,
   defaultReportOptions,
   renderStageAwareStandingsReport,
   zipStatReportBundle,
@@ -7,7 +8,7 @@ import {
   type StatReportPage,
 } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
-import { buildCanonicalSnapshot } from './canonicalReports';
+import { buildCanonicalRoundStatsSnapshot } from './canonicalRoundReports';
 import { safeReportName } from './downloads';
 import { buildCanonicalStandingsReport } from './standingsReport';
 import { withReportPresentation } from './reportPresentation';
@@ -25,12 +26,14 @@ function buildCanonicalReportPages(
 ): StatReportPage[] {
   const snapshot = withReportPresentation(
     state,
-    buildCanonicalSnapshot(state, undefined, generatedAt),
+    buildCanonicalRoundStatsSnapshot(state, undefined, generatedAt),
     options,
   );
   const standings = renderStageAwareStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
+  const rounds = buildRoundAwareStatReportBundle(snapshot).find((page) => page.name === 'rounds.html');
   return buildExtendedStatReportBundle(snapshot).map((page) => {
     if (page.name === 'standings.html') return { ...page, content: standings };
+    if (page.name === 'rounds.html' && rounds) return { ...page, content: rounds.content };
     return page;
   });
 }

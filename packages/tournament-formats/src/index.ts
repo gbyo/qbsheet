@@ -8,6 +8,8 @@ export * from './sqbs';
 export * from './yft';
 export * from './stats';
 export * from './reportDetail';
+export * from './roundStats';
+export * from './roundReportBundle';
 export * from './standingsReport';
 export * from './stageAwareStandingsReport';
 export * from './reportPresentation';
