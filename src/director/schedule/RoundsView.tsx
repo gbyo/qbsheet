@@ -53,7 +53,7 @@ import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { prepareOperation, type TransfersRuntime } from '../transfers/useTransfers';
-import { removeRoundFlexibly } from '../state/flexibleEditing';
+import { removeRoundFlexibly, roundRemovalBlocker } from '../state/flexibleEditing';
 import { currentOperationalRound } from '../transfers/assignment';
 import { errorNotice, type AnnounceInput } from '../notices';
 
@@ -1131,7 +1131,10 @@ function RoundRecoveryDialog({
               onAnnounce(
                 removed
                   ? `${round.name} removed. Restore it from Settings → Recovery if needed.`
-                  : errorNotice('The round was not removed; review the Director error.'),
+                  : errorNotice(
+                      roundRemovalBlocker(state, round.id) ??
+                        'The round was not removed; review the Director error.',
+                    ),
               );
               if (removed) onClose();
             } catch (reason: unknown) {

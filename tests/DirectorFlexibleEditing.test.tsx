@@ -96,4 +96,24 @@ describe('Director flexible editing', () => {
       hook.result.current.state.packets.some((packet) => packet.assignedRoundIds.includes(round.id)),
     ).toBe(false);
   });
+
+  test('ordinary removal cannot delete a prepared round', async () => {
+    const hook = await directorWithSetup();
+    act(() => {
+      expect(hook.result.current.generateSchedule({ deliveryMode: 'usb' }).generated).toBe(true);
+    });
+    const round = hook.result.current.state.rounds[0];
+    expect(round).toBeDefined();
+    if (!round) return;
+    act(() => {
+      expect(hook.result.current.prepareRound(round.id)).toBe(true);
+    });
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    const before = structuredClone(hook.result.current.state);
+
+    await act(async () => {
+      expect(await removeRoundFlexibly(hook.result.current, round.id)).toBe(false);
+    });
+    expect(hook.result.current.state).toEqual(before);
+  });
 });
