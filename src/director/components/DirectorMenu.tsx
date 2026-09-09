@@ -222,5 +222,6 @@ export function DirectorMenu({
       </Command.List>
     </Command>
   );
-  return floating ? createPortal(menu, document.body) : menu;
+  const portalRoot = openerRef.current?.closest<HTMLDialogElement>('dialog') ?? document.body;
+  return floating ? createPortal(menu, portalRoot) : menu;
 }
