@@ -7,14 +7,14 @@
 .director-dropzone {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--director-space-3);
   align-items: center;
-  padding: 22px var(--director-panel-inset);
-  border: 1px dashed var(--director-border-strong);
-  border-radius: var(--director-radius);
+  padding: var(--director-space-6) var(--director-panel-inset);
   margin: var(--director-panel-inset);
   color: var(--director-muted);
   text-align: center;
+  border: 1px dashed var(--director-border-strong);
+  border-radius: var(--director-radius);
 }
 
 .director-dropzone p {
@@ -22,6 +22,6 @@
 }
 
 .director-dropzone-panel.is-active .director-dropzone {
-  border-color: var(--director-accent);
   background: var(--director-accent-soft);
+  border-color: var(--director-accent);
 }

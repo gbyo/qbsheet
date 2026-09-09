@@ -1,18 +1,9 @@
-.director-tiebreaker-actions .director-icon-button {
-  width: 28px;
-  height: 28px;
-  color: var(--director-accent);
-  font-size: 15px;
-  line-height: 1;
-  border-color: var(--director-border);
-}
-
-.director-tiebreaker-actions .director-icon-button:disabled {
-  color: var(--director-faint);
-  background: var(--director-surface-soft);
-  cursor: not-allowed;
-  opacity: 0.65;
-}
+/*
+ * Format.
+ *
+ * Page-specific layout only. Shared lists and controls keep their sizing,
+ * borders, typography, and state styling from the Director layers.
+ */
 
 .director-pool-create-form .director-form-field {
   width: min(100%, 240px);
@@ -24,33 +15,6 @@
 
 .director-pool-card .director-form-grid {
   align-items: stretch;
-}
-
-.director-list,
-.director-plain-list,
-.director-phase-list,
-.director-preflight-list,
-.director-leader-list,
-.director-activity-list,
-.director-publish-checklist,
-.director-roster-list {
-  padding: 0;
-  margin: 0;
-  list-style: none;
-}
-
-.director-phase-list li,
-.director-preflight-list li,
-.director-leader-list li,
-.director-plain-list li {
-  border-bottom: 1px solid var(--director-border);
-}
-
-.director-phase-list li:last-child,
-.director-preflight-list li:last-child,
-.director-leader-list li:last-child,
-.director-plain-list li:last-child {
-  border-bottom: 0;
 }
 
 /* A row of controls that edits in place inside a Format section. */

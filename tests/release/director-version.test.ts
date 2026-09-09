@@ -6,7 +6,7 @@
  * * **The rules**, against synthetic entries. Every way a version bump goes wrong is cheap to
  *   construct and impossible to construct by editing the repository, so the disagreement cases are
  *   built by hand.
- * * **The repository**, against its real manifests. The guard is only worth having if the five
+ * * **The repository**, against its real manifests. The guard is only worth having if the four
  *   places Director's version is written agree right now, and that is a fact about this checkout
  *   rather than about the rules — so it is asserted directly, and a bump that forgets `npm install`
  *   fails here rather than at release time.
@@ -58,7 +58,7 @@ describe('version agreement', () => {
     entries[3] = { ...entries[3], version: '0.1.0' };
     const { problems } = check(entries);
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain('apps/director/package-lock.json says 0.1.0');
+    expect(problems[0]).toContain('package-lock.json says 0.1.0');
     expect(problems[0]).toContain('apps/director/src-tauri/tauri.conf.json says 0.2.0');
   });
 

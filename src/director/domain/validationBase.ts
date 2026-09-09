@@ -1,6 +1,14 @@
 import { type DirectorId, type DirectorState, type ScheduledGame } from './model';
 import { activeTournamentTeams, phaseCompetitiveField } from './field';
 import {
+  deriveOperationalRoom,
+  deriveRoundOperations,
+  roomDefaultEquipmentIds,
+  roundAssignments,
+  type OperationalIssue,
+  type OperationalTarget,
+} from './operations';
+import {
   currentFormat,
   currentPhase,
   currentPacket,
@@ -23,6 +31,14 @@ export interface PreflightIssue {
   area: 'tournament' | 'teams' | 'format' | 'schedule' | 'rooms' | 'packets' | 'storage' | 'qbtcp';
   message: string;
   action?: string;
+  /**
+   * The specific thing that needs fixing.
+   *
+   * An attention item exists to end a search, not to start one: "Room 204 needs a scorekeeper"
+   * should open Room 204's assignment, not the Operations page. Absent when the issue is genuinely
+   * about the tournament as a whole.
+   */
+  entity?: OperationalTarget;
 }
 
 export interface QbtcpPreflightHealth {
@@ -234,22 +250,36 @@ export function runPreflight(
       message: `${unscheduled.length} scheduled game(s) do not have a room.`,
     });
   }
-  const unavailableRooms = state.scheduledGames.filter((game) => {
-    if (game.bye || game.status === 'cancelled' || !game.roomId) return false;
-    const round = state.rounds.find((entry) => entry.id === game.roundId);
-    if (!round || (round.status !== 'planned' && round.status !== 'prepared')) return false;
-    const room = state.rooms.find((entry) => entry.id === game.roomId);
-    return (
-      !room || !room.available || room.status !== 'available' || roomHasUnresolvedWork(state, game.roomId)
-    );
-  });
-  if (unavailableRooms.length > 0) {
+  // Room usability comes from the operations derivation rather than from `Room.status`, which has
+  // six independent writers and drifts. Each unusable room is reported individually and points at
+  // the game that needs moving: "1 room is not ready" made the director hunt for which one.
+  for (const game of state.scheduledGames) {
+    if (game.bye || game.status === 'cancelled' || !game.roomId) continue;
+    const round = roundById.get(game.roundId);
+    if (!round || (round.status !== 'planned' && round.status !== 'prepared')) continue;
+    const view = deriveOperationalRoom(state, game.roomId, round.id);
+    const room = view?.room;
+    if (!room) {
+      issues.push({
+        id: `game-room-missing-${game.id}`,
+        severity: 'blocker',
+        area: 'rooms',
+        message: `A game in ${round.name} references a room that is no longer in the tournament workspace.`,
+        action: 'Assign a room',
+        entity: { entityType: 'game', entityId: game.id, parentId: round.id },
+      });
+      continue;
+    }
+    if (room.available && !roomHasUnresolvedWork(state, room.id)) continue;
     issues.push({
-      id: 'games-with-unavailable-rooms',
+      id: `game-room-unusable-${game.id}`,
       severity: 'blocker',
       area: 'rooms',
-      message: `${unavailableRooms.length} scheduled game(s) use rooms that are unavailable or not operationally ready.`,
-      action: 'Open Rooms',
+      message: room.available
+        ? `${room.name} still has unresolved work and cannot host ${round.name}.`
+        : `${room.name} is unavailable but hosts a game in ${round.name}.`,
+      action: 'Reassign room',
+      entity: { entityType: 'game', entityId: game.id, parentId: round.id },
     });
   }
   for (const round of state.rounds) {
@@ -273,6 +303,7 @@ export function runPreflight(
     });
   }
   issues.push(...roomAssignmentConflicts(state));
+  issues.push(...roomDefaultConflicts(state, issues));
   const packetReuse = packetUseConflicts(state);
   const packetReuseBlockers = [
     ...new Set(
@@ -483,97 +514,175 @@ function effectivePacketIdForValidation(state: DirectorState, game: ScheduledGam
   return game.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId ?? null;
 }
 
+/**
+ * Staff and equipment conflicts across the rooms in play.
+ *
+ * This used to walk the permanent `Room` records and read `moderatorId`/`scorekeeperId`/
+ * `equipmentId` off them directly, which meant preflight, the Rooms page, and release validation
+ * each had their own idea of who was where. It now reads the canonical operational derivation, so
+ * every surface agrees by construction, and per-round assignments are respected: the same
+ * moderator in two *different* rounds is a normal day and is no longer reported as a conflict.
+ *
+ * `roomIds`, when given, narrows the scan to a prospective set of rooms — release validation uses
+ * it to check the round it is about to start.
+ */
 export function roomAssignmentConflicts(
   state: DirectorState,
   roomIds?: ReadonlySet<DirectorId>,
 ): PreflightIssue[] {
-  const rooms = state.rooms.filter((room) => room.available && (!roomIds || roomIds.has(room.id)));
-  const staffById = new Map(state.staff.map((member) => [member.id, member]));
-  const equipmentById = new Map(state.equipment.map((item) => [item.id, item]));
-  const usedStaff = new Map<string, string>();
-  const reportedStaffConflicts = new Set<string>();
-  const usedEquipment = new Map<string, string>();
-  const reportedEquipmentConflicts = new Set<string>();
   const issues: PreflightIssue[] = [];
-  for (const room of rooms) {
+  const seen = new Set<string>();
+  for (const round of state.rounds) {
+    if (round.status === 'closed') continue;
+    const operations = deriveRoundOperations(state, round.id);
+    for (const issue of operations.blockers) {
+      // Only resource conflicts belong here. Missing rooms and unstaffed positions are reported
+      // separately by preflight, at their own severity, and would double up otherwise.
+      if (!isResourceConflict(issue.id)) continue;
+      if (roomIds && issue.target?.entityType === 'room' && !roomIds.has(issue.target.entityId)) continue;
+      if (roomIds && !issueTouchesRooms(state, round.id, issue, roomIds)) continue;
+      if (seen.has(issue.id)) continue;
+      seen.add(issue.id);
+      issues.push({
+        id: issue.id,
+        severity: 'blocker',
+        area: 'rooms',
+        message: issue.message,
+        ...(issue.action ? { action: issue.action } : {}),
+        ...(issue.target ? { entity: issue.target } : {}),
+      });
+    }
+  }
+  return issues;
+}
+
+/**
+ * Problems in a room's *default* staffing and equipment, before any round uses it.
+ *
+ * Round-scoped assignments are the operational truth, but a room's defaults are what a new round
+ * inherits, so a default pointing at an unavailable person is a setup problem worth catching while
+ * the tournament is still being planned — including on a day that has no schedule yet.
+ *
+ * Anything the round-scoped scan already reported is skipped: the director should be told once,
+ * about the assignment that actually exists, not twice about the same person.
+ */
+export function roomDefaultConflicts(
+  state: DirectorState,
+  reported: readonly PreflightIssue[] = [],
+): PreflightIssue[] {
+  const alreadyReported = new Set(reported.flatMap((issue) => (issue.entity ? [issue.entity.entityId] : [])));
+  const issues: PreflightIssue[] = [];
+  const seen = new Set<string>();
+  const push = (issue: PreflightIssue) => {
+    if (seen.has(issue.id)) return;
+    seen.add(issue.id);
+    issues.push(issue);
+  };
+  for (const room of state.rooms) {
+    if (!room.available) continue;
     for (const [role, staffId] of [
       ['moderator', room.moderatorId],
       ['scorekeeper', room.scorekeeperId],
     ] as const) {
-      if (!staffId) continue;
-      const member = staffById.get(staffId);
+      if (!staffId || alreadyReported.has(staffId)) continue;
+      const member = state.staff.find((entry) => entry.id === staffId);
       if (!member) {
-        issues.push({
+        push({
           id: `staff-missing-${staffId}`,
           severity: 'blocker',
           area: 'rooms',
           message: `${room.name} references a missing ${role}.`,
+          entity: { entityType: 'room', entityId: room.id },
         });
         continue;
       }
       if (!member.available) {
-        issues.push({
+        push({
           id: `staff-unavailable-${staffId}`,
           severity: 'blocker',
           area: 'rooms',
           message: `${member.name} is unavailable but assigned to ${room.name}.`,
+          action: `Replace ${member.name}`,
+          entity: { entityType: 'staff', entityId: member.id },
         });
       }
       if (!member.roles.includes(role)) {
-        issues.push({
+        push({
           id: `staff-role-${staffId}-${role}`,
           severity: 'blocker',
           area: 'rooms',
           message: `${member.name} is assigned as ${role} in ${room.name} but is not marked for that role.`,
+          action: 'Fix roles',
+          entity: { entityType: 'staff', entityId: member.id },
         });
-      }
-      const previous = usedStaff.get(staffId);
-      if (previous && !reportedStaffConflicts.has(staffId)) {
-        issues.push({
-          id: `staff-conflict-${staffId}`,
-          severity: 'blocker',
-          area: 'rooms',
-          message: `${member.name} is assigned to both ${previous} and ${room.name}.`,
-        });
-        reportedStaffConflicts.add(staffId);
-      } else {
-        if (!previous) usedStaff.set(staffId, `${room.name} (${role})`);
       }
     }
-    if (room.equipmentId) {
-      const equipment = equipmentById.get(room.equipmentId);
-      if (!equipment) {
-        issues.push({
-          id: `equipment-missing-${room.equipmentId}`,
+    for (const equipmentId of roomDefaultEquipmentIds(room)) {
+      if (alreadyReported.has(equipmentId)) continue;
+      const resource = state.equipment.find((entry) => entry.id === equipmentId);
+      if (!resource) {
+        push({
+          id: `equipment-missing-${equipmentId}`,
           severity: 'blocker',
           area: 'rooms',
           message: `${room.name} references missing equipment.`,
+          entity: { entityType: 'room', entityId: room.id },
         });
-      } else {
-        if (!equipment.available) {
-          issues.push({
-            id: `equipment-unavailable-${room.equipmentId}`,
-            severity: 'blocker',
-            area: 'rooms',
-            message: `${equipment.name} is unavailable but assigned to ${room.name}.`,
-          });
-        }
-        const previous = usedEquipment.get(room.equipmentId);
-        if (previous && !reportedEquipmentConflicts.has(room.equipmentId)) {
-          issues.push({
-            id: `equipment-conflict-${room.equipmentId}`,
-            severity: 'blocker',
-            area: 'rooms',
-            message: `${equipment.name} is assigned to both ${previous} and ${room.name}.`,
-          });
-          reportedEquipmentConflicts.add(room.equipmentId);
-        } else if (!previous) {
-          usedEquipment.set(room.equipmentId, room.name);
-        }
+        continue;
+      }
+      if (!resource.available) {
+        push({
+          id: `equipment-unavailable-${equipmentId}`,
+          severity: 'blocker',
+          area: 'rooms',
+          message: `${resource.name} is unavailable but assigned to ${room.name}.`,
+          action: `Replace ${resource.name}`,
+          entity: { entityType: 'equipment', entityId: resource.id },
+        });
       }
     }
   }
   return issues;
+}
+
+const resourceConflictPrefixes = [
+  'staff-missing-',
+  'staff-unavailable-',
+  'staff-role-',
+  'staff-conflict-',
+  'equipment-missing-',
+  'equipment-unavailable-',
+  'equipment-conflict-',
+  'room-double-booked-',
+  'duty-staff-unavailable-',
+];
+
+function isResourceConflict(id: string): boolean {
+  return resourceConflictPrefixes.some((prefix) => id.startsWith(prefix));
+}
+
+/** Whether a round-level conflict actually involves one of the rooms being validated. */
+function issueTouchesRooms(
+  state: DirectorState,
+  roundId: DirectorId,
+  issue: OperationalIssue,
+  roomIds: ReadonlySet<DirectorId>,
+): boolean {
+  if (issue.target?.entityType === 'room') return roomIds.has(issue.target.entityId);
+  if (issue.target?.entityType === 'game') {
+    const game = state.scheduledGames.find((entry) => entry.id === issue.target?.entityId);
+    return Boolean(game?.roomId && roomIds.has(game.roomId));
+  }
+  const resourceId = issue.target?.entityId;
+  if (!resourceId) return true;
+  return roundAssignments(state, roundId).some(
+    (assignment) =>
+      assignment.roomId !== null &&
+      roomIds.has(assignment.roomId) &&
+      (assignment.moderatorId === resourceId ||
+        assignment.scorekeeperId === resourceId ||
+        assignment.equipmentIds.includes(resourceId)),
+  );
 }
 
 function duplicateValues(values: string[]): string[] {

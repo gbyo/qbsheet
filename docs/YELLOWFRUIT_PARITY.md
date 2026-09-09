@@ -83,17 +83,28 @@ deliberate, with technical reasons.
 
 | Capability | Class | Notes |
 |---|---|---|
-| Team standings (W-L, pct, PPG, TUH/PPTUH, PPB, powers/negs) | equivalent | Derived tables exist; canonical engine unifying Director/Live/CSV/HTML/advancement/SQBS lands in PR 4 |
-| PP20 / points-per-X display | gap | Minor; not scheduled — PPG/PPTUH cover the need |
+| Team standings (W-L, pct, PPG, TUH/PPTUH, PPB, powers/negs) | equivalent | Printable standings use the canonical result snapshot plus one shared rules-aware presentation schema; tossup tiers come from scoring semantics rather than observed nonzero counts |
+| PP20 / points-per-X display | implemented | Printable reports can switch between PPG and points-per-X using the canonical regulation tossup count; unknown or incompatible mixed denominators render unavailable rather than being guessed |
 | Individual stats (GP, powers/gets/negs, TUH, PPTUH, points, PPG) | implemented (PR 4) | Full Individuals view; zero-TUH handling honest (unknown vs zero) |
-| Team detail (game log + aggregates) | implemented (PR 4) | Stats workspace section |
-| Player detail (game-by-game lines) | implemented (PR 4) | Stats workspace section |
-| Round/game aggregates | implemented (PR 4) | Stats workspace section |
-| Report column/page configuration | implemented (PR 4) | Sensible defaults; optional column picker, persisted |
+| Team detail (game log + aggregates) | implemented (PR 4) | Printable Team Detail uses canonical per-game rows, shared scoring columns, stable cross-report links, and cumulative canonical totals |
+| Player detail (game-by-game lines) | implemented (PR 4) | Printable Player Detail lists actual canonical player-game appearances only; missing player detail is not fabricated from roster membership |
+| Round/game aggregates | implemented (PR 4) | Games provide canonical box scores; Round Report groups canonical team-game facts today, while canonical round aggregate rates/denominators remain owned by the round-statistics work rather than being recalculated in HTML |
+| Report column/page configuration | implemented (PR 4) | Exports has advanced Report options for the six printable pages plus secondary score/context columns; preferences persist per tournament in local noncompetitive storage and never modify competitive state or audit history |
 | In-app printing | equivalent | Publish Print path preserved |
-| Static HTML bundle (standings, individuals, games, teamdetail, playerdetail, rounds) | implemented (PR 4) | Six linked pages, no JS, deterministic, escaped, canonical-engine-backed; single standings.html exists today |
+| Static HTML bundle (standings, individuals, games, teamdetail, playerdetail, rounds) | implemented (PR 4) | Six linked no-JS pages share the rules-aware presentation schema, escaped public event metadata, conditional format columns, and canonical result rows |
 | Scoreboard HTML page | equivalent | No separate scoreboard page; the bundle's rounds/games pages plus Live cover per-round scores |
-| Unknown-stats honesty (no fabricated zeroes) | implemented (PR 4) | Canonical model distinguishes known-zero from unknown; renders as —/N/A; rankings decline or warn on missing data |
+| Unknown-stats honesty (no fabricated zeroes) | implemented (PR 4) | Canonical known-zero values remain zero; unavailable denominators/detail render `—`; bounceback/lightning columns require canonical recorded data rather than only a configured rule |
+
+Printable report presentation is intentionally separate from competitive state.
+Enabled tossup tiers stay visible even when every count is zero, and answer
+columns use stable semantic identities (for example `power`) rather than point
+values. When a report is supplied multiple historical scoring definitions,
+mixed point values remain one semantic category and incompatible points-per-X
+denominators are declined explicitly. Current Director `GameRecord` does not
+yet persist a per-game historical scoring-definition snapshot; that canonical
+storage boundary must be supplied before reports can identify old-vs-new rule
+values from Director history, and the report layer does not infer them from raw
+QBJ or reinterpret old games using current rules.
 
 ## Interop
 

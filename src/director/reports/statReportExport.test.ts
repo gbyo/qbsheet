@@ -47,6 +47,44 @@ describe('canonical stat report export', () => {
     expect(buildCanonicalStandingsHtml(state, generatedAt)).toBe(bundledStandings);
   });
 
+  test('the exported page contains stage composition, advancement, rich columns, and exact game anchors', () => {
+    const state = playedTournament();
+    state.phases[0]!.name = 'Prelims';
+    state.phases[0]!.advancementRule = {
+      qualifiersPerPool: 1,
+      wildcards: 0,
+      tiebreakers: [...state.tournament!.rules.tiebreakers],
+      manualOverrideAllowed: true,
+    };
+    state.phases.push({
+      id: 'phase-2',
+      name: 'Playoffs',
+      kind: 'playoff',
+      order: 2,
+      formatId: 'format-1',
+      teamIds: ['team-a'],
+      poolIds: [],
+      roundIds: [],
+      advancementRule: null,
+      carryover: false,
+      status: 'planned',
+    });
+
+    const artifact = buildCanonicalStatReport(state, generatedAt);
+    const files = unzipSync(artifact.bytes);
+    const standings = strFromU8(files['standings.html']!);
+    const games = strFromU8(files['games.html']!);
+
+    expect(standings).toContain('Prelims');
+    expect(standings).toContain('Playoffs');
+    expect(standings).toContain('All Games');
+    expect(standings).toContain('Would advance to Playoffs');
+    expect(standings).toContain('<th scope="col" class="num">TUH</th>');
+    expect(standings).toContain('<th scope="col" class="num">PPTUH</th>');
+    expect(standings).toContain('href="teamdetail.html#team-1-team-a"');
+    expect(games).toContain('id="game-game-1"');
+  });
+
   test('same state and generated timestamp produce the same deterministic page content', () => {
     const first = buildCanonicalStatReport(playedTournament(), generatedAt);
     const second = buildCanonicalStatReport(playedTournament(), generatedAt);

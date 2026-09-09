@@ -1,365 +1,136 @@
-export interface RoundStatsGameFacts {
-  gameId: string;
-  roundId: string;
+import type { DirectorId, DirectorState, GameRecord } from './model.js';
+import { gameDetailedCountsKnown } from './canonicalStats.js';
+import { orderDayItems } from './dayOrder.js';
+import { acceptedGameRecords, type DirectorStandingsOptions } from './stats.js';
+
+export interface RoundStatsRow {
+  roundId: DirectorId;
   roundName: string;
-  phaseId?: string;
-  phaseName?: string;
-  packetId?: string | null;
-  packetName?: string | null;
-  teamIds: readonly string[];
-  teamPoints: readonly number[];
-  /** False for an administrative result, such as a scoreless forfeit, with no played questions. */
-  played: boolean;
-  /** True only when the complete detailed score line is trustworthy for this game. */
-  detailComplete: boolean;
-  /** Exact total tossups read, including overtime when the source reports it. */
-  tossupsRead: number | null;
-  /** Historical regulation length from this game's own scoring definition. */
-  regulationTossupCount: number | null;
+  phaseId?: DirectorId;
+  /** All accepted competitive results in the round, including forfeits. */
+  games: number;
+  /** Games eligible for scoring aggregates. Scoreless administrative forfeits are excluded. */
+  playedGames: number;
+  /** Played games whose detailed count fields are trustworthy. */
+  detailedGames: number;
+  /** Average final points scored by one team in an eligible played game. */
+  pointsPerTeam: number | null;
   superpowers: number | null;
   powers: number | null;
   gets: number | null;
   negs: number | null;
   bonusesHeard: number | null;
   bonusPoints: number | null;
-  /** Historical maximum bonus score from this game's own scoring definition. */
-  maximumBonusScore: number | null;
-  superpowerApplicable: boolean | null;
-  powerApplicable: boolean | null;
-  negApplicable: boolean | null;
-  bonusApplicable: boolean | null;
-}
-
-export interface RoundStatsCoverage {
-  playedGames: number;
-  detailGames: number;
-  tossupsReadGames: number;
-  regulationGames: number;
-  bonusGames: number;
-}
-
-export interface CanonicalRoundStatsRow {
-  roundId: string;
-  roundName: string;
-  phaseId?: string;
-  phaseName?: string;
-  packetName: string | null;
-  /** Accepted competitive results in the row, including forfeits. */
-  games: number;
-  /** Distinct teams represented by those results. */
-  teams: number;
-  /** Results with evidence that questions were actually played. */
-  playedGames: number;
-  /** Common historical regulation length (X), or null when unknown/mixed. */
-  regulationTossupCount: number | null;
-  /** Exact tossups read across played games, only when every played game reports it. */
-  tossupsRead: number | null;
-  /** Team points normalized to the common historical regulation length X. */
-  pointsPerTeamPerXTuh: number | null;
-  /** Superpowers divided by positive tossup conversions. */
-  superpowerRate: number | null;
-  /** Powers divided by positive tossup conversions. */
-  powerRate: number | null;
-  /** Positive tossup conversions divided by tossups read. */
-  tossupConversionRate: number | null;
-  /** Negs per common historical regulation length X. */
-  negRatePerXTuh: number | null;
-  /** Bonus points divided by bonuses heard. */
   ppb: number | null;
-  /** Bonus points divided by the historical maximum points available on heard bonuses. */
-  bonusConversionRate: number | null;
-  superpowerApplicable: boolean | null;
-  powerApplicable: boolean | null;
-  negApplicable: boolean | null;
-  bonusApplicable: boolean | null;
-  coverage: RoundStatsCoverage;
-  /** Human-readable reasons that one or more otherwise useful metrics are unavailable. */
-  notes: string[];
+  /** Exact tossups read are not yet persisted on Director GameRecord. */
+  tossupsRead: number | null;
+  /** Reserved for the normalized metric once exact per-game tossup denominators are canonical. */
+  pointsPerTeamPerXTuh: number | null;
+  powerRate: number | null;
+  tossupConversionRate: number | null;
+  negRatePerXTuh: number | null;
+  packetIds: DirectorId[];
 }
 
-export interface CanonicalRoundStatsReport {
-  rows: CanonicalRoundStatsRow[];
-  /** Recomputed from all games in scope. Never an average of row percentages. */
-  total: CanonicalRoundStatsRow | null;
-}
-
-function finiteNonNegative(value: number | null): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
-}
-
-function finitePositive(value: number | null): value is number {
-  return finiteNonNegative(value) && value > 0;
-}
-
-function sumKnown(values: readonly (number | null)[]): number | null {
-  if (values.some((value) => !finiteNonNegative(value))) return null;
-  return values.reduce<number>((sum, value) => sum + (value ?? 0), 0);
-}
-
-function applicability(
-  games: readonly RoundStatsGameFacts[],
-  field: 'superpowerApplicable' | 'powerApplicable' | 'negApplicable' | 'bonusApplicable',
-  count?: 'superpowers' | 'powers' | 'negs' | 'bonusesHeard' | 'bonusPoints',
-): boolean | null {
-  const values = games.map((game) => {
-    if (game[field] !== null) return game[field];
-    if (count && finitePositive(game[count])) return true;
-    return null;
-  });
-  if (values.some((value) => value === true)) return true;
-  if (values.length > 0 && values.every((value) => value === false)) return false;
-  return null;
-}
-
-function applicabilityComparable(
-  games: readonly RoundStatsGameFacts[],
-  field: 'superpowerApplicable' | 'powerApplicable' | 'negApplicable',
-  count: 'superpowers' | 'powers' | 'negs',
-): boolean {
-  if (games.length === 0) return false;
-  const values = games.map((game) => {
-    if (game[field] !== null) return game[field];
-    if (finitePositive(game[count])) return true;
-    return null;
-  });
-  return values.every((value) => value === true);
-}
-
-function commonPositive(values: readonly (number | null)[]): number | null {
-  if (values.length === 0 || values.some((value) => !finitePositive(value))) return null;
-  const first = values[0] as number;
-  return values.every((value) => value === first) ? first : null;
-}
-
-function packetLabel(games: readonly RoundStatsGameFacts[]): string | null {
-  const labels = games.map((game) => game.packetName?.trim() || game.packetId?.trim() || null);
-  const known = [...new Set(labels.filter((value): value is string => value !== null))];
-  if (known.length === 0) return null;
-  if (known.length === 1 && labels.every((value) => value === known[0])) return known[0];
-  return 'Mixed';
-}
-
-function uniquePhase(games: readonly RoundStatsGameFacts[]): { phaseId?: string; phaseName?: string } {
-  const ids = [
-    ...new Set(games.map((game) => game.phaseId).filter((value): value is string => Boolean(value))),
-  ];
-  if (ids.length !== 1) return {};
-  const names = [
-    ...new Set(
-      games
-        .filter((game) => game.phaseId === ids[0])
-        .map((game) => game.phaseName)
-        .filter((value): value is string => Boolean(value)),
-    ),
-  ];
-  return { phaseId: ids[0], ...(names.length === 1 ? { phaseName: names[0] } : {}) };
-}
-
-function aggregateRow(
-  facts: readonly RoundStatsGameFacts[],
-  identity: Pick<CanonicalRoundStatsRow, 'roundId' | 'roundName'>,
-): CanonicalRoundStatsRow {
-  const played = facts.filter((game) => game.played);
-  const detail = played.filter((game) => game.detailComplete);
-  const exactTossups = played.filter((game) => finitePositive(game.tossupsRead));
-  const exactRegulation = played.filter((game) => finitePositive(game.regulationTossupCount));
-  const regulation = commonPositive(played.map((game) => game.regulationTossupCount));
-  const tossupsRead =
-    played.length > 0 && exactTossups.length === played.length
-      ? played.reduce((sum, game) => sum + (game.tossupsRead ?? 0), 0)
-      : null;
-  const allDetailKnown = played.length > 0 && detail.length === played.length;
-
-  const positiveConversions = allDetailKnown
-    ? sumKnown(
-        played.map((game) => {
-          if (
-            !finiteNonNegative(game.superpowers) ||
-            !finiteNonNegative(game.powers) ||
-            !finiteNonNegative(game.gets)
-          ) {
-            return null;
-          }
-          return game.superpowers + game.powers + game.gets;
-        }),
-      )
-    : null;
-  const superpowers = allDetailKnown ? sumKnown(played.map((game) => game.superpowers)) : null;
-  const powers = allDetailKnown ? sumKnown(played.map((game) => game.powers)) : null;
-  const negs = allDetailKnown ? sumKnown(played.map((game) => game.negs)) : null;
-
-  const teamQuestionDenominator =
-    regulation !== null && tossupsRead !== null
-      ? played.reduce((sum, game) => sum + (game.tossupsRead ?? 0) * game.teamIds.length, 0)
-      : 0;
-  const points = played.reduce(
-    (sum, game) =>
-      sum +
-      game.teamPoints.filter((value) => Number.isFinite(value)).reduce((inner, value) => inner + value, 0),
-    0,
+function hasRecordedPlayDetail(game: GameRecord): boolean {
+  if (game.detailedStats === 'complete' || game.playerStats.length > 0) return true;
+  return game.scores.some(
+    (score) =>
+      score.superpowers > 0 ||
+      score.powers > 0 ||
+      score.gets > 0 ||
+      score.negs > 0 ||
+      score.bonuses > 0 ||
+      score.bonusPoints > 0 ||
+      score.bouncebacks > 0,
   );
-  const pointsPerTeamPerXTuh =
-    regulation !== null && teamQuestionDenominator > 0
-      ? (points / teamQuestionDenominator) * regulation
-      : null;
-  const tossupConversionRate =
-    tossupsRead !== null && tossupsRead > 0 && positiveConversions !== null
-      ? positiveConversions / tossupsRead
-      : null;
+}
 
-  const superpowerRelevant = applicability(played, 'superpowerApplicable', 'superpowers');
-  const powerRelevant = applicability(played, 'powerApplicable', 'powers');
-  const negRelevant = applicability(played, 'negApplicable', 'negs');
-  const bonusRelevant = applicability(played, 'bonusApplicable', 'bonusesHeard');
-  const superpowerComparable = applicabilityComparable(played, 'superpowerApplicable', 'superpowers');
-  const powerComparable = applicabilityComparable(played, 'powerApplicable', 'powers');
-  const negComparable = applicabilityComparable(played, 'negApplicable', 'negs');
-
-  const superpowerRate =
-    superpowerComparable && positiveConversions !== null && positiveConversions > 0 && superpowers !== null
-      ? superpowers / positiveConversions
-      : null;
-  const powerRate =
-    powerComparable && positiveConversions !== null && positiveConversions > 0 && powers !== null
-      ? powers / positiveConversions
-      : null;
-  const negRatePerXTuh =
-    negComparable && regulation !== null && tossupsRead !== null && tossupsRead > 0 && negs !== null
-      ? (negs / tossupsRead) * regulation
-      : null;
-
-  const bonusGames: RoundStatsGameFacts[] = [];
-  let bonusCoverageComplete = played.length > 0;
-  for (const game of played) {
-    const inferredApplicable =
-      game.bonusApplicable ??
-      (finitePositive(game.bonusesHeard) || finitePositive(game.bonusPoints) ? true : null);
-    if (inferredApplicable === false) continue;
-    if (inferredApplicable !== true || !game.detailComplete) {
-      bonusCoverageComplete = false;
-      continue;
-    }
-    if (!finiteNonNegative(game.bonusesHeard) || !finiteNonNegative(game.bonusPoints)) {
-      bonusCoverageComplete = false;
-      continue;
-    }
-    bonusGames.push(game);
-  }
-  const totalBonuses = bonusCoverageComplete
-    ? bonusGames.reduce((sum, game) => sum + (game.bonusesHeard ?? 0), 0)
-    : null;
-  const totalBonusPoints = bonusCoverageComplete
-    ? bonusGames.reduce((sum, game) => sum + (game.bonusPoints ?? 0), 0)
-    : null;
-  const ppb =
-    bonusRelevant === true && totalBonuses !== null && totalBonuses > 0 && totalBonusPoints !== null
-      ? totalBonusPoints / totalBonuses
-      : null;
-  const bonusMaximumDenominator =
-    bonusCoverageComplete && bonusGames.every((game) => finitePositive(game.maximumBonusScore))
-      ? bonusGames.reduce((sum, game) => sum + (game.bonusesHeard ?? 0) * (game.maximumBonusScore ?? 0), 0)
-      : null;
-  const bonusConversionRate =
-    bonusRelevant === true &&
-    totalBonusPoints !== null &&
-    bonusMaximumDenominator !== null &&
-    bonusMaximumDenominator > 0
-      ? totalBonusPoints / bonusMaximumDenominator
-      : null;
-
-  const notes: string[] = [];
-  const excludedAdministrative = facts.length - played.length;
-  if (excludedAdministrative > 0) {
-    notes.push(
-      `${excludedAdministrative} administrative result${excludedAdministrative === 1 ? '' : 's'} excluded from scoring denominators.`,
-    );
-  }
-  if (played.length > 0 && detail.length !== played.length) {
-    notes.push(`${detail.length}/${played.length} played games have complete detail.`);
-  }
-  if (played.length > 0 && exactTossups.length !== played.length) {
-    notes.push(`${exactTossups.length}/${played.length} played games report exact tossups read.`);
-  }
-  if (played.length > 0 && exactRegulation.length !== played.length) {
-    notes.push(
-      `${exactRegulation.length}/${played.length} played games have a historical regulation length.`,
-    );
-  } else if (played.length > 0 && regulation === null) {
-    notes.push('Mixed regulation lengths; regulation-normalized metrics are unavailable.');
-  }
-  if (superpowerRelevant === true && !superpowerComparable) {
-    notes.push('Superpower availability is mixed or unknown across the included games.');
-  }
-  if (powerRelevant === true && !powerComparable) {
-    notes.push('Power availability is mixed or unknown across the included games.');
-  }
-  if (negRelevant === true && !negComparable) {
-    notes.push('Neg availability is mixed or unknown across the included games.');
-  }
-  if (bonusRelevant === true && !bonusCoverageComplete) {
-    notes.push(`${bonusGames.length}/${played.length} played games have complete bonus denominators.`);
-  }
-  if (
-    bonusRelevant === true &&
-    bonusCoverageComplete &&
-    bonusGames.length > 0 &&
-    bonusGames.some((game) => !finitePositive(game.maximumBonusScore))
-  ) {
-    notes.push('Bonus maximum is unknown for at least one included game; bonus conversion is unavailable.');
-  }
-
-  const teams = new Set(facts.flatMap((game) => [...game.teamIds])).size;
-  return {
-    ...identity,
-    ...uniquePhase(facts),
-    packetName: packetLabel(facts),
-    games: facts.length,
-    teams,
-    playedGames: played.length,
-    regulationTossupCount: regulation,
-    tossupsRead,
-    pointsPerTeamPerXTuh,
-    superpowerRate,
-    powerRate,
-    tossupConversionRate,
-    negRatePerXTuh,
-    ppb,
-    bonusConversionRate,
-    superpowerApplicable: superpowerRelevant,
-    powerApplicable: powerRelevant,
-    negApplicable: negRelevant,
-    bonusApplicable: bonusRelevant,
-    coverage: {
-      playedGames: played.length,
-      detailGames: detail.length,
-      tossupsReadGames: exactTossups.length,
-      regulationGames: exactRegulation.length,
-      bonusGames: bonusGames.length,
-    },
-    notes,
-  };
+function eligibleForScoringAggregates(game: GameRecord): boolean {
+  // Administrative forfeits count in standings/result totals, but a documentary 0-0 score is not
+  // a played scoring sample. If exact played detail exists, keep it available for round analysis.
+  return game.status !== 'forfeit' || hasRecordedPlayDetail(game);
 }
 
 /**
- * Derive round-level statistics from already-canonical per-game facts.
+ * Derive round-level report facts from the same accepted-game selector used by standings.
  *
- * The derivation is deliberately strict about knownness. A ratio is emitted only when every
- * applicable played game supplies the denominator needed to describe the whole row. Tournament
- * totals are produced by running the same derivation over all scoped games, never by averaging
- * percentages from individual rounds.
+ * This intentionally exposes numerator/count aggregates before inventing tossup-normalized rates.
+ * Director's persisted GameRecord does not yet carry exact tossups-read/overtime counts, so metrics
+ * that require those denominators remain null until the source of truth can support them honestly.
  */
-export function deriveRoundStats(facts: readonly RoundStatsGameFacts[]): CanonicalRoundStatsReport {
-  const groups = new Map<string, RoundStatsGameFacts[]>();
-  for (const fact of facts) {
-    const games = groups.get(fact.roundId) ?? [];
-    games.push(fact);
-    groups.set(fact.roundId, games);
+export function deriveRoundStats(
+  state: DirectorState,
+  options: DirectorStandingsOptions = {},
+): RoundStatsRow[] {
+  const games = acceptedGameRecords(state, options);
+  const byRound = new Map<DirectorId, GameRecord[]>();
+  for (const game of games) {
+    const rows = byRound.get(game.roundId) ?? [];
+    rows.push(game);
+    byRound.set(game.roundId, rows);
   }
-  const rows = [...groups.entries()].map(([roundId, games]) =>
-    aggregateRow(games, { roundId, roundName: games[0]?.roundName ?? roundId }),
-  );
-  return {
-    rows,
-    total: facts.length > 0 ? aggregateRow(facts, { roundId: 'overall', roundName: 'Overall' }) : null,
-  };
+
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const dayOrder = new Map<DirectorId, number>();
+  orderDayItems(state.rounds, state.timeline).forEach((entry, index) => {
+    if (entry.kind === 'round' && entry.round) dayOrder.set(entry.round.id, index);
+  });
+
+  return [...byRound.entries()]
+    .sort(
+      ([leftId], [rightId]) =>
+        (dayOrder.get(leftId) ?? Number.MAX_SAFE_INTEGER) -
+          (dayOrder.get(rightId) ?? Number.MAX_SAFE_INTEGER) || leftId.localeCompare(rightId),
+    )
+    .map(([roundId, roundGames]) => {
+      const round = roundById.get(roundId);
+      const played = roundGames.filter(eligibleForScoringAggregates);
+      const detailed = played.filter(gameDetailedCountsKnown);
+      const detailComplete = played.length > 0 && detailed.length === played.length;
+      const points = played.reduce(
+        (sum, game) => sum + game.scores.reduce((gameSum, score) => gameSum + score.score, 0),
+        0,
+      );
+      const count = <K extends 'superpowers' | 'powers' | 'gets' | 'negs' | 'bonuses' | 'bonusPoints'>(
+        key: K,
+      ): number | null =>
+        detailComplete
+          ? detailed.reduce(
+              (sum, game) => sum + game.scores.reduce((gameSum, score) => gameSum + score[key], 0),
+              0,
+            )
+          : null;
+      const bonusesHeard = count('bonuses');
+      const bonusPoints = count('bonusPoints');
+      const packetIds = [
+        ...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null)),
+      ];
+
+      return {
+        roundId,
+        roundName: round?.name ?? roundId,
+        ...(round?.phaseId ? { phaseId: round.phaseId } : {}),
+        games: roundGames.length,
+        playedGames: played.length,
+        detailedGames: detailed.length,
+        pointsPerTeam: played.length > 0 ? points / (played.length * 2) : null,
+        superpowers: count('superpowers'),
+        powers: count('powers'),
+        gets: count('gets'),
+        negs: count('negs'),
+        bonusesHeard,
+        bonusPoints,
+        ppb:
+          bonusesHeard !== null && bonusPoints !== null && bonusesHeard > 0
+            ? bonusPoints / bonusesHeard
+            : null,
+        tossupsRead: null,
+        pointsPerTeamPerXTuh: null,
+        powerRate: null,
+        tossupConversionRate: null,
+        negRatePerXTuh: null,
+        packetIds,
+      };
+    });
 }

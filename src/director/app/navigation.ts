@@ -63,7 +63,9 @@ export interface NavigationGroup {
  *   `Standings`       one destination, team and player views inside it.
  *   `Exports`         it writes local files. `QBSheet Live` is what publishes.
  *   `Tournament day`  it holds rounds *and* the breaks between them.
- *   `Rooms`           rooms are the point; staff and equipment are views of it.
+ *   `Operations`      rooms, staff, and equipment are one resource graph, not three
+ *                     independent lists. The destination id stays `rooms` so every existing
+ *                     deep link, saved navigation target, and search result still resolves.
  *
  * # Settings is a destination
  *
@@ -85,7 +87,12 @@ export const planGroup: NavigationGroup = {
   items: [
     { id: 'teams', label: 'Teams', icon: 'teams', description: 'Registration, rosters, and schools.' },
     { id: 'format', label: 'Format', icon: 'format', description: 'Structure, pairing, and scoring rules.' },
-    { id: 'rooms', label: 'Rooms', icon: 'rooms', description: 'Rooms, staff, and equipment.' },
+    {
+      id: 'rooms',
+      label: 'Operations',
+      icon: 'rooms',
+      description: 'Rooms, staff, equipment, and who is operating where.',
+    },
     { id: 'packets', label: 'Packets', icon: 'file', description: 'Packet inventory and assignment.' },
   ],
 };

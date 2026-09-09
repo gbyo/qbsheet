@@ -1,147 +1,212 @@
 import { describe, expect, test } from 'vitest';
-import { deriveRoundStats, type RoundStatsGameFacts } from '../src/index.js';
+import {
+  defaultRules,
+  deriveRoundStats,
+  emptyDirectorState,
+  type DirectorState,
+  type TeamGameScore,
+} from '../src/index.js';
 
-function fact(
-  gameId: string,
-  roundId: string,
-  overrides: Partial<RoundStatsGameFacts> = {},
-): RoundStatsGameFacts {
+const at = '2026-09-09T12:00:00.000Z';
+
+function teamScore(teamId: string, score: number, detail: Partial<TeamGameScore> = {}): TeamGameScore {
   return {
-    gameId,
-    roundId,
-    roundName: roundId === 'r1' ? 'Round 1' : 'Round 2',
-    phaseId: 'prelims',
-    phaseName: 'Preliminary',
-    packetId: roundId === 'r1' ? 'p1' : 'p2',
-    packetName: roundId === 'r1' ? 'Packet 1' : 'Packet 2',
-    teamIds: [`${gameId}-a`, `${gameId}-b`],
-    teamPoints: [300, 200],
-    played: true,
-    detailComplete: true,
-    tossupsRead: 20,
-    regulationTossupCount: 20,
+    teamId,
+    score,
     superpowers: 0,
-    powers: 3,
-    gets: 7,
-    negs: 3,
-    bonusesHeard: 10,
-    bonusPoints: 140,
-    maximumBonusScore: 30,
-    superpowerApplicable: false,
-    powerApplicable: true,
-    negApplicable: true,
-    bonusApplicable: true,
-    ...overrides,
+    powers: 0,
+    gets: 0,
+    negs: 0,
+    bonuses: 0,
+    bonusPoints: 0,
+    bouncebacks: 0,
+    ...detail,
   };
 }
 
+function roundState(): DirectorState {
+  const state = emptyDirectorState();
+  state.tournament = {
+    id: 't',
+    name: 'Round stats',
+    date: '2026-09-09',
+    venue: '',
+    organizer: '',
+    status: 'running',
+    timeZone: 'America/New_York',
+    rules: structuredClone(defaultRules),
+    formatId: null,
+    currentPhaseId: 'phase-1',
+    currentPacketId: null,
+    currentRoundId: null,
+    createdAt: at,
+    updatedAt: at,
+  };
+  state.teams = ['a', 'b', 'c', 'd'].map((id) => ({
+    id,
+    organizationId: null,
+    displayName: id.toUpperCase(),
+    teamLetter: 'A',
+    seed: null,
+    status: 'confirmed' as const,
+    createdAt: at,
+    updatedAt: at,
+  }));
+  state.rounds = [
+    {
+      id: 'round-z',
+      phaseId: 'phase-1',
+      name: 'Round 1',
+      number: 1,
+      revision: 1,
+      status: 'closed',
+      packetId: 'packet-1',
+      scheduledGameIds: ['s1', 's2'],
+      dayOrder: 0,
+      scheduledStart: null,
+      releasedAt: null,
+      startedAt: null,
+      closedAt: null,
+    },
+    {
+      id: 'round-a',
+      phaseId: 'phase-1',
+      name: 'Round 2',
+      number: 2,
+      revision: 1,
+      status: 'closed',
+      packetId: 'packet-2',
+      scheduledGameIds: ['s3', 's4'],
+      dayOrder: 1,
+      scheduledStart: null,
+      releasedAt: null,
+      startedAt: null,
+      closedAt: null,
+    },
+  ];
+  state.scheduledGames = [
+    ['s1', 'round-z', 'a', 'b'],
+    ['s2', 'round-z', 'c', 'd'],
+    ['s3', 'round-a', 'a', 'c'],
+    ['s4', 'round-a', 'b', 'd'],
+  ].map(([id, roundId, leftTeamId, rightTeamId]) => ({
+    id: id!,
+    roundId: roundId!,
+    roomId: null,
+    packetId: roundId === 'round-z' ? 'packet-1' : 'packet-2',
+    leftTeamId: leftTeamId!,
+    rightTeamId: rightTeamId!,
+    bye: false,
+    status: 'accepted' as const,
+    assignmentRevision: 1,
+  }));
+  state.games = [
+    {
+      id: 'g1',
+      scheduledGameId: 's1',
+      roundId: 'round-z',
+      packetId: 'packet-1',
+      status: 'accepted',
+      scores: [
+        teamScore('a', 300, { powers: 2, gets: 4, negs: 1, bonuses: 6, bonusPoints: 90 }),
+        teamScore('b', 200, { powers: 1, gets: 3, negs: 2, bonuses: 4, bonusPoints: 50 }),
+      ],
+      playerStats: [],
+      source: 'manual',
+      detailedStats: 'complete',
+    },
+    {
+      id: 'g2',
+      scheduledGameId: 's2',
+      roundId: 'round-z',
+      packetId: 'packet-1',
+      status: 'accepted',
+      scores: [teamScore('c', 250), teamScore('d', 150)],
+      playerStats: [],
+      source: 'paper',
+      detailedStats: 'unknown',
+    },
+    {
+      id: 'g3',
+      scheduledGameId: 's3',
+      roundId: 'round-a',
+      packetId: 'packet-2',
+      status: 'accepted',
+      scores: [
+        teamScore('a', 280, { powers: 1, gets: 5, negs: 0, bonuses: 6, bonusPoints: 84 }),
+        teamScore('c', 220, { powers: 0, gets: 4, negs: 1, bonuses: 5, bonusPoints: 60 }),
+      ],
+      playerStats: [],
+      source: 'manual',
+      detailedStats: 'complete',
+    },
+    {
+      id: 'g4',
+      scheduledGameId: 's4',
+      roundId: 'round-a',
+      packetId: 'packet-2',
+      status: 'forfeit',
+      forfeitedTeamId: 'd',
+      scores: [teamScore('b', 0), teamScore('d', 0)],
+      playerStats: [],
+      source: 'manual',
+      detailedStats: 'unknown',
+    },
+  ];
+  return state;
+}
+
 describe('deriveRoundStats', () => {
-  test('matches hand-calculated round formulas and recomputes weighted totals', () => {
-    const report = deriveRoundStats([
-      fact('g1', 'r1'),
-      fact('g2', 'r1', {
-        teamPoints: [400, 100],
-        powers: 5,
-        gets: 5,
-        negs: 2,
-        bonusesHeard: 12,
-        bonusPoints: 180,
-      }),
-      fact('g3', 'r2', {
-        teamPoints: [450, 350],
-        powers: 1,
-        gets: 9,
-        negs: 1,
-        bonusesHeard: 1,
-        bonusPoints: 30,
-      }),
-    ]);
+  test('orders by tournament day and keeps exact point averages even when detail is partial', () => {
+    const rows = deriveRoundStats(roundState());
 
-    const round = report.rows[0]!;
-    expect(round.games).toBe(2);
-    expect(round.regulationTossupCount).toBe(20);
-    expect(round.pointsPerTeamPerXTuh).toBeCloseTo(250);
-    expect(round.tossupConversionRate).toBeCloseTo(0.5);
-    expect(round.powerRate).toBeCloseTo(0.4);
-    expect(round.negRatePerXTuh).toBeCloseTo(2.5);
-    expect(round.ppb).toBeCloseTo(320 / 22);
-    expect(round.bonusConversionRate).toBeCloseTo(320 / (22 * 30));
-    expect(round.packetName).toBe('Packet 1');
-
-    expect(report.total?.ppb).toBeCloseTo(350 / 23);
-    expect(report.total?.ppb).not.toBeCloseTo((round.ppb! + report.rows[1]!.ppb!) / 2);
+    expect(rows.map((row) => row.roundName)).toEqual(['Round 1', 'Round 2']);
+    expect(rows[0]).toMatchObject({
+      games: 2,
+      playedGames: 2,
+      detailedGames: 1,
+      pointsPerTeam: 225,
+      powers: null,
+      gets: null,
+      negs: null,
+      bonusesHeard: null,
+      bonusPoints: null,
+      ppb: null,
+      packetIds: ['packet-1'],
+    });
   });
 
-  test('does not silently aggregate a known subset when detail is partial', () => {
-    const report = deriveRoundStats([
-      fact('g1', 'r1'),
-      fact('g2', 'r1', {
-        detailComplete: false,
-        powers: null,
-        gets: null,
-        negs: null,
-        bonusesHeard: null,
-        bonusPoints: null,
-      }),
-    ]);
-    const round = report.rows[0]!;
+  test('computes PPB and count aggregates only when every eligible played game has detail', () => {
+    const row = deriveRoundStats(roundState())[1]!;
 
-    expect(round.pointsPerTeamPerXTuh).toBeCloseTo(250);
-    expect(round.tossupConversionRate).toBeNull();
-    expect(round.powerRate).toBeNull();
-    expect(round.negRatePerXTuh).toBeNull();
-    expect(round.ppb).toBeNull();
-    expect(round.notes).toContain('1/2 played games have complete detail.');
+    // The administrative 0-0 forfeit is a result, but not a played scoring sample.
+    expect(row.games).toBe(2);
+    expect(row.playedGames).toBe(1);
+    expect(row.detailedGames).toBe(1);
+    expect(row.pointsPerTeam).toBe(250);
+    expect(row).toMatchObject({
+      powers: 1,
+      gets: 9,
+      negs: 1,
+      bonusesHeard: 11,
+      bonusPoints: 144,
+      packetIds: ['packet-2'],
+    });
+    expect(row.ppb).toBeCloseTo(144 / 11);
   });
 
-  test('counts scoreless forfeits as results without fabricating scoring denominators', () => {
-    const report = deriveRoundStats([
-      fact('g1', 'r1', { regulationTossupCount: 24, tossupsRead: 24 }),
-      fact('forfeit', 'r1', {
-        teamPoints: [0, 0],
-        played: false,
-        detailComplete: false,
-        tossupsRead: null,
-        regulationTossupCount: null,
-        superpowers: null,
-        powers: null,
-        gets: null,
-        negs: null,
-        bonusesHeard: null,
-        bonusPoints: null,
-        maximumBonusScore: null,
-        superpowerApplicable: null,
-        powerApplicable: null,
-        negApplicable: null,
-        bonusApplicable: null,
-      }),
-    ]);
-    const round = report.rows[0]!;
-
-    expect(round.games).toBe(2);
-    expect(round.playedGames).toBe(1);
-    expect(round.regulationTossupCount).toBe(24);
-    expect(round.pointsPerTeamPerXTuh).toBeCloseTo(250);
-    expect(round.notes.some((note) => note.includes('administrative result'))).toBe(true);
+  test('declines tossup-normalized rates instead of fabricating denominators', () => {
+    for (const row of deriveRoundStats(roundState())) {
+      expect(row.tossupsRead).toBeNull();
+      expect(row.pointsPerTeamPerXTuh).toBeNull();
+      expect(row.powerRate).toBeNull();
+      expect(row.tossupConversionRate).toBeNull();
+      expect(row.negRatePerXTuh).toBeNull();
+    }
   });
 
-  test('keeps definition-dependent normalization unavailable for mixed historical lengths', () => {
-    const report = deriveRoundStats([
-      fact('g1', 'r1', { regulationTossupCount: 20 }),
-      fact('g2', 'r1', {
-        regulationTossupCount: 24,
-        packetId: 'different',
-        packetName: 'Packet X',
-      }),
-    ]);
-    const round = report.rows[0]!;
-
-    expect(round.regulationTossupCount).toBeNull();
-    expect(round.pointsPerTeamPerXTuh).toBeNull();
-    expect(round.negRatePerXTuh).toBeNull();
-    expect(round.tossupConversionRate).toBeCloseTo(0.5);
-    expect(round.ppb).toBeCloseTo(14);
-    expect(round.packetName).toBe('Mixed');
-    expect(round.notes).toContain('Mixed regulation lengths; regulation-normalized metrics are unavailable.');
+  test('respects canonical phase scoping', () => {
+    expect(deriveRoundStats(roundState(), { phaseId: 'missing' })).toEqual([]);
+    expect(deriveRoundStats(roundState(), { phaseId: 'phase-1' })).toHaveLength(2);
   });
 });
