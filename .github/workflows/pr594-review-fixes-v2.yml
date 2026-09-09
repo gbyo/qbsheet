@@ -1,0 +1,330 @@
+name: Apply PR 594 review fixes v2
+
+on:
+  push:
+    branches:
+      - codex/issues-565-568-qbtcp-lifecycle
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    if: ${{ !contains(github.event.head_commit.message, '[pr594-fix]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/issues-565-568-qbtcp-lifecycle
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Apply lifecycle review fixes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly one match, found {count}")
+              return text.replace(old, new, 1)
+
+          path = Path('src/director/domain/scheduling.ts')
+          text = path.read_text()
+          start = text.index('export function effectiveRoundDeliveryMode(')
+          end = text.index('/**\n * Assignment-visible edits', start)
+          replacement = '''export function effectiveRoundDeliveryMode(
+            state: DirectorState,
+            roundOrId: Round | DirectorId,
+          ): RoundDeliveryMode {
+            const round =
+              typeof roundOrId === 'string'
+                ? state.rounds.find((entry) => entry.id === roundOrId)
+                : roundOrId;
+            if (round?.deliveryMode) return round.deliveryMode;
+
+            const roundGames = round
+              ? state.scheduledGames.filter((game) => game.roundId === round.id)
+              : [];
+            const hasQbtcpActivity =
+              state.qbtcpSessions.some(
+                (session) =>
+                  session.state !== 'abandoned' &&
+                  roundGames.some(
+                    (game) => game.id === session.matchId || game.roomId === session.roomId,
+                  ),
+              ) ||
+              state.qbtcpHelpRequests.some(
+                (request) =>
+                  request.status === 'open' &&
+                  roundGames.some((game) => game.roomId === request.roomId),
+              );
+            if (hasQbtcpActivity) return 'qbtcp';
+            if (state.transfers.locations.length > 0) return 'usb';
+            if (roundGames.some((game) => game.roomId !== null)) return 'qbtcp';
+            return 'manual';
+          }
+
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
+
+          path = Path('src/director/schedule/RoundsView.tsx')
+          text = path.read_text()
+          text = replace_once(
+              text,
+              '                const result = controller.generateSchedule();',
+              "                const result = controller.generateSchedule({ deliveryMode: 'manual' });",
+              'default new-round delivery mode',
+          )
+          rooms_start = text.index('function RoundRoomsDialog(')
+          rooms_submit = text.index('      onSubmit={() => {\n', rooms_start)
+          rooms_assign = text.index('        void controller.assignRoundRooms(round.id, draft).then((saved) => {', rooms_submit)
+          rooms_insert = '''        const mode = Object.values(draft).some((roomId) => roomId !== null) ? 'qbtcp' : 'manual';
+                  if (!controller.setRoundDeliveryMode(round.id, mode)) {
+                    onAnnounce(errorNotice('The round delivery mode could not be changed; review the Director error.'));
+                    return;
+                  }
+          '''
+          text = text[:rooms_assign] + rooms_insert + text[rooms_assign:]
+          text = replace_once(
+              text,
+              '''        <RoundUsbDialog
+                    round={round}
+                    drives={drives}
+                    transfers={transfers}
+                    onAnnounce={onAnnounce}
+          ''',
+              '''        <RoundUsbDialog
+                    round={round}
+                    drives={drives}
+                    transfers={transfers}
+                    controller={controller}
+                    onAnnounce={onAnnounce}
+          ''',
+              'RoundUsbDialog controller prop call',
+          )
+          text = replace_once(
+              text,
+              '''function RoundUsbDialog({
+            round,
+            drives,
+            transfers,
+            onAnnounce,
+            onClose,
+          }: {
+            round: DirectorState['rounds'][number];
+            drives: DirectorState['transfers']['locations'];
+            transfers: TransfersRuntime;
+            onAnnounce: (announcement: AnnounceInput) => void;
+          ''',
+              '''function RoundUsbDialog({
+            round,
+            drives,
+            transfers,
+            controller,
+            onAnnounce,
+            onClose,
+          }: {
+            round: DirectorState['rounds'][number];
+            drives: DirectorState['transfers']['locations'];
+            transfers: TransfersRuntime;
+            controller: DirectorController;
+            onAnnounce: (announcement: AnnounceInput) => void;
+          ''',
+              'RoundUsbDialog controller prop definition',
+          )
+          usb_start = text.index('function RoundUsbDialog(')
+          usb_submit = text.index('      onSubmit={() => {\n        if (!driveId) return;\n', usb_start)
+          usb_prepare = text.index("        void transfers.prepareTo(driveId, { kind: 'round', roundId: round.id });", usb_submit)
+          usb_insert = '''        if (
+                  round.status !== 'released' &&
+                  !controller.setRoundDeliveryMode(round.id, 'usb')
+                ) {
+                  onAnnounce(errorNotice('USB delivery could not be selected; review the Director error.'));
+                  return;
+                }
+          '''
+          path.write_text(text[:usb_prepare] + usb_insert + text[usb_prepare:])
+
+          path = Path('src/director/state/useDirectorController.ts')
+          text = path.read_text()
+          update_room_start = text.index('  const updateRoom = useCallback(')
+          room_commit = text.index('      return commit((draft) => {', update_room_start)
+          guard = '''      const assignmentVisibleChange =
+                (changes.name !== undefined && changes.name.trim() !== current.name) ||
+                (changes.building !== undefined && (changes.building.trim() || undefined) !== current.building) ||
+                (changes.floor !== undefined && (changes.floor.trim() || undefined) !== current.floor) ||
+                (changes.accessibility !== undefined &&
+                  (changes.accessibility.trim() || undefined) !== current.accessibility) ||
+                (changes.directions !== undefined &&
+                  (changes.directions.trim() || undefined) !== current.directions) ||
+                (changes.moderatorId !== undefined && changes.moderatorId !== current.moderatorId) ||
+                (changes.scorekeeperId !== undefined && changes.scorekeeperId !== current.scorekeeperId) ||
+                (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId);
+              if (assignmentVisibleChange) {
+                const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'room', id: roomId });
+                if (assignmentBlocker) {
+                  setError(assignmentBlocker);
+                  return false;
+                }
+              }
+          '''
+          text = text[:room_commit] + guard + text[room_commit:]
+          session_start = text.index('function qbtcpSessionIdsForGame(')
+          session_end = text.index('export function useDirectorController', session_start)
+          session_replacement = '''function qbtcpSessionBelongsToGame(
+            state: DirectorState,
+            session: DirectorState['qbtcpSessions'][number],
+            scheduledGameId: DirectorId,
+          ): boolean {
+            if (session.matchId) return session.matchId === scheduledGameId;
+            const target = state.scheduledGames.find((game) => game.id === scheduledGameId);
+            if (!target?.roomId || target.roomId !== session.roomId) return false;
+            const operational = state.scheduledGames.filter(
+              (game) =>
+                !game.bye &&
+                game.roomId === session.roomId &&
+                ['released', 'live', 'submitted'].includes(game.status),
+            );
+            if (operational.length > 0) {
+              return operational.length === 1 && operational[0].id === scheduledGameId;
+            }
+            const unresolved = state.scheduledGames.filter(
+              (game) =>
+                !game.bye &&
+                game.roomId === session.roomId &&
+                !['accepted', 'cancelled'].includes(game.status),
+            );
+            return unresolved.length === 1 && unresolved[0].id === scheduledGameId;
+          }
+
+          function qbtcpSessionIdsForGame(state: DirectorState, scheduledGameId: DirectorId): string[] {
+            return state.qbtcpSessions
+              .filter(
+                (session) =>
+                  session.state !== 'abandoned' &&
+                  qbtcpSessionHasUnresolvedWork(state, session) &&
+                  qbtcpSessionBelongsToGame(state, session, scheduledGameId),
+              )
+              .map((session) => session.sessionId);
+          }
+
+          async function retireQbtcpSessions(sessionIds: string[]): Promise<string | null> {
+            try {
+              await abandonNativeQbtcpSessions(sessionIds);
+              return null;
+            } catch (reason: unknown) {
+              return reason instanceof Error ? reason.message : 'The QBTCP session could not be retired.';
+            }
+          }
+
+          function abandonQbtcpSessionsForGame(draft: DirectorState, scheduledGameId: DirectorId): void {
+            for (const session of draft.qbtcpSessions.filter((entry) =>
+              qbtcpSessionBelongsToGame(draft, entry, scheduledGameId),
+            )) {
+              session.state = 'abandoned';
+              session.resumable = false;
+              session.resultReceived = false;
+              session.progress = null;
+              session.helpRequestId = null;
+            }
+          }
+
+          '''
+          path.write_text(text[:session_start] + session_replacement + text[session_end:])
+
+          path = Path('tests/DirectorIntegration.test.tsx')
+          text = path.read_text()
+          marker = "  test('an electronic first round cannot start while the native QBTCP server is down', async () => {"
+          usb_test = '''  test('an explicit USB round can start with partial room assignments without QBTCP', async () => {
+            const { hook } = await directorWithSetup(4);
+            act(() => {
+              expect(hook.result.current.generateSchedule({ deliveryMode: 'manual' }).generated).toBe(true);
+            });
+            const roundId = hook.result.current.state.rounds[0].id;
+            act(() => {
+              hook.result.current.addTransferLocation({
+                kind: 'removable-drive',
+                label: 'USB',
+                path: '/mnt/usb',
+              });
+              expect(hook.result.current.setRoundDeliveryMode(roundId, 'usb')).toBe(true);
+            });
+            let result: StartRoundResult | undefined;
+            await act(async () => {
+              result = await hook.result.current.startRound(roundId);
+            });
+            expect(result?.ok).toBe(true);
+            expect(result?.manual).not.toBe(true);
+            expect(result?.pendingHandoffs).toHaveLength(1);
+            expect(result?.summary).toMatch(/handoff/i);
+            expect(hook.result.current.state.rounds[0].status).toBe('released');
+          });
+
+          '''
+          if marker not in text:
+              raise SystemExit('USB regression insertion marker not found')
+          text = text.replace(marker, usb_test + marker, 1)
+
+          manual_test_start = text.index("  test('administrative manual settlement retires the live native QBTCP session first'")
+          manual_test_end = text.index("  test('administrative cancellation retires a live native QBTCP session before freeing its room'", manual_test_start)
+          segment = text[manual_test_start:manual_test_end]
+          segment = replace_once(segment, "        matchId: scheduled.id,\n", '', 'match-id-less administrative settlement regression')
+          text = text[:manual_test_start] + segment + text[manual_test_end:]
+
+          metadata_start = text.index("  test('assignment-visible metadata edits are blocked while a QBTCP session is live'")
+          metadata_end = text.index("  test('tournament detail updates normalize persisted text and reject blank names'", metadata_start)
+          metadata_close = text.rfind('  });', metadata_start, metadata_end)
+          if metadata_close < 0:
+              raise SystemExit('room metadata regression closing marker not found')
+          room_assertions = '''
+            let roomChanged = true;
+            act(() => {
+              roomChanged = hook.result.current.updateRoom(scheduled.roomId!, { name: 'Renamed live room' });
+            });
+            expect(roomChanged).toBe(false);
+            expect(hook.result.current.error).toMatch(/live QBTCP scorer assignment/i);
+
+            let notesChanged = false;
+            act(() => {
+              notesChanged = hook.result.current.updateRoom(scheduled.roomId!, { notes: 'HQ-only note' });
+            });
+            expect(notesChanged).toBe(true);
+          '''
+          text = text[:metadata_close] + room_assertions + text[metadata_close:]
+          path.write_text(text)
+          PY
+
+          npx prettier --write \
+            src/director/domain/scheduling.ts \
+            src/director/schedule/RoundsView.tsx \
+            src/director/state/useDirectorController.ts \
+            tests/DirectorIntegration.test.tsx
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run targeted Director regression tests
+        run: npx vitest --run tests/DirectorIntegration.test.tsx tests/DirectorTournamentCriticalFixes.test.tsx
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Verify formatting
+        run: npx prettier --check src/director/domain/scheduling.ts src/director/schedule/RoundsView.tsx src/director/state/useDirectorController.ts tests/DirectorIntegration.test.tsx
+
+      - name: Commit fixes to the PR branch
+        shell: bash
+        run: |
+          rm .github/workflows/pr594-review-fixes-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/director/domain/scheduling.ts src/director/schedule/RoundsView.tsx src/director/state/useDirectorController.ts tests/DirectorIntegration.test.tsx .github/workflows/pr594-review-fixes-v2.yml
+          git commit -m "fix: close PR 594 lifecycle review gaps [pr594-fix]"
+          git push origin HEAD:codex/issues-565-568-qbtcp-lifecycle
