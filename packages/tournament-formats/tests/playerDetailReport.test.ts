@@ -2,11 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { buildExtendedStatReportBundle } from '../src/printableStatReport';
 import type { StatsSnapshot } from '../src/stats';
 
-function team(
-  rank: number,
-  teamId: string,
-  teamName: string,
-): StatsSnapshot['teams'][number] {
+function team(rank: number, teamId: string, teamName: string): StatsSnapshot['teams'][number] {
   return {
     rank,
     teamId,
@@ -190,7 +186,7 @@ describe('printable player detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'playerdetail.html',
     )!.content;
-    const alice = playerSection(page, 'player-1-player-a');
+    const alice = playerSection(page, 'player-player-a');
 
     expect(alice).toContain('Round 1');
     expect(alice).toContain('Round 3');
@@ -205,7 +201,7 @@ describe('printable player detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'playerdetail.html',
     )!.content;
-    const alice = playerSection(page, 'player-1-player-a');
+    const alice = playerSection(page, 'player-player-a');
     const roundThree = alice.slice(alice.indexOf('Round 3'));
 
     expect(roundThree).toContain('<td class="num">0</td>');
@@ -216,12 +212,12 @@ describe('printable player detail', () => {
     const page = buildExtendedStatReportBundle(snapshot()).find(
       (entry) => entry.name === 'playerdetail.html',
     )!.content;
-    const alice = playerSection(page, 'player-1-player-a');
+    const alice = playerSection(page, 'player-player-a');
 
     expect(alice).toContain('<th scope="col">Stage</th>');
     expect(alice).toContain('prelims');
     expect(alice).toContain('playoffs');
-    expect(alice).toContain('teamdetail.html#team-2-team-b');
+    expect(alice).toContain('teamdetail.html#team-team-b');
     expect(alice).toContain('Grade 12');
     expect(alice).toContain('55 pts');
     expect(alice).toContain('2.75 PPTUH');
