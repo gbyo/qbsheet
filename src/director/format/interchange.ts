@@ -483,6 +483,9 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         timed: tournament.rules.timed,
         regulationMinutes: tournament.rules.regulationMinutes,
         tiebreakers: tournament.rules.tiebreakers,
+        ...(tournament.rules.tiebreakerCountsStatistically === true
+          ? { tiebreakerCountsStatistically: true }
+          : {}),
       },
     },
     // Director's camelCase rules are an internal editing model. Public QBJ needs the canonical
@@ -647,6 +650,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
   }
   if (Array.isArray(tournamentExtensions.tiebreakers)) {
     extensionRules.tiebreakers = tournamentExtensions.tiebreakers;
+  }
+  if (tournamentExtensions.tiebreakerCountsStatistically === true) {
+    extensionRules.tiebreakerCountsStatistically = true;
   }
   state.tournament = {
     id: data.tournament.id,
@@ -1069,6 +1075,7 @@ function rulesFromInterchange(
   if (typeof rules.overtimeBonuses === 'boolean') result.overtimeBonuses = rules.overtimeBonuses;
   else if (typeof rules.overtime_includes_bonuses === 'boolean')
     result.overtimeBonuses = rules.overtime_includes_bonuses;
+  if (rules.tiebreakerCountsStatistically === true) result.tiebreakerCountsStatistically = true;
   if (typeof rules.timed === 'boolean') result.timed = rules.timed;
   else {
     const procedure = ['roomProcedure', 'room_procedure', 'procedure', 'regulation']

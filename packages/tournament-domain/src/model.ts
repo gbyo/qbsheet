@@ -92,6 +92,14 @@ export interface TournamentRules {
   maximumActivePlayers: number;
   regulationMinutes: number;
   tiebreakers: Array<'head-to-head' | 'record' | 'points' | 'margin' | 'powers' | 'gets' | 'playoff'>;
+  /**
+   * Whether games played on tiebreaker packets count toward normal standings
+   * statistics (record, PPG, etc.). Absent means false: tiebreaker games are
+   * shown as explicit result context but excluded from standings totals unless
+   * the tournament's canonical rules say they count statistically. This is a
+   * standings-reporting rule, not part of any scorer game definition.
+   */
+  tiebreakerCountsStatistically?: boolean;
 }
 
 export interface Tournament {

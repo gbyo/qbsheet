@@ -72,6 +72,26 @@ describe('classifications, school year, and final placement round-trip', () => {
     expect(restored.tournament?.questionSet).toBe('ACF Fall 2025');
   });
 
+  it('the tiebreaker statistical-counting rule round-trips through extensions', () => {
+    const { state } = classifiedFixture();
+    if (!state.tournament) throw new Error('fixture has no tournament');
+    state.tournament.rules.tiebreakerCountsStatistically = true;
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    expect(restored.tournament?.rules.tiebreakerCountsStatistically).toBe(true);
+  });
+
+  it('an absent tiebreaker statistical-counting rule stays absent', () => {
+    const { state } = classifiedFixture();
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    expect(restored.tournament?.rules.tiebreakerCountsStatistically).toBeUndefined();
+  });
+
   it('a free-text foreign grade never fabricates a school year', () => {
     const { state } = classifiedFixture();
     const exported = exportQbj(state).replace('"grade": "10"', '"grade": "Sophomore"');

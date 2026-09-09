@@ -31,11 +31,12 @@ function withoutFinalPlacement(tournament: NonNullable<DirectorState['tournament
 }
 
 function calculatedOverallSnapshot(state: DirectorState, generatedAt: string) {
-  if (!state.tournament?.finalPlacement) {
-    return buildCanonicalSnapshot(state, { label: 'All Games' }, generatedAt);
+  const stats = statInput(state);
+  if (!stats.tournament?.finalPlacement) {
+    return buildCanonicalSnapshot(stats, { label: 'All Games' }, generatedAt);
   }
-  const tournament = withoutFinalPlacement(state.tournament);
-  return buildCanonicalSnapshot({ ...state, tournament }, { label: 'All Games' }, generatedAt);
+  const tournament = withoutFinalPlacement(stats.tournament);
+  return buildCanonicalSnapshot({ ...stats, tournament }, { label: 'All Games' }, generatedAt);
 }
 
 function activePhases(state: DirectorState): Phase[] {
@@ -90,6 +91,33 @@ function fieldTeamIds(state: DirectorState, phase: Phase, pool?: Pool): string[]
   return phaseCompetitiveField(state, phase.id).teams.map((team) => team.id);
 }
 
+function tiebreakerGameIds(state: DirectorState): Set<string> {
+  const packetById = new Map(state.packets.map((packet) => [packet.id, packet]));
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const ids = new Set<string>();
+  for (const game of acceptedGameRecords(state)) {
+    const scheduled = scheduledById.get(game.scheduledGameId);
+    const round = roundById.get(game.roundId);
+    const packetId = game.packetId ?? scheduled?.packetId ?? round?.packetId ?? undefined;
+    if (packetId && packetById.get(packetId)?.tiebreaker) ids.add(game.id);
+  }
+  return ids;
+}
+
+/**
+ * Standings statistics never fold tiebreaker-packet games into normal totals
+ * unless the tournament's canonical rules say they count statistically. The
+ * games remain visible as explicit tiebreaker result context and in every
+ * per-game surface; only the standings-stat snapshots exclude them.
+ */
+function statInput(state: DirectorState): DirectorState {
+  if (state.tournament?.rules.tiebreakerCountsStatistically === true) return state;
+  const ids = tiebreakerGameIds(state);
+  if (ids.size === 0) return state;
+  return { ...state, games: state.games.filter((game) => !ids.has(game.id)) };
+}
+
 function carryoverGames(state: DirectorState, phase: Phase, pool?: Pool): GameRecord[] {
   const field = new Set(fieldTeamIds(state, phase, pool));
   const phases = new Map(state.phases.map((entry) => [entry.id, entry]));
@@ -118,11 +146,12 @@ function carryoverSnapshot(
   const gameIds = new Set(games.map((game) => game.id));
   const teamIds = new Set(fieldTeamIds(state, phase, pool));
   const tournament = state.tournament ? withoutFinalPlacement(state.tournament) : null;
+  const stats = statInput(state);
   const narrowed: DirectorState = {
-    ...state,
+    ...stats,
     tournament,
     teams: state.teams.filter((team) => teamIds.has(team.id)),
-    games: state.games.filter((game) => gameIds.has(game.id)),
+    games: stats.games.filter((game) => gameIds.has(game.id)),
   };
   return { snapshot: buildCanonicalSnapshot(narrowed, { label }, generatedAt), games };
 }
@@ -132,9 +161,10 @@ function normalSectionSnapshot(
   scope: CanonicalReportScope,
   generatedAt: string,
 ): { snapshot: ReturnType<typeof buildCanonicalSnapshot>; games: GameRecord[] } {
-  const snapshot = buildCanonicalSnapshot(state, scope, generatedAt);
+  const stats = statInput(state);
+  const snapshot = buildCanonicalSnapshot(stats, scope, generatedAt);
   const gameIds = new Set(snapshot.games.map((game) => game.gameId));
-  return { snapshot, games: acceptedGameRecords(state).filter((game) => gameIds.has(game.id)) };
+  return { snapshot, games: acceptedGameRecords(stats).filter((game) => gameIds.has(game.id)) };
 }
 
 function latestAdvancementCommit(state: DirectorState, sourcePhaseId: string) {
@@ -368,13 +398,13 @@ function addDisplayRanks(
   }
 }
 
-function builtSection(
+function builtSections(
   state: DirectorState,
   phases: readonly Phase[],
   phase: Phase,
   pool: Pool | undefined,
   generatedAt: string,
-): BuiltSection {
+): BuiltSection[] {
   const title = pool ? `${phase.name} · ${pool.name}` : phase.name;
   const label = phase.carryover ? `${title} · including carryover` : title;
   const resolved = phase.carryover
@@ -404,7 +434,35 @@ function builtSection(
     phase,
     section.teams.map((row) => row.teamId),
   );
-  return { section, games: resolved.games, phase };
+  const built: BuiltSection[] = [{ section, games: resolved.games, phase }];
+  if (phase.carryover) {
+    const stageLabel = `${title} · stage games only`;
+    const stageOnly = normalSectionSnapshot(
+      state,
+      {
+        phaseId: phase.id,
+        ...(pool ? { poolId: pool.id } : {}),
+        label: stageLabel,
+      },
+      generatedAt,
+    );
+    if (stageOnly.games.length > 0) {
+      built.push({
+        section: {
+          id: pool ? `standings-pool-${pool.id}-stage-only` : `standings-phase-${phase.id}-stage-only`,
+          title,
+          kind: pool ? 'pool' : 'phase',
+          scopeLabel: stageLabel,
+          teams: stageOnly.snapshot.teams,
+          phaseId: phase.id,
+          ...(pool ? { poolId: pool.id } : {}),
+        },
+        games: stageOnly.games,
+        phase,
+      });
+    }
+  }
+  return built;
 }
 
 /**
@@ -422,7 +480,8 @@ export function buildCanonicalStandingsReport(
   const poolsByPhase = new Map(phases.map((phase) => [phase.id, phasePools(state, phase)]));
   const hasPoolSplit = phases.some((phase) => (poolsByPhase.get(phase.id)?.length ?? 0) > 1);
   const multiStage = phases.length > 1 || hasPoolSplit;
-  const overall = buildCanonicalSnapshot(state, { label: 'Overall' }, generatedAt);
+  const stats = statInput(state);
+  const overall = buildCanonicalSnapshot(stats, { label: 'Overall' }, generatedAt);
   const built: BuiltSection[] = [];
 
   if (!multiStage) {
@@ -435,15 +494,15 @@ export function buildCanonicalStandingsReport(
     };
     const phase = phases[0];
     section.advancement = advancementForSection(
-      state,
+      stats,
       phases,
       phase,
       section.teams.map((row) => row.teamId),
     );
-    built.push({ section, games: acceptedGameRecords(state), phase });
+    built.push({ section, games: acceptedGameRecords(stats), phase });
   } else {
     if (state.tournament?.finalPlacement) {
-      const finalSnapshot = buildCanonicalSnapshot(state, { label: 'Final Rankings' }, generatedAt);
+      const finalSnapshot = buildCanonicalSnapshot(stats, { label: 'Final Rankings' }, generatedAt);
       built.push({
         section: {
           id: 'standings-final',
@@ -452,16 +511,16 @@ export function buildCanonicalStandingsReport(
           scopeLabel: 'Final Rankings',
           teams: finalSnapshot.teams,
         },
-        games: acceptedGameRecords(state),
+        games: acceptedGameRecords(stats),
       });
     }
 
     for (const phase of phases) {
       const pools = poolsByPhase.get(phase.id) ?? [];
       if (pools.length > 1) {
-        for (const pool of pools) built.push(builtSection(state, phases, phase, pool, generatedAt));
+        for (const pool of pools) built.push(...builtSections(stats, phases, phase, pool, generatedAt));
       } else {
-        built.push(builtSection(state, phases, phase, undefined, generatedAt));
+        built.push(...builtSections(stats, phases, phase, undefined, generatedAt));
       }
     }
 
@@ -474,7 +533,7 @@ export function buildCanonicalStandingsReport(
         scopeLabel: 'All Games',
         teams: cumulative.teams,
       },
-      games: acceptedGameRecords(state),
+      games: acceptedGameRecords(stats),
     });
   }
 

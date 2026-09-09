@@ -278,6 +278,37 @@ describe('canonical standings report composition', () => {
     const report = buildCanonicalStandingsReport(state, generatedAt);
     const prelim = report.sections.find((section) => section.phaseId === 'phase-1')!;
     const teamA = prelim.teams.find((row) => row.teamId === 'team-a')!;
+    const cumulative = report.sections.at(-1)!;
+
+    expect(prelim.contextGames).toEqual([
+      expect.objectContaining({ gameId: 'game-tb', kind: 'tiebreaker', label: 'Tiebreaker Packet' }),
+    ]);
+    expect(teamA.gamesPlayed).toBe(1);
+    expect(cumulative.teams.find((row) => row.teamId === 'team-a')?.gamesPlayed).toBe(1);
+  });
+
+  test('tiebreaker games count statistically only when tournament rules say so', () => {
+    const state = playedTournament();
+    addPlayoffPhase(state, ['team-a']);
+    state.packets.push({
+      id: 'packet-tb',
+      name: 'Tiebreaker Packet',
+      source: 'manual',
+      assignedRoundIds: ['round-tb'],
+      assignedGameIds: [],
+      usedGameIds: [],
+      replacementForPacketId: null,
+      tiebreaker: true,
+    });
+    addRound(state, 'round-tb', 'phase-1', 'Tiebreaker', 2, 2, 'packet-tb');
+    addAcceptedGame(state, 'game-tb', 'scheduled-tb', 'round-tb', 'team-a', 'team-b', 50, 40, {
+      packetId: 'packet-tb',
+    });
+    state.tournament!.rules.tiebreakerCountsStatistically = true;
+
+    const report = buildCanonicalStandingsReport(state, generatedAt);
+    const prelim = report.sections.find((section) => section.phaseId === 'phase-1')!;
+    const teamA = prelim.teams.find((row) => row.teamId === 'team-a')!;
 
     expect(prelim.contextGames).toEqual([
       expect.objectContaining({ gameId: 'game-tb', kind: 'tiebreaker', label: 'Tiebreaker Packet' }),
@@ -350,5 +381,26 @@ describe('canonical standings report composition', () => {
     expect(playoff.teams.find((row) => row.teamId === 'team-a')?.gamesPlayed).toBe(2);
     expect(playoff.teams.find((row) => row.teamId === 'team-b')?.gamesPlayed).toBe(2);
     expect(cumulative.teams.find((row) => row.teamId === 'team-a')?.gamesPlayed).toBe(2);
+  });
+
+  test('a carryover stage also reports an unambiguous stage-games-only section', () => {
+    const state = playedTournament();
+    const playoffs = addPhase(state, 'phase-2', 'Playoffs', 2, {
+      teamIds: ['team-a', 'team-b'],
+      carryover: true,
+    });
+    addRound(state, 'round-2', playoffs.id, 'Round 2', 2, 2);
+    addAcceptedGame(state, 'game-2', 'scheduled-2', 'round-2', 'team-b', 'team-a', 250, 200);
+
+    const report = buildCanonicalStandingsReport(state, generatedAt);
+    const playoff = report.sections.find((section) => section.phaseId === 'phase-2')!;
+    const stageOnly = report.sections.find((section) => section.id === 'standings-phase-phase-2-stage-only')!;
+
+    expect(playoff.carryover).toBe(true);
+    expect(stageOnly.carryover).toBeUndefined();
+    expect(stageOnly.scopeLabel).toContain('stage games only');
+    expect(stageOnly.teams.find((row) => row.teamId === 'team-a')?.gamesPlayed).toBe(1);
+    expect(stageOnly.teams.find((row) => row.teamId === 'team-b')?.gamesPlayed).toBe(1);
+    expect(report.sections.indexOf(stageOnly)).toBeGreaterThan(report.sections.indexOf(playoff));
   });
 });
