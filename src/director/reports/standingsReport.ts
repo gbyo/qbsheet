@@ -8,6 +8,7 @@ import {
   acceptedGameRecords,
   canonicalCompetitionRanks,
   deriveTeamStandings,
+  orderDayItems,
   phaseCompetitiveField,
   previewAdvancement,
   type DirectorState,
@@ -56,6 +57,30 @@ function gamePoolId(state: DirectorState, game: GameRecord): string | undefined 
   return scheduled?.poolId ?? undefined;
 }
 
+function orderedAcceptedGames(state: DirectorState): GameRecord[] {
+  const dayIndex = new Map<string, number>();
+  orderDayItems(state.rounds, state.timeline).forEach((entry, index) => {
+    if (entry.kind === 'round' && entry.round) dayIndex.set(entry.round.id, index);
+  });
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  return acceptedGameRecords(state)
+    .slice()
+    .sort((left, right) => {
+      const dayDifference =
+        (dayIndex.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
+        (dayIndex.get(right.roundId) ?? Number.MAX_SAFE_INTEGER);
+      if (dayDifference !== 0) return dayDifference;
+      const leftRound = roundById.get(left.roundId);
+      const rightRound = roundById.get(right.roundId);
+      const leftGameIndex = leftRound?.scheduledGameIds.indexOf(left.scheduledGameId) ?? -1;
+      const rightGameIndex = rightRound?.scheduledGameIds.indexOf(right.scheduledGameId) ?? -1;
+      const sequenceDifference =
+        (leftGameIndex < 0 ? Number.MAX_SAFE_INTEGER : leftGameIndex) -
+        (rightGameIndex < 0 ? Number.MAX_SAFE_INTEGER : rightGameIndex);
+      return sequenceDifference || left.id.localeCompare(right.id);
+    });
+}
+
 function fieldTeamIds(state: DirectorState, phase: Phase, pool?: Pool): string[] {
   if (pool) return [...pool.teamIds];
   return phaseCompetitiveField(state, phase.id).teams.map((team) => team.id);
@@ -69,7 +94,11 @@ function carryoverGames(state: DirectorState, phase: Phase, pool?: Pool): GameRe
     if (!gamePhase) return false;
     const teams = game.scores.map((score) => score.teamId);
     if (teams.length < 2 || teams.some((teamId) => !field.has(teamId))) return false;
-    if (gamePhase.id === phase.id) return pool ? gamePoolId(state, game) === pool.id : true;
+    if (gamePhase.id === phase.id) {
+      if (!pool) return true;
+      const explicitPoolId = gamePoolId(state, game);
+      return explicitPoolId === undefined || explicitPoolId === pool.id;
+    }
     return gamePhase.order < phase.order;
   });
 }
@@ -197,7 +226,13 @@ function provisionalDestinations(
     sectionTeams.map((teamId) => {
       const unresolvedReason = unresolved.get(teamId);
       if (unresolvedReason) {
-        return [teamId, { status: 'unresolved' as const, note: unresolvedReason }];
+        return [
+          teamId,
+          {
+            status: 'unresolved' as const,
+            note: `${unresolvedReason} Resolution is required before advancement can be committed.`,
+          },
+        ];
       }
       return [
         teamId,
@@ -246,10 +281,9 @@ function gameReference(
 }
 
 function explicitFinalResults(state: DirectorState): Array<{ phaseId?: string; game: StandingsContextGame }> {
-  const accepted = acceptedGameRecords(state);
   const format = state.formats.find((entry) => entry.id === state.tournament?.formatId);
   const bracketNodes = new Map((format?.bracket?.nodes ?? []).map((node) => [node.key, node]));
-  return accepted.flatMap((game) => {
+  return orderedAcceptedGames(state).flatMap((game) => {
     const phaseId = gamePhaseId(state, game);
     const phase = state.phases.find((entry) => entry.id === phaseId);
     const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
@@ -270,7 +304,7 @@ function tiebreakerResults(
   const packetById = new Map(state.packets.map((packet) => [packet.id, packet]));
   const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
   const roundById = new Map(state.rounds.map((round) => [round.id, round]));
-  return acceptedGameRecords(state).flatMap((game) => {
+  return orderedAcceptedGames(state).flatMap((game) => {
     const scheduled = scheduledById.get(game.scheduledGameId);
     const round = roundById.get(game.roundId);
     const packetId = game.packetId ?? scheduled?.packetId ?? round?.packetId ?? undefined;
@@ -302,12 +336,13 @@ function attachContextGames(state: DirectorState, sections: BuiltSection[]): voi
     const target =
       sections.find(
         (entry) =>
-          entry.section.phaseId === result.phaseId &&
+          (entry.section.phaseId ?? entry.phase?.id) === result.phaseId &&
           entry.section.poolId !== undefined &&
           entry.section.poolId === result.poolId,
       ) ??
       sections.find(
-        (entry) => entry.section.phaseId === result.phaseId && entry.section.poolId === undefined,
+        (entry) =>
+          (entry.section.phaseId ?? entry.phase?.id) === result.phaseId && entry.section.poolId === undefined,
       );
     if (target) target.section.contextGames = [...(target.section.contextGames ?? []), result.game];
   }
