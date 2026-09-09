@@ -931,7 +931,7 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
         store.save_state(&current).expect("current document saves");
-        let server = ServerRuntime::default();
+        let server = ServerRuntime::with_key([0x41; 32]);
         server
             .start_on_port(Some(current.clone()), 0)
             .await
@@ -962,7 +962,7 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
         store.save_state(&current).expect("current document saves");
-        let server = ServerRuntime::default();
+        let server = ServerRuntime::with_key([0x42; 32]);
         server
             .start_on_port(Some(current), 0)
             .await

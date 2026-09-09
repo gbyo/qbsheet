@@ -321,7 +321,7 @@ impl Default for ServerRuntime {
 
 impl ServerRuntime {
     #[cfg(test)]
-    fn with_key(key: [u8; 32]) -> Self {
+    pub(crate) fn with_key(key: [u8; 32]) -> Self {
         struct FixedKeyStore([u8; 32]);
         impl QbtcpKeyStore for FixedKeyStore {
             fn key(&self) -> Result<[u8; 32], ServerError> {
