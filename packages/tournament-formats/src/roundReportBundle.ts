@@ -74,7 +74,9 @@ function percentCell(value: number | null | undefined): string {
     : '<td class="num">—</td>';
 }
 
-function gamesByRound(snapshot: StatsSnapshot): Array<{ roundId: string; roundName: string; games: GameStatsRow[] }> {
+function gamesByRound(
+  snapshot: StatsSnapshot,
+): Array<{ roundId: string; roundName: string; games: GameStatsRow[] }> {
   const groups = new Map<string, { roundId: string; roundName: string; games: GameStatsRow[] }>();
   for (const game of snapshot.games) {
     const key = game.roundId ?? game.gameId;
@@ -128,9 +130,14 @@ interface RoundColumns {
   notes: boolean;
 }
 
-function roundColumns(rows: readonly RoundStatsRow[], total: RoundStatsRow | null | undefined): RoundColumns {
+function roundColumns(
+  rows: readonly RoundStatsRow[],
+  total: RoundStatsRow | null | undefined,
+): RoundColumns {
   const all = total ? [...rows, total] : [...rows];
-  const phases = new Set(rows.map((row) => row.phaseId).filter((value): value is string => Boolean(value)));
+  const phases = new Set(
+    rows.map((row) => row.phaseId).filter((value): value is string => Boolean(value)),
+  );
   return {
     stage: phases.size > 1,
     superpower: all.some((row) => row.superpowerApplicable === true),
@@ -180,7 +187,7 @@ function roundsPage(snapshot: StatsSnapshot): string {
     '<th scope="col" class="num">Games</th>' +
     '<th scope="col" class="num"><abbr title="Points per team normalized to the historical regulation tossup count">Pts/team/reg</abbr></th>' +
     `${columns.superpower ? '<th scope="col" class="num"><abbr title="Superpowers divided by positive tossup conversions">SP %</abbr></th>' : ''}` +
-    `${columns.power ? '<th scope="col" class="num"><abbr title="Superpowers plus powers divided by positive tossup conversions">Power %</abbr></th>' : ''}` +
+    `${columns.power ? '<th scope="col" class="num"><abbr title="Powers divided by positive tossup conversions">Power %</abbr></th>' : ''}` +
     '<th scope="col" class="num"><abbr title="Positive tossup conversions divided by exact tossups read">TU Conv %</abbr></th>' +
     `${columns.neg ? '<th scope="col" class="num"><abbr title="Negs normalized to the historical regulation tossup count">Negs/reg</abbr></th>' : ''}` +
     `${columns.ppb ? '<th scope="col" class="num"><abbr title="Bonus points divided by bonuses heard">PPB</abbr></th>' : ''}` +
@@ -190,7 +197,7 @@ function roundsPage(snapshot: StatsSnapshot): string {
   const bodyRows = rows.map((row) => roundRow(row, columns)).join('');
   const footer = total ? `<tfoot>${roundRow(total, columns, true)}</tfoot>` : '';
   const definitions =
-    '<p class="meta">Pts/team/reg uses each game’s exact tossups read and the row’s common historical regulation length. TU Conv % is positive tossup conversions / tossups read. Power % is (superpowers + powers) / positive conversions. Negs/reg is negs normalized to regulation length. PPB is bonus points / bonuses heard. Overall percentages are recomputed from their numerators and denominators; — means required source detail is incomplete, unknown, or not comparable.</p>';
+    '<p class="meta">Pts/team/reg uses each game’s exact tossups read and the row’s common historical regulation length. TU Conv % is positive tossup conversions / tossups read. Power % is powers / positive conversions. Negs/reg is negs normalized to regulation length. PPB is bonus points / bonuses heard. Overall percentages are recomputed from their numerators and denominators; — means required source detail is incomplete, unknown, or not comparable.</p>';
   const table = `<div class="table-wrap"><table><caption>Round statistics</caption><thead><tr>${headers}</tr></thead><tbody>${bodyRows}</tbody>${footer}</table></div>`;
   return reportPage(snapshot, 'Rounds', `${scopeNote(snapshot)}${definitions}${table}`);
 }
