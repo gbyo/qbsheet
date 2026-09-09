@@ -35,6 +35,11 @@ import { latestRound } from '../domain';
 import { currentOperationalRound } from '../transfers/assignment';
 import { isNativeDirector, type NativeServerStatus } from '../platform/native';
 import { useNativeServerStatus } from '../server/useNativeServerStatus';
+import {
+  deriveQbtcpOperationalHealth,
+  qbtcpHealthSummary,
+  type QbtcpOperationalHealth,
+} from '../server/qbtcpHealth';
 import { DirectorToast } from '../components/DirectorToast';
 import { errorNotice, toDirectorNotice, type AnnounceInput, type DirectorNotice } from '../notices';
 import { localCalendarDate } from './date';
@@ -120,6 +125,9 @@ function DirectorAppContent() {
     : nativeServer.loading
       ? null
       : nativeServer.status;
+  const qbtcpOperationalHealth: QbtcpOperationalHealth | null = nativeDirector
+    ? deriveQbtcpOperationalHealth(qbtcpServerStatus, controller.qbtcpHealth)
+    : null;
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [operatorProfile, setOperatorProfile] = useState<OperatorProfile>(() => loadOperatorProfile());
@@ -264,6 +272,7 @@ function DirectorAppContent() {
             nativeServerReady={qbtcpServerStatus?.running ?? false}
             nativeServerAvailable={nativeDirector}
             qbtcpHealth={controller.qbtcpHealth}
+            qbtcpOperationalHealth={qbtcpOperationalHealth}
           />
         );
       case 'teams':
@@ -403,7 +412,7 @@ function DirectorAppContent() {
             ? { count: transferPendingCount, tone: 'info', label: 'staged transfers' }
             : undefined,
         }}
-        nowChips={nowChips(state, qbtcpServerStatus, nativeDirector, navigate)}
+        nowChips={nowChips(state, qbtcpOperationalHealth, nativeDirector, navigate)}
         search={
           <GlobalSearch
             value={search}
@@ -647,9 +656,9 @@ function DocumentTransitionDialog({
  * what is happening *now*, and optional subsystems appear only when they are in
  * use or need attention — which is the product principle applied to chrome.
  */
-function nowChips(
+export function nowChips(
   state: ReturnType<typeof useDirectorController>['state'],
-  server: NativeServerStatus | null,
+  health: QbtcpOperationalHealth | null,
   native: boolean,
   navigate: (section: SectionId) => void,
 ): NowChip[] {
@@ -665,26 +674,33 @@ function nowChips(
       onSelect: () => navigate('schedule'),
     });
   }
-  // QBTCP earns a chip when it is running, when rooms are paired, when a room
-  // has asked for help, or when the server reported a problem. A tournament
-  // that never turns it on never sees it.
-  if (native && server) {
-    const pairedRooms = server.pairedRooms ?? 0;
-    const failed =
-      !server.running && server.message && !/^qbtcp server stopped\.?$/i.test(server.message.trim());
-    if (failed) {
+  // QBTCP earns a chip for every operational state other than an intentionally stopped server. A
+  // tournament that never turns it on never sees it, and browser mode never fabricates native state.
+  if (native && health && health.kind !== 'checking' && health.kind !== 'off') {
+    if (health.kind === 'error') {
       chips.push({
-        label: 'QBTCP error',
-        detail: server.message,
+        label: health.source === 'snapshot' ? 'QBTCP sync error' : 'QBTCP error',
+        detail: qbtcpHealthSummary(health),
         tone: 'danger',
-        ariaLabel: `QBTCP server error: ${server.message}. Go to Rooms`,
+        ariaLabel: `QBTCP ${health.source === 'snapshot' ? 'snapshot ingestion' : 'server'} error. Go to Rooms`,
         onSelect: () => navigate('rooms'),
       });
-    } else if (server.running) {
+    } else if (health.kind === 'stale' || health.kind === 'unverified') {
       chips.push({
-        label: pairedRooms > 0 ? `${pairedRooms} room${pairedRooms === 1 ? '' : 's'} paired` : 'QBTCP on',
+        label: health.kind === 'stale' ? 'QBTCP sync delayed' : 'QBTCP sync pending',
+        detail: qbtcpHealthSummary(health),
+        tone: 'warning',
+        ariaLabel: `QBTCP ${health.kind === 'stale' ? 'snapshot sync is delayed' : 'snapshot ingestion is not verified'}. Go to Rooms`,
+        onSelect: () => navigate('rooms'),
+      });
+    } else if (health.kind === 'healthy') {
+      chips.push({
+        label:
+          health.pairedRooms > 0
+            ? `${health.pairedRooms} room${health.pairedRooms === 1 ? '' : 's'} paired`
+            : 'QBTCP on',
         tone: 'success',
-        ariaLabel: `QBTCP server running, ${pairedRooms} rooms paired. Go to Rooms`,
+        ariaLabel: `QBTCP running and snapshot sync is healthy, ${health.pairedRooms} rooms paired. Go to Rooms`,
         onSelect: () => navigate('rooms'),
       });
     }
