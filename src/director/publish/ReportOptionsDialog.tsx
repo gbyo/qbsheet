@@ -33,7 +33,9 @@ export function ReportOptionsDialog({
       description="Choose the pages and secondary columns for this Director. Competitive results and tournament data are unchanged."
       size="lg"
       onClose={onClose}
-      onSubmit={() => onSave(draft)}
+      onSubmit={() => {
+        if (draft.pages.length > 0) onSave(draft);
+      }}
       submitDisabled={draft.pages.length === 0}
       footer={
         <div className="director-dialog-footer">
@@ -102,12 +104,12 @@ export function ReportOptionsDialog({
         <Checkbox
           checked={draft.showPacket}
           label="Packet when known"
-          onChange={(showPacket) => setDraft((current) => ({ ...current, showPacket }))
+          onChange={(showPacket) => setDraft((current) => ({ ...current, showPacket }))}
         />
         <Checkbox
           checked={draft.showStage}
           label="Stage when multiple stages are present"
-          onChange={(showStage) => setDraft((current) => ({ ...current, showStage }))
+          onChange={(showStage) => setDraft((current) => ({ ...current, showStage }))}
         />
       </DialogSection>
     </Dialog>
