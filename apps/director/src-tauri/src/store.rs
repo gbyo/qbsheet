@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 8;
+const SCHEMA_VERSION: i64 = 9;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -285,6 +285,49 @@ impl DirectorStore {
                 )),
                 disposition.conflict_with,
             ],
+        )?;
+        Ok(())
+    }
+
+    /// Read the encrypted QBTCP authority blob for one tournament. Encryption and key custody
+    /// deliberately live outside this store; SQLite never receives plaintext bearer material.
+    pub fn load_qbtcp_credentials(
+        &self,
+        tournament_id: &str,
+    ) -> Result<Option<Vec<u8>>, StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        connection
+            .query_row(
+                "SELECT ciphertext FROM qbtcp_runtime_credentials WHERE tournament_id = ?1",
+                params![tournament_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(StoreError::from)
+    }
+
+    pub fn save_qbtcp_credentials(
+        &self,
+        tournament_id: &str,
+        ciphertext: &[u8],
+    ) -> Result<(), StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        connection.execute(
+            "INSERT INTO qbtcp_runtime_credentials (tournament_id, ciphertext, updated_at)
+             VALUES (?1, ?2, CURRENT_TIMESTAMP)
+             ON CONFLICT(tournament_id) DO UPDATE SET
+               ciphertext = excluded.ciphertext,
+               updated_at = CURRENT_TIMESTAMP",
+            params![tournament_id, ciphertext],
+        )?;
+        Ok(())
+    }
+
+    pub fn forget_qbtcp_credentials(&self, tournament_id: &str) -> Result<(), StoreError> {
+        let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
+        connection.execute(
+            "DELETE FROM qbtcp_runtime_credentials WHERE tournament_id = ?1",
+            params![tournament_id],
         )?;
         Ok(())
     }
@@ -1929,6 +1972,19 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
     }
 
+    if current < 9 {
+        // QBTCP bearer/session authority is encrypted before it reaches this table. The device
+        // encryption key is held by the OS credential store and is never written to SQLite.
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS qbtcp_runtime_credentials (
+                tournament_id TEXT PRIMARY KEY,
+                ciphertext BLOB NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO schema_migrations(version) VALUES (9);",
+        )?;
+    }
+
     transaction.commit()?;
     Ok(())
 }
@@ -2003,6 +2059,7 @@ mod tests {
             "qbtcp_sessions",
             "result_submissions",
             "qbtcp_results",
+            "qbtcp_runtime_credentials",
             "protests",
             "audit_events",
             "tournament_documents",
@@ -2114,7 +2171,7 @@ mod tests {
         let document =
             json!({"schemaVersion": 7, "tournament": {"id": "event", "name": "Existing"}});
         store.save_state(&document).unwrap();
-        store.connection.lock().unwrap().execute_batch("DROP TABLE director_checkpoints; DROP TABLE qbtcp_recovery_exclusions; DELETE FROM schema_migrations WHERE version = 8;").unwrap();
+        store.connection.lock().unwrap().execute_batch("DROP TABLE director_checkpoints; DROP TABLE qbtcp_recovery_exclusions; DROP TABLE qbtcp_runtime_credentials; DELETE FROM schema_migrations WHERE version >= 8;").unwrap();
         drop(store);
         let store = DirectorStore::open(path.clone()).unwrap();
         assert_eq!(store.load_state().unwrap(), Some(document.clone()));
@@ -2237,6 +2294,7 @@ mod tests {
                     DELETE FROM schema_migrations WHERE version >= 6;
                     DROP TABLE IF EXISTS director_checkpoints;
                     DROP TABLE IF EXISTS qbtcp_recovery_exclusions;
+                    DROP TABLE IF EXISTS qbtcp_runtime_credentials;
                     DROP INDEX IF EXISTS tournament_documents_recent_idx;
                     DROP TABLE IF EXISTS tournament_documents;
                     ALTER TABLE tournaments DROP COLUMN date;

@@ -124,6 +124,11 @@ export async function stopQbtcpServer(): Promise<NativeServerStatus> {
   return invoke<NativeServerStatus>('director_stop_qbtcp_server');
 }
 
+export async function resetQbtcpCredentials(): Promise<NativeServerStatus> {
+  requireTauri();
+  return invoke<NativeServerStatus>('director_reset_qbtcp_credentials');
+}
+
 export async function issueRoomPairing(roomId: string): Promise<NativeRoomPairingInvitation> {
   requireTauri();
   return invoke<NativeRoomPairingInvitation>('director_issue_qbtcp_pairing', { roomId });

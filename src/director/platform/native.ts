@@ -9,7 +9,6 @@ export interface NativeServerStatus {
   expiredPairingRoomIds?: string[];
   protocol?: string;
   pairedRooms?: number;
-  restartRecoveryRoomIds?: string[];
   pairingInvitations?: NativeRoomPairingInvitation[];
   pairingCode?: string;
   pairingUrl?: string;
@@ -185,9 +184,6 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
       : {}),
     ...(typeof value.protocol === 'string' ? { protocol: value.protocol } : {}),
     ...(typeof value.pairedRooms === 'number' ? { pairedRooms: value.pairedRooms } : {}),
-    ...(Array.isArray(value.restartRecoveryRoomIds)
-      ? { restartRecoveryRoomIds: value.restartRecoveryRoomIds.filter((roomId): roomId is string => typeof roomId === 'string') }
-      : {}),
     ...(Array.isArray(invitations)
       ? {
           pairingInvitations: invitations.filter(
@@ -257,6 +253,15 @@ export async function stopNativeServer(): Promise<NativeServerStatus> {
       message: reason instanceof Error ? reason.message : 'The QBTCP server could not stop.',
     };
   }
+}
+
+export async function resetNativeQbtcpCredentials(): Promise<NativeServerStatus> {
+  const native = bridge();
+  if (!native) throw new Error('Open the Tauri Director app to reset QBTCP pairings.');
+  return normalizeStatus(
+    await native.invoke('director_reset_qbtcp_credentials'),
+    'The native server returned an invalid reset status.',
+  );
 }
 
 export async function issueNativeRoomPairing(roomId: string): Promise<NativeRoomPairingInvitation> {

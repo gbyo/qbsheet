@@ -2,11 +2,11 @@ use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use qbtcp_server::{
     AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceUpdate, QbtcpConfig,
-    QbtcpServer, RoomInfo, TournamentInfo, DEVICE_ID_HEADER, OPERATOR_NAME_HEADER, QBTCP_PREFIX,
-    ROOM_TOKEN_HEADER, SESSION_TOKEN_HEADER,
+    QbtcpServer, RoomInfo, RuntimeCredentialPersistence, RuntimeCredentialSnapshot, TournamentInfo,
+    DEVICE_ID_HEADER, OPERATOR_NAME_HEADER, QBTCP_PREFIX, ROOM_TOKEN_HEADER, SESSION_TOKEN_HEADER,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tower::ServiceExt;
@@ -75,6 +75,16 @@ fn assignment_qbj() -> Value {
             }
         ]
     })
+}
+
+#[derive(Default)]
+struct CapturedCredentials(Mutex<Option<RuntimeCredentialSnapshot>>);
+
+impl RuntimeCredentialPersistence for CapturedCredentials {
+    fn persist(&self, snapshot: &RuntimeCredentialSnapshot) -> Result<(), String> {
+        *self.0.lock().map_err(|_| "poisoned".to_owned())? = Some(snapshot.clone());
+        Ok(())
+    }
 }
 
 fn result_qbj(left_points: u64, extra_transport: bool) -> Value {
@@ -781,6 +791,87 @@ fn multiple_rooms_receive_independent_pairing_invitations() {
             .room_id,
         "room-2"
     );
+}
+
+#[test]
+fn room_and_session_authority_survive_a_same_tournament_restart() {
+    let (server, state) = fixture();
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "restart-client")
+        .unwrap();
+    let session = server
+        .open_session(Some(&paired.token), "match-1", Some("device-restart"))
+        .unwrap();
+    server
+        .progress(
+            &session.session_id,
+            Some(&session.token),
+            7,
+            json!({"type": "Match", "id": "match-1"}),
+        )
+        .unwrap();
+    let snapshot = server.credential_snapshot().unwrap();
+    let persisted = Arc::new(CapturedCredentials::default());
+    let restored = QbtcpServer::new_with_credentials(
+        state,
+        QbtcpConfig::default(),
+        Some(snapshot),
+        persisted.clone(),
+    )
+    .unwrap();
+
+    assert!(restored.assignment(Some(&paired.token)).unwrap().is_some());
+    let reopened = restored
+        .open_session(Some(&paired.token), "match-1", Some("device-restart"))
+        .unwrap();
+    assert_eq!(reopened.session_id, session.session_id);
+    assert_eq!(reopened.token, session.token);
+    assert!(reopened.writer);
+    assert!(
+        !restored
+            .progress(
+                &session.session_id,
+                Some(&session.token),
+                6,
+                json!({"type": "Match", "id": "match-1"}),
+            )
+            .unwrap()
+            .accepted
+    );
+    assert!(persisted.0.lock().unwrap().is_some());
+}
+
+#[test]
+fn saved_authority_is_scoped_to_the_same_tournament() {
+    let (server, _) = fixture();
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(&invitation.code, Some("room-1"), "scope-client")
+        .unwrap();
+    let snapshot = server.credential_snapshot().unwrap();
+    let other_state = Arc::new(MemoryState::new(
+        TournamentInfo {
+            id: "tournament-2".to_owned(),
+            name: "Other tournament".to_owned(),
+            qbj_version: "2.1.1".to_owned(),
+        },
+        vec![RoomInfo {
+            id: "room-1".to_owned(),
+            name: "Room 1".to_owned(),
+            description: None,
+            enabled: true,
+        }],
+    ));
+    let restored = QbtcpServer::new_with_credentials(
+        other_state,
+        QbtcpConfig::default(),
+        Some(snapshot),
+        Arc::new(CapturedCredentials::default()),
+    )
+    .unwrap();
+
+    assert!(restored.assignment(Some(&paired.token)).is_err());
 }
 
 #[test]

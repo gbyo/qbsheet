@@ -585,6 +585,27 @@ repair flow, a `403` as an explicit refusal without starting a pairing loop, a n
 unreachable, and a `5xx` as a retryable server failure. None of these outcomes removes a locally
 recorded issue or stops scoring.
 
+## Server restart continuity
+
+A tournament-control host that can securely persist local credentials SHOULD preserve room and
+session authority across an accidental listener or application restart. Restored authority MUST be
+accepted only for the same tournament identity and remains subject to the current room-enabled,
+assignment-revision, assignment-fingerprint, writer, and result-idempotency checks. Short-lived
+pairing invitations are not restart state and are always recreated.
+
+QBSheet Director stores the minimum restart snapshot as authenticated ciphertext in its local
+SQLite database. The encryption key is generated locally and held by the operating system's
+credential store. Plaintext room tokens, session tokens, and bearer-equivalent token hashes never
+enter the tournament document, `.qbst` archives, QBJ, QBSheet Live, logs, audit text, or diagnostics.
+Copying the database to another device does not copy the key.
+
+Presence, help state, and the full latest scoresheet snapshot remain ephemeral. The scorer's
+local-first game is authoritative during an outage; the restored session retains its monotonic
+progress sequence so an older retry cannot replace newer progress. Director provides an explicit
+**Reset all pairings** action that deletes the tournament's encrypted restart state and recreates a
+fresh runtime, immediately revoking every old room and session credential. Ordinary Stop/Start is
+not a security reset and preserves restart continuity.
+
 ## CORS and local network access
 
 A scoresheet is typically a static site on a public origin. Tournament-control software typically runs

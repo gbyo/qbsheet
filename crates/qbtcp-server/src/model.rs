@@ -259,7 +259,7 @@ pub enum AssignmentState {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SessionStatus {
     Open,
@@ -406,7 +406,7 @@ pub struct RosterAmendmentRequest {
     pub question_number: Option<u32>,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RosterAmendment {
     #[serde(rename = "playerId", skip_serializing_if = "Option::is_none")]
     pub player_id: Option<String>,
