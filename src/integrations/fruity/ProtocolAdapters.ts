@@ -35,6 +35,7 @@ import {
   legacyRoutes,
   qbtcpRoutes,
   supports,
+  unresolvedQbtcpRoutes,
   unsupportedQbtcpRoutes,
 } from '../../qbtcp/QbtcpRoutes';
 import { assignmentToGamePackage, qbtcpAssignmentToDefinition } from './FruityGameSource';
@@ -893,6 +894,78 @@ export class UnsupportedQbtcpAdapter implements IServerAdapter {
 
   private refusal<T>(): ApiResult<T> {
     return { ok: false, unsupported: true, error: unsupportedQbtcpMessage(this.discovery.version) };
+  }
+
+  verify(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  identify(): Promise<ApiResult<IServerIdentity>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  listRooms(): Promise<ApiResult<IRoomListEntry[]>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  join(): Promise<ApiResult<IJoinResult>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  assignment(): Promise<ApiResult<INormalizedAssignment>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  openSession(): Promise<ApiResult<IOpenedSession>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  takeWriter(): Promise<ApiResult<IOpenedSession>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  updatePresence(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  requestHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  readHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  cancelHelp(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  addRosterPlayer(): Promise<ApiResult<IRosterAddResult>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  putProgress(): Promise<ApiResult<unknown>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  postResult(): Promise<ApiResult<IResultReceipt>> {
+    return Promise.resolve(this.refusal());
+  }
+
+  recover(): Promise<ApiResult<ISessionRecovery>> {
+    return Promise.resolve(this.refusal());
+  }
+}
+
+/** Refuse operations while discovery is unresolved; in particular, never guess at legacy routes. */
+export class UnresolvedDiscoveryAdapter implements IServerAdapter {
+  readonly routes = unresolvedQbtcpRoutes;
+
+  private refusal<T>(): ApiResult<T> {
+    return {
+      ok: false,
+      error: 'Tournament control protocol discovery is unresolved; retry when the connection is available.',
+    };
   }
 
   verify(): Promise<ApiResult<unknown>> {

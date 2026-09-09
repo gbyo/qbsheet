@@ -254,6 +254,7 @@ describe('what the client puts on the wire', () => {
       const first = await client.assignment(identity);
       expect(first.ok).toBe(false);
       expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+      expect(calls.some((call) => call.path.startsWith('/api/v1'))).toBe(false);
 
       const second = await client.assignment(identity);
       expect(second.ok).toBe(true);
@@ -265,7 +266,7 @@ describe('what the client puts on the wire', () => {
 
   test('a malformed successful discovery response is not latched as legacy', async () => {
     let discoveryAttempts = 0;
-    const { fetchImpl } = recordingFetch((path) => {
+    const { calls, fetchImpl } = recordingFetch((path) => {
       if (path === '/qbtcp/v1') {
         discoveryAttempts += 1;
         return discoveryAttempts === 1 ? { body: { status: 'ok' } } : { body: qbtcpDiscovery };
@@ -275,8 +276,10 @@ describe('what the client puts on the wire', () => {
     });
     const client = new FruityServerClient('http://control.test', fetchImpl);
 
-    await client.assignment(identity);
+    const first = await client.assignment(identity);
+    expect(first.ok).toBe(false);
     expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+    expect(calls.some((call) => call.path.startsWith('/api/v1'))).toBe(false);
 
     const second = await client.assignment(identity);
     expect(second.ok).toBe(true);
