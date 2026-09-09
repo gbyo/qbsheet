@@ -379,7 +379,7 @@ function RecoverySettings({
         <Button
           variant="primary"
           icon="plus"
-          disabled={!state.tournament || controller.recovering}
+          disabled={!state.tournament || controller.documentTransition !== null}
           onClick={() => {
             void controller
               .checkpoint('Manual recovery point')
@@ -418,7 +418,7 @@ function RecoverySettings({
                 <Button
                   variant="secondary"
                   icon="undo"
-                  disabled={controller.recovering}
+                  disabled={controller.documentTransition !== null}
                   onClick={() =>
                     void (async () => {
                       const approved = await confirmAction({

@@ -137,6 +137,19 @@ describe('released-game room recovery UI', () => {
     expect(screen.getByRole('button', { name: 'Change room' })).toBeDisabled();
   });
 
+  test('the secondary recovery Close action cannot bypass unresolved games', async () => {
+    const { getController } = await openRounds(directorFixture({ games: 1 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Round 5 actions' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Advanced recovery…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(getController().state.rounds.find((round) => round.id === 'round-5')?.status).toBe('released');
+    expect(onAnnounce).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringMatching(/released game/i) }),
+    );
+  });
+
   // The document only learns about pairings on the once-per-second QBTCP poll, so a scorer who
   // pairs between two polls leaves no trace in the state the blocker above reads. Saving the move
   // anyway reassigns both rooms and the native server clears their session tracking, disconnecting
