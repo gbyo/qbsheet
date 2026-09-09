@@ -1,7 +1,7 @@
 import {
   addGameRowAnchors,
   buildStatReportBundle,
-  renderCanonicalStandingsReport,
+  renderStageAwareStandingsReport,
   zipStatReportBundle,
   type StatReportPage,
 } from '@qbsheet/tournament-formats';
@@ -18,7 +18,7 @@ export interface CanonicalStatReportArtifact {
 
 function buildCanonicalReportPages(state: DirectorState, generatedAt: string): StatReportPage[] {
   const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
-  const standings = renderCanonicalStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
+  const standings = renderStageAwareStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
   return buildStatReportBundle(snapshot).map((page) => {
     if (page.name === 'standings.html') return { ...page, content: standings };
     if (page.name === 'games.html') {
