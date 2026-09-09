@@ -103,7 +103,9 @@ export function deriveRoundStats(
           : null;
       const bonusesHeard = count('bonuses');
       const bonusPoints = count('bonusPoints');
-      const packetIds = [...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null))];
+      const packetIds = [
+        ...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null)),
+      ];
 
       return {
         roundId,
