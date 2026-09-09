@@ -4,3 +4,47 @@
  * The logistics workspace is built from the shared list, table, dialog, and
  * disclosure surfaces; nothing here needed a page-specific rule.
  */
+
+
+/* Directional motion between adjacent logistics views. */
+.director-logistics-view {
+  min-width: 0;
+}
+
+.director-logistics-view[data-direction='forward'] {
+  animation: director-logistics-forward 150ms var(--director-ease);
+}
+
+.director-logistics-view[data-direction='backward'] {
+  animation: director-logistics-backward 150ms var(--director-ease);
+}
+
+@keyframes director-logistics-forward {
+  from {
+    opacity: 0.72;
+    transform: translateX(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes director-logistics-backward {
+  from {
+    opacity: 0.72;
+    transform: translateX(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .director-logistics-view[data-direction] {
+    animation: none;
+  }
+}

@@ -1,4 +1,4 @@
-import { useId, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 
 /**
@@ -297,8 +297,40 @@ export function Segmented<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
+  const groupRef = useRef<HTMLDivElement>(null);
+  const [indicator, setIndicator] = useState<{ left: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+
+    const updateIndicator = () => {
+      const selected = group.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+      if (!selected) {
+        setIndicator(null);
+        return;
+      }
+      const next = { left: selected.offsetLeft, width: selected.offsetWidth };
+      setIndicator((current) =>
+        current?.left === next.left && current.width === next.width ? current : next,
+      );
+    };
+
+    updateIndicator();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateIndicator);
+    observer.observe(group);
+    group.querySelectorAll('button').forEach((button) => observer.observe(button));
+    return () => observer.disconnect();
+  }, [value]);
+
   return (
-    <div className="director-segmented" role="group" aria-label={ariaLabel}>
+    <div ref={groupRef} className="director-segmented" role="group" aria-label={ariaLabel}>
+      <span
+        className="director-segmented-indicator"
+        aria-hidden="true"
+        style={indicator ? { left: indicator.left, width: indicator.width } : undefined}
+      />
       {options.map((option) => (
         <button
           key={option.value}

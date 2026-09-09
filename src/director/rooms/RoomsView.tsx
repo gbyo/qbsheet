@@ -44,6 +44,13 @@ type EquipmentKind = DirectorState['equipment'][number]['kind'];
 type LogisticsView = 'rooms' | 'staff' | 'equipment' | 'requests';
 type RoomFilter = 'all' | 'assignable' | 'active' | 'attention';
 
+const logisticsViewOrder: Record<LogisticsView, number> = {
+  rooms: 0,
+  staff: 1,
+  equipment: 2,
+  requests: 3,
+};
+
 interface RoomDraft {
   name: string;
   building: string;
@@ -102,6 +109,7 @@ export function RoomsView({
   server?: NativeServerState;
 }) {
   const [view, setView] = useState<LogisticsView>('rooms');
+  const [viewDirection, setViewDirection] = useState<'forward' | 'backward' | null>(null);
   const [filter, setFilter] = useState<RoomFilter>('all');
   const [editingRoomId, setEditingRoomId] = useState<string | null | 'new'>(null);
   const [editingStaffId, setEditingStaffId] = useState<string | null | 'new'>(null);
@@ -120,6 +128,7 @@ export function RoomsView({
   const [appliedRoomTarget, setAppliedRoomTarget] = useState<string | undefined>(targetRoomId);
   if (targetRoomId && targetRoomId !== appliedRoomTarget) {
     setAppliedRoomTarget(targetRoomId);
+    setViewDirection(null);
     setView('rooms');
   }
 
@@ -196,6 +205,12 @@ export function RoomsView({
     }
   };
 
+  const changeView = (nextView: LogisticsView) => {
+    if (nextView === view) return;
+    setViewDirection(logisticsViewOrder[nextView] > logisticsViewOrder[view] ? 'forward' : 'backward');
+    setView(nextView);
+  };
+
   const primaryAdd =
     view === 'rooms' ? (
       <Button variant="primary" icon="plus" onClick={() => setEditingRoomId('new')}>
@@ -221,7 +236,7 @@ export function RoomsView({
 
       <Segmented<LogisticsView>
         value={view}
-        onChange={setView}
+        onChange={changeView}
         ariaLabel="Logistics view"
         options={[
           { value: 'rooms', label: `Rooms ${state.rooms.length}` },
@@ -231,80 +246,86 @@ export function RoomsView({
         ]}
       />
 
-      {view === 'rooms' && (
-        <RoomsLogisticsView
-          state={state}
-          controller={controller}
-          rooms={filteredRooms}
-          filter={filter}
-          setFilter={setFilter}
-          assignableRoomIds={assignableRoomIds}
-          onNavigate={onNavigate}
-          onAnnounce={onAnnounce}
-          navigationTarget={navigationTarget}
-          onClearNavigationTarget={onClearNavigationTarget}
-          onEdit={(roomId) => setEditingRoomId(roomId)}
-          onAdd={() => setEditingRoomId('new')}
-        />
-      )}
+      <div
+        key={view}
+        className="director-logistics-view"
+        data-direction={viewDirection ?? undefined}
+      >
+        {view === 'rooms' && (
+          <RoomsLogisticsView
+            state={state}
+            controller={controller}
+            rooms={filteredRooms}
+            filter={filter}
+            setFilter={setFilter}
+            assignableRoomIds={assignableRoomIds}
+            onNavigate={onNavigate}
+            onAnnounce={onAnnounce}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={onClearNavigationTarget}
+            onEdit={(roomId) => setEditingRoomId(roomId)}
+            onAdd={() => setEditingRoomId('new')}
+          />
+        )}
 
-      {view === 'staff' && (
-        <ResourceView
-          title="Staff"
-          description="People available for moderator, scorekeeper, runner, and HQ assignments."
-          emptyTitle="No staff yet"
-          emptyDescription="Add staff only when you want Director to track room assignments."
-          addLabel="Add staff member"
-          onAdd={() => setEditingStaffId('new')}
-        >
-          <SummaryList ariaLabel="Staff">
-            {state.staff.map((member) => (
-              <StaffSummary
-                key={member.id}
-                member={member}
-                controller={controller}
-                onAnnounce={onAnnounce}
-                onEdit={() => setEditingStaffId(member.id)}
-              />
-            ))}
-          </SummaryList>
-        </ResourceView>
-      )}
+        {view === 'staff' && (
+          <ResourceView
+            title="Staff"
+            description="People available for moderator, scorekeeper, runner, and HQ assignments."
+            emptyTitle="No staff yet"
+            emptyDescription="Add staff only when you want Director to track room assignments."
+            addLabel="Add staff member"
+            onAdd={() => setEditingStaffId('new')}
+          >
+            <SummaryList ariaLabel="Staff">
+              {state.staff.map((member) => (
+                <StaffSummary
+                  key={member.id}
+                  member={member}
+                  controller={controller}
+                  onAnnounce={onAnnounce}
+                  onEdit={() => setEditingStaffId(member.id)}
+                />
+              ))}
+            </SummaryList>
+          </ResourceView>
+        )}
 
-      {view === 'equipment' && (
-        <ResourceView
-          title="Equipment"
-          description="Buzzers, scoring devices, and other resources that can be assigned to rooms."
-          emptyTitle="No equipment yet"
-          emptyDescription="Equipment tracking is optional until you need it."
-          addLabel="Add equipment"
-          onAdd={() => setEditingEquipmentId('new')}
-        >
-          <SummaryList ariaLabel="Equipment">
-            {state.equipment.map((item) => (
-              <EquipmentSummary
-                key={item.id}
-                item={item}
-                controller={controller}
-                onAnnounce={onAnnounce}
-                onEdit={() => setEditingEquipmentId(item.id)}
-              />
-            ))}
-          </SummaryList>
-        </ResourceView>
-      )}
+        {view === 'equipment' && (
+          <ResourceView
+            title="Equipment"
+            description="Buzzers, scoring devices, and other resources that can be assigned to rooms."
+            emptyTitle="No equipment yet"
+            emptyDescription="Equipment tracking is optional until you need it."
+            addLabel="Add equipment"
+            onAdd={() => setEditingEquipmentId('new')}
+          >
+            <SummaryList ariaLabel="Equipment">
+              {state.equipment.map((item) => (
+                <EquipmentSummary
+                  key={item.id}
+                  item={item}
+                  controller={controller}
+                  onAnnounce={onAnnounce}
+                  onEdit={() => setEditingEquipmentId(item.id)}
+                />
+              ))}
+            </SummaryList>
+          </ResourceView>
+        )}
 
-      {view === 'requests' && (
-        <RequestsView
-          state={state}
-          controller={controller}
-          helpRequests={helpRequests}
-          rosterAmendments={rosterAmendments}
-          mappings={amendmentMappings}
-          setMappings={setAmendmentMappings}
-          onAnnounce={onAnnounce}
-        />
-      )}
+        {view === 'requests' && (
+          <RequestsView
+            state={state}
+            controller={controller}
+            helpRequests={helpRequests}
+            rosterAmendments={rosterAmendments}
+            mappings={amendmentMappings}
+            setMappings={setAmendmentMappings}
+            onAnnounce={onAnnounce}
+          />
+        )}
+      </div>
 
       {nativeServer && (
         <AdvancedSection
