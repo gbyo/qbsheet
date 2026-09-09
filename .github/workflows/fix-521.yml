@@ -1,0 +1,319 @@
+name: Apply fix 521
+
+on:
+  push:
+    branches: [fix/521-qbtcp-global-health]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/521-qbtcp-global-health
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply operational health model and regression tests
+        shell: bash
+        run: |
+          cat > src/director/server/qbtcpOperationalHealth.ts <<'EOF'
+          import type { NativeServerStatus } from '../platform/native';
+
+          export interface QbtcpSyncHealth {
+            lastSuccessfulAt: string | null;
+            error: string | null;
+          }
+
+          export type QbtcpOperationalHealth =
+            | { kind: 'off' }
+            | { kind: 'healthy'; pairedRooms: number; lastSuccessfulAt: string }
+            | { kind: 'stale'; pairedRooms: number; lastSuccessfulAt: string | null }
+            | { kind: 'error'; pairedRooms: number; message: string };
+
+          /** Native status and snapshot ingestion are polled once per second. Allow four missed cycles. */
+          export const qbtcpSyncStaleAfterMs = 4_000;
+
+          export function deriveQbtcpOperationalHealth(
+            server: NativeServerStatus | null,
+            sync: QbtcpSyncHealth,
+            now = Date.now(),
+          ): QbtcpOperationalHealth {
+            if (!server) return { kind: 'off' };
+            const pairedRooms = server.pairedRooms ?? 0;
+            const processError =
+              !server.running && server.message && !/^qbtcp server stopped\.?$/i.test(server.message.trim());
+            if (processError) return { kind: 'error', pairedRooms, message: server.message! };
+            if (!server.running) return { kind: 'off' };
+            if (sync.error) return { kind: 'error', pairedRooms, message: sync.error };
+            if (!sync.lastSuccessfulAt) return { kind: 'stale', pairedRooms, lastSuccessfulAt: null };
+            const lastSuccess = Date.parse(sync.lastSuccessfulAt);
+            if (!Number.isFinite(lastSuccess) || now - lastSuccess > qbtcpSyncStaleAfterMs) {
+              return { kind: 'stale', pairedRooms, lastSuccessfulAt: sync.lastSuccessfulAt };
+            }
+            return { kind: 'healthy', pairedRooms, lastSuccessfulAt: sync.lastSuccessfulAt };
+          }
+          EOF
+          cat > src/director/server/qbtcpOperationalHealth.test.ts <<'EOF'
+          import { describe, expect, test } from 'vitest';
+          import { deriveQbtcpOperationalHealth, qbtcpSyncStaleAfterMs } from './qbtcpOperationalHealth';
+
+          const now = Date.parse('2026-09-09T03:00:00.000Z');
+
+          describe('QBTCP operational health', () => {
+            test('requires both a running server and a recent successful snapshot', () => {
+              expect(
+                deriveQbtcpOperationalHealth(
+                  { running: true, pairedRooms: 5 },
+                  { lastSuccessfulAt: new Date(now - 1000).toISOString(), error: null },
+                  now,
+                ),
+              ).toMatchObject({ kind: 'healthy', pairedRooms: 5 });
+            });
+
+            test('never reports healthy while snapshot ingestion has an error', () => {
+              expect(
+                deriveQbtcpOperationalHealth(
+                  { running: true, pairedRooms: 5 },
+                  { lastSuccessfulAt: new Date(now - 1000).toISOString(), error: 'snapshot failed' },
+                  now,
+                ),
+              ).toEqual({ kind: 'error', pairedRooms: 5, message: 'snapshot failed' });
+            });
+
+            test('marks missing or old snapshot success as delayed', () => {
+              expect(
+                deriveQbtcpOperationalHealth(
+                  { running: true, pairedRooms: 2 },
+                  { lastSuccessfulAt: null, error: null },
+                  now,
+                ),
+              ).toMatchObject({ kind: 'stale' });
+              expect(
+                deriveQbtcpOperationalHealth(
+                  { running: true, pairedRooms: 2 },
+                  { lastSuccessfulAt: new Date(now - qbtcpSyncStaleAfterMs - 1).toISOString(), error: null },
+                  now,
+                ),
+              ).toMatchObject({ kind: 'stale' });
+            });
+
+            test('a later successful sync recovers from error or stale state', () => {
+              const recovered = deriveQbtcpOperationalHealth(
+                { running: true, pairedRooms: 1 },
+                { lastSuccessfulAt: new Date(now).toISOString(), error: null },
+                now,
+              );
+              expect(recovered.kind).toBe('healthy');
+            });
+
+            test('normal server stop is off rather than an error', () => {
+              expect(
+                deriveQbtcpOperationalHealth(
+                  { running: false, message: 'QBTCP server stopped.' },
+                  { lastSuccessfulAt: null, error: null },
+                  now,
+                ),
+              ).toEqual({ kind: 'off' });
+            });
+          });
+          EOF
+          python <<'PY'
+          from pathlib import Path
+
+          app = Path('src/director/app/DirectorApp.tsx')
+          text = app.read_text()
+          import_anchor = "import { useNativeServerStatus } from '../server/useNativeServerStatus';\n"
+          import_line = "import { deriveQbtcpOperationalHealth } from '../server/qbtcpOperationalHealth';\n"
+          if text.count(import_anchor) != 1:
+              raise SystemExit('DirectorApp server-status import did not match')
+          text = text.replace(import_anchor, import_anchor + import_line, 1)
+          text = text.replace('nowChips={nowChips(state, qbtcpServerStatus, nativeDirector, navigate)}','nowChips={nowChips(state, qbtcpServerStatus, controller.qbtcpHealth, nativeDirector, navigate)}',1)
+          old_sig = """function nowChips(
+  state: ReturnType<typeof useDirectorController>['state'],
+  server: NativeServerStatus | null,
+  native: boolean,
+  navigate: (section: SectionId) => void,
+): NowChip[] {
+"""
+          new_sig = """function nowChips(
+  state: ReturnType<typeof useDirectorController>['state'],
+  server: NativeServerStatus | null,
+  syncHealth: ReturnType<typeof useDirectorController>['qbtcpHealth'],
+  native: boolean,
+  navigate: (section: SectionId) => void,
+): NowChip[] {
+"""
+          if text.count(old_sig) != 1:
+              raise SystemExit('nowChips signature did not match')
+          text = text.replace(old_sig,new_sig,1)
+          old = """  if (native && server) {
+    const pairedRooms = server.pairedRooms ?? 0;
+    const failed =
+      !server.running && server.message && !/^qbtcp server stopped\\.?$/i.test(server.message.trim());
+    if (failed) {
+      chips.push({
+        label: 'QBTCP error',
+        detail: server.message,
+        tone: 'danger',
+        ariaLabel: `QBTCP server error: ${server.message}. Go to Rooms`,
+        onSelect: () => navigate('rooms'),
+      });
+    } else if (server.running) {
+      chips.push({
+        label: pairedRooms > 0 ? `${pairedRooms} room${pairedRooms === 1 ? '' : 's'} paired` : 'QBTCP on',
+        tone: 'success',
+        ariaLabel: `QBTCP server running, ${pairedRooms} rooms paired. Go to Rooms`,
+        onSelect: () => navigate('rooms'),
+      });
+    }
+  }
+"""
+          new = """  if (native && server) {
+    const operational = deriveQbtcpOperationalHealth(server, syncHealth);
+    if (operational.kind === 'error') {
+      chips.push({
+        label: 'QBTCP sync error',
+        detail: 'Director is not receiving current scorer updates.',
+        tone: 'danger',
+        ariaLabel: 'QBTCP sync error. Director is not receiving current scorer updates. Go to Rooms',
+        onSelect: () => navigate('rooms'),
+      });
+    } else if (operational.kind === 'stale') {
+      chips.push({
+        label: 'QBTCP sync delayed',
+        detail: operational.lastSuccessfulAt ? 'Scorer updates are stale.' : 'Waiting for the first scorer snapshot.',
+        tone: 'warning',
+        ariaLabel: 'QBTCP sync delayed. Go to Rooms',
+        onSelect: () => navigate('rooms'),
+      });
+    } else if (operational.kind === 'healthy') {
+      const pairedRooms = operational.pairedRooms;
+      chips.push({
+        label: pairedRooms > 0 ? `${pairedRooms} room${pairedRooms === 1 ? '' : 's'} paired` : 'QBTCP on',
+        tone: 'success',
+        ariaLabel: `QBTCP server and snapshot sync healthy, ${pairedRooms} rooms paired. Go to Rooms`,
+        onSelect: () => navigate('rooms'),
+      });
+    }
+  }
+"""
+          if text.count(old) != 1:
+              raise SystemExit('nowChips QBTCP block did not match')
+          app.write_text(text.replace(old,new,1))
+
+          rooms = Path('src/director/rooms/RoomsView.tsx')
+          text = rooms.read_text()
+          import_anchor = "import type { NativeServerState } from '../server/useNativeServerStatus';\n"
+          import_line = "import { deriveQbtcpOperationalHealth, type QbtcpOperationalHealth } from '../server/qbtcpOperationalHealth';\n"
+          if text.count(import_anchor) != 1:
+              raise SystemExit('RoomsView server import did not match')
+          text = text.replace(import_anchor, import_anchor + import_line, 1)
+          old = """  const qbtcpRunning = qbtcpStatus?.running ?? false;
+  const qbtcpHasError = !qbtcpLoading && nativeDirector && !qbtcpRunning && Boolean(qbtcpStatus?.message);
+  const invitations = qbtcpStatus?.pairingInvitations ?? [];
+"""
+          new = """  const qbtcpRunning = qbtcpStatus?.running ?? false;
+  const qbtcpOperational = deriveQbtcpOperationalHealth(qbtcpStatus, controller.qbtcpHealth);
+  const qbtcpHasError = !qbtcpLoading && nativeDirector && qbtcpOperational.kind === 'error';
+  const qbtcpDelayed = !qbtcpLoading && nativeDirector && qbtcpOperational.kind === 'stale';
+  const invitations = qbtcpStatus?.pairingInvitations ?? [];
+"""
+          if text.count(old) != 1:
+              raise SystemExit('RoomsView QBTCP derived state did not match')
+          text = text.replace(old,new,1)
+          text = text.replace("label={qbtcpRunning || qbtcpHasError ? 'QBTCP local network' : 'Set up QBTCP local network'}", "label={qbtcpRunning || qbtcpHasError ? 'QBTCP local network' : 'Set up QBTCP local network'}",1)
+          old_hint = """            qbtcpRunning
+              ? `${qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length} paired room${(qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length) === 1 ? '' : 's'}`
+              : qbtcpHasError
+                ? 'Server needs attention'
+                : 'Optional for network-connected scorekeepers'
+"""
+          new_hint = """            qbtcpHasError
+              ? 'QBTCP sync needs attention'
+              : qbtcpDelayed
+                ? 'QBTCP sync delayed'
+                : qbtcpRunning
+                  ? `${qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length} paired room${(qbtcpStatus?.pairedRooms ?? state.qbtcpSessions.length) === 1 ? '' : 's'}`
+                  : 'Optional for network-connected scorekeepers'
+"""
+          if text.count(old_hint) != 1:
+              raise SystemExit('RoomsView advanced hint did not match')
+          text = text.replace(old_hint,new_hint,1)
+          text = text.replace('defaultOpen={qbtcpRunning || qbtcpHasError}', 'defaultOpen={qbtcpRunning || qbtcpHasError || qbtcpDelayed}', 1)
+          text = text.replace('            qbtcpHasError={qbtcpHasError}\n            pairingRooms={pairingRooms}', '            qbtcpHasError={qbtcpHasError}\n            qbtcpOperational={qbtcpOperational}\n            pairingRooms={pairingRooms}', 1)
+          text = text.replace('  qbtcpHasError,\n  pairingRooms,', '  qbtcpHasError,\n  qbtcpOperational,\n  pairingRooms,', 1)
+          text = text.replace('  qbtcpHasError: boolean;\n  pairingRooms:', '  qbtcpHasError: boolean;\n  qbtcpOperational: QbtcpOperationalHealth;\n  pairingRooms:', 1)
+          old_calls = """      {qbtcpHasError && (
+        <Callout tone=\"danger\" title=\"QBTCP server needs attention\">
+          {status?.message}
+        </Callout>
+      )}
+      {controller.qbtcpHealth.error && <Callout tone=\"danger\">{controller.qbtcpHealth.error}</Callout>}
+"""
+          new_calls = """      {qbtcpOperational.kind === 'error' && (
+        <Callout tone=\"danger\" title=\"QBTCP sync needs attention\">
+          {qbtcpOperational.message}
+        </Callout>
+      )}
+      {qbtcpOperational.kind === 'stale' && (
+        <Callout tone=\"warning\" title=\"QBTCP sync is delayed\">
+          Director has not received a recent scorer snapshot. The server can still be running while scorer updates are stale.
+        </Callout>
+      )}
+"""
+          if text.count(old_calls) != 1:
+              raise SystemExit('QbtcpNetwork callouts did not match')
+          text = text.replace(old_calls,new_calls,1)
+          text = text.replace('defaultOpen={qbtcpHasError}', "defaultOpen={qbtcpOperational.kind === 'error' || qbtcpOperational.kind === 'stale'}",1)
+          rooms.write_text(text)
+
+          controller = Path('src/director/state/useDirectorController.ts')
+          text = controller.read_text()
+          switch_marker = """        stateRef.current = loaded;
+        setState(loaded);
+        publishedSnapshotRef.current = null;
+"""
+          switch_replacement = """        stateRef.current = loaded;
+        setState(loaded);
+        setQbtcpHealth({ lastSuccessfulAt: null, error: null });
+        publishedSnapshotRef.current = null;
+"""
+          if text.count(switch_marker) != 1:
+              raise SystemExit('switch QBTCP reset insertion point did not match')
+          text = text.replace(switch_marker,switch_replacement,1)
+          import_marker = """      stateRef.current = next;
+      setState(next);
+      void persist(next, revision).catch(() => undefined);
+"""
+          import_replacement = """      stateRef.current = next;
+      setState(next);
+      if (next.tournament?.id !== previousTournamentId) {
+        setQbtcpHealth({ lastSuccessfulAt: null, error: null });
+      }
+      void persist(next, revision).catch(() => undefined);
+"""
+          if text.count(import_marker) != 1:
+              raise SystemExit('import QBTCP reset insertion point did not match')
+          controller.write_text(text.replace(import_marker,import_replacement,1))
+          PY
+      - run: npx prettier --write src/director/server/qbtcpOperationalHealth.ts src/director/server/qbtcpOperationalHealth.test.ts src/director/app/DirectorApp.tsx src/director/rooms/RoomsView.tsx src/director/state/useDirectorController.ts
+      - run: npx vitest --run src/director/server/qbtcpOperationalHealth.test.ts
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-521.yml
+          git add src/director/server/qbtcpOperationalHealth.ts src/director/server/qbtcpOperationalHealth.test.ts src/director/app/DirectorApp.tsx src/director/rooms/RoomsView.tsx src/director/state/useDirectorController.ts
+          git commit -m 'fix: reflect QBTCP snapshot health globally (#521)'
+          git push origin HEAD:fix/521-qbtcp-global-health
