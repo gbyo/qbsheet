@@ -77,7 +77,7 @@ export function Field({
   const labelId = `${generated}-label`;
   const hintId = `${generated}-hint`;
   const errorId = `${generated}-error`;
-  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
   /*
    * Without this, a `children` field rendered a `<label for=…>` pointing at an
    * id nothing carried: visually a labelled field, but an unlabelled control to
