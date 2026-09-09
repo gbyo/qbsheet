@@ -306,17 +306,10 @@ jobs:
 
           metadata_start = text.index("  test('assignment-visible metadata edits are blocked while a QBTCP session is live'")
           metadata_end = text.index("  test('tournament detail updates normalize persisted text and reject blank names'", metadata_start)
-          segment = text[metadata_start:metadata_end]
-          needle = '''    expect(hook.result.current.state.teams.find((team) => team.id === teamId)?.displayName).not.toBe(
-              'Rebound Team',
-            );
-          });
-
-          '''
-          replacement = '''    expect(hook.result.current.state.teams.find((team) => team.id === teamId)?.displayName).not.toBe(
-              'Rebound Team',
-            );
-
+          metadata_close = text.rfind('  });', metadata_start, metadata_end)
+          if metadata_close < 0:
+              raise SystemExit('room metadata regression closing marker not found')
+          room_assertions = '''
             let roomChanged = true;
             act(() => {
               roomChanged = hook.result.current.updateRoom(scheduled.roomId!, { name: 'Renamed live room' });
@@ -329,11 +322,8 @@ jobs:
               notesChanged = hook.result.current.updateRoom(scheduled.roomId!, { notes: 'HQ-only note' });
             });
             expect(notesChanged).toBe(true);
-          });
-
           '''
-          segment = replace_once(segment, needle, replacement, 'room metadata regression coverage')
-          text = text[:metadata_start] + segment + text[metadata_end:]
+          text = text[:metadata_close] + room_assertions + text[metadata_close:]
           path.write_text(text)
           PY
 
