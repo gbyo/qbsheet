@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   useDirectorController as useBaseDirectorController,
   type DirectorController,
@@ -18,22 +18,24 @@ export function useDirectorController(
   repository?: Parameters<typeof useBaseDirectorController>[0],
 ): DirectorController {
   const base = useBaseDirectorController(repository);
-  const [safetyError, setSafetyError] = useState<string | null>(null);
-
-  // A later canonical mutation/error supersedes a locally raised safety message just as base
-  // controller errors are cleared by successful commits.
-  useEffect(() => {
-    setSafetyError(null);
-  }, [base.state, base.error]);
+  const [safetyIssue, setSafetyIssue] = useState<{
+    message: string;
+    state: DirectorController['state'];
+    baseError: string | null;
+  } | null>(null);
+  // A local blocker belongs to the snapshot that produced it. A later canonical mutation/error
+  // therefore supersedes it without a state-setting effect or a transient extra render.
+  const safetyError =
+    safetyIssue?.state === base.state && safetyIssue.baseError === base.error ? safetyIssue.message : null;
 
   return useMemo<DirectorController>(() => {
     const resultBlocker = (scheduledGameId: string): string | null =>
       releasedRoundResultBlocker(base.state, scheduledGameId);
     const reject = (message: string): false => {
-      setSafetyError(message);
+      setSafetyIssue({ message, state: base.state, baseError: base.error });
       return false;
     };
-    const allow = () => setSafetyError(null);
+    const allow = () => setSafetyIssue(null);
 
     return {
       ...base,
