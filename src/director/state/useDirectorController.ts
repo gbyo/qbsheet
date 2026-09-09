@@ -1398,6 +1398,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.status === status) return true;
+      if (status === 'archived' && liveSetupInFlightRef.current) {
+        setError('Wait for QBSheet Live setup to finish before archiving this tournament.');
+        return false;
+      }
       if (current.status === 'archived' && status === 'draft') {
         setError('Use Reopen as draft to make an archived tournament editable.');
         return false;
@@ -6124,7 +6128,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * and must not fail because of it — see `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const drainLiveOutbox = useCallback(async (): Promise<void> => {
-    if (documentTransitionRef.current) return;
+    // Archiving is a hard boundary for external publication as well as document persistence.
+    // Do not even begin an outbox attempt while the historical document is read-only.
+    if (documentTransitionRef.current || stateRef.current.tournament?.status === 'archived') return;
     if (liveDrainInFlightRef.current) return liveDrainInFlightRef.current;
     const task = (async () => {
       const initialPublication = stateRef.current.live;
@@ -6155,9 +6161,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const recovered = recoverStaleInFlight(publication);
       if (recovered !== publication) {
         publication = recovered;
-        commit((draft) => {
+        const recoveredCommitted = commit((draft) => {
           if (draft.live?.publicationId === recovered.publicationId) draft.live = recovered;
         });
+        if (!recoveredCommitted) return;
       }
       if (publication.outbox.length === 0) return;
       const next = nextOutboxItem(publication);
@@ -6166,10 +6173,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const inFlight = markOutboxItemInFlight(publication, next.id);
       // Make the in-flight state visible to concurrent derivations before the network round-trip
       // so transient coalescing cannot collapse the item being published onto a newer update.
-      commit((draft) => {
+      const attemptStarted = commit((draft) => {
         if (!draft.live) return;
         draft.live.outbox = inFlight.outbox;
       });
+      // The commit boundary is authoritative. If it rejected the transition (for example because
+      // the tournament was archived between the worker's initial check and this point), the
+      // corresponding network/process side effect must not happen either.
+      if (!attemptStarted) return;
       if (local) {
         try {
           if (next.kind === 'delete') {
@@ -6314,11 +6325,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const localPublicationEnabled = state.live?.settings.enabled;
   const localPublicationBackendKind = state.live?.backend?.kind;
   const localPublicationLifecycle = state.live?.lifecycle;
+  const tournamentArchived = state.tournament?.status === 'archived';
 
   // A local listener is process state. Reopen it and republish a full current projection whenever a
   // persisted local publication is reopened after Director/server restart.
   useEffect(() => {
     if (
+      tournamentArchived ||
       !localPublicationId ||
       !localPublicationEnabled ||
       localPublicationBackendKind !== 'local' ||
@@ -6358,6 +6371,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     localPublicationEnabled,
     localPublicationBackendKind,
     localPublicationLifecycle,
+    tournamentArchived,
     commit,
   ]);
 
@@ -6382,6 +6396,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const live = useMemo<LiveActions>(
     () => ({
       enable: (backend, setupToken) => {
+        // Live setup performs process/network work before the publication can be committed.
+        // Reject archived documents before starting a listener, claiming a backend, or touching
+        // credentials so the central read-only invariant also covers external side effects.
+        if (!ensureTournamentEditable()) {
+          return Promise.reject(new Error(archivedTournamentReadOnlyMessage));
+        }
         if (liveSetupInFlightRef.current) {
           return Promise.reject(new Error('A QBSheet Live setup attempt is already in progress.'));
         }
@@ -6555,7 +6575,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         })();
       },
     }),
-    [commit],
+    [commit, ensureTournamentEditable],
   );
 
   const applyTournamentPlan = useCallback(
