@@ -56,7 +56,12 @@ import { currentOperationalRound } from '../transfers/assignment';
 import { errorNotice, type AnnounceInput } from '../notices';
 
 /** One-click day events. Anything else uses the full event form. */
-const quickEventTypes: TimelineEventType[] = ['lunch', 'break', 'check-in', 'awards'];
+const quickEvents = [
+  { type: 'lunch', icon: 'clock' },
+  { type: 'break', icon: 'pause' },
+  { type: 'check-in', icon: 'clipboard' },
+  { type: 'awards', icon: 'tournament' },
+] as const;
 
 type Navigate = (section: SectionId, target?: DirectorNavigationTarget | null) => void;
 
@@ -179,15 +184,16 @@ export function RoundsView({
             >
               {(close) => (
                 <>
-                  {quickEventTypes.map((type) => (
+                  {quickEvents.map((event) => (
                     <MenuItem
-                      key={type}
+                      key={event.type}
+                      icon={event.icon}
                       onSelect={() => {
                         close();
-                        quickAddEvent(type);
+                        quickAddEvent(event.type);
                       }}
                     >
-                      {timelineEventTypeLabel(type)}
+                      {timelineEventTypeLabel(event.type)}
                     </MenuItem>
                   ))}
                   <MenuItem
