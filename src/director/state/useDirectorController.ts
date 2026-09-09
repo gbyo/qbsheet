@@ -101,7 +101,7 @@ export function useDirectorController(
       commitAdvancement(input) {
         const blocker = advancementCommitBlocker(base.state, input.sourcePhaseId);
         if (blocker) {
-          setSafetyError(blocker);
+          raise(blocker);
           return { committed: false, message: blocker, assigned: 0, overridden: [] };
         }
         allow();
