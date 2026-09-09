@@ -1,17 +1,23 @@
 /*
  * Tournament day.
  *
- * The day sequence is a shared summary list; what it needs on top of that is
- * only its own vertical rhythm. The page header is now the shared
- * `PageHeader`, so the bespoke `director-workspace-header` is gone.
+ * `SummaryList` is shared with lists that live inside panels, where its default
+ * panel inset and subtle bottom rules are appropriate. Tournament Day is an
+ * open sequence instead, so keep the shared row structure but give these rows
+ * standalone rhythm and separators from the Director token system.
  */
 
 .director-day-sequence {
   padding: 0;
   margin: 0;
-  list-style: none;
 }
 
-.director-day-sequence > li:first-child {
+.director-day-sequence > .director-list-item {
+  padding: var(--director-space-4) var(--director-space-1);
+  border-top: 1px solid var(--director-border);
+  border-bottom: 0;
+}
+
+.director-day-sequence > .director-list-item:first-child {
   border-top: 0;
 }
