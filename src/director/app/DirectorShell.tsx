@@ -144,6 +144,23 @@ export function DirectorShell({
     onNavigate(section, target);
   };
 
+  const navigateToSettingsPanel = (
+    entityId: 'tournament' | 'operator',
+    panelId: 'settings-tournament' | 'settings-operator',
+  ) => {
+    navigate('settings', { section: 'settings', entityType: 'setting', entityId });
+    window.setTimeout(() => {
+      const panel = document.getElementById(panelId);
+      if (!panel) return;
+      panel.scrollIntoView({ block: 'start', behavior: 'auto' });
+      panel
+        .querySelector<HTMLElement>(
+          'input:not(:disabled), textarea:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        )
+        ?.focus({ preventScroll: true });
+    }, 0);
+  };
+
   const archiveCurrent = () => {
     closeMenu();
     void confirm({
@@ -242,9 +259,7 @@ export function DirectorShell({
               />
               <MenuItem
                 icon="edit"
-                onSelect={() =>
-                  navigate('settings', { section: 'settings', entityType: 'setting', entityId: 'tournament' })
-                }
+                onSelect={() => navigateToSettingsPanel('tournament', 'settings-tournament')}
               >
                 Tournament details…
               </MenuItem>
@@ -324,13 +339,7 @@ export function DirectorShell({
               >
                 <MenuItem
                   icon="users"
-                  onSelect={() =>
-                    navigate('settings', {
-                      section: 'settings',
-                      entityType: 'setting',
-                      entityId: 'operator',
-                    })
-                  }
+                  onSelect={() => navigateToSettingsPanel('operator', 'settings-operator')}
                 >
                   Operator profile…
                 </MenuItem>
