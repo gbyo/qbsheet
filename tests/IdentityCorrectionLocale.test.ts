@@ -3,7 +3,7 @@ import { correctPlayerName, correctTeamName } from '../src/scoring/identityCorre
 import type { IGameSetup } from '../src/scoring/deriveGame';
 
 function emulateTurkishLocaleCasing(): void {
-  vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function () {
+  vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(function (this: string) {
     return String(this).replace(/I/g, 'ı').replace(/İ/g, 'i').toLowerCase();
   });
 }
