@@ -93,7 +93,9 @@ export function AdvancementCommit({
   if (targets.length === 0 || !target || targetPools.length === 0) return null;
 
   const previewQualifierIds = new Set(preview.qualifiers.map((team) => team.id));
-  const movedOutside = selectedTeams.filter((team) => !previewQualifierIds.has(team.id)).map((team) => team.id);
+  const movedOutside = selectedTeams
+    .filter((team) => !previewQualifierIds.has(team.id))
+    .map((team) => team.id);
   const needsReason = cutoffDecisions.length > 0 || movedOutside.length > 0;
   const byPool = new Map<string, typeof selectedTeams>();
   for (const team of selectedTeams) {
@@ -151,7 +153,8 @@ export function AdvancementCommit({
         <div className="director-inset" key={decision.key}>
           <h4>Resolve tied cutoff</h4>
           <p className="director-text-secondary">
-            {decision.reason} Choose {decision.berthCount} team{decision.berthCount === 1 ? '' : 's'} to advance.
+            {decision.reason} Choose {decision.berthCount} team{decision.berthCount === 1 ? '' : 's'} to
+            advance.
           </p>
           <div className="director-stack director-stack-tight">
             {decision.teamIds.map((teamId) => {
@@ -167,8 +170,9 @@ export function AdvancementCommit({
                   onChange={(nextChecked) => {
                     setCutoffChoices((current) => {
                       const currentSelected =
-                        advancementCutoffDecisions(preview, current).find((entry) => entry.key === decision.key)
-                          ?.selectedTeamIds ?? [];
+                        advancementCutoffDecisions(preview, current).find(
+                          (entry) => entry.key === decision.key,
+                        )?.selectedTeamIds ?? [];
                       const nextSelected = nextChecked
                         ? [...currentSelected, teamId]
                         : currentSelected.filter((id) => id !== teamId);
