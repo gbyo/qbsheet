@@ -40,6 +40,7 @@ export function Checkbox({
   name,
   value,
   ariaDescribedBy,
+  ariaLabel,
 }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -50,6 +51,12 @@ export function Checkbox({
   name?: string;
   value?: string;
   ariaDescribedBy?: string;
+  /**
+   * The spoken name, when the visible label is only unambiguous in context —
+   * a "Captain" box repeated once per roster row tells a screen-reader user
+   * nothing about which player it belongs to.
+   */
+  ariaLabel?: string;
 }) {
   // `indeterminate` is a property, not an attribute, so React cannot set it
   // declaratively. A ref callback keeps it in step with the prop.
@@ -65,6 +72,7 @@ export function Checkbox({
         value={value}
         checked={checked}
         disabled={disabled}
+        aria-label={ariaLabel}
         aria-describedby={ariaDescribedBy}
         onChange={(event) => onChange(event.target.checked)}
       />

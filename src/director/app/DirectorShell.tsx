@@ -125,6 +125,14 @@ export function DirectorShell({
   const confirm = useConfirm();
 
   const closeMenu = useCallback(() => setOpenMenu(null), []);
+  /**
+   * Close the menu and put focus back on the button that opened it, so a menu
+   * item that opens an overlay hands that overlay a real element to return to.
+   */
+  const closeMenuToOpener = useCallback(() => {
+    setOpenMenu(null);
+    menuOpenerRef.current?.focus({ preventScroll: true });
+  }, []);
   const openMenuFrom = (name: 'tournament' | 'operator', event: { currentTarget: HTMLElement }) => {
     menuOpenerRef.current = event.currentTarget;
     setOpenMenu((current) => (current === name ? null : name));
@@ -334,7 +342,7 @@ export function DirectorShell({
                 <MenuItem
                   icon="help"
                   onSelect={() => {
-                    closeMenu();
+                    closeMenuToOpener();
                     onHelp();
                   }}
                 >
