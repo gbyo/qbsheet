@@ -35,10 +35,7 @@ function detailKnown(team: GameTeamStatsRow | undefined): boolean {
   );
 }
 
-function playerRows(
-  players: readonly GamePlayerStatsRow[],
-  showSuperpowers: boolean,
-): string {
+function playerRows(players: readonly GamePlayerStatsRow[], showSuperpowers: boolean): string {
   return players
     .map(
       (player) =>
@@ -51,11 +48,7 @@ function playerRows(
     .join('');
 }
 
-function teamBox(
-  game: GameStatsRow,
-  team: GameTeamStatsRow,
-  showSuperpowers: boolean,
-): string {
+function teamBox(game: GameStatsRow, team: GameTeamStatsRow, showSuperpowers: boolean): string {
   const players = (game.playerStats ?? []).filter((player) => player.teamId === team.teamId);
   const playerBody =
     players.length > 0
@@ -123,7 +116,11 @@ function groupedGames(snapshot: StatsSnapshot): Array<{ id: string; name: string
   const groups = new Map<string, { id: string; name: string; games: GameStatsRow[] }>();
   for (const game of snapshot.games) {
     const id = game.roundId ?? game.gameId;
-    const group = groups.get(id) ?? { id, name: game.roundName ?? game.roundId ?? 'Games', games: [] };
+    const group = groups.get(id) ?? {
+      id,
+      name: game.roundName ?? game.roundId ?? 'Games',
+      games: [],
+    };
     group.games.push(game);
     groups.set(id, group);
   }
@@ -169,6 +166,8 @@ export function renderBoxScoreReport(snapshot: StatsSnapshot): string {
 export function buildPrintableStatReportBundle(snapshot: StatsSnapshot): StatReportPage[] {
   const pages = buildStatReportBundle(snapshot);
   return pages.map((page) =>
-    page.name === 'games.html' ? { name: page.name, content: renderBoxScoreReport(snapshot) } : page,
+    page.name === 'games.html'
+      ? { name: page.name, content: renderBoxScoreReport(snapshot) }
+      : page,
   );
 }
