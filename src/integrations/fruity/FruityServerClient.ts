@@ -15,10 +15,9 @@
  *
  * # Two protocols, one question, asked once
  *
- * A client starts on the legacy surface, because a server that has never heard of QBTCP must keep
- * working without a round trip to find out. `discover` asks, and whatever it learns is settled for
- * the life of the client: the adapter is replaced, and no caller above ever branches on the answer
- * again. Every method below returns the normalized vocabulary in `ServerTypes`, not a wire shape.
+ * A client starts unresolved. `discover` asks, and only a successful QBTCP answer or an explicit
+ * discovery 404 selects an adapter; no caller above ever branches on the answer again. Every method
+ * below returns the normalized vocabulary in `ServerTypes`, not a wire shape.
  *
  * Discovery is not optional in the live flow. A client that never asks is a client permanently on
  * the deprecated surface, which is how a canonical route table ends up shipped and unused.
@@ -49,6 +48,7 @@ import {
   IRequestOptions,
   LegacyAdapter,
   QbtcpAdapter,
+  UnresolvedDiscoveryAdapter,
   UnsupportedQbtcpAdapter,
 } from './ProtocolAdapters';
 import {
@@ -252,10 +252,10 @@ export default class FruityServerClient {
   /**
    * Which surface this client is having its conversation on.
    *
-   * Starts legacy, because that is the assumption that keeps an old server working, and is replaced
-   * exactly once by `discover`. Nothing else in the class reads a path or a wire shape directly.
+   * Starts unresolved so a discovery failure cannot accidentally use a default legacy surface.
+   * Nothing else in the class reads a path or a wire shape directly.
    */
-  private adapter: IServerAdapter;
+  private adapter: IServerAdapter | null = null;
 
   private discovery: IQbtcpDiscovery | null = null;
 
@@ -268,18 +268,16 @@ export default class FruityServerClient {
   constructor(
     readonly baseUrl: string,
     private fetchImpl: typeof fetch = (...args) => fetch(...args),
-  ) {
-    this.adapter = new LegacyAdapter(this.requestFn);
-  }
+  ) {}
 
   /** What protocol this client settled on. For the connection detail; never a brand. */
   get protocol(): string {
-    return this.adapter.routes.protocol;
+    return this.adapter?.routes.protocol ?? 'unknown';
   }
 
   /** Whether the assignment body will be a QBJ document rather than the legacy shape. */
   get assignmentIsQbj(): boolean {
-    return this.adapter.routes.assignmentIsQbj;
+    return this.adapter?.routes.assignmentIsQbj ?? false;
   }
 
   private rememberHelpRequest(request: IHelpRequestSummary): boolean {
@@ -295,12 +293,12 @@ export default class FruityServerClient {
 
   /** Whether discovery selected the supported QBTCP v1 surface. */
   get isQbtcp(): boolean {
-    return this.discovery?.version === 1 && this.adapter.routes.assignmentIsQbj;
+    return this.discovery?.version === 1 && this.adapter?.routes.assignmentIsQbj === true;
   }
 
   /** Whether the server explicitly announced a QBTCP version this client cannot speak. */
   get isUnsupportedQbtcp(): boolean {
-    return this.discovery !== null && this.adapter.routes.protocol === 'qbtcp/unsupported';
+    return this.discovery !== null && this.adapter?.routes.protocol === 'qbtcp/unsupported';
   }
 
   supports(capability: string): boolean {
@@ -334,8 +332,8 @@ export default class FruityServerClient {
   } {
     if (this.discovery === null) {
       // No answer yet, or an answer that was not QBTCP. Those are different, and `discoveryAttempted`
-      // is what tells them apart: an unasked server is `unknown`, an asked one that did not announce
-      // itself is the legacy surface this client is now using.
+      // is what tells them apart: an unresolved probe is `unknown`, while an explicit discovery 404 is
+      // the legacy surface this client is now using.
       return this.discoveryAttempted ? { protocol: 'legacy' } : { protocol: 'unknown' };
     }
     return {
@@ -349,23 +347,38 @@ export default class FruityServerClient {
   /**
    * Ask the server what it speaks, and adopt the matching surface.
    *
-   * Unauthenticated and cheap. An absent or non-QBTCP answer selects the legacy adapter; an explicit
-   * future QBTCP answer selects a refusal adapter and never falls back to `/api/v1`.
+   * Unauthenticated and cheap. An explicit discovery 404 selects the legacy adapter; an explicit
+   * future QBTCP answer selects a refusal adapter, and every unresolved outcome stays blocked rather
+   * than falling back to `/api/v1`.
    */
   async discover(): Promise<IQbtcpDiscovery | null> {
     const result = await this.request<unknown>(qbtcpRoutes.discovery);
-    this.discovery = result.ok ? readDiscovery(result.value) : null;
-    const routes = routesFor(this.discovery);
-    this.adapter =
-      routes === qbtcpRoutes
-        ? new QbtcpAdapter(this.requestFn, this.discovery as IQbtcpDiscovery)
-        : routes.protocol === 'qbtcp/unsupported'
-          ? new UnsupportedQbtcpAdapter(this.discovery as IQbtcpDiscovery)
-          : new LegacyAdapter(this.requestFn);
-    // Settled only when something answered. A `404` is an answer — it is how a pre-QBTCP server
-    // says so — but nothing answering is not, and latching on it would pin a room to the deprecated
-    // surface for the whole game because its Wi-Fi happened to be out at the moment it started.
-    this.discoveryAttempted = result.ok || result.status !== undefined;
+    const discovery = result.ok ? readDiscovery(result.value) : null;
+    const definitiveLegacy = !result.ok && result.status === 404;
+
+    if (discovery) {
+      this.discovery = discovery;
+      const routes = routesFor(discovery);
+      this.adapter =
+        routes === qbtcpRoutes
+          ? new QbtcpAdapter(this.requestFn, discovery)
+          : routes.protocol === 'qbtcp/unsupported'
+            ? new UnsupportedQbtcpAdapter(discovery)
+            : new LegacyAdapter(this.requestFn);
+      this.discoveryAttempted = true;
+    } else if (definitiveLegacy) {
+      // A missing discovery route is the definitive signal that this is a pre-QBTCP server.
+      this.discovery = null;
+      this.adapter = new LegacyAdapter(this.requestFn);
+      this.discoveryAttempted = true;
+    } else {
+      // A transport failure, retryable HTTP response, or malformed successful body does not identify
+      // a protocol. Keep discovery unresolved so the next operation probes again instead of pinning
+      // this client to the deprecated surface until the scorekeeper reloads.
+      this.discovery = null;
+      this.adapter = null;
+      this.discoveryAttempted = false;
+    }
     return this.discovery;
   }
 
@@ -394,10 +407,10 @@ export default class FruityServerClient {
     return this.discovering;
   }
 
-  /** The adapter, once it is the right one. */
+  /** The adapter, once it is the right one; unresolved discovery gets a no-network refusal. */
   private async ready(): Promise<IServerAdapter> {
     await this.ensureDiscovered();
-    return this.adapter;
+    return this.adapter ?? new UnresolvedDiscoveryAdapter();
   }
 
   private requestFn = <T>(path: string, init: IRequestOptions = {}): Promise<ApiResult<T>> =>
