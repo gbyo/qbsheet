@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useRef, useMemo, useState } from 'react';
 import type { DirectorController, NewPlayerInput } from '../state/useDirectorController';
 import { unresolvedScheduledGameForTeam, type DirectorState } from '../domain';
 import {
@@ -502,6 +502,8 @@ function TeamDialog({
   const [displayNameCustomized, setDisplayNameCustomized] = useState(Boolean(team));
   const [seed, setSeed] = useState(team?.seed == null ? '' : String(team.seed));
   const [notes, setNotes] = useState(team?.notes ?? '');
+  /** The roster row that "Add player" just created, so it can take focus once mounted. */
+  const pendingFocusKey = useRef<string | null>(null);
   const [players, setPlayers] = useState<PlayerDraft[]>(() => {
     const existing = team
       ? state.players
@@ -722,6 +724,15 @@ function TeamDialog({
                   {index + 1}
                 </span>
                 <TextInput
+                  ref={(node) => {
+                    // A row added by "Add player" takes focus, so a keyboard
+                    // operator can type the name they pressed the button to
+                    // enter instead of tabbing back into the list.
+                    if (node && pendingFocusKey.current === player.key) {
+                      pendingFocusKey.current = null;
+                      node.focus();
+                    }
+                  }}
                   aria-label={`Player ${index + 1} name`}
                   value={player.name}
                   onChange={(event) => updatePlayer(player.key, { name: event.target.value })}
@@ -736,12 +747,14 @@ function TeamDialog({
                 <Checkbox
                   checked={player.captain}
                   label="Captain"
+                  ariaLabel={`Player ${index + 1} captain`}
                   onChange={(checked) => updatePlayer(player.key, { captain: checked })}
                 />
                 {player.id && (
                   <Checkbox
                     checked={player.active}
                     label="Active"
+                    ariaLabel={`Player ${index + 1} active`}
                     onChange={(checked) => updatePlayer(player.key, { active: checked })}
                   />
                 )}
@@ -765,7 +778,13 @@ function TeamDialog({
           variant="quiet"
           type="button"
           icon="plus"
-          onClick={() => setPlayers((current) => [...current, newPlayerDraft()])}
+          onClick={() =>
+            setPlayers((current) => {
+              const draft = newPlayerDraft();
+              pendingFocusKey.current = draft.key;
+              return [...current, draft];
+            })
+          }
         >
           Add player
         </Button>

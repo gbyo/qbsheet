@@ -377,9 +377,12 @@ function ScoringRulesDialog({
     lightning: rules.lightning,
   }));
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<ScoringRuleKey, string>>>({});
 
-  const setValue = (key: ScoringRuleKey, value: string) =>
+  const setValue = (key: ScoringRuleKey, value: string) => {
     setValues((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => (current[key] ? { ...current, [key]: undefined } : current));
+  };
   const nullable = new Set<ScoringRuleKey>([
     'superpowerValue',
     'powerValue',
@@ -389,16 +392,28 @@ function ScoringRulesDialog({
     'maximumBonusScore',
     'bonusDivisor',
   ]);
-  const parse = (key: ScoringRuleKey, label: string): number | null | undefined => {
+  /*
+   * Validation lands on the field, not in a toast.
+   *
+   * A toast names the problem somewhere else on screen, marks nothing, and is
+   * gone by the time the operator looks down at the input it was about. The
+   * failures are collected instead and shown against the fields that caused
+   * them, cleared as soon as the value changes.
+   */
+  const parse = (
+    key: ScoringRuleKey,
+    label: string,
+    failures: Partial<Record<ScoringRuleKey, string>>,
+  ): number | null | undefined => {
     const raw = values[key].trim();
     if (!raw) {
       if (nullable.has(key)) return null;
-      onAnnounce(errorNotice(`${label} must be a number.`));
+      failures[key] = `${label} must be a number.`;
       return undefined;
     }
     const value = Number(raw);
     if (!Number.isFinite(value)) {
-      onAnnounce(errorNotice(`${label} must be a finite number.`));
+      failures[key] = `${label} must be a finite number.`;
       return undefined;
     }
     return value;
@@ -422,12 +437,17 @@ function ScoringRulesDialog({
       lightningDivisor: 'Lightning divisor',
       maximumActivePlayers: 'Maximum active players',
     };
+    const failures: Partial<Record<ScoringRuleKey, string>> = {};
     const parsed = {} as Record<ScoringRuleKey, number | null>;
     for (const key of Object.keys(labels) as ScoringRuleKey[]) {
-      const value = parse(key, labels[key]);
-      if (value === undefined) return;
-      parsed[key] = value;
+      const value = parse(key, labels[key], failures);
+      if (value !== undefined) parsed[key] = value;
     }
+    if (Object.keys(failures).length > 0) {
+      setFieldErrors(failures);
+      return;
+    }
+    setFieldErrors({});
     const changes: Partial<typeof rules> = {
       overtimeTossupCount: parsed.overtimeTossupCount as number,
       lightningCountPerTeam: parsed.lightningCountPerTeam as number,
@@ -512,6 +532,7 @@ function ScoringRulesDialog({
             label="Tossup value"
             value={values.tossupValue}
             disabled={locked}
+            error={fieldErrors.tossupValue}
             onChange={(value) => setValue('tossupValue', value)}
           />
           <NumberRule
@@ -519,6 +540,7 @@ function ScoringRulesDialog({
             hint="Blank means no power mark."
             value={values.powerValue}
             disabled={locked}
+            error={fieldErrors.powerValue}
             onChange={(value) => setValue('powerValue', value)}
           />
           <NumberRule
@@ -526,30 +548,35 @@ function ScoringRulesDialog({
             hint="Blank means no interrupt penalty."
             value={values.negValue}
             disabled={locked}
+            error={fieldErrors.negValue}
             onChange={(value) => setValue('negValue', value)}
           />
           <NumberRule
             label="Bonus value"
             value={values.bonusValue}
             disabled={locked}
+            error={fieldErrors.bonusValue}
             onChange={(value) => setValue('bonusValue', value)}
           />
           <NumberRule
             label="Tossups"
             value={values.tossupCount}
             disabled={locked}
+            error={fieldErrors.tossupCount}
             onChange={(value) => setValue('tossupCount', value)}
           />
           <NumberRule
             label="Bonus parts"
             value={values.bonusParts}
             disabled={locked}
+            error={fieldErrors.bonusParts}
             onChange={(value) => setValue('bonusParts', value)}
           />
           <NumberRule
             label="Maximum active players"
             value={values.maximumActivePlayers}
             disabled={locked}
+            error={fieldErrors.maximumActivePlayers}
             onChange={(value) => setValue('maximumActivePlayers', value)}
           />
         </FieldGrid>
@@ -592,16 +619,19 @@ function ScoringRulesDialog({
           <NumberRule
             label="Overtime tossups"
             value={values.overtimeTossupCount}
+            error={fieldErrors.overtimeTossupCount}
             onChange={(value) => setValue('overtimeTossupCount', value)}
           />
           <NumberRule
             label="Lightning rounds per team"
             value={values.lightningCountPerTeam}
+            error={fieldErrors.lightningCountPerTeam}
             onChange={(value) => setValue('lightningCountPerTeam', value)}
           />
           <NumberRule
             label="Lightning divisor"
             value={values.lightningDivisor}
+            error={fieldErrors.lightningDivisor}
             onChange={(value) => setValue('lightningDivisor', value)}
           />
         </FieldGrid>
@@ -617,6 +647,7 @@ function ScoringRulesDialog({
               hint="Blank means no second tier."
               value={values.superpowerValue}
               disabled={locked}
+              error={fieldErrors.superpowerValue}
               onChange={(value) => setValue('superpowerValue', value)}
             />
             <NumberRule
@@ -624,24 +655,28 @@ function ScoringRulesDialog({
               hint="Blank means regulation ends at Tossups."
               value={values.maximumTossupCount}
               disabled={locked}
+              error={fieldErrors.maximumTossupCount}
               onChange={(value) => setValue('maximumTossupCount', value)}
             />
             <NumberRule
               label="Minimum bonus parts"
               value={values.minimumBonusParts}
               disabled={locked}
+              error={fieldErrors.minimumBonusParts}
               onChange={(value) => setValue('minimumBonusParts', value)}
             />
             <NumberRule
               label="Maximum bonus score"
               value={values.maximumBonusScore}
               disabled={locked}
+              error={fieldErrors.maximumBonusScore}
               onChange={(value) => setValue('maximumBonusScore', value)}
             />
             <NumberRule
               label="Bonus divisor"
               value={values.bonusDivisor}
               disabled={locked}
+              error={fieldErrors.bonusDivisor}
               onChange={(value) => setValue('bonusDivisor', value)}
             />
           </FieldGrid>
@@ -656,17 +691,24 @@ function NumberRule({
   hint,
   value,
   disabled = false,
+  error,
   onChange,
 }: {
   label: string;
   hint?: string;
   value: string;
   disabled?: boolean;
+  error?: string | null;
   onChange: (value: string) => void;
 }) {
   return (
-    <Field label={label} hint={hint}>
-      <NumberInput value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    <Field label={label} hint={hint} error={error}>
+      <NumberInput
+        value={value}
+        disabled={disabled}
+        invalid={Boolean(error)}
+        onChange={(event) => onChange(event.target.value)}
+      />
     </Field>
   );
 }

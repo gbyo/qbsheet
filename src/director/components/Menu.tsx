@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { DirectorMenu } from './DirectorMenu';
 import { Icon, type IconName } from './Icon';
 import { Button, IconButton } from './Controls';
@@ -49,7 +49,28 @@ export function ActionMenu({
   const [open, setOpen] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
   const menuId = useId();
-  const close = () => setOpen(false);
+  const close = useCallback(() => setOpen(false), []);
+
+  /*
+   * Closing returns focus to the trigger.
+   *
+   * This is what makes a menu item that opens a dialog restore focus correctly:
+   * the dialog captures whatever is focused when it mounts, and without this
+   * that was a menu item which had just been unmounted — so Escape left focus
+   * on the document body. The cleanup runs before the dialog's own effects, so
+   * the trigger is focused in time for the dialog to capture it.
+   *
+   * Nothing is stolen: if focus already moved somewhere real, it stays there.
+   */
+  useEffect(() => {
+    if (!open) return;
+    return () => {
+      const active = document.activeElement;
+      if (active && active !== document.body) return;
+      const opener = openerRef.current;
+      if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    };
+  }, [open]);
 
   const commonTriggerProps = {
     'aria-haspopup': 'menu' as const,
