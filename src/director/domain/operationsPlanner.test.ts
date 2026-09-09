@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { type DirectorState } from './model';
-import { operationsFixture, session } from './operations.test';
+import { operationsFixture, session } from './operations.fixtures';
 import {
   planRoundOperations,
   planToAssignments,
@@ -316,6 +316,31 @@ describe('resourceUnavailabilityImpact', () => {
     });
     const impact = resourceUnavailabilityImpact(state, 'staff', 'staff-cara');
     expect(impact.affected.some((entry) => entry.slot === 'duty')).toBe(true);
+  });
+
+  test('runner and HQ duty equipment is counted in an equipment impact', () => {
+    const state = operationsFixture();
+    state.rounds[0]!.status = 'planned';
+    state.operationalAssignments.push(
+      {
+        id: 'duty-runner',
+        roundId: 'round-1',
+        kind: 'runner',
+        staffIds: [],
+        equipmentIds: ['equipment-3'],
+      },
+      {
+        id: 'duty-hq',
+        roundId: 'round-1',
+        kind: 'hq',
+        staffIds: [],
+        equipmentIds: ['equipment-3'],
+      },
+    );
+    const impact = resourceUnavailabilityImpact(state, 'equipment', 'equipment-3');
+    expect(
+      impact.affected.filter((entry) => entry.slot === 'duty').map((entry) => entry.scheduledGameId),
+    ).toEqual(['duty-runner', 'duty-hq']);
   });
 
   test('closed rounds are never counted', () => {
