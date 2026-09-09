@@ -3,13 +3,19 @@ import type { DirectorController } from '../state/useDirectorController';
 import type { AdvancementPreview, DirectorState } from '../domain';
 import type { AnnounceInput } from '../notices';
 import { errorNotice, infoNotice } from '../notices';
-import { Button, Field, Select, TextInput } from '../components';
+import { Button, Checkbox, Field, Select, TextInput } from '../components';
+import {
+  advancementCutoffDecisions,
+  cutoffDecisionsAreValid,
+  selectedAdvancementTeamIds,
+  type AdvancementCutoffChoices,
+} from './advancementSelection';
 
 /**
  * Manual rebracketing: the preview proposes where each qualifier goes, the
- * director can move teams between playoff pools, and committing writes plain
- * pool membership plus an audit record. Game results are never rewritten;
- * placement changes are explicit and audited.
+ * director can resolve any cutoff ties and move teams between playoff pools,
+ * and committing writes plain pool membership plus an audit record. Game
+ * results are never rewritten; placement changes are explicit and audited.
  */
 export function AdvancementCommit({
   state,
@@ -39,6 +45,7 @@ export function AdvancementCommit({
   }, [targets, source]);
   const [targetPhaseId, setTargetPhaseId] = useState(defaultTargetId);
   const [moves, setMoves] = useState<Record<string, string>>({});
+  const [cutoffChoices, setCutoffChoices] = useState<AdvancementCutoffChoices>({});
   const [reason, setReason] = useState('');
 
   const target = targets.find((entry) => entry.id === (targetPhaseId || defaultTargetId));
@@ -50,23 +57,46 @@ export function AdvancementCommit({
         .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
     [target, state.pools],
   );
-  const wildcardIds = useMemo(() => new Set(preview.wildcards.map((team) => team.id)), [preview]);
+  const cutoffDecisions = useMemo(
+    () => advancementCutoffDecisions(preview, cutoffChoices),
+    [preview, cutoffChoices],
+  );
+  const selectedTeamIds = useMemo(
+    () => selectedAdvancementTeamIds(preview, cutoffDecisions),
+    [preview, cutoffDecisions],
+  );
+  const selectedTeams = useMemo(
+    () =>
+      selectedTeamIds
+        .map((teamId) => state.teams.find((team) => team.id === teamId))
+        .filter((team): team is NonNullable<typeof team> => team !== undefined),
+    [selectedTeamIds, state.teams],
+  );
+  const cutoffValid = cutoffDecisionsAreValid(cutoffDecisions);
+  const wildcardIds = useMemo(() => {
+    const ids = new Set(preview.wildcards.map((team) => team.id));
+    for (const decision of cutoffDecisions.filter((entry) => /wildcard/i.test(entry.reason))) {
+      decision.teamIds.forEach((teamId) => ids.delete(teamId));
+      decision.selectedTeamIds.forEach((teamId) => ids.add(teamId));
+    }
+    return ids;
+  }, [preview.wildcards, cutoffDecisions]);
   const proposal = useMemo(() => {
     const next: Record<string, string> = {};
-    preview.qualifiers.forEach((team, index) => {
+    selectedTeams.forEach((team, index) => {
       const pool = targetPools.length > 0 ? targetPools[index % targetPools.length] : undefined;
       if (pool) next[team.id] = moves[team.id] ?? pool.id;
     });
     return next;
-  }, [preview, targetPools, moves]);
+  }, [selectedTeams, targetPools, moves]);
 
   if (targets.length === 0 || !target || targetPools.length === 0) return null;
 
-  const qualifierIds = new Set(preview.qualifiers.map((team) => team.id));
-  const movedOutside = Object.keys(moves).filter((teamId) => !qualifierIds.has(teamId));
-  const needsReason = preview.unresolved.length > 0 || movedOutside.length > 0;
-  const byPool = new Map<string, typeof preview.qualifiers>();
-  for (const team of preview.qualifiers) {
+  const previewQualifierIds = new Set(preview.qualifiers.map((team) => team.id));
+  const movedOutside = selectedTeams.filter((team) => !previewQualifierIds.has(team.id)).map((team) => team.id);
+  const needsReason = cutoffDecisions.length > 0 || movedOutside.length > 0;
+  const byPool = new Map<string, typeof selectedTeams>();
+  for (const team of selectedTeams) {
     const poolId = proposal[team.id];
     if (!poolId) continue;
     const list = byPool.get(poolId) ?? [];
@@ -75,10 +105,14 @@ export function AdvancementCommit({
   }
 
   const commit = (): void => {
+    if (!cutoffValid) {
+      onAnnounce(errorNotice('Choose exactly the available number of berths in every tied cutoff.'));
+      return;
+    }
     const result = controller.commitAdvancement({
       sourcePhaseId,
       targetPhaseId: target.id,
-      assignments: preview.qualifiers
+      assignments: selectedTeams
         .map((team) => ({ teamId: team.id, targetPoolId: proposal[team.id] ?? '' }))
         .filter((assignment) => assignment.targetPoolId !== ''),
       reason,
@@ -113,6 +147,40 @@ export function AdvancementCommit({
           />
         )}
       />
+      {cutoffDecisions.map((decision) => (
+        <div className="director-inset" key={decision.key}>
+          <h4>Resolve tied cutoff</h4>
+          <p className="director-text-secondary">
+            {decision.reason} Choose {decision.berthCount} team{decision.berthCount === 1 ? '' : 's'} to advance.
+          </p>
+          <div className="director-stack director-stack-tight">
+            {decision.teamIds.map((teamId) => {
+              const team = state.teams.find((entry) => entry.id === teamId);
+              const checked = decision.selectedTeamIds.includes(teamId);
+              const atLimit = decision.selectedTeamIds.length >= decision.berthCount;
+              return (
+                <Checkbox
+                  key={teamId}
+                  checked={checked}
+                  disabled={!checked && atLimit}
+                  label={team?.displayName ?? teamId}
+                  onChange={(nextChecked) => {
+                    setCutoffChoices((current) => {
+                      const currentSelected =
+                        advancementCutoffDecisions(preview, current).find((entry) => entry.key === decision.key)
+                          ?.selectedTeamIds ?? [];
+                      const nextSelected = nextChecked
+                        ? [...currentSelected, teamId]
+                        : currentSelected.filter((id) => id !== teamId);
+                      return { ...current, [decision.key]: nextSelected };
+                    });
+                  }}
+                />
+              );
+            })}
+          </div>
+        </div>
+      ))}
       <div className="director-stack director-stack-tight">
         {targetPools.map((pool) => (
           <div className="director-inset" key={pool.id}>
@@ -148,8 +216,12 @@ export function AdvancementCommit({
           />
         </Field>
       )}
-      <Button variant="primary" onClick={commit}>
-        Commit {preview.qualifiers.length} placements to {target.name}
+      <Button
+        variant="primary"
+        disabled={!cutoffValid || (needsReason && reason.trim() === '')}
+        onClick={commit}
+      >
+        Commit {selectedTeams.length} placements to {target.name}
       </Button>
     </div>
   );
