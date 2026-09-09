@@ -852,8 +852,9 @@ test('Director keeps unavailable resources out of new room assignments', async (
   await page
     .getByRole('listitem')
     .filter({ hasText: 'Room 101' })
-    .getByRole('button', { name: 'Edit' })
+    .getByRole('button', { name: /Room 101 actions/ })
     .click();
+  await page.getByRole('option', { name: 'Edit room details' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByRole('combobox', { name: 'Moderator' }).click();
   await expect(page.getByRole('option').filter({ hasText: 'Moderator Two' })).toHaveCount(0);
