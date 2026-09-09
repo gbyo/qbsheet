@@ -111,8 +111,20 @@ export function reportNumberCell(value: number | null | undefined, digits?: numb
 export function reportAnswerHeaders(presentation: ReportPresentation): string {
   return presentation.answerColumns
     .map((column) => {
-      const detail = column.pointValue === null ? 'mixed values' : `${column.pointValue} pts`;
-      return `<th scope="col" class="num" title="${reportEscape(`${column.label} · ${detail}`)}">${reportEscape(column.shortLabel)}</th>`;
+      const valueLabel =
+        column.pointValue !== null
+          ? String(column.pointValue)
+          : column.pointValues.length > 1
+            ? column.pointValues.join('/')
+            : '';
+      const visibleLabel = valueLabel ? `${column.shortLabel} (${valueLabel})` : column.shortLabel;
+      const detail =
+        column.pointValue !== null
+          ? `${column.pointValue} pts`
+          : column.pointValues.length > 1
+            ? `mixed values: ${column.pointValues.join(', ')}`
+            : 'point value unavailable';
+      return `<th scope="col" class="num" title="${reportEscape(`${column.label} · ${detail}`)}">${reportEscape(visibleLabel)}</th>`;
     })
     .join('');
 }
