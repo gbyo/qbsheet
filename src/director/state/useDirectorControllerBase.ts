@@ -1540,7 +1540,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
   }, []);
 
   const restoreLocalLivePublication = useCallback(
-    async (outgoing: DirectorState): Promise<void> => {
+    async (
+      outgoing: DirectorState,
+      documentTransition: DirectorDocumentTransition,
+    ): Promise<void> => {
       const publication = outgoing.live;
       if (
         !publication?.settings.enabled ||
@@ -1558,11 +1561,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const published = await publishLocalLive(snapshot);
       publishedSnapshotRef.current = snapshot;
       localServerPublicationRef.current = publication.publicationId;
-      commit((draft) => {
-        if (draft.live?.publicationId !== publication.publicationId || !draft.live.backend) return;
-        draft.live.backend = { ...draft.live.backend, origin };
-        draft.live.publicUrl = published.publicUrl;
-      });
+      commit(
+        (draft) => {
+          if (draft.live?.publicationId !== publication.publicationId || !draft.live.backend) return;
+          draft.live.backend = { ...draft.live.backend, origin };
+          draft.live.publicUrl = published.publicUrl;
+        },
+        { documentTransition },
+      );
     },
     [commit],
   );
@@ -1633,7 +1639,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         let failure = openMessage;
         if (localLiveTeardownStarted && localLiveWasRunning) {
           try {
-            await restoreLocalLivePublication(outgoing);
+            await restoreLocalLivePublication(outgoing, transition);
           } catch (rollbackReason: unknown) {
             localServerPublicationRef.current = null;
             localServerRecoveryBlockedRef.current = outgoing.live?.publicationId ?? null;

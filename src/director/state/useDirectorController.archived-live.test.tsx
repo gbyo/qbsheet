@@ -105,6 +105,11 @@ async function repositoryWithLocalSwitchTarget(repository: FailingOpenRepository
 
 afterEach(() => {
   vi.clearAllMocks();
+  localServerMocks.publish.mockResolvedValue({
+    revision: 1,
+    publicUrl: 'http://127.0.0.1:8790',
+  });
+  localServerMocks.origin.mockReturnValue('http://127.0.0.1:8790');
 });
 
 describe('archived tournament Live side-effect guard', () => {
@@ -170,11 +175,22 @@ describe('archived tournament Live side-effect guard', () => {
 
     const hook = renderHook(() => useDirectorController(repository));
     await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(hook.result.current.state.live?.backend?.origin).toBe('http://127.0.0.1:8790'),
+    );
+    localServerMocks.origin.mockReturnValue('http://127.0.0.1:8890');
+    localServerMocks.publish.mockResolvedValue({
+      revision: 2,
+      publicUrl: 'http://127.0.0.1:8890',
+    });
+
     await act(async () =>
       expect(await hook.result.current.switchTournament('target-tournament')).toBe(false),
     );
 
     expect(hook.result.current.state.tournament?.id).not.toBe('target-tournament');
+    expect(hook.result.current.state.live?.backend?.origin).toBe('http://127.0.0.1:8890');
+    expect(hook.result.current.state.live?.publicUrl).toBe('http://127.0.0.1:8890');
     expect(localServerMocks.clear).toHaveBeenCalledWith(false);
     expect(localServerMocks.stop).toHaveBeenCalled();
     expect(localServerMocks.start.mock.calls.length).toBeGreaterThanOrEqual(2);

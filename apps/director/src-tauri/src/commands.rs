@@ -13,6 +13,7 @@ use tauri_plugin_dialog::{DialogExt, FilePath};
 
 use crate::server::{
     RoomPairingInvitation, ServerError, ServerRuntime, ServerSnapshot, ServerStatus,
+    DEFAULT_QBTCP_PORT,
 };
 use crate::store::{DirectorStore, StoreError, StoreStatus};
 
@@ -298,13 +299,14 @@ pub async fn director_open_tournament(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,
 ) -> Result<Value, CommandError> {
-    open_tournament_with_runtime(&tournament_id, &store, &server).await
+    open_tournament_with_runtime(&tournament_id, &store, &server, DEFAULT_QBTCP_PORT).await
 }
 
 async fn open_tournament_with_runtime(
     tournament_id: &str,
     store: &DirectorStore,
     server: &ServerRuntime,
+    rollback_port: u16,
 ) -> Result<Value, CommandError> {
     let restart_server = server.status().running;
     if restart_server {
@@ -316,7 +318,11 @@ async fn open_tournament_with_runtime(
             if restart_server {
                 let rollback = match store.load_state() {
                     Ok(Some(current)) => server
-                        .start_with_store(Some(current), std::sync::Arc::new(store.clone()))
+                        .start_with_store_on_port(
+                            Some(current),
+                            std::sync::Arc::new(store.clone()),
+                            rollback_port,
+                        )
                         .await
                         .map(|_| ())
                         .map_err(|error| error.to_string()),
@@ -832,9 +838,12 @@ fn sync_parent_directory(_parent: &Path) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::{ServerRuntime, DEFAULT_QBTCP_PORT};
+    use crate::server::ServerRuntime;
     use serde_json::json;
     use std::path::{Path, PathBuf};
+
+    static OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX: tokio::sync::Mutex<()> =
+        tokio::sync::Mutex::const_new(());
 
     fn temporary_database_path() -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -872,6 +881,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn failed_open_restores_a_running_qbtcp_server_for_the_outgoing_document() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
         let path = temporary_database_path();
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
@@ -882,7 +892,7 @@ mod tests {
             .await
             .expect("initial server starts");
 
-        let result = open_tournament_with_runtime("missing", &store, &server).await;
+        let result = open_tournament_with_runtime("missing", &store, &server, 0).await;
 
         let error = result.expect_err("missing tournament must fail");
         assert_eq!(error.code, "store");
@@ -902,6 +912,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn failed_open_surfaces_qbtcp_rollback_failure_without_replacing_the_document() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
         let path = temporary_database_path();
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
@@ -911,11 +922,14 @@ mod tests {
             .start_on_port(Some(current), 0)
             .await
             .expect("initial server starts");
-        let blocker =
-            std::net::TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, DEFAULT_QBTCP_PORT))
-                .expect("default QBTCP port is available for rollback failure test");
+        let blocker = std::net::TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, 0))
+            .expect("rollback blocker listener binds");
+        let rollback_port = blocker
+            .local_addr()
+            .expect("rollback blocker address is available")
+            .port();
 
-        let result = open_tournament_with_runtime("missing", &store, &server).await;
+        let result = open_tournament_with_runtime("missing", &store, &server, rollback_port).await;
 
         let error = result.expect_err("missing tournament must fail");
         assert_eq!(error.code, "server");
