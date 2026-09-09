@@ -6,6 +6,7 @@ import {
   type Team,
   type TournamentRules,
 } from './model';
+import { activeTournamentTeams } from './field';
 import {
   acceptedGameRecords,
   deriveTeamStandings,
@@ -138,7 +139,7 @@ function standingsByPool(
 ): Array<{ poolId: DirectorId | null; standings: TeamStanding[] }> {
   const tiebreakers = phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers;
   if (phase.poolIds.length === 0) {
-    const teamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+    const teamIds = activeTournamentTeams(state).map((team) => team.id);
     return [
       {
         poolId: null,
@@ -153,8 +154,8 @@ function standingsByPool(
   }
   return phase.poolIds.map((poolId) => {
     const pool = state.pools.find((entry) => entry.id === poolId);
-    const teamIds = (pool?.teamIds ?? []).filter(
-      (teamId) => state.teams.find((team) => team.id === teamId)?.status === 'confirmed',
+    const teamIds = (pool?.teamIds ?? []).filter((teamId) =>
+      activeTournamentTeams(state).some((team) => team.id === teamId),
     );
     return {
       poolId,

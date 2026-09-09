@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  activeTournamentTeams,
   closeRound,
   defaultRules,
   emptyDirectorState,
@@ -316,7 +317,7 @@ export interface DirectorController {
   archiveTournament(tournamentId?: DirectorId): Promise<boolean>;
   reopenTournament(tournamentId?: DirectorId): Promise<boolean>;
   setTournamentStatus(status: TournamentStatus): boolean;
-  createTournament(input: NewTournamentInput): void;
+  createTournament(input: NewTournamentInput): boolean;
   updateTournament(
     changes: Partial<
       Pick<
@@ -1271,12 +1272,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const createTournament = useCallback(
-    (input: NewTournamentInput) => {
+    (input: NewTournamentInput): boolean => {
       const now = isoNow();
       const tournamentId = newDirectorId('tournament');
       const formatId = newDirectorId('format');
       const phaseId = newDirectorId('phase');
-      commit((draft) => {
+      return commit((draft) => {
         const fresh = emptyDirectorState();
         Object.assign(draft, fresh);
         draft.tournament = {
@@ -3572,7 +3573,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       if (!snapshot.tournament)
         return { conflicts: ['Create a tournament before generating a schedule.'], generated: false };
-      if (snapshot.teams.filter((team) => team.status === 'confirmed').length < 2) {
+      if (activeTournamentTeams(snapshot).length < 2) {
         return {
           conflicts: ['Add at least two confirmed teams before generating a schedule.'],
           generated: false,
@@ -5798,7 +5799,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         // new one instead of leaving a dangling reference.
         tournament.currentPhaseId = null;
         tournament.currentRoundId = null;
-        const activeTeams = draft.teams.filter((team) => team.status !== 'dropped');
+        const activeTeams = activeTournamentTeams(draft);
         // Timeline events (Lunch, breaks) survive a plan change; new rounds
         // sequence after them so day order stays duplicate-free.
         let dayOrder = nextDayOrder(draft.rounds, draft.timeline);

@@ -73,6 +73,9 @@ targets:
     sources:
       - path: QBSheetLiveClip
       - path: Shared
+      # The App Clip must ship with the same icon as the full app. Keeping a single asset catalog
+      # prevents the two products from drifting and gives the Clip an AppIcon resource at archive time.
+      - path: QBSheetLive/Assets.xcassets
     dependencies:
       - package: QBSheetLiveKit
         product: QBSheetLiveKit
