@@ -1,0 +1,343 @@
+name: Director release
+
+# Publishes QBSheet Director.
+#
+# Director is a Tauri desktop application, so a release is not one artifact but one set per operating
+# system, each of which can only be built on that operating system. This workflow builds them in
+# parallel and gathers them into a single GitHub release.
+#
+# # How to release
+#
+# Bump the version everywhere `scripts/release/director-version.mjs` looks, merge that, then push a
+# tag: `director-v0.2.0`. `docs/DIRECTOR_RELEASE.md` is the procedure in full.
+#
+# # The four properties this workflow keeps
+#
+# * **The version is checked before a runner is spent on it.** Director's version is written in five
+#   places and the tag is a sixth. `guard` reads all of them first, and it is cheap: no `npm ci`, no
+#   toolchain, no bundle. The header of `scripts/release/director-version.mjs` records what a
+#   disagreement does to a released installer and to the updater.
+# * **The release is created once, before anything is built.** `draft` does it, and the bundle jobs
+#   upload into it by id. Letting three concurrent jobs each find-or-create a release for the same
+#   tag is a race, and the way it loses is a platform failing on a duplicate tag after it has
+#   already spent half an hour compiling.
+# * **A release is all of Director or none of it.** The draft becomes visible only in `publish`,
+#   which requires every bundle job to have succeeded. A Windows failure therefore cannot leave a
+#   published release that directors on Windows can see and cannot download. `fail-fast: false` is
+#   deliberate for the same reason: one platform breaking should report the other two in the same
+#   run rather than hiding them.
+# * **`workflow_dispatch` builds without releasing.** No tag means no draft and no release id, so
+#   the bundles come back as workflow artifacts instead. This is how you find out that the release
+#   build still works — a bundling failure is specific to the bundler and the runner, and ordinary
+#   CI never bundles — without first creating a tag you would have to delete.
+#
+# # Not routed by change impact
+#
+# `scripts/ci/impact.mjs` classifies every other workflow as affecting nothing, on the grounds that
+# each carries its own path filter. This one has no path filter to carry: it is triggered by a tag,
+# so the push that changes it is never the event that runs it. A dispatch run is the substitute, and
+# it is the reason dispatch exists here.
+#
+# # What this does not do
+#
+# The bundles are not code-signed. macOS refuses an unsigned application on first open until the
+# user opens it from the context menu, and Windows SmartScreen warns. Both need paid certificates
+# this repository does not hold; `docs/DIRECTOR_RELEASE.md` records exactly what to add here when it
+# does, and why wiring it speculatively would be worse than not wiring it. Signed *automatic
+# updates* are a separate mechanism, need no certificate authority, and are wired: `guard` turns
+# them on the moment both halves of the updater keypair exist.
+
+on:
+  push:
+    tags:
+      - 'director-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs for the same tag must not race for the same draft. Not `cancel-in-progress`: a
+# half-cancelled release is worse than a slow one.
+concurrency:
+  group: director-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # -----------------------------------------------------------------------------------------------
+  # What version this is, whether every manifest agrees on it, and whether it can carry updates.
+  # -----------------------------------------------------------------------------------------------
+  guard:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      updater: ${{ steps.version.outputs.updater }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # No `npm ci`: the guard is dependency-free, so the job that decides whether this release is
+      # worth installing anything for does not have to install anything.
+      #
+      # The signing key is tested for existence, not read. A job that does not build cannot need it,
+      # and the value stays out of this job's environment entirely.
+      - name: Check the version, and whether updates can be signed
+        id: version
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && 'present' || 'absent' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ]; then
+            node scripts/release/director-version.mjs --tag "$TAG" --signing-key "$SIGNING_KEY"
+          else
+            node scripts/release/director-version.mjs --signing-key "$SIGNING_KEY"
+          fi
+
+  # -----------------------------------------------------------------------------------------------
+  # The empty draft the three bundle jobs upload into.
+  #
+  # Created here rather than by the bundle jobs so that exactly one thing creates it. The lookup and
+  # the creation both go through `gh api` rather than `gh release`, because a draft release has no
+  # tag reference behind it yet and addressing one by tag name is unreliable; the id this job
+  # outputs is not.
+  # -----------------------------------------------------------------------------------------------
+  draft:
+    name: Draft release
+    needs: guard
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.draft.outputs.release-id }}
+    steps:
+      - name: Create or reuse the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Reused rather than recreated, so re-running a failed release after fixing one platform
+          # keeps the bundles the other two already uploaded.
+          #
+          # Not piped through `head`: under `pipefail`, closing the pipe on a paginating `gh` is a
+          # SIGPIPE and therefore a failed release. The first line is taken from the variable
+          # instead, which also settles the one case that can return two — GitHub does not bind a
+          # draft to its tag, so a previous abandoned draft can carry the same `tag_name`.
+          matches=$(gh api "repos/${GH_REPO}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id")
+          existing=${matches%%$'\n'*}
+
+          if [ -n "$existing" ]; then
+            echo "Reusing release ${existing} for ${TAG}."
+            echo "release-id=${existing}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/notes.md" <<'NOTES'
+          QBSheet Director, the desktop tournament control application. Install the file for your
+          system:
+
+          * **macOS** — the `.dmg`. One download for both Apple silicon and Intel.
+          * **Windows** — the `-setup.exe`, or the `.msi` for deployment by an administrator.
+          * **Linux** — the `.AppImage` to run without installing, or the `.deb` or `.rpm`.
+
+          These builds are not code-signed. macOS will refuse the application on first open:
+          right-click it in Applications and choose Open. Windows will show a SmartScreen warning.
+
+          Director can also be built from source; see `apps/director/README.md`.
+          NOTES
+
+          id=$(gh api --method POST "repos/${GH_REPO}/releases" \
+            -f "tag_name=${TAG}" \
+            -f "name=QBSheet Director ${VERSION}" \
+            -F "body=@${RUNNER_TEMP}/notes.md" \
+            -F draft=true \
+            -F prerelease=false \
+            --jq .id)
+
+          echo "Created draft release ${id} for ${TAG}."
+          echo "release-id=${id}" >> "$GITHUB_OUTPUT"
+
+  # -----------------------------------------------------------------------------------------------
+  # One bundle set per operating system.
+  #
+  # macOS builds `universal-apple-darwin` rather than one bundle per architecture. A tournament
+  # director downloading Director should not have to know which processor their Mac has, and the
+  # updater keeps working either way: Tauri records the universal bundle under both of its platform
+  # keys in `latest.json`.
+  # -----------------------------------------------------------------------------------------------
+  bundle:
+    name: ${{ matrix.name }}
+    needs: [guard, draft]
+    # `always()` because `draft` is skipped on a dispatch run, and a skipped dependency would
+    # otherwise skip this too. The guard is not optional, though, so it still has to have passed.
+    if: always() && needs.guard.result == 'success' && needs.draft.result != 'failure'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      # To upload the bundles into the draft.
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+          # 22.04 rather than `ubuntu-latest` on purpose: the `.deb` and the AppImage link against
+          # the runner's glibc and will not start on anything older, so the runner image decides the
+          # oldest distribution Director supports. When this image is retired, moving it forward
+          # raises that floor — worth saying so in the release notes when it happens.
+          - name: Linux
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      # The same list the `rust-director` job of `ci.yml` installs, which is what the Director crate
+      # needs in order to compile, and nothing more: Tauri's Linux bundlers fetch their own tooling.
+      - name: Install Director Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Cache Cargo dependencies and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/director/src-tauri/target
+          key: ${{ runner.os }}-cargo-director-release-${{ matrix.target }}-${{ hashFiles('apps/director/src-tauri/Cargo.lock', 'crates/qbtcp-server/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-director-release-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-director-
+
+      # From the repository root, and only from the repository root. `apps/director` is a workspace
+      # of the root manifest and depends on `@qbsheet/tournament-core` and
+      # `@qbsheet/tournament-formats`, which the root `prepare` script builds out of `packages/` and
+      # which are published nowhere. An install inside `apps/director` cannot resolve them.
+      - name: Install dependencies
+        run: npm ci
+
+      # tauri-action installs nothing itself, which is why the step above exists. What it does is
+      # run `tauri build` through the app's own `tauri` script, upload every bundle it produced into
+      # the draft, and — when updater artifacts were built — merge this platform's signature into
+      # the release's shared `latest.json`. The frontend is built by `beforeBuildCommand` in
+      # `tauri.conf.json`, as it is in a local build.
+      - name: Build and upload the Director bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/director
+          # `--config` layers `createUpdaterArtifacts: true` over the checked-in configuration for
+          # this build alone, so an ordinary `tauri build` — a developer's, or a dispatch run before
+          # a key exists — never emits a signature no installed Director could verify. Tauri still
+          # merges `tauri.<platform>.conf.json` underneath it. See `guard`.
+          args: >-
+            --target ${{ matrix.target }}
+            ${{ needs.guard.outputs.updater == 'true' && '--config src-tauri/tauri.updater.conf.json' || '' }}
+          # Empty on a dispatch run: no release to upload to, so the bundles become workflow
+          # artifacts instead.
+          releaseId: ${{ needs.draft.outputs.release-id }}
+          uploadUpdaterJson: ${{ needs.guard.outputs.updater == 'true' }}
+          uploadWorkflowArtifacts: ${{ github.ref_type != 'tag' }}
+
+  # -----------------------------------------------------------------------------------------------
+  # Make the draft visible, once every platform is in it.
+  #
+  # `make_latest` matters beyond presentation: the updater endpoint in `tauri.conf.json` is
+  # `releases/latest/download/latest.json`, so the release GitHub calls latest is the release
+  # installed copies of Director will be offered. See the last section of
+  # `docs/DIRECTOR_RELEASE.md` for what that costs once a second component starts releasing.
+  # -----------------------------------------------------------------------------------------------
+  publish:
+    name: Publish
+    needs: [guard, draft, bundle]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.guard.outputs.version }}
+          UPDATER: ${{ needs.guard.outputs.updater }}
+        run: |
+          set -euo pipefail
+
+          echo "Assets in the draft:"
+          gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | "  \(.name)  \(.size) bytes"'
+
+          gh api --method PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -f make_latest=true \
+            --jq .html_url
+
+          {
+            echo "## QBSheet Director ${VERSION} published"
+            echo
+            echo "<https://github.com/${GH_REPO}/releases/tag/${TAG}>"
+            echo
+            if [ "$UPDATER" = "true" ]; then
+              echo "Signed automatic updates are included: installed copies will be offered this version."
+            else
+              echo "Installers only. Signed automatic updates are not configured — see \`docs/DIRECTOR_RELEASE.md\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
