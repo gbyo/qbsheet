@@ -199,16 +199,48 @@ pub async fn director_open_tournament(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,
 ) -> Result<Value, CommandError> {
+    open_tournament_with_runtime(&tournament_id, &store, &server).await
+}
+
+async fn open_tournament_with_runtime(
+    tournament_id: &str,
+    store: &DirectorStore,
+    server: &ServerRuntime,
+) -> Result<Value, CommandError> {
     let restart_server = server.status().running;
     if restart_server {
         server.stop();
     }
-    let state = store
-        .open_tournament(tournament_id.trim())
-        .map_err(CommandError::store)?;
+    let state = match store.open_tournament(tournament_id.trim()) {
+        Ok(state) => state,
+        Err(open_error) => {
+            if restart_server {
+                let rollback = match store.load_state() {
+                    Ok(Some(current)) => server
+                        .start_with_store(Some(current), std::sync::Arc::new(store.clone()))
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| error.to_string()),
+                    Ok(None) => Err("the outgoing tournament document is unavailable".to_owned()),
+                    Err(error) => Err(format!(
+                        "the outgoing tournament could not be reloaded: {error}"
+                    )),
+                };
+                if let Err(rollback_error) = rollback {
+                    return Err(CommandError {
+                        code: "server",
+                        message: format!(
+                            "The selected tournament could not be opened: {open_error}. QBTCP rollback failed: {rollback_error}."
+                        ),
+                    });
+                }
+            }
+            return Err(CommandError::store(open_error));
+        }
+    };
     if restart_server {
         server
-            .start_with_store(Some(state.clone()), std::sync::Arc::new((*store).clone()))
+            .start_with_store(Some(state.clone()), std::sync::Arc::new(store.clone()))
             .await
             .map_err(CommandError::server)?;
     }
@@ -700,6 +732,109 @@ fn sync_parent_directory(_parent: &Path) -> Result<(), std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::{ServerRuntime, DEFAULT_QBTCP_PORT};
+    use serde_json::json;
+    use std::path::{Path, PathBuf};
+
+    fn temporary_database_path() -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "qbsheet-director-open-rollback-{}-{}.sqlite",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ))
+    }
+
+    fn cleanup(path: &Path) {
+        let _ = fs::remove_file(path);
+        let _ = fs::remove_file(path.with_extension("sqlite-wal"));
+        let _ = fs::remove_file(path.with_extension("sqlite-shm"));
+    }
+
+    fn document(id: &str, name: &str) -> Value {
+        json!({
+            "schemaVersion": 8,
+            "metadata": {},
+            "tournament": {
+                "id": id,
+                "name": name,
+                "date": "2026-09-09",
+                "venue": "Test hall",
+                "organizer": "QBSheet",
+                "status": "running",
+                "timeZone": "UTC",
+                "rules": {}
+            }
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_open_restores_a_running_qbtcp_server_for_the_outgoing_document() {
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let current = document("tournament-a", "Tournament A");
+        store.save_state(&current).expect("current document saves");
+        let server = ServerRuntime::default();
+        server
+            .start_on_port(Some(current.clone()), 0)
+            .await
+            .expect("initial server starts");
+
+        let result = open_tournament_with_runtime("missing", &store, &server).await;
+
+        let error = result.expect_err("missing tournament must fail");
+        assert_eq!(error.code, "store");
+        assert!(error.message.contains("no rows"));
+        assert!(
+            server.status().running,
+            "QBTCP should be restored after the failed open"
+        );
+        assert_eq!(
+            store.load_state().expect("state reads").unwrap()["tournament"]["id"],
+            "tournament-a"
+        );
+        server.stop();
+        drop(store);
+        cleanup(&path);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_open_surfaces_qbtcp_rollback_failure_without_replacing_the_document() {
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        let current = document("tournament-a", "Tournament A");
+        store.save_state(&current).expect("current document saves");
+        let server = ServerRuntime::default();
+        server
+            .start_on_port(Some(current), 0)
+            .await
+            .expect("initial server starts");
+        let blocker =
+            std::net::TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, DEFAULT_QBTCP_PORT))
+                .expect("default QBTCP port is available for rollback failure test");
+
+        let result = open_tournament_with_runtime("missing", &store, &server).await;
+
+        let error = result.expect_err("missing tournament must fail");
+        assert_eq!(error.code, "server");
+        assert!(error
+            .message
+            .contains("selected tournament could not be opened"));
+        assert!(error.message.contains("QBTCP rollback failed"));
+        assert!(
+            !server.status().running,
+            "failed rollback must remain visible as stopped"
+        );
+        assert_eq!(
+            store.load_state().expect("state reads").unwrap()["tournament"]["id"],
+            "tournament-a"
+        );
+        drop(blocker);
+        drop(store);
+        cleanup(&path);
+    }
 
     #[test]
     fn atomic_write_replaces_a_file_without_leaving_a_temp_file() {

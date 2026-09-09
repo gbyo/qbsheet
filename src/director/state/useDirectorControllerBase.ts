@@ -95,6 +95,7 @@ import {
   clearLocalLive,
   localLiveOrigin,
   publishLocalLive,
+  readLocalLiveServerStatus,
   startLocalLiveServer,
   stopLocalLiveServer,
 } from '../live/localServer';
@@ -350,6 +351,7 @@ export type DocumentTransitionCheck =
 
 export type DirectorDocumentTransition =
   | { kind: 'switching'; tournamentId: DirectorId }
+  | { kind: 'creating-tournament' }
   | { kind: 'restoring-checkpoint'; checkpointId: string }
   | { kind: 'recovery-edit'; reason: string };
 
@@ -359,12 +361,16 @@ const archivedTournamentReadOnlyMessage =
 interface CommitOptions {
   /** The only archived write exception: the explicit archived → draft lifecycle transition. */
   allowArchivedReopen?: boolean;
+  /** A synchronous whole-document replacement may commit while its transition barrier is held. */
+  documentTransition?: DirectorDocumentTransition;
 }
 
 function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
   switch (transition.kind) {
     case 'switching':
       return 'The tournament is being opened. Wait for opening to finish, then try again.';
+    case 'creating-tournament':
+      return 'A new tournament is being created. Wait for creation to finish, then try again.';
     case 'restoring-checkpoint':
       return 'The tournament is being restored. Wait for recovery to finish, then try again.';
     case 'recovery-edit':
@@ -939,6 +945,28 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const liveSetupInFlightRef = useRef<Promise<void> | null>(null);
   const liveDrainInFlightRef = useRef<Promise<void> | null>(null);
   const localServerPublicationRef = useRef<string | null>(null);
+  const localServerRecoveryBlockedRef = useRef<string | null>(null);
+
+  // Every whole-document replacement advances the transport epoch before it changes state. This
+  // is intentionally shared by async replacements and synchronous New Tournament creation: a
+  // native snapshot that started before this point must never be allowed to apply afterward.
+  const beginDocumentTransition = useCallback((transition: DirectorDocumentTransition): boolean => {
+    if (documentTransitionRef.current) {
+      setError(documentTransitionConflictMessage(documentTransitionRef.current));
+      return false;
+    }
+    documentTransitionRef.current = transition;
+    documentEpochRef.current += 1;
+    setDocumentTransition(transition);
+    return true;
+  }, []);
+
+  const endDocumentTransition = useCallback((transition: DirectorDocumentTransition): void => {
+    if (documentTransitionRef.current !== transition) return;
+    documentTransitionRef.current = null;
+    setDocumentEpoch(documentEpochRef.current);
+    setDocumentTransition(null);
+  }, []);
 
   const settleWriterReady = useCallback((tournamentId: DirectorId, reason?: unknown) => {
     const waiter = writerReadyWaitersRef.current.get(tournamentId);
@@ -1358,7 +1386,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
        * to a document that is about to be discarded — but it must not be reported as saved
        * either, so every caller that returns a success boolean returns this one.
        */
-      if (documentTransitionRef.current) {
+      if (documentTransitionRef.current && documentTransitionRef.current !== options.documentTransition) {
         setError(documentTransitionConflictMessage(documentTransitionRef.current));
         return false;
       }
@@ -1479,6 +1507,34 @@ export function useDirectorController(repository = createDirectorRepository()): 
     }
   }, []);
 
+  const restoreLocalLivePublication = useCallback(
+    async (outgoing: DirectorState): Promise<void> => {
+      const publication = outgoing.live;
+      if (
+        !publication?.settings.enabled ||
+        publication.backend?.kind !== 'local' ||
+        (publication.lifecycle !== 'live' && publication.lifecycle !== 'final')
+      ) {
+        return;
+      }
+      localServerRecoveryBlockedRef.current = null;
+      localServerPublicationRef.current = null;
+      const server = await startLocalLiveServer();
+      const origin = localLiveOrigin(server);
+      const snapshot = publishedSnapshotRef.current ?? derivePublication(outgoing, null).snapshot;
+      if (!snapshot) throw new Error('The outgoing Local Live publication could not be rebuilt.');
+      const published = await publishLocalLive(snapshot);
+      publishedSnapshotRef.current = snapshot;
+      localServerPublicationRef.current = publication.publicationId;
+      commit((draft) => {
+        if (draft.live?.publicationId !== publication.publicationId || !draft.live.backend) return;
+        draft.live.backend = { ...draft.live.backend, origin };
+        draft.live.publicUrl = published.publicUrl;
+      });
+    },
+    [commit],
+  );
+
   const switchTournament = useCallback(
     async (tournamentId: DirectorId): Promise<boolean> => {
       if (stateRef.current.tournament?.id === tournamentId) return true;
@@ -1488,19 +1544,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This storage backend does not support multiple tournaments.');
         return false;
       }
-      if (documentTransitionRef.current) {
-        setError('The tournament is already changing. Wait for that operation to finish.');
-        return false;
-      }
       const transition: DirectorDocumentTransition = { kind: 'switching', tournamentId };
-      documentTransitionRef.current = transition;
-      documentEpochRef.current += 1;
-      setDocumentTransition(transition);
+      if (!beginDocumentTransition(transition)) return false;
+      localServerRecoveryBlockedRef.current = null;
+      const outgoing = structuredClone(stateRef.current);
+      let localLiveTeardownStarted = false;
+      let localLiveWasRunning = false;
       try {
         // All writes queued before the switch belong to the outgoing document. Waiting here prevents
         // a late save from racing the incoming document selection.
         await persistenceQueueRef.current;
-        if (stateRef.current.live?.backend?.kind === 'local') {
+        const localPublication = stateRef.current.live;
+        if (localPublication?.settings.enabled && localPublication.backend?.kind === 'local') {
+          const localStatus = await readLocalLiveServerStatus();
+          localLiveWasRunning = localStatus.running;
+          localLiveTeardownStarted = true;
           await clearLocalLive(false).catch(() => undefined);
           await stopLocalLiveServer().catch(() => undefined);
         }
@@ -1536,19 +1594,39 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
-        setError(
+        const openMessage =
           reason instanceof Error
             ? `The selected tournament could not be opened. ${reason.message}`
-            : 'The selected tournament could not be opened.',
-        );
+            : 'The selected tournament could not be opened.';
+        let failure = openMessage;
+        if (localLiveTeardownStarted && localLiveWasRunning) {
+          try {
+            await restoreLocalLivePublication(outgoing);
+          } catch (rollbackReason: unknown) {
+            localServerPublicationRef.current = null;
+            localServerRecoveryBlockedRef.current = outgoing.live?.publicationId ?? null;
+            const rollbackMessage =
+              rollbackReason instanceof Error
+                ? rollbackReason.message
+                : 'The outgoing Local Live service could not be restored.';
+            failure = `${openMessage} Local Live rollback failed: ${rollbackMessage}`;
+          }
+        }
+        setError(failure);
         return false;
       } finally {
-        documentTransitionRef.current = null;
-        setDocumentEpoch(documentEpochRef.current);
-        setDocumentTransition(null);
+        endDocumentTransition(transition);
       }
     },
-    [ensureDocumentTransitionAllowed, refreshTournaments, resetQbtcpHealth, settleWriterReady],
+    [
+      beginDocumentTransition,
+      endDocumentTransition,
+      ensureDocumentTransitionAllowed,
+      refreshTournaments,
+      resetQbtcpHealth,
+      restoreLocalLivePublication,
+      settleWriterReady,
+    ],
   );
 
   const updateCatalogTournamentStatus = useCallback(
@@ -1673,59 +1751,82 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const tournamentId = newDirectorId('tournament');
       const formatId = newDirectorId('format');
       const phaseId = newDirectorId('phase');
-      return commit((draft) => {
-        const fresh = emptyDirectorState();
-        Object.assign(draft, fresh);
-        draft.tournament = {
-          id: tournamentId,
-          name: input.name.trim() || 'Untitled tournament',
-          date: input.date,
-          venue: input.venue.trim(),
-          organizer: input.organizer.trim(),
-          status: 'draft',
-          timeZone: normalizeTimeZone(input.timeZone ?? hostTimeZone()),
-          rules: structuredClone(defaultRules),
-          formatId,
-          currentPhaseId: phaseId,
-          currentPacketId: null,
-          currentRoundId: null,
-          createdAt: now,
-          updatedAt: now,
-        };
-        draft.formats.push({
-          id: formatId,
-          name: 'Round robin',
-          kind: 'round-robin',
-          phaseIds: [phaseId],
-          roundsPerTeam: null,
-          avoidRematches: true,
-          avoidSameOrganization: false,
-          allowByes: true,
-          editable: true,
-        });
-        draft.phases.push({
-          id: phaseId,
-          name: 'Preliminary phase',
-          kind: 'preliminary',
-          order: 1,
-          formatId,
-          poolIds: [],
-          roundIds: [],
-          advancementRule: null,
-          carryover: false,
-          status: 'planned',
-        });
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: now,
-          actor: 'Director',
-          type: 'tournament-created',
-          summary: `Created ${draft.tournament.name}.`,
-          entityId: tournamentId,
-        });
-      });
+      const transition: DirectorDocumentTransition = { kind: 'creating-tournament' };
+      if (!beginDocumentTransition(transition)) return false;
+      try {
+        const created = commit(
+          (draft) => {
+            const fresh = emptyDirectorState();
+            Object.assign(draft, fresh);
+            draft.tournament = {
+              id: tournamentId,
+              name: input.name.trim() || 'Untitled tournament',
+              date: input.date,
+              venue: input.venue.trim(),
+              organizer: input.organizer.trim(),
+              status: 'draft',
+              timeZone: normalizeTimeZone(input.timeZone ?? hostTimeZone()),
+              rules: structuredClone(defaultRules),
+              formatId,
+              currentPhaseId: phaseId,
+              currentPacketId: null,
+              currentRoundId: null,
+              createdAt: now,
+              updatedAt: now,
+            };
+            draft.formats.push({
+              id: formatId,
+              name: 'Round robin',
+              kind: 'round-robin',
+              phaseIds: [phaseId],
+              roundsPerTeam: null,
+              avoidRematches: true,
+              avoidSameOrganization: false,
+              allowByes: true,
+              editable: true,
+            });
+            draft.phases.push({
+              id: phaseId,
+              name: 'Preliminary phase',
+              kind: 'preliminary',
+              order: 1,
+              formatId,
+              poolIds: [],
+              roundIds: [],
+              advancementRule: null,
+              carryover: false,
+              status: 'planned',
+            });
+            draft.audit.push({
+              id: newDirectorId('audit'),
+              at: now,
+              actor: 'Director',
+              type: 'tournament-created',
+              summary: `Created ${draft.tournament.name}.`,
+              entityId: tournamentId,
+            });
+          },
+          { documentTransition: transition },
+        );
+        if (created) {
+          publishedSnapshotRef.current = null;
+          liveClientRef.current = null;
+          localServerPublicationRef.current = null;
+          localServerRecoveryBlockedRef.current = null;
+          resetQbtcpHealth();
+        }
+        return created;
+      } finally {
+        endDocumentTransition(transition);
+      }
     },
-    [commit, ensureDocumentTransitionAllowed],
+    [
+      beginDocumentTransition,
+      commit,
+      endDocumentTransition,
+      ensureDocumentTransitionAllowed,
+      resetQbtcpHealth,
+    ],
   );
 
   const updateTournament = useCallback(
@@ -5502,9 +5603,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const transition: DirectorDocumentTransition = { kind: 'restoring-checkpoint', checkpointId };
-      documentTransitionRef.current = transition;
-      documentEpochRef.current += 1;
-      setDocumentTransition(transition);
+      if (!beginDocumentTransition(transition)) return false;
+      localServerRecoveryBlockedRef.current = null;
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -5571,14 +5671,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The recovery point could not be restored.');
         return false;
       } finally {
-        documentTransitionRef.current = null;
-        setDocumentEpoch(documentEpochRef.current);
-        setDocumentTransition(null);
+        endDocumentTransition(transition);
       }
     },
     [
       assertWriteAuthority,
+      beginDocumentTransition,
       captureWriteAuthority,
+      endDocumentTransition,
       ensureDocumentTransitionAllowed,
       ensureTournamentEditable,
       ensureWriter,
@@ -5590,7 +5690,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const editTournamentSnapshot = useCallback(
     async (value: DirectorState, reason: string): Promise<boolean> => {
-      if (documentTransitionRef.current) return false;
       const before = structuredClone(stateRef.current);
       const startingRevision = stateRevisionRef.current;
       if (!before.tournament || value.tournament?.id !== before.tournament.id) {
@@ -5600,9 +5699,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!ensureTournamentEditable()) return false;
       if (!ensureWriter()) return false;
       const transition: DirectorDocumentTransition = { kind: 'recovery-edit', reason };
-      documentTransitionRef.current = transition;
-      documentEpochRef.current += 1;
-      setDocumentTransition(transition);
+      if (!beginDocumentTransition(transition)) return false;
+      localServerRecoveryBlockedRef.current = null;
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -5652,14 +5750,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The edit could not be saved.');
         return false;
       } finally {
-        documentTransitionRef.current = null;
-        setDocumentEpoch(documentEpochRef.current);
-        setDocumentTransition(null);
+        endDocumentTransition(transition);
       }
     },
     [
       assertWriteAuthority,
+      beginDocumentTransition,
       captureWriteAuthority,
+      endDocumentTransition,
       ensureTournamentEditable,
       ensureWriter,
       refreshCheckpoints,
@@ -6387,6 +6485,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       !localPublicationEnabled ||
       localPublicationBackendKind !== 'local' ||
       (localPublicationLifecycle !== 'live' && localPublicationLifecycle !== 'final') ||
+      localServerRecoveryBlockedRef.current === localPublicationId ||
       localServerPublicationRef.current === localPublicationId
     ) {
       return;

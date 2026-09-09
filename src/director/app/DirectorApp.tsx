@@ -595,9 +595,11 @@ export function DocumentTransitionLoading({ transition }: { transition: Director
   const message =
     transition.kind === 'switching'
       ? 'Opening tournament…'
-      : transition.kind === 'restoring-checkpoint'
-        ? 'Restoring recovery point…'
-        : 'Applying recovery edit…';
+      : transition.kind === 'creating-tournament'
+        ? 'Creating tournament…'
+        : transition.kind === 'restoring-checkpoint'
+          ? 'Restoring recovery point…'
+          : 'Applying recovery edit…';
   return (
     <div className="director-loading" role="status">
       {message}
