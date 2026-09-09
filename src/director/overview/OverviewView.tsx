@@ -123,14 +123,17 @@ export function OverviewView({
     .slice(0, 5);
 
   const attention: AttentionItem[] = [
-    ...blockers.map((issue) => ({
-      id: issue.id,
-      title: 'Setup blocker',
-      text: issue.message,
-      section: sectionForArea(issue.area),
-      tone: 'danger' as const,
-      severity: 'blocker' as const,
-    })),
+    ...blockers.map((issue) => {
+      const section = sectionForArea(issue.area);
+      return {
+        id: issue.id,
+        title: issue.message,
+        text: `Resolve in ${labelForSection(section)} before tournament play.`,
+        section,
+        tone: 'danger' as const,
+        severity: 'blocker' as const,
+      };
+    }),
     ...(controller.error
       ? [
           {
@@ -188,14 +191,17 @@ export function OverviewView({
     })),
     ...issues
       .filter((issue) => issue.severity !== 'blocker')
-      .map((issue) => ({
-        id: issue.id,
-        title: 'Check before tournament play',
-        text: issue.message,
-        section: sectionForArea(issue.area),
-        tone: 'info' as const,
-        severity: 'info' as const,
-      })),
+      .map((issue) => {
+        const section = sectionForArea(issue.area);
+        return {
+          id: issue.id,
+          title: issue.message,
+          text: `Review in ${labelForSection(section)} before tournament play.`,
+          section,
+          tone: 'info' as const,
+          severity: 'info' as const,
+        };
+      }),
   ].sort((left, right) => severityRank[left.severity] - severityRank[right.severity]);
 
   return (
