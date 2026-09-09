@@ -253,7 +253,7 @@ export function ChoiceCards<T extends string>({
         {options.map((option) => (
           <label
             key={option.value}
-            className="director-choice-card director-choice-radio"
+            className="director-choice director-choice-card director-choice-radio"
             data-selected={value === option.value || undefined}
             data-disabled={option.disabled || undefined}
           >
@@ -269,7 +269,12 @@ export function ChoiceCards<T extends string>({
             <span className="director-choice-card-text">
               <strong>
                 <span className="director-choice-card-title">{option.title}</span>
-                {option.badge && <Badge tone="neutral" label={option.badge} />}
+                {option.badge && (
+                  <>
+                    {' '}
+                    <Badge tone="neutral" label={option.badge} />
+                  </>
+                )}
               </strong>
               {option.description && <small>{option.description}</small>}
             </span>
