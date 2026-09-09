@@ -1,10 +1,12 @@
-import { deriveTeamStandings, type DirectorState } from '../domain';
+import type { DirectorState } from '../domain';
 import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
 import { isNativeDirector, saveNativeFile } from '../platform/native';
 import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
+import { saveOrDownloadBytes } from '../reports/downloads';
+import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
 
 export function PublishView({
   state,
@@ -45,8 +47,14 @@ export function PublishView({
         >
           <SummaryList ariaLabel="Export formats">
             <ExportAction
+              title="Printable stat report"
+              description="Linked standings, individuals, games, rounds, team, and player pages for printing or static hosting."
+              action="Download report"
+              onClick={() => void downloadStatReport(state, onAnnounce)}
+            />
+            <ExportAction
               title="Team standings HTML"
-              description="Printable static standings table using accepted results and the configured tiebreak order."
+              description="Single-page standings from the same canonical snapshot and renderer as the printable stat report."
               action="Download HTML"
               onClick={() => downloadHtml(state, onAnnounce)}
             />
@@ -142,18 +150,37 @@ export async function downloadArchive(
   }
 }
 
+export async function downloadStatReport(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+): Promise<void> {
+  try {
+    const artifact = buildCanonicalStatReport(state);
+    await saveOrDownloadBytes(
+      artifact.bytes,
+      artifact.fileName,
+      'application/zip',
+      onAnnounce,
+      'Printable stat report exported',
+      'Printable stat report save cancelled.',
+    );
+  } catch (reason: unknown) {
+    onAnnounce(
+      errorNotice(reason instanceof Error ? reason.message : 'Printable stat report could not be exported.'),
+    );
+  }
+}
+
 function downloadHtml(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
-  const standings = deriveTeamStandings(state);
-  const title = escapeHtml(state.tournament?.name ?? 'Tournament standings');
-  const rows = standings
-    .map(
-      (standing, index) =>
-        `<tr><td>${index + 1}</td><td>${escapeHtml(state.teams.find((team) => team.id === standing.teamId)?.displayName ?? '')}</td><td>${standing.wins}–${standing.losses}${standing.ties ? `–${standing.ties}` : ''}</td><td>${standing.pointsFor}</td><td>${standing.pointsAgainst}</td><td>${standing.margin}</td></tr>`,
-    )
-    .join('');
-  const html = `<!doctype html><meta charset="utf-8"><title>${title}</title><style>body{font:16px system-ui,sans-serif;max-width:960px;margin:40px auto;color:#202a2e}table{border-collapse:collapse;width:100%}th,td{padding:9px;border-bottom:1px solid #d8dfe1;text-align:left}th{font-size:12px;text-transform:uppercase}</style><h1>${title}</h1><table><thead><tr><th>Rank</th><th>Team</th><th>Record</th><th>PF</th><th>PA</th><th>Margin</th></tr></thead><tbody>${rows}</tbody></table>`;
-  downloadText(html, `${standingsFileStem(state)}-standings.html`, 'text/html;charset=utf-8');
-  onAnnounce('Static standings HTML exported.');
+  try {
+    const html = buildCanonicalStandingsHtml(state);
+    downloadText(html, `${standingsFileStem(state)}-standings.html`, 'text/html;charset=utf-8');
+    onAnnounce('Static standings HTML exported.');
+  } catch (reason: unknown) {
+    onAnnounce(
+      errorNotice(reason instanceof Error ? reason.message : 'Static standings HTML could not be exported.'),
+    );
+  }
 }
 
 function downloadTeamStandingsCsv(
@@ -189,12 +216,4 @@ function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceIn
 function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
   downloadText(exportSqbs(state), `${standingsFileStem(state)}.sqbs`, 'text/plain;charset=utf-8');
   onAnnounce('SQBS roster exported.');
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
 }
