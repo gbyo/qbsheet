@@ -5,6 +5,15 @@ import { defaultRules, emptyDirectorState, type DirectorState } from '../domain'
 import { MemoryDirectorRepository } from '../persistence';
 import { useDirectorController } from './useDirectorController';
 
+class FailingCatalogRepository extends MemoryDirectorRepository {
+  failDocumentSave = false;
+
+  override async saveDocument(...args: Parameters<MemoryDirectorRepository['saveDocument']>): Promise<void> {
+    if (this.failDocumentSave) throw new Error('catalog disk full');
+    await super.saveDocument(...args);
+  }
+}
+
 function archivedState(): DirectorState {
   const state = emptyDirectorState();
   state.tournament = {
@@ -27,6 +36,72 @@ function archivedState(): DirectorState {
 }
 
 describe('archived tournament read-only guard', () => {
+  test('applies the same archive validation to an inactive catalog document', async () => {
+    const repository = new MemoryDirectorRepository();
+    const incomplete = archivedState();
+    incomplete.tournament!.id = 'inactive-running';
+    incomplete.tournament!.status = 'running';
+    const current = archivedState();
+    current.tournament!.id = 'current-complete';
+    current.tournament!.status = 'complete';
+    await repository.saveDocument(incomplete, false);
+    await repository.saveDocument(current, true);
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    const before = await repository.readTournament('inactive-running');
+    await act(async () =>
+      expect(await hook.result.current.archiveTournament('inactive-running')).toBe(false),
+    );
+    expect(hook.result.current.error).toMatch(/cannot change a running tournament to archived/i);
+    expect(await repository.readTournament('inactive-running')).toEqual(before);
+    hook.unmount();
+  });
+
+  test('reopens an inactive archived document with canonical audit semantics', async () => {
+    const repository = new MemoryDirectorRepository();
+    const inactive = archivedState();
+    inactive.tournament!.id = 'inactive-archived';
+    const current = archivedState();
+    current.tournament!.id = 'current-complete';
+    current.tournament!.status = 'complete';
+    await repository.saveDocument(inactive, false);
+    await repository.saveDocument(current, true);
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await act(async () => expect(await hook.result.current.reopenTournament('inactive-archived')).toBe(true));
+    expect((await repository.readTournament('inactive-archived')).tournament?.status).toBe('draft');
+    expect((await repository.readTournament('inactive-archived')).audit.at(-1)).toMatchObject({
+      summary: 'Reopened tournament as a draft.',
+      details: { from: 'archived', to: 'draft', reason: 'explicit-reopen' },
+    });
+    hook.unmount();
+  });
+
+  test('preserves the inactive document when its validated save fails', async () => {
+    const repository = new FailingCatalogRepository();
+    const inactive = archivedState();
+    inactive.tournament!.id = 'inactive-save-failure';
+    inactive.tournament!.status = 'complete';
+    const current = archivedState();
+    current.tournament!.id = 'current-complete';
+    current.tournament!.status = 'complete';
+    await repository.saveDocument(inactive, false);
+    await repository.saveDocument(current, true);
+    const before = await repository.readTournament('inactive-save-failure');
+    repository.failDocumentSave = true;
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await act(async () =>
+      expect(await hook.result.current.archiveTournament('inactive-save-failure')).toBe(false),
+    );
+    expect(hook.result.current.error).toMatch(/catalog disk full/i);
+    expect(await repository.readTournament('inactive-save-failure')).toEqual(before);
+    hook.unmount();
+  });
+
   test('blocks controller mutation and persistence escape hatches while preserving reads', async () => {
     const repository = new MemoryDirectorRepository();
     const before = archivedState();

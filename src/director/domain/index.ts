@@ -1,5 +1,6 @@
 export * from './advancement';
 export * from './field';
+export * from './lifecycle';
 export * from './model';
 export * from './planning';
 export * from './roster';
