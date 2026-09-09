@@ -51,6 +51,14 @@ The server binds port `8787`, advertises the configured scoresheet origins, and 
 metadata into the shared `qbtcp-server` protocol implementation. Add a room in Director before
 starting it to receive a one-time pairing code and launch link.
 
+## Releases
+
+`.github/workflows/director-release.yml` builds Director for macOS, Windows, and Linux and publishes
+them as one GitHub release. Push a `director-v*` tag to release; run the workflow by hand to build
+the bundles without releasing them. The procedure, what the bundles are, and what code signing and
+signed automatic updates still need is [`docs/DIRECTOR_RELEASE.md`](../../docs/DIRECTOR_RELEASE.md).
+
 The updater endpoint and public signing key are release configuration. The checked-in configuration
-keeps the updater plugin wired while `createUpdaterArtifacts` remains disabled until a release key
-is supplied by the distribution pipeline.
+keeps the updater plugin wired while `createUpdaterArtifacts` remains disabled: an ordinary build
+needs no key and emits no signatures, and the release workflow enables updater artifacts for its own
+build only once both halves of a release keypair exist.

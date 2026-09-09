@@ -254,6 +254,25 @@ describe('documentation and repository furniture run nothing', () => {
     // it would test nothing about the edit.
     expect(affected(['.github/workflows/qblive.yml'])).toEqual([]);
   });
+
+  it('runs nothing for the Director release pipeline, which no push can exercise', () => {
+    // It is triggered by a `director-v*` tag, so the push that edits it is never the event that
+    // runs it. A `workflow_dispatch` run is what validates it; the scorer jobs could not.
+    expect(affected(['.github/workflows/director-release.yml'])).toEqual([]);
+  });
+});
+
+describe('the Director release guard is held by the root suite', () => {
+  it('runs the suite that tests it, and not the browser torture test', () => {
+    // `tests/release/director-version.test.ts` is what holds the guard to the manifests, and the
+    // `scorer` job is what runs the root suite. A release script cannot reach the scoresheet.
+    expect(affected(['scripts/release/director-version.mjs'])).toEqual(['quality', 'scorer']);
+    expect(affected(['tests/release/director-version.test.ts'])).toEqual(['quality', 'scorer']);
+  });
+
+  it('runs the Director crate for the updater configuration patch', () => {
+    expect(affected(['apps/director/src-tauri/tauri.updater.conf.json'])).toEqual(['rust-director']);
+  });
 });
 
 describe('a change to the routing runs the routing', () => {

@@ -167,6 +167,10 @@ BASE_PATH=/qbsheet/ npm run build
 
 The service worker provides the application shell for offline use.
 
+Director is not part of that build. It is a desktop application, released per platform from a
+`director-v*` tag by `.github/workflows/director-release.yml`; see
+[Director releases](docs/DIRECTOR_RELEASE.md).
+
 ## Documentation
 
 | Document                                                 | Description                                                 |
@@ -184,6 +188,7 @@ The service worker provides the application shell for offline use.
 | [APNs prototype result](docs/QBLIVE_PUSH_PROTOTYPE.md)   | What was measured about reaching Apple's push endpoints     |
 | [Live load results](docs/QBLIVE_LOAD.md)                 | WebSocket load, and APNs channel-consumption modelling      |
 | [Live verification status](docs/QBLIVE_STATUS.md)        | What is demonstrated, what is tested, and what is not        |
+| [Director releases](docs/DIRECTOR_RELEASE.md)            | How Director is versioned, built per platform, and published |
 
 ## Contributing
 

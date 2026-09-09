@@ -97,6 +97,7 @@ session credential.
 | `tests/`, `e2e/` | application and integration tests, and the Playwright torture test |
 | `e2e/director/` | the Director browser tests, run against `apps/director` by `playwright.director.config.ts` |
 | `scripts/ci/` | the change-impact classifier that routes the `CI` workflow |
+| `scripts/release/` | the version guard the Director release workflow runs before it builds anything |
 
 ## Before you open a pull request
 
