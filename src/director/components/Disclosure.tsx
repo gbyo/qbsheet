@@ -40,6 +40,8 @@ export function Disclosure({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const panelId = useId();
+  const labelId = useId();
+  const hintId = useId();
   return (
     <div
       className={['director-disclosure', standalone ? 'director-disclosure-standalone' : '']
@@ -51,12 +53,20 @@ export function Disclosure({
         className="director-disclosure-trigger"
         aria-expanded={open}
         aria-controls={panelId}
+        // The label alone names the trigger; the hint is a description so it
+        // does not become part of the accessible name.
+        aria-labelledby={labelId}
+        aria-describedby={hint ? hintId : undefined}
         onClick={() => setOpen((current) => !current)}
       >
         <Icon name="chevron" size={14} />
         {icon && <Icon name={icon} size={15} />}
-        <span>{label}</span>
-        {hint && <small className="director-text-meta">{hint}</small>}
+        <span id={labelId}>{label}</span>
+        {hint && (
+          <small id={hintId} className="director-text-meta">
+            {hint}
+          </small>
+        )}
       </button>
       {actions}
       <div id={panelId} className="director-disclosure-panel" hidden={!open}>

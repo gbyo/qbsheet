@@ -309,13 +309,40 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
 /**
  * Ask for confirmation. Resolves `true` only if the operator confirmed.
  *
- * Outside a provider it resolves `true`: a unit test that mounts one view in
- * isolation should exercise that view's behaviour, not fail on missing shell
- * context. Every real mount is inside the provider.
+ * Outside a provider it resolves `false`: missing confirmation infrastructure
+ * must never be interpreted as approval, so destructive callers fail closed.
+ * Isolated tests that want automatic approval must opt in explicitly with
+ * {@link ConfirmTestProvider}.
  */
 export function useConfirm(): (request: ConfirmRequest) => Promise<boolean> {
   const confirm = useContext(ConfirmContext);
-  return useMemo(() => confirm ?? (() => Promise.resolve(true)), [confirm]);
+  return useMemo(() => confirm ?? (() => Promise.resolve(false)), [confirm]);
+}
+
+/**
+ * Test-only confirmation provider with an explicit canned response.
+ *
+ * Mount this (rather than relying on any implicit fallback) when an isolated
+ * test mounts a view that gates an action behind `useConfirm`.
+ *
+ * ```tsx
+ * render(
+ *   <ConfirmTestProvider response>
+ *     <TeamsView ... />
+ *   </ConfirmTestProvider>,
+ * );
+ * ```
+ */
+export function ConfirmTestProvider({
+  response,
+  children,
+}: {
+  /** The canned answer every `confirm(...)` call receives. */
+  response: boolean;
+  children: ReactNode;
+}) {
+  const confirm = useCallback(async () => response, [response]);
+  return <ConfirmContext.Provider value={confirm}>{children}</ConfirmContext.Provider>;
 }
 
 const confirmIcons: Record<ConfirmTone, IconName> = {

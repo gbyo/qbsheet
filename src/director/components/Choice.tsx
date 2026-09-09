@@ -29,7 +29,24 @@ import { Badge } from './Status';
  *
  * A surface that mixes them is telling the operator which of its controls are
  * pending and which have already happened.
+ *
+ * # Hint semantics
+ *
+ * `hint` is helper text, so it is exposed as an accessible *description*,
+ * never as part of the control's accessible *name*. Each control generates an
+ * id for its hint and wires it via `aria-describedby`; a caller-supplied
+ * `ariaDescribedBy` is combined with the built-in hint rather than replacing
+ * it.
  */
+
+/**
+ * Combine a caller-supplied description with the control's own hint id, so an
+ * external description never suppresses the component's visible hint.
+ */
+function combineDescribedBy(external?: string, hintId?: string): string | undefined {
+  const ids = [external, hintId].filter((id): id is string => Boolean(id)).join(' ');
+  return ids === '' ? undefined : ids;
+}
 
 export function Checkbox({
   checked,
@@ -64,6 +81,11 @@ export function Checkbox({
   const setRef = (node: HTMLInputElement | null) => {
     if (node) node.indeterminate = indeterminate && !checked;
   };
+  // The hint stays visible inside the label for click-target purposes, but the
+  // input is named by the label text alone so the helper sentence does not
+  // become part of the accessible name.
+  const labelId = useId();
+  const hintId = useId();
   return (
     <label className="director-choice" data-disabled={disabled || undefined}>
       <input
@@ -74,15 +96,16 @@ export function Checkbox({
         checked={checked}
         disabled={disabled}
         aria-label={ariaLabel}
-        aria-describedby={ariaDescribedBy}
+        aria-labelledby={ariaLabel ? undefined : labelId}
+        aria-describedby={combineDescribedBy(ariaDescribedBy, hint ? hintId : undefined)}
         onChange={(event) => onChange(event.target.checked)}
       />
       <span className="director-choice-box" aria-hidden="true">
         <Icon name={indeterminate && !checked ? 'minus' : 'check'} size={13} />
       </span>
       <span className="director-choice-text">
-        <span>{label}</span>
-        {hint && <small>{hint}</small>}
+        <span id={labelId}>{label}</span>
+        {hint && <small id={hintId}>{hint}</small>}
       </span>
     </label>
   );
@@ -94,16 +117,26 @@ export function CheckboxGroup({
   hint,
   children,
   columns = false,
+  ariaDescribedBy,
 }: {
   legend: ReactNode;
   hint?: ReactNode;
   children: ReactNode;
   columns?: boolean;
+  ariaDescribedBy?: string;
 }) {
+  const hintId = useId();
   return (
-    <fieldset className="director-fieldset">
+    <fieldset
+      className="director-fieldset"
+      aria-describedby={combineDescribedBy(ariaDescribedBy, hint ? hintId : undefined)}
+    >
       <legend>{legend}</legend>
-      {hint && <p className="director-field-hint">{hint}</p>}
+      {hint && (
+        <p className="director-field-hint" id={hintId}>
+          {hint}
+        </p>
+      )}
       <div className={columns ? 'director-choice-list-columns' : 'director-choice-list'}>{children}</div>
     </fieldset>
   );
@@ -130,6 +163,7 @@ export function RadioGroup<T extends string>({
   name,
   disabled = false,
   columns = false,
+  ariaDescribedBy,
 }: {
   value: T | '' | null | undefined;
   options: { value: T; label: ReactNode; hint?: ReactNode; disabled?: boolean }[];
@@ -139,13 +173,23 @@ export function RadioGroup<T extends string>({
   name?: string;
   disabled?: boolean;
   columns?: boolean;
+  ariaDescribedBy?: string;
 }) {
   const generated = useId();
   const groupName = name ?? generated;
+  const hintId = useId();
   return (
-    <fieldset className="director-fieldset" disabled={disabled}>
+    <fieldset
+      className="director-fieldset"
+      disabled={disabled}
+      aria-describedby={combineDescribedBy(ariaDescribedBy, hint ? hintId : undefined)}
+    >
       <legend>{legend}</legend>
-      {hint && <p className="director-field-hint">{hint}</p>}
+      {hint && (
+        <p className="director-field-hint" id={hintId}>
+          {hint}
+        </p>
+      )}
       <div className={columns ? 'director-choice-list-columns' : 'director-choice-list'}>
         {options.map((option) => (
           <label
@@ -201,8 +245,8 @@ export function Switch({
   const hintId = useId();
   return (
     <div className="director-switch">
-      <span className="director-switch-label" id={labelId}>
-        <span>{label}</span>
+      <span className="director-switch-label">
+        <span id={labelId}>{label}</span>
         {hint && <small id={hintId}>{hint}</small>}
       </span>
       <button
@@ -210,7 +254,7 @@ export function Switch({
         role="switch"
         aria-checked={checked}
         aria-labelledby={labelId}
-        aria-describedby={ariaDescribedBy ?? (hint ? hintId : undefined)}
+        aria-describedby={combineDescribedBy(ariaDescribedBy, hint ? hintId : undefined)}
         className="director-switch-control"
         disabled={disabled || pending}
         onClick={() => onChange(!checked)}
@@ -235,6 +279,7 @@ export function ChoiceCards<T extends string>({
   legend,
   hint,
   name,
+  ariaDescribedBy,
 }: {
   value: T | '' | null | undefined;
   options: { value: T; title: ReactNode; description?: ReactNode; badge?: ReactNode; disabled?: boolean }[];
@@ -242,13 +287,22 @@ export function ChoiceCards<T extends string>({
   legend: ReactNode;
   hint?: ReactNode;
   name?: string;
+  ariaDescribedBy?: string;
 }) {
   const generated = useId();
   const groupName = name ?? generated;
+  const hintId = useId();
   return (
-    <fieldset className="director-fieldset">
+    <fieldset
+      className="director-fieldset"
+      aria-describedby={combineDescribedBy(ariaDescribedBy, hint ? hintId : undefined)}
+    >
       <legend>{legend}</legend>
-      {hint && <p className="director-field-hint">{hint}</p>}
+      {hint && (
+        <p className="director-field-hint" id={hintId}>
+          {hint}
+        </p>
+      )}
       <div className="director-choice-cards">
         {options.map((option) => (
           <label

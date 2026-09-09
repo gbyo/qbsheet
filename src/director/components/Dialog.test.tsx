@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { ConfirmProvider, type ConfirmRequest, useConfirm } from './Dialog';
+import { ConfirmProvider, ConfirmTestProvider, type ConfirmRequest, useConfirm } from './Dialog';
 
 afterEach(cleanup);
 
@@ -74,6 +74,58 @@ describe('ConfirmProvider', () => {
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
+  test('resolves true only after the confirm action, false on cancel', async () => {
+    const onReady = vi.fn<(confirm: ConfirmFunction) => void>();
+    render(
+      <ConfirmProvider>
+        <ConfirmHandle onReady={onReady} />
+      </ConfirmProvider>,
+    );
+    const confirm = onReady.mock.calls[0][0];
+
+    let approved!: Promise<boolean>;
+    await act(async () => {
+      approved = confirm(request('Delete team?'));
+    });
+    expect(screen.getByRole('alertdialog', { name: 'Delete team?' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Approve Delete team?' }));
+    });
+    await expect(approved).resolves.toBe(true);
+
+    let cancelled!: Promise<boolean>;
+    await act(async () => {
+      cancelled = confirm(request('Remove room?'));
+    });
+    expect(screen.getByRole('alertdialog', { name: 'Remove room?' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    });
+    await expect(cancelled).resolves.toBe(false);
+  });
+
+  test('treats Escape as cancellation', async () => {
+    const onReady = vi.fn<(confirm: ConfirmFunction) => void>();
+    render(
+      <ConfirmProvider>
+        <ConfirmHandle onReady={onReady} />
+      </ConfirmProvider>,
+    );
+    const confirm = onReady.mock.calls[0][0];
+
+    let escaped!: Promise<boolean>;
+    await act(async () => {
+      escaped = confirm(request('Delete team?'));
+    });
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete team?' });
+    await act(async () => {
+      // jsdom never synthesizes platform Escape; the `cancel` event is what
+      // the native dialog delivers for it.
+      fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    });
+    await expect(escaped).resolves.toBe(false);
+  });
+
   test('cancels all pending callers when the provider unmounts', async () => {
     const onReady = vi.fn<(confirm: ConfirmFunction) => void>();
     const view = render(
@@ -97,5 +149,64 @@ describe('ConfirmProvider', () => {
 
     await expect(first).resolves.toBe(false);
     await expect(second).resolves.toBe(false);
+  });
+});
+
+describe('useConfirm without a provider', () => {
+  test('fails closed instead of auto-approving', async () => {
+    const onReady = vi.fn<(confirm: ConfirmFunction) => void>();
+    render(<ConfirmHandle onReady={onReady} />);
+    const confirm = onReady.mock.calls[0][0];
+
+    await expect(
+      confirm({ title: 'Delete team?', confirmLabel: 'Delete team', tone: 'danger' }),
+    ).resolves.toBe(false);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  test('blocks a representative destructive action mounted in isolation', async () => {
+    const onDelete = vi.fn();
+    function DeleteTeam() {
+      const confirm = useConfirm();
+      return (
+        <button
+          type="button"
+          onClick={async () => {
+            if (await confirm({ title: 'Delete team?', confirmLabel: 'Delete team', tone: 'danger' })) {
+              onDelete();
+            }
+          }}
+        >
+          Delete team
+        </button>
+      );
+    }
+
+    render(<DeleteTeam />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Delete team' }));
+    });
+
+    expect(onDelete).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  test('ConfirmTestProvider opts isolated mounts into an explicit canned response', async () => {
+    const onReady = vi.fn<(confirm: ConfirmFunction) => void>();
+    const approved = render(
+      <ConfirmTestProvider response>
+        <ConfirmHandle onReady={onReady} />
+      </ConfirmTestProvider>,
+    );
+    await expect(onReady.mock.calls[0][0](request('A'))).resolves.toBe(true);
+    approved.unmount();
+
+    const denied = render(
+      <ConfirmTestProvider response={false}>
+        <ConfirmHandle onReady={onReady} />
+      </ConfirmTestProvider>,
+    );
+    await expect(onReady.mock.calls[1][0](request('B'))).resolves.toBe(false);
+    denied.unmount();
   });
 });
