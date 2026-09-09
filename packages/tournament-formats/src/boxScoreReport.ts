@@ -23,15 +23,15 @@ function scoreText(game: GameStatsRow): string {
 function detailKnown(team: GameTeamStatsRow | undefined): boolean {
   return Boolean(
     team &&
-      [
-        team.superpowers,
-        team.powers,
-        team.gets,
-        team.negs,
-        team.tossupsHeard,
-        team.bonusesHeard,
-        team.bonusPoints,
-      ].some((value) => value !== null),
+    [
+      team.superpowers,
+      team.powers,
+      team.gets,
+      team.negs,
+      team.tossupsHeard,
+      team.bonusesHeard,
+      team.bonusPoints,
+    ].some((value) => value !== null),
   );
 }
 
@@ -139,8 +139,7 @@ export function renderBoxScoreReport(snapshot: StatsSnapshot): string {
     groups.length > 1
       ? `<nav aria-label="Rounds"><strong>Rounds</strong><ul>${groups
           .map(
-            (group) =>
-              `<li><a href="#${reportRoundAnchor(group.id)}">${reportEscape(group.name)}</a></li>`,
+            (group) => `<li><a href="#${reportRoundAnchor(group.id)}">${reportEscape(group.name)}</a></li>`,
           )
           .join('')}</ul></nav>`
       : '';
@@ -166,8 +165,6 @@ export function renderBoxScoreReport(snapshot: StatsSnapshot): string {
 export function buildPrintableStatReportBundle(snapshot: StatsSnapshot): StatReportPage[] {
   const pages = buildStatReportBundle(snapshot);
   return pages.map((page) =>
-    page.name === 'games.html'
-      ? { name: page.name, content: renderBoxScoreReport(snapshot) }
-      : page,
+    page.name === 'games.html' ? { name: page.name, content: renderBoxScoreReport(snapshot) } : page,
   );
 }
