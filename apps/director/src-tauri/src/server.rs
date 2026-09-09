@@ -7,8 +7,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use qbtcp_server::{
     AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceRecord,
-    ProgressRecord, QbtcpConfig, QbtcpServer, QbtcpState, ResultDisposition, ResultSubmission,
-    RoomInfo, RosterAmendment, RosterAmendmentRequest, SessionEvent, StateError, TournamentInfo,
+    ProgressRecord, QbtcpConfig, QbtcpError, QbtcpServer, QbtcpState, ResultDisposition,
+    ResultSubmission, RoomInfo, RosterAmendment, RosterAmendmentRequest, SessionEvent, StateError,
+    TournamentInfo,
 };
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -478,9 +479,12 @@ impl ServerRuntime {
             .clone()
             .ok_or(ServerError::NotRunning)?;
         for session_id in session_ids {
-            server
-                .abandon_session(session_id)
-                .map_err(|error| ServerError::Operation(format!("{error:?}")))?;
+            match server.abandon_session(session_id) {
+                // Administrative cleanup is idempotent. A stale Director mirror must not keep
+                // later, still-live sessions from losing their writer authority.
+                Ok(()) | Err(QbtcpError::NotFound(_)) => {}
+                Err(error) => return Err(ServerError::Operation(format!("{error:?}"))),
+            }
         }
         Ok(())
     }
@@ -2135,6 +2139,55 @@ mod tests {
             .unwrap_or_default()
             .contains("Internal staffing note"));
         assert_eq!(state.paired_room_count(), 0);
+    }
+
+    #[test]
+    fn stale_session_ids_do_not_block_later_live_session_abandonment() {
+        let document = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}],
+            "teams": [
+                {"id": "team-a", "displayName": "North A"},
+                {"id": "team-b", "displayName": "South B"}
+            ],
+            "rounds": [{"id": "round-1", "name": "Round 1", "number": 1, "revision": 1}],
+            "scheduledGames": [{
+                "id": "scheduled-1",
+                "roundId": "round-1",
+                "roomId": "room-101",
+                "leftTeamId": "team-a",
+                "rightTeamId": "team-b",
+                "bye": false,
+                "status": "released",
+                "assignmentRevision": 1
+            }]
+        });
+        let state = Arc::new(DirectorQbtcpState::from_document(Some(&document)));
+        let server = Arc::new(
+            QbtcpServer::new(Arc::clone(&state), QbtcpConfig::default())
+                .expect("QBTCP server is configured"),
+        );
+        let invitation = server
+            .issue_pairing("room-101")
+            .expect("pairing invitation");
+        let paired = server
+            .pair(&invitation.code, Some("room-101"), "test")
+            .expect("room pairing");
+        let session = server
+            .open_session(Some(&paired.token), "scheduled-1", Some("device-1"))
+            .expect("live session");
+
+        let runtime = ServerRuntime::default();
+        runtime.inner.lock().expect("runtime lock").server = Some(Arc::clone(&server));
+
+        runtime
+            .abandon_sessions(&["stale-session".to_owned(), session.session_id.clone()])
+            .expect("a stale mirror is an idempotent cleanup success");
+
+        let sessions = state.snapshot().expect("session snapshot").sessions;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].session_id, session.session_id);
+        assert_eq!(sessions[0].status, qbtcp_server::SessionStatus::Abandoned);
     }
 
     #[test]
