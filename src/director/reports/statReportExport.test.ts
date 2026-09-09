@@ -34,7 +34,7 @@ describe('canonical stat report export', () => {
     ]) {
       expect(index).toContain(`href="${target}"`);
     }
-    expect(index).toContain('Ninety-Six Invitational');
+    expect(index).toContain('Ninety Six Invitational');
     expect(index).not.toContain('<script');
   });
 
