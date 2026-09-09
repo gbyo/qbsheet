@@ -102,7 +102,9 @@ describe('rules-aware report presentation', () => {
     expect(report.answerColumns.find((column) => column.key === 'superpower')?.pointValue).toBe(30);
 
     const standings = buildExtendedStatReportBundle(snapshot()).find((page) => page.name === 'standings.html')!.content;
-    expect(standings).toContain('>Super</th>');
+    expect(standings).toContain('>Super (30)</th>');
+    expect(standings).toContain('>Power (20)</th>');
+    expect(standings).toContain('>Neg (-5)</th>');
     expect(standings).toContain('title="Superpower · 30 pts"');
   });
 
@@ -141,6 +143,13 @@ describe('rules-aware report presentation', () => {
     expect(power.pointValues).toEqual([20, 15]);
     expect(report.pointsNormalization).toBeNull();
     expect(report.mixedDefinitionNote).toContain('stable semantic category');
+
+    const snap = snapshot();
+    snap.presentation = report;
+    const standings = buildExtendedStatReportBundle(snap).find((page) => page.name === 'standings.html')!.content;
+    expect(standings).toContain('>Power (20/15)</th>');
+    expect(standings).toContain('mixed values: 20, 15');
+    expect(standings).toContain('Scoring definitions vary within this report.');
   });
 
   test('points-per-X uses the configured regulation count and refuses unknown denominators', () => {
