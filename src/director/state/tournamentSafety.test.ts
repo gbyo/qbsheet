@@ -19,7 +19,10 @@ function resultState(status: DirectorState['rounds'][number]['status']): Directo
     startedAt: null,
     closedAt: status === 'closed' ? '2026-09-12T14:00:00.000Z' : null,
   });
-  state.scheduledGames.push({ id: 'scheduled-1', roundId: 'round-1' } as DirectorState['scheduledGames'][number]);
+  state.scheduledGames.push({
+    id: 'scheduled-1',
+    roundId: 'round-1',
+  } as DirectorState['scheduledGames'][number]);
   return state;
 }
 

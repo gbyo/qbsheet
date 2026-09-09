@@ -309,6 +309,7 @@ function DirectorAppContent() {
         }}
         onNewTournament={() => setNewTournamentOpen(true)}
         onOpenFile={importFile}
+        onOpenFileError={(message) => announce(errorNotice(message))}
         onManageTournaments={() => setManageOpen(true)}
         onArchiveTournament={() => {
           void controller.archiveTournament().then((archived) => {
@@ -520,7 +521,7 @@ function humanRoundStatus(status: string): string {
 
 /* ------------------------------------------------------------ New tournament */
 
-function NewTournamentDialog({
+export function NewTournamentDialog({
   controller,
   onClose,
   onCreated,
@@ -533,13 +534,15 @@ function NewTournamentDialog({
     initial: emptyTournamentForm(localCalendarDate(), localTimeZone()),
     validate: validateTournamentForm,
     onSubmit: (draft) => {
-      controller.createTournament({
+      const created = controller.createTournament({
         name: draft.name.trim(),
         date: draft.date,
         venue: draft.venue,
         organizer: draft.organizer,
       });
+      if (!created) return false;
       onCreated(draft.name.trim());
+      return true;
     },
   });
 

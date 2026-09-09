@@ -5,10 +5,7 @@ import type { DirectorId, DirectorState } from '../domain';
  * scheduled games early, but those rows are not competitive history until the Director starts the
  * round. Keeping this check outside the UI gives every result-entry path the same lifecycle rule.
  */
-export function releasedRoundResultBlocker(
-  state: DirectorState,
-  scheduledGameId: DirectorId,
-): string | null {
+export function releasedRoundResultBlocker(state: DirectorState, scheduledGameId: DirectorId): string | null {
   const scheduled = state.scheduledGames.find((game) => game.id === scheduledGameId);
   if (!scheduled) return null; // Preserve the base controller's more specific unknown-game error.
   const round = state.rounds.find((entry) => entry.id === scheduled.roundId);

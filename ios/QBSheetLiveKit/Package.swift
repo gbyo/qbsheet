@@ -23,6 +23,7 @@ let package = Package(
     targets: [
         .target(
             name: "QBSheetLiveKit",
+            resources: [.process("PrivacyInfo.xcprivacy")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
