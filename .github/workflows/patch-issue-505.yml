@@ -1,0 +1,76 @@
+name: Apply issue 505 patch
+
+on:
+  push:
+    branches:
+      - fix/505-modaq-qbj-intake
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out QBSheet
+        uses: actions/checkout@v4
+        with:
+          ref: fix/505-modaq-qbj-intake
+          path: qbsheet
+
+      - name: Check out pinned current MODAQ
+        uses: actions/checkout@v4
+        with:
+          repository: alopezlago/MODAQ
+          ref: 78d582e1a1f0b719ea47226ae3bce2a757acd705
+          path: modaq
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Generate fixture with current MODAQ
+        run: |
+          corepack enable
+          cp qbsheet/scripts/generate-issue-505-modaq-fixture.ts modaq/generate-qbsheet-fixture.ts
+          cd modaq
+          yarn install --frozen-lockfile
+          yarn ts-node -r tsconfig-paths/register generate-qbsheet-fixture.ts "$GITHUB_WORKSPACE/qbsheet/packages/tournament-formats/tests/fixtures/current-modaq-match.qbj"
+
+      - name: Apply compatibility patch
+        run: |
+          cd qbsheet
+          python scripts/patch-issue-505.py
+
+      - name: Install QBSheet dependencies
+        run: |
+          cd qbsheet
+          npm ci
+
+      - name: Format changed source and tests
+        run: |
+          cd qbsheet
+          npx prettier --write \
+            packages/tournament-formats/src/qbj.ts \
+            packages/tournament-formats/tests/formats.test.ts \
+            src/director/transfers/parse.ts \
+            src/director/transfers/ingest.ts \
+            src/director/transfers/ingest.test.ts
+
+      - name: Run focused compatibility checks
+        run: |
+          cd qbsheet
+          npm run director:formats:test
+          npx vitest --run src/director/transfers/ingest.test.ts
+          npm run typecheck
+
+      - name: Commit tested patch
+        run: |
+          cd qbsheet
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add first-class MODAQ QBJ result intake"
+          git push origin HEAD:fix/505-modaq-qbj-intake
