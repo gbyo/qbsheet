@@ -235,6 +235,55 @@ describe('what the client puts on the wire', () => {
     expect(calls.map((call) => call.path)).toContain('/api/v1/rooms/room-204/assignment');
   });
 
+  test.each([429, 500, 502, 503])(
+    'a transient %i discovery response is retried by the same client',
+    async (status) => {
+      let discoveryAttempts = 0;
+      const { calls, fetchImpl } = recordingFetch((path) => {
+        if (path === '/qbtcp/v1') {
+          discoveryAttempts += 1;
+          return discoveryAttempts === 1
+            ? { status, body: { error: 'temporary discovery failure' } }
+            : { body: qbtcpDiscovery };
+        }
+        if (path.startsWith('/api/v1')) return { status: 503, body: { error: 'legacy unavailable' } };
+        return { body: assignmentDocument() };
+      });
+      const client = new FruityServerClient('http://control.test', fetchImpl);
+
+      const first = await client.assignment(identity);
+      expect(first.ok).toBe(false);
+      expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+
+      const second = await client.assignment(identity);
+      expect(second.ok).toBe(true);
+      expect(client.isQbtcp).toBe(true);
+      expect(discoveryAttempts).toBe(2);
+      expect(calls.filter((call) => call.path === '/qbtcp/v1')).toHaveLength(2);
+    },
+  );
+
+  test('a malformed successful discovery response is not latched as legacy', async () => {
+    let discoveryAttempts = 0;
+    const { fetchImpl } = recordingFetch((path) => {
+      if (path === '/qbtcp/v1') {
+        discoveryAttempts += 1;
+        return discoveryAttempts === 1 ? { body: { status: 'ok' } } : { body: qbtcpDiscovery };
+      }
+      if (path.startsWith('/api/v1')) return { status: 404, body: { error: 'Not found' } };
+      return { body: assignmentDocument() };
+    });
+    const client = new FruityServerClient('http://control.test', fetchImpl);
+
+    await client.assignment(identity);
+    expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+
+    const second = await client.assignment(identity);
+    expect(second.ok).toBe(true);
+    expect(client.isQbtcp).toBe(true);
+    expect(discoveryAttempts).toBe(2);
+  });
+
   test('help request uses the room-scoped QBTCP envelope and returns normalized state', async () => {
     const { calls, fetchImpl } = qbtcpServer({
       '/qbtcp/v1/help': {

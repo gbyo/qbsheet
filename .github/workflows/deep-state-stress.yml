@@ -1,38 +1,47 @@
-name: Apply fix 520
+name: Deep state stress
 
 on:
-  push:
-    branches:
-      - fix/520-qbtcp-discovery-retry
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: Generated game seeds (minimum 64)
+        required: true
+        default: '5000'
+        type: string
+      actions:
+        description: Maximum actions per generated game (minimum 24)
+        required: true
+        default: '120'
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: deep-state-stress
+  cancel-in-progress: false
 
 jobs:
-  patch:
+  stress:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      QBSHEET_STRESS_SEEDS: ${{ inputs.seeds || '5000' }}
+      QBSHEET_STRESS_ACTIONS: ${{ inputs.actions || '120' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
         with:
-          ref: fix/520-qbtcp-discovery-retry
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          node-version: 24
           cache: npm
-      - run: npm ci
-      - run: python scripts/tmp-fix-520.py
-      - run: npx prettier --write src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts
-      - run: npx vitest --run tests/Qbtcp.test.ts
-      - run: npm run typecheck
-      - name: Commit verified fix
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout 0ceab2ce812b6d35e6c315c8d7bf8f57a55a8f1e -- .github/workflows/deep-state-stress.yml
-          git rm -f .github/workflows/fix-520.yml scripts/tmp-fix-520.py
-          git add src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts .github/workflows/deep-state-stress.yml
-          git commit -m 'fix: retry transient QBTCP discovery failures (#520)'
-          git push origin HEAD:fix/520-qbtcp-discovery-retry
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deep state stress suite
+        run: npm run test:stress

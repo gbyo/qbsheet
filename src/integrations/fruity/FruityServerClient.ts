@@ -354,18 +354,31 @@ export default class FruityServerClient {
    */
   async discover(): Promise<IQbtcpDiscovery | null> {
     const result = await this.request<unknown>(qbtcpRoutes.discovery);
-    this.discovery = result.ok ? readDiscovery(result.value) : null;
-    const routes = routesFor(this.discovery);
-    this.adapter =
-      routes === qbtcpRoutes
-        ? new QbtcpAdapter(this.requestFn, this.discovery as IQbtcpDiscovery)
-        : routes.protocol === 'qbtcp/unsupported'
-          ? new UnsupportedQbtcpAdapter(this.discovery as IQbtcpDiscovery)
-          : new LegacyAdapter(this.requestFn);
-    // Settled only when something answered. A `404` is an answer — it is how a pre-QBTCP server
-    // says so — but nothing answering is not, and latching on it would pin a room to the deprecated
-    // surface for the whole game because its Wi-Fi happened to be out at the moment it started.
-    this.discoveryAttempted = result.ok || result.status !== undefined;
+    const discovery = result.ok ? readDiscovery(result.value) : null;
+    const definitiveLegacy = !result.ok && result.status === 404;
+
+    if (discovery) {
+      this.discovery = discovery;
+      const routes = routesFor(discovery);
+      this.adapter =
+        routes === qbtcpRoutes
+          ? new QbtcpAdapter(this.requestFn, discovery)
+          : routes.protocol === 'qbtcp/unsupported'
+            ? new UnsupportedQbtcpAdapter(discovery)
+            : new LegacyAdapter(this.requestFn);
+      this.discoveryAttempted = true;
+    } else if (definitiveLegacy) {
+      // A missing discovery route is the definitive signal that this is a pre-QBTCP server.
+      this.discovery = null;
+      this.adapter = new LegacyAdapter(this.requestFn);
+      this.discoveryAttempted = true;
+    } else {
+      // A transport failure, retryable HTTP response, or malformed successful body does not identify
+      // a protocol. Keep discovery unresolved so the next operation probes again instead of pinning
+      // this client to the deprecated surface until the scorekeeper reloads.
+      this.discovery = null;
+      this.discoveryAttempted = false;
+    }
     return this.discovery;
   }
 
