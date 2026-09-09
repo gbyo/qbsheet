@@ -529,6 +529,7 @@ function normalizeTournamentRules(value: Record<string, unknown>): TournamentRul
   ) {
     rules.tiebreakers = [...tiebreakers];
   }
+  if (value.tiebreakerCountsStatistically === true) rules.tiebreakerCountsStatistically = true;
   return rules;
 }
 
