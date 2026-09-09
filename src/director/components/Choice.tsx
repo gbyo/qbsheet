@@ -253,7 +253,7 @@ export function ChoiceCards<T extends string>({
         {options.map((option) => (
           <label
             key={option.value}
-            className="director-choice-card"
+            className="director-choice-card director-choice-radio"
             data-selected={value === option.value || undefined}
             data-disabled={option.disabled || undefined}
           >
