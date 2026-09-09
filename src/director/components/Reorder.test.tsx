@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ReorderHandle, useDragReorder } from './Reorder';
@@ -13,8 +14,8 @@ type DirectorTauriConfig = {
 };
 
 function readDirectorTauriConfig(): DirectorTauriConfig {
-  const configUrl = new URL('../../../apps/director/src-tauri/tauri.conf.json', import.meta.url);
-  return JSON.parse(readFileSync(configUrl, 'utf8')) as DirectorTauriConfig;
+  const configPath = resolve(process.cwd(), 'apps/director/src-tauri/tauri.conf.json');
+  return JSON.parse(readFileSync(configPath, 'utf8')) as DirectorTauriConfig;
 }
 
 describe('Director drag reorder', () => {
@@ -30,20 +31,8 @@ describe('Director drag reorder', () => {
       const drag = useDragReorder(onReorder);
       return (
         <>
-          <ReorderHandle
-            label="Round 1"
-            index={0}
-            count={2}
-            onMove={() => {}}
-            {...drag.handlers(0)}
-          />
-          <ReorderHandle
-            label="Round 2"
-            index={1}
-            count={2}
-            onMove={() => {}}
-            {...drag.handlers(1)}
-          />
+          <ReorderHandle label="Round 1" index={0} count={2} onMove={() => {}} {...drag.handlers(0)} />
+          <ReorderHandle label="Round 2" index={1} count={2} onMove={() => {}} {...drag.handlers(1)} />
         </>
       );
     }
