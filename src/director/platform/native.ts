@@ -89,6 +89,8 @@ export interface NativePresenceSnapshot {
 }
 
 export interface NativeServerSnapshot {
+  /** The document currently loaded by the native server, when provided by newer hosts. */
+  tournamentId?: string;
   results: NativeResultSnapshot[];
   progress: NativeProgressSnapshot[];
   presence: NativePresenceSnapshot[];
@@ -243,6 +245,7 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
     return {
       status: 'ok',
       snapshot: {
+        ...(typeof snapshot.tournamentId === 'string' ? { tournamentId: snapshot.tournamentId } : {}),
         results: snapshot.results
           .map(normalizeNativeResult)
           .filter((result): result is NativeResultSnapshot => result !== null),
@@ -261,6 +264,13 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
       message: reason instanceof Error ? reason.message : 'The native server snapshot could not be read.',
     };
   }
+}
+
+/** Retire native scorer authorities before Director settles their scheduled game administratively. */
+export async function abandonNativeQbtcpSessions(sessionIds: string[]): Promise<void> {
+  const native = bridge();
+  if (!native || sessionIds.length === 0) return;
+  await native.invoke('director_abandon_qbtcp_sessions', { sessionIds });
 }
 
 /**

@@ -350,6 +350,30 @@ pub fn director_qbtcp_live_rooms(
         .map_err(CommandError::server)
 }
 
+/// Retire live native QBTCP sessions before Director accepts, forfeits, or cancels their game.
+/// This revokes the scorer writer token so a late final cannot be delivered into a reused room.
+#[tauri::command]
+pub fn director_abandon_qbtcp_sessions(
+    session_ids: Vec<String>,
+    server: State<'_, ServerRuntime>,
+) -> Result<(), CommandError> {
+    let mut session_ids = session_ids
+        .into_iter()
+        .map(|session_id| session_id.trim().to_owned())
+        .filter(|session_id| !session_id.is_empty())
+        .collect::<Vec<_>>();
+    session_ids.sort();
+    session_ids.dedup();
+    if session_ids.is_empty() {
+        return Err(CommandError::dialog(
+            "At least one QBTCP session id is required.",
+        ));
+    }
+    server
+        .abandon_sessions(&session_ids)
+        .map_err(CommandError::server)
+}
+
 #[tauri::command]
 pub fn director_resolve_qbtcp_help(
     help_id: String,

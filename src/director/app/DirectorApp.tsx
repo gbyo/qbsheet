@@ -225,6 +225,7 @@ function DirectorAppContent() {
             onAnnounce={announce}
             nativeServerReady={qbtcpServerStatus?.running ?? false}
             nativeServerAvailable={nativeDirector}
+            qbtcpHealth={controller.qbtcpHealth}
           />
         );
       case 'teams':

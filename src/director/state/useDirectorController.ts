@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   activeTournamentTeams,
+  assignmentEditBlocker,
   closeRound,
   defaultRules,
+  effectiveRoundDeliveryMode,
   emptyDirectorState,
   generateDirectorRound,
   generatePlannedRoundRobinGames,
@@ -23,6 +25,7 @@ import {
   roomAssignmentConflicts,
   roomAssignmentIsValid,
   roomHasUnresolvedWork,
+  qbtcpSessionHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
   packetReuseBlocker,
@@ -54,6 +57,7 @@ import {
   type ProtestScoreAdjustment,
   type ResultSubmission,
   type ScheduledGame,
+  type RoundDeliveryMode,
   type StaffRole,
   type TeamGameScore,
   type TournamentStatus,
@@ -120,6 +124,8 @@ import type { TransferVolume } from '../transfers/ports';
 import {
   readNativeLiveScorerRooms,
   readNativeServerSnapshot,
+  readNativeServerStatus,
+  abandonNativeQbtcpSessions,
   resolveNativeQbtcpHelp,
   isNativeDirector,
   type NativeHelpSnapshot,
@@ -495,12 +501,13 @@ export interface DirectorController {
     packetId?: DirectorId | null;
     manualPairings?: Array<{ leftTeamId: DirectorId; rightTeamId: DirectorId | null }>;
     allowIncomplete?: boolean;
+    deliveryMode?: RoundDeliveryMode;
   }): {
     conflicts: string[];
     generated: boolean;
   };
   prepareRound(roundId: DirectorId): boolean;
-  releaseRound(roundId: DirectorId): boolean;
+  releaseRound(roundId: DirectorId): boolean | Promise<boolean>;
   closeRound(roundId: DirectorId): boolean;
   /**
    * One-action round start: validate, checkpoint, prepare, and release through
@@ -515,9 +522,14 @@ export interface DirectorController {
    * is accepted or deliberately cancelled; otherwise reports what remains.
    */
   finishRound(roundId: DirectorId): FinishRoundResult;
-  cancelScheduledGame(scheduledGameId: DirectorId, reason?: string): boolean;
-  recordForfeit(scheduledGameId: DirectorId, forfeitedTeamId: DirectorId, reason?: string): boolean;
-  addManualResult(input: ManualResultInput): boolean;
+  cancelScheduledGame(scheduledGameId: DirectorId, reason?: string): boolean | Promise<boolean>;
+  recordForfeit(
+    scheduledGameId: DirectorId,
+    forfeitedTeamId: DirectorId,
+    reason?: string,
+  ): boolean | Promise<boolean>;
+  addManualResult(input: ManualResultInput): boolean | Promise<boolean>;
+  setRoundDeliveryMode(roundId: DirectorId, mode: RoundDeliveryMode): boolean;
   associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
   rejectSubmission(submissionId: DirectorId, reason?: string): boolean;
@@ -647,6 +659,197 @@ function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | 
   // whether that answer was the network, a stick, or both.
   recordQbtcpDelivery(draft, roundId);
   return round.name;
+}
+
+function roundDeliveryBlocker(state: DirectorState, roundId: DirectorId): string | null {
+  const round = state.rounds.find((entry) => entry.id === roundId);
+  if (!round) return 'That round is no longer in the tournament workspace.';
+  const mode = effectiveRoundDeliveryMode(state, round);
+  const games = state.scheduledGames.filter(
+    (game) => game.roundId === roundId && !game.bye && game.status !== 'cancelled',
+  );
+  if (mode === 'manual') return null;
+  if (mode === 'usb') {
+    return state.transfers.locations.length > 0
+      ? null
+      : `${round.name} is configured for USB delivery, but no transfer location is configured. Add a USB or folder before starting.`;
+  }
+  const missing = games.filter((game) => game.roomId === null);
+  if (missing.length > 0) {
+    return `${round.name} is configured for electronic QBTCP delivery, but ${missing.length} game(s) have no room assignment. Assign rooms before starting.`;
+  }
+  const roomIds = games.map((game) => game.roomId as DirectorId);
+  const duplicateRoom = roomIds.find((roomId, index) => roomIds.indexOf(roomId) !== index);
+  const invalidRoom = games.find((game) => !roomAssignmentIsValid(state, game.roomId as DirectorId, game.id));
+  const resourceIssue = roomAssignmentConflicts(state, new Set(roomIds))[0];
+  return (
+    resourceIssue?.message ??
+    (duplicateRoom
+      ? 'A room can only host one game in a QBTCP round.'
+      : invalidRoom
+        ? `Room assignment for ${invalidRoom.id} is not operationally available.`
+        : null)
+  );
+}
+
+async function nativeQbtcpRoundBlocker(
+  tournamentId: DirectorId | null,
+  roundName: string,
+): Promise<string | null> {
+  if (!isNativeDirector()) return null;
+  const status = await readNativeServerStatus();
+  if (!status.running) {
+    return `QBTCP is not running. Start the native QBTCP server before releasing ${roundName} to electronic scorekeepers.`;
+  }
+  const read = await readNativeServerSnapshot();
+  if (read.status === 'error') {
+    return `QBTCP sync is unhealthy: ${read.message} Resolve the connection before starting ${roundName}.`;
+  }
+  if (tournamentId && read.snapshot.tournamentId && read.snapshot.tournamentId !== tournamentId) {
+    return 'The native QBTCP server is serving a different tournament document. Restart it from Rooms before starting this round.';
+  }
+  return null;
+}
+
+function assignmentSnapshotBlocker(before: DirectorState, next: DirectorState): string | null {
+  const liveGames = before.qbtcpSessions
+    .filter((session) => session.state !== 'abandoned' && qbtcpSessionHasUnresolvedWork(before, session))
+    .map((session) =>
+      session.matchId
+        ? before.scheduledGames.find((game) => game.id === session.matchId)
+        : before.scheduledGames.find(
+            (game) =>
+              game.roomId === session.roomId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
+          ),
+    )
+    .filter((game): game is ScheduledGame => Boolean(game));
+  for (const game of liveGames) {
+    const projection = (state: DirectorState) => ({
+      scheduled: (() => {
+        const scheduled = state.scheduledGames.find((entry) => entry.id === game.id);
+        return scheduled
+          ? {
+              leftTeamId: scheduled.leftTeamId,
+              rightTeamId: scheduled.rightTeamId,
+              roomId: scheduled.roomId,
+              packetId: scheduled.packetId,
+              assignmentRevision: scheduled.assignmentRevision,
+            }
+          : null;
+      })(),
+      left: state.teams.find((team) => team.id === game.leftTeamId),
+      right: game.rightTeamId ? state.teams.find((team) => team.id === game.rightTeamId) : null,
+      players: state.players
+        .filter((player) => player.teamId === game.leftTeamId || player.teamId === game.rightTeamId)
+        .map(({ id, teamId, name, captain, active, rosterNumber, notes }) => ({
+          id,
+          teamId,
+          name,
+          captain,
+          active,
+          rosterNumber,
+          notes,
+        })),
+      room: game.roomId
+        ? (() => {
+            const room = state.rooms.find((entry) => entry.id === game.roomId);
+            if (!room) return null;
+            const {
+              id,
+              name,
+              building,
+              floor,
+              accessibility,
+              directions,
+              moderatorId,
+              scorekeeperId,
+              equipmentId,
+            } = room;
+            return {
+              id,
+              name,
+              building,
+              floor,
+              accessibility,
+              directions,
+              moderatorId,
+              scorekeeperId,
+              equipmentId,
+            };
+          })()
+        : null,
+      packet:
+        (game.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId)
+          ? (() => {
+              const packet = state.packets.find(
+                (entry) =>
+                  entry.id ===
+                  (game.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId),
+              );
+              if (!packet) return null;
+              const { id, name, tiebreaker, notes } = packet;
+              return { id, name, tiebreaker, notes };
+            })()
+          : null,
+    });
+    if (JSON.stringify(projection(before)) !== JSON.stringify(projection(next))) {
+      return assignmentEditBlocker(before, { kind: 'team', id: game.leftTeamId });
+    }
+  }
+  return null;
+}
+
+function qbtcpSessionBelongsToGame(
+  state: DirectorState,
+  session: DirectorState['qbtcpSessions'][number],
+  scheduledGameId: DirectorId,
+): boolean {
+  if (session.matchId) return session.matchId === scheduledGameId;
+  const target = state.scheduledGames.find((game) => game.id === scheduledGameId);
+  if (!target?.roomId || target.roomId !== session.roomId) return false;
+  const operational = state.scheduledGames.filter(
+    (game) =>
+      !game.bye && game.roomId === session.roomId && ['released', 'live', 'submitted'].includes(game.status),
+  );
+  if (operational.length > 0) {
+    return operational.length === 1 && operational[0].id === scheduledGameId;
+  }
+  const unresolved = state.scheduledGames.filter(
+    (game) => !game.bye && game.roomId === session.roomId && !['accepted', 'cancelled'].includes(game.status),
+  );
+  return unresolved.length === 1 && unresolved[0].id === scheduledGameId;
+}
+
+function qbtcpSessionIdsForGame(state: DirectorState, scheduledGameId: DirectorId): string[] {
+  return state.qbtcpSessions
+    .filter(
+      (session) =>
+        session.state !== 'abandoned' &&
+        qbtcpSessionHasUnresolvedWork(state, session) &&
+        qbtcpSessionBelongsToGame(state, session, scheduledGameId),
+    )
+    .map((session) => session.sessionId);
+}
+
+async function retireQbtcpSessions(sessionIds: string[]): Promise<string | null> {
+  try {
+    await abandonNativeQbtcpSessions(sessionIds);
+    return null;
+  } catch (reason: unknown) {
+    return reason instanceof Error ? reason.message : 'The QBTCP session could not be retired.';
+  }
+}
+
+function abandonQbtcpSessionsForGame(draft: DirectorState, scheduledGameId: DirectorId): void {
+  for (const session of draft.qbtcpSessions.filter((entry) =>
+    qbtcpSessionBelongsToGame(draft, entry, scheduledGameId),
+  )) {
+    session.state = 'abandoned';
+    session.resumable = false;
+    session.resultReceived = false;
+    session.progress = null;
+    session.helpRequestId = null;
+  }
 }
 
 export function useDirectorController(repository = createDirectorRepository()): DirectorController {
@@ -1607,6 +1810,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`School / club “${name}” already exists.`);
         return false;
       }
+      const assignmentBlocker = assignmentEditBlocker(snapshot, { kind: 'organization', id: organizationId });
+      if (assignmentBlocker && Object.keys(changes).length > 0) {
+        setError(assignmentBlocker);
+        return false;
+      }
       return commit((draft) => {
         const organization = draft.organizations.find((entry) => entry.id === organizationId);
         if (!organization) return;
@@ -1679,6 +1887,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       if (target.archived) {
         setError(`Reopen ${target.name} before merging another school or club into it.`);
+        return false;
+      }
+      const assignmentBlocker =
+        assignmentEditBlocker(snapshot, { kind: 'organization', id: sourceOrganizationId }) ??
+        assignmentEditBlocker(snapshot, { kind: 'organization', id: targetOrganizationId });
+      if (assignmentBlocker) {
+        setError(assignmentBlocker);
         return false;
       }
       const reassignedTeamCount = snapshot.teams.filter(
@@ -1952,6 +2167,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      const assignmentBlocker = assignmentEditBlocker(snapshot, { kind: 'team', id: teamId });
+      if (assignmentBlocker && Object.keys(changes).length > 0) {
+        setError(assignmentBlocker);
+        return false;
+      }
       return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
@@ -2214,6 +2434,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`“${name}” is already on this active roster.`);
         return false;
       }
+      const assignmentBlocker = assignmentEditBlocker(snapshot, { kind: 'player', id: playerId });
+      if (assignmentBlocker && Object.keys(changes).length > 0) {
+        setError(assignmentBlocker);
+        return false;
+      }
       return commit((draft) => {
         const player = draft.players.find((entry) => entry.id === playerId);
         if (!player) return;
@@ -2259,6 +2484,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       if (!current.active) {
         setError(`${current.name} is already inactive.`);
+        return false;
+      }
+      const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'player', id: playerId });
+      if (assignmentBlocker) {
+        setError(assignmentBlocker);
         return false;
       }
       return commit((draft) => {
@@ -2486,6 +2716,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
       ) {
         setError(`Room “${name}” already exists.`);
         return false;
+      }
+      const assignmentVisibleChange =
+        (changes.name !== undefined && changes.name.trim() !== current.name) ||
+        (changes.building !== undefined && (changes.building.trim() || undefined) !== current.building) ||
+        (changes.floor !== undefined && (changes.floor.trim() || undefined) !== current.floor) ||
+        (changes.accessibility !== undefined &&
+          (changes.accessibility.trim() || undefined) !== current.accessibility) ||
+        (changes.directions !== undefined &&
+          (changes.directions.trim() || undefined) !== current.directions) ||
+        (changes.moderatorId !== undefined && changes.moderatorId !== current.moderatorId) ||
+        (changes.scorekeeperId !== undefined && changes.scorekeeperId !== current.scorekeeperId) ||
+        (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId);
+      if (assignmentVisibleChange) {
+        const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'room', id: roomId });
+        if (assignmentBlocker) {
+          setError(assignmentBlocker);
+          return false;
+        }
       }
       return commit((draft) => {
         const room = draft.rooms.find((entry) => entry.id === roomId);
@@ -2810,6 +3058,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         )
       ) {
         setError(`Packet “${name}” already exists.`);
+        return false;
+      }
+      const assignmentBlocker = assignmentEditBlocker(snapshot, { kind: 'packet', id: packetId });
+      if (assignmentBlocker && Object.keys(changes).length > 0) {
+        setError(assignmentBlocker);
         return false;
       }
       return commit((draft) => {
@@ -3847,6 +4100,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         packetId?: DirectorId | null;
         manualPairings?: Array<{ leftTeamId: DirectorId; rightTeamId: DirectorId | null }>;
         allowIncomplete?: boolean;
+        deliveryMode?: RoundDeliveryMode;
       } = {},
     ) => {
       const snapshot = stateRef.current;
@@ -3965,7 +4219,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const releaseRound = useCallback(
-    (roundId: DirectorId): boolean => {
+    (roundId: DirectorId): boolean | Promise<boolean> => {
       const snapshot = stateRef.current;
       const round = snapshot.rounds.find((entry) => entry.id === roundId);
       if (!round || round.status !== 'prepared') {
@@ -3973,30 +4227,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
-      const activeGames = games.filter((game) => !game.bye && game.status !== 'cancelled');
-      const roomIds = activeGames.map((game) => game.roomId);
-      const duplicateRoom = roomIds.filter((roomId, index) => roomId && roomIds.indexOf(roomId) !== index)[0];
-      const invalidRoom = activeGames.find((game) => {
-        if (!game.roomId) return true;
-        const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-        return !room || !roomAssignmentIsValid(snapshot, game.roomId, game.id);
-      });
-      const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
-      const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
-      if (
-        !roundScheduleIsValid(snapshot, roundId) ||
-        games.length === 0 ||
-        roomIds.some((roomId) => roomId === null) ||
-        duplicateRoom ||
-        invalidRoom ||
-        resourceIssues.length > 0
-      ) {
-        setError(
-          resourceIssues[0]?.message ??
-            (duplicateRoom
-              ? 'A room can only host one game in a round.'
-              : 'This round cannot be released until every game has a valid matchup and available room.'),
-        );
+      if (!roundScheduleIsValid(snapshot, roundId) || games.length === 0) {
+        setError('This round cannot be released until every game has a valid matchup.');
         return false;
       }
       const packetBlocker = packetReuseBlocker(snapshot, roundId);
@@ -4009,8 +4241,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(retiredBlocker);
         return false;
       }
-      return commit((draft) => {
-        applyRoundRelease(draft, roundId);
+      const deliveryBlocker = roundDeliveryBlocker(snapshot, roundId);
+      if (deliveryBlocker) {
+        setError(deliveryBlocker);
+        return false;
+      }
+      const release = (): boolean =>
+        commit((draft) => {
+          applyRoundRelease(draft, roundId);
+        });
+      if (effectiveRoundDeliveryMode(snapshot, round) !== 'qbtcp' || !isNativeDirector()) return release();
+      return nativeQbtcpRoundBlocker(snapshot.tournament?.id ?? null, round.name).then((blocker) => {
+        if (blocker) {
+          setError(blocker);
+          return false;
+        }
+        return release();
       });
     },
     [commit],
@@ -4091,7 +4337,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const cancelScheduledGame = useCallback(
-    (scheduledGameId: DirectorId, reason = 'Cancelled by director'): boolean => {
+    (scheduledGameId: DirectorId, reason = 'Cancelled by director'): boolean | Promise<boolean> => {
       const snapshot = stateRef.current;
       const scheduled = snapshot.scheduledGames.find((game) => game.id === scheduledGameId);
       if (!scheduled) {
@@ -4119,44 +4365,57 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const normalizedReason = reason.trim() || 'Cancelled by director';
-      return commit((draft) => {
-        const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
-        if (!target || target.status === 'cancelled' || target.status === 'accepted') return;
-        target.status = 'cancelled';
-        for (const game of draft.games.filter((entry) => entry.scheduledGameId === scheduledGameId)) {
-          if (game.status !== 'accepted' && game.status !== 'forfeit') {
-            game.status = 'cancelled';
-            game.note = [game.note, `Scheduled game cancelled: ${normalizedReason}`]
-              .filter(Boolean)
-              .join(' · ');
-          }
-          for (const submission of draft.submissions.filter((entry) => entry.gameId === game.id)) {
-            if (submission.status === 'received' || submission.status === 'review') {
-              submission.status = 'rejected';
-              submission.reason = `Scheduled game cancelled: ${normalizedReason}`;
+      const settle = (): boolean =>
+        commit((draft) => {
+          const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+          if (!target || target.status === 'cancelled' || target.status === 'accepted') return;
+          abandonQbtcpSessionsForGame(draft, scheduledGameId);
+          target.status = 'cancelled';
+          for (const game of draft.games.filter((entry) => entry.scheduledGameId === scheduledGameId)) {
+            if (game.status !== 'accepted' && game.status !== 'forfeit') {
+              game.status = 'cancelled';
+              game.note = [game.note, `Scheduled game cancelled: ${normalizedReason}`]
+                .filter(Boolean)
+                .join(' · ');
+            }
+            for (const submission of draft.submissions.filter((entry) => entry.gameId === game.id)) {
+              if (submission.status === 'received' || submission.status === 'review') {
+                submission.status = 'rejected';
+                submission.reason = `Scheduled game cancelled: ${normalizedReason}`;
+              }
             }
           }
-        }
-        const room = target.roomId ? draft.rooms.find((entry) => entry.id === target.roomId) : undefined;
-        if (room?.status === 'finished') room.status = room.available ? 'available' : 'offline';
-        if (room?.status === 'live') markRoomAvailableIfIdle(draft, room.id);
-        const now = isoNow();
-        const auditId = newDirectorId('audit');
-        target.cancellation = {
-          reasonKind: 'manual',
-          reason: normalizedReason,
-          at: now,
-          auditId,
-        };
-        draft.audit.push({
-          id: auditId,
-          at: now,
-          actor: 'Director',
-          type: 'schedule-cancelled',
-          summary: `Cancelled the game between ${target.leftTeamId} and ${target.rightTeamId ?? 'a bye'}.`,
-          entityId: scheduledGameId,
-          details: { reason: normalizedReason, roundId: target.roundId },
+          const room = target.roomId ? draft.rooms.find((entry) => entry.id === target.roomId) : undefined;
+          if (room?.status === 'finished') room.status = room.available ? 'available' : 'offline';
+          if (room?.status === 'live') markRoomAvailableIfIdle(draft, room.id);
+          const now = isoNow();
+          const auditId = newDirectorId('audit');
+          target.cancellation = {
+            reasonKind: 'manual',
+            reason: normalizedReason,
+            at: now,
+            auditId,
+          };
+          draft.audit.push({
+            id: auditId,
+            at: now,
+            actor: 'Director',
+            type: 'schedule-cancelled',
+            summary: `Cancelled the game between ${target.leftTeamId} and ${target.rightTeamId ?? 'a bye'}.`,
+            entityId: scheduledGameId,
+            details: { reason: normalizedReason, roundId: target.roundId },
+          });
         });
+      const sessionIds = qbtcpSessionIdsForGame(snapshot, scheduledGameId);
+      if (sessionIds.length === 0 || !isNativeDirector()) return settle();
+      return retireQbtcpSessions(sessionIds).then((error) => {
+        if (error) {
+          setError(
+            `The game was not cancelled because its live QBTCP session could not be retired: ${error}`,
+          );
+          return false;
+        }
+        return settle();
       });
     },
     [commit],
@@ -4167,7 +4426,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       scheduledGameId: DirectorId,
       forfeitedTeamId: DirectorId,
       reason = 'Forfeit recorded by director',
-    ): boolean => {
+    ): boolean | Promise<boolean> => {
       const snapshot = stateRef.current;
       const scheduled = snapshot.scheduledGames.find((game) => game.id === scheduledGameId);
       if (!scheduled || scheduled.bye || !scheduled.rightTeamId) {
@@ -4187,87 +4446,94 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       const normalizedReason = reason.trim() || 'Forfeit recorded by director';
-      return commit((draft) => {
-        const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
-        if (!target || target.bye || !target.rightTeamId) return;
-        if (![target.leftTeamId, target.rightTeamId].includes(forfeitedTeamId)) return;
-        if (target.status === 'cancelled' || target.status === 'accepted') return;
-        if (canonicalAcceptedGame(draft, target.id)) return;
+      const settle = (): boolean =>
+        commit((draft) => {
+          const target = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+          if (!target || target.bye || !target.rightTeamId) return;
+          if (![target.leftTeamId, target.rightTeamId].includes(forfeitedTeamId)) return;
+          if (target.status === 'cancelled' || target.status === 'accepted') return;
+          if (canonicalAcceptedGame(draft, target.id)) return;
 
-        const now = isoNow();
-        const packetId = effectivePacketId(draft, target);
-        for (const game of draft.games.filter((entry) => entry.scheduledGameId === target.id)) {
-          if (game.status !== 'accepted' && game.status !== 'forfeit') {
-            game.status = 'rejected';
-            game.note = [game.note, `Replaced by administrative forfeit: ${normalizedReason}`]
-              .filter(Boolean)
-              .join(' · ');
-          }
-          for (const submission of draft.submissions.filter((entry) => entry.gameId === game.id)) {
-            if (submission.status === 'received' || submission.status === 'review') {
-              submission.status = 'rejected';
-              submission.reason = `Replaced by administrative forfeit: ${normalizedReason}`;
+          const now = isoNow();
+          abandonQbtcpSessionsForGame(draft, scheduledGameId);
+          const packetId = effectivePacketId(draft, target);
+          for (const game of draft.games.filter((entry) => entry.scheduledGameId === target.id)) {
+            if (game.status !== 'accepted' && game.status !== 'forfeit') {
+              game.status = 'rejected';
+              game.note = [game.note, `Replaced by administrative forfeit: ${normalizedReason}`]
+                .filter(Boolean)
+                .join(' · ');
+            }
+            for (const submission of draft.submissions.filter((entry) => entry.gameId === game.id)) {
+              if (submission.status === 'received' || submission.status === 'review') {
+                submission.status = 'rejected';
+                submission.reason = `Replaced by administrative forfeit: ${normalizedReason}`;
+              }
             }
           }
-        }
-        const scores = [zeroGameScore(target.leftTeamId), zeroGameScore(target.rightTeamId)];
-        const gameId = newDirectorId('game-record');
-        const game: GameRecord = {
-          id: gameId,
-          scheduledGameId: target.id,
-          roundId: target.roundId,
-          packetId,
-          status: 'forfeit',
-          forfeitedTeamId,
-          scores,
-          playerStats: [],
-          source: 'manual',
-          detailedStats: 'unknown',
-          finishedAt: now,
-          acceptedAt: now,
-          note: normalizedReason,
-        };
-        draft.games.push(game);
-        target.status = 'accepted';
-        markPacketUsed(draft, target.id, packetId);
-        markRoomFinished(draft, target.roomId);
-        for (const session of draft.qbtcpSessions.filter((entry) => entry.matchId === target.id)) {
-          session.state = 'result-received';
-          session.resumable = false;
-          session.resultReceived = true;
-          session.progress = null;
-        }
-        draft.submissions.push({
-          id: newDirectorId('submission'),
-          gameId,
-          receivedAt: now,
-          fingerprint: fingerprintForScores(scores),
-          status: 'accepted',
-          rawSubmission: {
-            source: 'manual',
-            outcome: 'forfeit',
+          const scores = [zeroGameScore(target.leftTeamId), zeroGameScore(target.rightTeamId)];
+          const gameId = newDirectorId('game-record');
+          const game: GameRecord = {
+            id: gameId,
+            scheduledGameId: target.id,
+            roundId: target.roundId,
+            packetId,
+            status: 'forfeit',
             forfeitedTeamId,
-            reason: normalizedReason,
-          },
-          acceptedBy: operatorDisplayName(loadOperatorProfile()),
-          acceptedAt: now,
+            scores,
+            playerStats: [],
+            source: 'manual',
+            detailedStats: 'unknown',
+            finishedAt: now,
+            acceptedAt: now,
+            note: normalizedReason,
+          };
+          draft.games.push(game);
+          target.status = 'accepted';
+          markPacketUsed(draft, target.id, packetId);
+          markRoomFinished(draft, target.roomId);
+          draft.submissions.push({
+            id: newDirectorId('submission'),
+            gameId,
+            receivedAt: now,
+            fingerprint: fingerprintForScores(scores),
+            status: 'accepted',
+            rawSubmission: {
+              source: 'manual',
+              outcome: 'forfeit',
+              forfeitedTeamId,
+              reason: normalizedReason,
+            },
+            acceptedBy: operatorDisplayName(loadOperatorProfile()),
+            acceptedAt: now,
+          });
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: now,
+            actor: 'Director',
+            type: 'result-accepted',
+            summary: `Recorded a forfeit for ${target.id}.`,
+            entityId: gameId,
+            details: { scheduledGameId: target.id, forfeitedTeamId, reason: normalizedReason },
+          });
         });
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: now,
-          actor: 'Director',
-          type: 'result-accepted',
-          summary: `Recorded a forfeit for ${target.id}.`,
-          entityId: gameId,
-          details: { scheduledGameId: target.id, forfeitedTeamId, reason: normalizedReason },
-        });
+      const sessionIds = qbtcpSessionIdsForGame(snapshot, scheduledGameId);
+      if (sessionIds.length === 0 || !isNativeDirector()) return settle();
+      return retireQbtcpSessions(sessionIds).then((error) => {
+        if (error) {
+          setError(
+            `The forfeit was not recorded because its live QBTCP session could not be retired: ${error}`,
+          );
+          return false;
+        }
+        return settle();
       });
     },
     [commit],
   );
 
   const addManualResult = useCallback(
-    (input: ManualResultInput): boolean => {
+    (input: ManualResultInput): boolean | Promise<boolean> => {
       const snapshot = stateRef.current;
       const scheduled = snapshot.scheduledGames.find((game) => game.id === input.scheduledGameId);
       const playerStats = input.playerStats ?? [];
@@ -4287,50 +4553,63 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
-      return commit((draft) => {
-        const target = draft.scheduledGames.find((game) => game.id === input.scheduledGameId);
-        if (!target || target.bye) return;
-        const gameId = newDirectorId('game-record');
-        const now = isoNow();
-        const packetId = effectivePacketId(draft, target);
-        const game: GameRecord = {
-          id: gameId,
-          scheduledGameId: target.id,
-          roundId: target.roundId,
-          packetId,
-          status: 'accepted',
-          scores: structuredClone(input.scores),
-          playerStats: structuredClone(playerStats),
-          source: 'manual',
-          detailedStats: input.detailedStats ?? (playerStats.length > 0 ? 'incomplete' : 'unknown'),
-          finishedAt: now,
-          acceptedAt: now,
-          note: input.note,
-        };
-        draft.games.push(game);
-        target.status = 'accepted';
-        markPacketUsed(draft, target.id, packetId);
-        markRoomFinished(draft, target.roomId);
-        const submission: ResultSubmission = {
-          id: newDirectorId('submission'),
-          gameId,
-          receivedAt: now,
-          fingerprint: fingerprintForScores(input.scores),
-          status: 'accepted',
-          rawSubmission: { source: 'manual', game: structuredClone(game) },
-          acceptedBy: operatorDisplayName(loadOperatorProfile()),
-          acceptedAt: now,
-        };
-        draft.submissions.push(submission);
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: now,
-          actor: 'Director',
-          type: 'result-accepted',
-          summary: `Accepted a manual result for ${gameId}.`,
-          entityId: gameId,
-          details: { scheduledGameId: target.id, detailedStats: game.detailedStats },
+      const settle = (): boolean =>
+        commit((draft) => {
+          const target = draft.scheduledGames.find((game) => game.id === input.scheduledGameId);
+          if (!target || target.bye) return;
+          abandonQbtcpSessionsForGame(draft, input.scheduledGameId);
+          const gameId = newDirectorId('game-record');
+          const now = isoNow();
+          const packetId = effectivePacketId(draft, target);
+          const game: GameRecord = {
+            id: gameId,
+            scheduledGameId: target.id,
+            roundId: target.roundId,
+            packetId,
+            status: 'accepted',
+            scores: structuredClone(input.scores),
+            playerStats: structuredClone(playerStats),
+            source: 'manual',
+            detailedStats: input.detailedStats ?? (playerStats.length > 0 ? 'incomplete' : 'unknown'),
+            finishedAt: now,
+            acceptedAt: now,
+            note: input.note,
+          };
+          draft.games.push(game);
+          target.status = 'accepted';
+          markPacketUsed(draft, target.id, packetId);
+          markRoomFinished(draft, target.roomId);
+          const submission: ResultSubmission = {
+            id: newDirectorId('submission'),
+            gameId,
+            receivedAt: now,
+            fingerprint: fingerprintForScores(input.scores),
+            status: 'accepted',
+            rawSubmission: { source: 'manual', game: structuredClone(game) },
+            acceptedBy: operatorDisplayName(loadOperatorProfile()),
+            acceptedAt: now,
+          };
+          draft.submissions.push(submission);
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: now,
+            actor: 'Director',
+            type: 'result-accepted',
+            summary: `Accepted a manual result for ${gameId}.`,
+            entityId: gameId,
+            details: { scheduledGameId: target.id, detailedStats: game.detailedStats },
+          });
         });
+      const sessionIds = qbtcpSessionIdsForGame(snapshot, input.scheduledGameId);
+      if (sessionIds.length === 0 || !isNativeDirector()) return settle();
+      return retireQbtcpSessions(sessionIds).then((error) => {
+        if (error) {
+          setError(
+            `The manual result was not accepted because its live QBTCP session could not be retired: ${error}`,
+          );
+          return false;
+        }
+        return settle();
       });
     },
     [commit],
@@ -5286,6 +5565,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         assertWriteAuthority(authority, before);
         await repositoryRef.current.checkpoint(before, reason);
         const next = normalizeDirectorState(value);
+        const assignmentBlocker = assignmentSnapshotBlocker(before, next);
+        if (assignmentBlocker) {
+          setError(assignmentBlocker);
+          return false;
+        }
         next.metadata.lastCheckpointAt = isoNow();
         next.metadata.lastSavedAt = isoNow();
         if (next.live?.settings.enabled) {
@@ -5367,6 +5651,34 @@ export function useDirectorController(repository = createDirectorRepository()): 
       return editTournamentSnapshot(next, `Before changing packet for ${round.name}`);
     },
     [editTournamentSnapshot],
+  );
+
+  const setRoundDeliveryMode = useCallback(
+    (roundId: DirectorId, mode: RoundDeliveryMode): boolean => {
+      const snapshot = stateRef.current;
+      const round = snapshot.rounds.find((entry) => entry.id === roundId);
+      if (!round || round.status === 'released' || round.status === 'closed') {
+        setError('Delivery mode can only be changed before a round is released.');
+        return false;
+      }
+      if (round.deliveryMode === mode) return true;
+      return commit((draft) => {
+        const target = draft.rounds.find((entry) => entry.id === roundId);
+        if (!target || target.status === 'released' || target.status === 'closed') return;
+        target.deliveryMode = mode;
+        target.revision += 1;
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: operatorDisplayName(loadOperatorProfile()),
+          type: 'schedule-repaired',
+          summary: `Set ${target.name} delivery mode to ${mode}.`,
+          entityId: roundId,
+          details: { deliveryMode: mode },
+        });
+      });
+    },
+    [commit],
   );
 
   const assignRoundRooms = useCallback(
@@ -5531,14 +5843,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         game.rightTeamId
           ? `${teamName(game.leftTeamId)} vs ${teamName(game.rightTeamId)}`
           : teamName(game.leftTeamId);
-      // Room-based delivery is in play when every game already carries a room,
-      // a QBTCP session is actively paired, or a transfer location is
-      // configured. A manual tournament uses none of those, so rooms stay
-      // optional even when a room record or a partial assignment exists.
-      const usbConfigured = snapshot.transfers.locations.length > 0;
-      const sessionsPaired = snapshot.qbtcpSessions.some((session) => session.state !== 'abandoned');
-      const fullyAssigned = activeGames.length > 0 && activeGames.every((game) => game.roomId !== null);
-      const roomsInPlay = sessionsPaired || usbConfigured || fullyAssigned;
+      const deliveryMode = effectiveRoundDeliveryMode(snapshot, round);
+      const deliveryBlocker = roundDeliveryBlocker(snapshot, roundId);
+      if (deliveryBlocker) return fail(round.name, deliveryBlocker);
       const describe = (pending: string[], delivered: number, manual: boolean): string => {
         if (manual && pending.length === 0) return `${round.name} started. Results can be entered manually.`;
         if (manual)
@@ -5547,60 +5854,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
             `${pending.length} game${pending.length === 1 ? '' : 's'} still need${pending.length === 1 ? 's' : ''} files.`
           );
         const base = `${round.name} started with ${delivered} room assignment${delivered === 1 ? '' : 's'}.`;
-        const manualGames = !usbConfigured ? activeGames.filter((game) => game.roomId === null).length : 0;
         return pending.length > 0
           ? `${base} ${pending.length} still need${pending.length === 1 ? 's' : ''} a physical handoff.`
-          : manualGames > 0
-            ? `${base} ${manualGames} game${manualGames === 1 ? '' : 's'} can be entered manually.`
-            : base;
+          : base;
       };
       if (round.status === 'released') {
-        const pending = usbConfigured
-          ? activeGames.filter((game) => game.roomId === null).map(gameLabel)
-          : [];
+        const pending =
+          deliveryMode === 'usb' ? activeGames.filter((game) => game.roomId === null).map(gameLabel) : [];
         const delivered = activeGames.filter((game) => game.roomId !== null).length;
         return {
           ok: true,
           roundId,
           roundName: round.name,
           alreadyStarted: true,
-          manual: !roomsInPlay,
+          manual: deliveryMode === 'manual',
           deliveredGames: delivered,
           pendingHandoffs: pending,
-          summary: describe(pending, delivered, !roomsInPlay),
+          summary: describe(pending, delivered, deliveryMode === 'manual'),
         };
-      }
-      if (roomsInPlay) {
-        // Assigned rooms must be usable. A roomless manual game remains valid alongside
-        // QBTCP or USB rooms; one transport never makes the others mandatory.
-        const roomIds = activeGames.map((game) => game.roomId);
-        const duplicateRoom = roomIds.filter(
-          (roomId, index) => roomId && roomIds.indexOf(roomId) !== index,
-        )[0];
-        const invalidRoom = activeGames.find((game) => {
-          if (!game.roomId) return false;
-          const room = snapshot.rooms.find((entry) => entry.id === game.roomId);
-          return !room || !roomAssignmentIsValid(snapshot, game.roomId, game.id);
-        });
-        const roomIdsForRound = new Set(roomIds.filter((roomId): roomId is DirectorId => roomId !== null));
-        const resourceIssues = roomAssignmentConflicts(snapshot, roomIdsForRound);
-        if (
-          !roundScheduleIsValid(snapshot, roundId) ||
-          games.length === 0 ||
-          duplicateRoom ||
-          invalidRoom ||
-          resourceIssues.length > 0
-        ) {
-          return fail(
-            round.name,
-            resourceIssues[0]?.message ??
-              (duplicateRoom
-                ? 'A room can only host one game in a round.'
-                : usbConfigured
-                  ? `${round.name} cannot start until every room game has an available room. Games without a room will need USB files.`
-                  : `${round.name} cannot start until every game has an available room.`),
-          );
-        }
       }
       try {
         await checkpoint(`Before starting ${round.name}`);
@@ -5629,19 +5900,21 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const latestRound = latest.rounds.find((entry) => entry.id === roundId);
       const latestGames = latest.scheduledGames.filter((game) => game.roundId === roundId);
       const latestActiveGames = latestGames.filter((game) => !game.bye && game.status !== 'cancelled');
-      const latestUsbConfigured = latest.transfers.locations.length > 0;
-      const latestSessionsPaired = latest.qbtcpSessions.some((session) => session.state !== 'abandoned');
-      const latestFullyAssigned =
-        latestActiveGames.length > 0 && latestActiveGames.every((game) => game.roomId !== null);
-      const latestRoomsInPlay = latestSessionsPaired || latestUsbConfigured || latestFullyAssigned;
       if (!latestRound || !['planned', 'prepared'].includes(latestRound.status)) {
         return fail(round.name, 'The round changed while starting. Review its current status and try again.');
       }
+      const latestDeliveryMode = effectiveRoundDeliveryMode(latest, latestRound);
+      const latestDeliveryBlocker = roundDeliveryBlocker(latest, roundId);
+      if (latestDeliveryBlocker) return fail(round.name, latestDeliveryBlocker);
       const latestPacketBlocker = packetReuseBlocker(latest, roundId);
       if (latestPacketBlocker) return fail(latestRound.name, latestPacketBlocker);
       const latestRetiredBlocker = retiredPacketBlocker(latest, roundId);
       if (latestRetiredBlocker) return fail(latestRound.name, latestRetiredBlocker);
-      if (latestRoomsInPlay) {
+      if (latestDeliveryMode === 'qbtcp') {
+        const qbtcpBlocker = await nativeQbtcpRoundBlocker(latest.tournament?.id ?? null, latestRound.name);
+        if (qbtcpBlocker) return fail(round.name, qbtcpBlocker);
+      }
+      if (latestDeliveryMode !== 'manual') {
         const latestRoomIds = latestActiveGames.map((game) => game.roomId);
         const duplicateLatestRoom = latestRoomIds.find(
           (roomId, index) => roomId && latestRoomIds.indexOf(roomId) !== index,
@@ -5663,11 +5936,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           );
         }
       }
-      const pending = latestUsbConfigured
-        ? latestActiveGames.filter((game) => game.roomId === null).map(gameLabel)
-        : [];
+      const pending =
+        latestDeliveryMode === 'usb'
+          ? latestActiveGames.filter((game) => game.roomId === null).map(gameLabel)
+          : [];
       const delivered = latestActiveGames.filter((game) => game.roomId !== null).length;
-      const manual = !latestRoomsInPlay;
+      const manual = latestDeliveryMode === 'manual';
       const committed = commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
@@ -5681,7 +5955,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'assignment-released',
           summary: `Started ${releasedName}.`,
           entityId: roundId,
-          details: { manual, deliveredGames: delivered, pendingHandoffs: pending },
+          details: {
+            manual,
+            deliveryMode: latestDeliveryMode,
+            deliveredGames: delivered,
+            pendingHandoffs: pending,
+          },
         });
       });
       if (!committed)
@@ -6480,6 +6759,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     moveDayItem,
     setRoundScheduledStart,
     setRoundPacket,
+    setRoundDeliveryMode,
     assignRoundRooms,
     moveReleasedGame,
     addImportedTeams,
