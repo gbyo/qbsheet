@@ -228,10 +228,7 @@ function sumKnown(
   return sum;
 }
 
-function metricEnabled(
-  games: readonly GameStatsRow[],
-  key: 'superpowers' | 'powers' | 'bonuses',
-): boolean {
+function metricEnabled(games: readonly GameStatsRow[], key: 'superpowers' | 'powers' | 'bonuses'): boolean {
   return games.some((game) => game.roundStatDefinition?.[key] === true);
 }
 
@@ -242,21 +239,20 @@ function completeApplicability(
   return (
     games.length > 0 &&
     games.every(
-      (game) =>
-        game.roundStatDefinition?.[key] !== null &&
-        game.roundStatDefinition?.[key] !== undefined,
+      (game) => game.roundStatDefinition?.[key] !== null && game.roundStatDefinition?.[key] !== undefined,
     )
   );
 }
 
-function everyGameUses(
-  games: readonly GameStatsRow[],
-  key: 'superpowers' | 'powers',
-): boolean {
+function everyGameUses(games: readonly GameStatsRow[], key: 'superpowers' | 'powers'): boolean {
   return games.length > 0 && games.every((game) => game.roundStatDefinition?.[key] === true);
 }
 
-function aggregate(roundId: string | null, roundName: string, results: readonly GameStatsRow[]): AggregateFacts {
+function aggregate(
+  roundId: string | null,
+  roundName: string,
+  results: readonly GameStatsRow[],
+): AggregateFacts {
   const unique = uniqueGames(results);
   const played = unique.filter(contributesScoringStats);
   const excludedForfeits = unique.length - played.length;
@@ -268,8 +264,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
   );
   const tossupsByGame = played.map(tossupsReadForGame);
   const allTossupsKnown =
-    played.length > 0 &&
-    tossupsByGame.every((value): value is number => finite(value) && value > 0);
+    played.length > 0 && tossupsByGame.every((value): value is number => finite(value) && value > 0);
   const totalTossupsRead = allTossupsKnown
     ? (tossupsByGame as number[]).reduce((sum, value) => sum + value, 0)
     : null;
@@ -293,11 +288,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
   const bonusPoints = sumKnown(played, (team) => team.bonusPoints);
   const bonusesHeard = sumKnown(played, (team) => team.bonusesHeard);
   const ppb =
-    hasBonuses &&
-    bonusApplicabilityKnown &&
-    bonusPoints !== null &&
-    bonusesHeard !== null &&
-    bonusesHeard > 0
+    hasBonuses && bonusApplicabilityKnown && bonusPoints !== null && bonusesHeard !== null && bonusesHeard > 0
       ? bonusPoints / bonusesHeard
       : null;
 
@@ -338,23 +329,16 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
       ? bonusPoints / maximumBonusPoints
       : null;
 
-  let normalizedPointsSum: number | null =
-    regulationTossups === null || played.length === 0 ? null : 0;
-  if (normalizedPointsSum !== null) {
+  let normalizedPointsSum: number | null = regulationTossups === null || played.length === 0 ? null : 0;
+  if (normalizedPointsSum !== null && regulationTossups !== null) {
     for (let index = 0; index < played.length; index += 1) {
       const game = played[index]!;
       const tossups = tossupsByGame[index];
-      if (
-        !finite(tossups) ||
-        tossups <= 0 ||
-        !finite(game.teamOnePoints) ||
-        !finite(game.teamTwoPoints)
-      ) {
+      if (!finite(tossups) || tossups <= 0 || !finite(game.teamOnePoints) || !finite(game.teamTwoPoints)) {
         normalizedPointsSum = null;
         break;
       }
-      normalizedPointsSum +=
-        ((game.teamOnePoints + game.teamTwoPoints) / 2) * (regulationTossups / tossups);
+      normalizedPointsSum += ((game.teamOnePoints + game.teamTwoPoints) / 2) * (regulationTossups / tossups);
     }
   }
   const pointsPerTeamPerXTuh =
@@ -383,10 +367,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
       ? superpowers / positiveConversions
       : null;
   const negRatePerXTuh =
-    regulationTossups !== null &&
-    negs !== null &&
-    totalTossupsRead !== null &&
-    totalTossupsRead > 0
+    regulationTossups !== null && negs !== null && totalTossupsRead !== null && totalTossupsRead > 0
       ? (negs / totalTossupsRead) * regulationTossups
       : null;
 
@@ -394,9 +375,7 @@ function aggregate(roundId: string | null, roundName: string, results: readonly 
     const teamRows = allKnownTeamStats(game);
     return (
       teamRows !== null &&
-      teamRows.every((team) =>
-        [team.superpowers, team.powers, team.gets, team.negs].every(finite),
-      )
+      teamRows.every((team) => [team.superpowers, team.powers, team.gets, team.negs].every(finite))
     );
   }).length;
 
@@ -485,8 +464,7 @@ export function deriveRoundStats(games: readonly GameStatsRow[]): RoundStatsRepo
     showBonusConversion:
       aggregates.some((value) => value.bonusConversionApplicable) || total.bonusConversionApplicable,
     hasMixedRegulation:
-      total.row.regulationTossups === null &&
-      aggregates.some(({ row }) => row.regulationTossups !== null),
+      total.row.regulationTossups === null && aggregates.some(({ row }) => row.regulationTossups !== null),
   };
 }
 
