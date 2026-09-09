@@ -1,0 +1,153 @@
+name: Apply fix 520
+
+on:
+  push:
+    branches: [fix/520-qbtcp-discovery-retry]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/520-qbtcp-discovery-retry
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply source and regression-test patch
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          source = Path('src/integrations/fruity/FruityServerClient.ts')
+          text = source.read_text()
+          old = '''  async discover(): Promise<IQbtcpDiscovery | null> {
+            const result = await this.request<unknown>(qbtcpRoutes.discovery);
+            this.discovery = result.ok ? readDiscovery(result.value) : null;
+            const routes = routesFor(this.discovery);
+            this.adapter =
+              routes === qbtcpRoutes
+                ? new QbtcpAdapter(this.requestFn, this.discovery as IQbtcpDiscovery)
+                : routes.protocol === 'qbtcp/unsupported'
+                  ? new UnsupportedQbtcpAdapter(this.discovery as IQbtcpDiscovery)
+                  : new LegacyAdapter(this.requestFn);
+            // Settled only when something answered. A `404` is an answer — it is how a pre-QBTCP server
+            // says so — but nothing answering is not, and latching on it would pin a room to the deprecated
+            // surface for the whole game because its Wi-Fi happened to be out at the moment it started.
+            this.discoveryAttempted = result.ok || result.status !== undefined;
+            return this.discovery;
+          }
+          '''.replace('          ', '')
+          new = '''  async discover(): Promise<IQbtcpDiscovery | null> {
+            const result = await this.request<unknown>(qbtcpRoutes.discovery);
+            const discovery = result.ok ? readDiscovery(result.value) : null;
+            const definitiveLegacy = !result.ok && result.status === 404;
+
+            if (discovery) {
+              this.discovery = discovery;
+              const routes = routesFor(discovery);
+              this.adapter =
+                routes === qbtcpRoutes
+                  ? new QbtcpAdapter(this.requestFn, discovery)
+                  : routes.protocol === 'qbtcp/unsupported'
+                    ? new UnsupportedQbtcpAdapter(discovery)
+                    : new LegacyAdapter(this.requestFn);
+              this.discoveryAttempted = true;
+            } else if (definitiveLegacy) {
+              // A missing discovery route is the one definitive signal that this is a pre-QBTCP server.
+              this.discovery = null;
+              this.adapter = new LegacyAdapter(this.requestFn);
+              this.discoveryAttempted = true;
+            } else {
+              // Transport failures, retryable HTTP responses, and malformed successful bodies do not
+              // identify a protocol. Keep discovery unresolved so the next operation probes again rather
+              // than pinning this client to the deprecated surface until the scorekeeper reloads.
+              this.discovery = null;
+              this.discoveryAttempted = false;
+            }
+            return this.discovery;
+          }
+          '''.replace('          ', '')
+          if old not in text:
+              raise SystemExit('FruityServerClient discovery block did not match expected main revision')
+          source.write_text(text.replace(old, new, 1))
+
+          tests = Path('tests/Qbtcp.test.ts')
+          text = tests.read_text()
+          anchor = "  test('help request uses the room-scoped QBTCP envelope and returns normalized state', async () => {\n"
+          addition = '''  test.each([429, 500, 502, 503])(
+            'a transient %i discovery response is retried by the same client',
+            async (status) => {
+              let discoveryAttempts = 0;
+              const { calls, fetchImpl } = recordingFetch((path) => {
+                if (path === '/qbtcp/v1') {
+                  discoveryAttempts += 1;
+                  return discoveryAttempts === 1
+                    ? { status, body: { error: 'temporary discovery failure' } }
+                    : { body: qbtcpDiscovery };
+                }
+                if (path === '/qbtcp/v1/assignment') return { body: assignmentDocument() };
+                if (path.startsWith('/api/v1')) return { status: 503, body: { error: 'legacy unavailable' } };
+                return { body: {} };
+              });
+              const client = new FruityServerClient('http://control.test', fetchImpl);
+
+              const first = await client.assignment(identity);
+              expect(first.ok).toBe(false);
+              expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+
+              const second = await client.assignment(identity);
+              expect(second.ok).toBe(true);
+              expect(client.isQbtcp).toBe(true);
+              expect(discoveryAttempts).toBe(2);
+              expect(calls.filter((call) => call.path === '/qbtcp/v1')).toHaveLength(2);
+              expect(calls.map((call) => call.path)).toContain('/qbtcp/v1/assignment');
+            },
+          );
+
+          test('a malformed successful discovery response is not latched as legacy', async () => {
+            let discoveryAttempts = 0;
+            const { fetchImpl } = recordingFetch((path) => {
+              if (path === '/qbtcp/v1') {
+                discoveryAttempts += 1;
+                return discoveryAttempts === 1 ? { body: { status: 'ok' } } : { body: qbtcpDiscovery };
+              }
+              if (path === '/qbtcp/v1/assignment') return { body: assignmentDocument() };
+              if (path.startsWith('/api/v1')) return { status: 404, body: { error: 'Not found' } };
+              return { body: {} };
+            });
+            const client = new FruityServerClient('http://control.test', fetchImpl);
+
+            await client.assignment(identity);
+            expect(client.describeProtocol()).toEqual({ protocol: 'unknown' });
+
+            const second = await client.assignment(identity);
+            expect(second.ok).toBe(true);
+            expect(client.isQbtcp).toBe(true);
+            expect(discoveryAttempts).toBe(2);
+          });
+
+'''.replace('          ', '')
+          if anchor not in text:
+              raise SystemExit('Qbtcp test insertion point did not match expected main revision')
+          tests.write_text(text.replace(anchor, addition + anchor, 1))
+          PY
+      - run: npx prettier --write src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts
+      - run: npx vitest --run tests/Qbtcp.test.ts
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-520.yml
+          git add src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts
+          git commit -m 'fix: retry transient QBTCP discovery failures (#520)'
+          git push origin HEAD:fix/520-qbtcp-discovery-retry
