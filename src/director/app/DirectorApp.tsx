@@ -309,6 +309,7 @@ function DirectorAppContent() {
         }}
         onNewTournament={() => setNewTournamentOpen(true)}
         onOpenFile={importFile}
+        onOpenFileError={(message) => announce(errorNotice(message))}
         onManageTournaments={() => setManageOpen(true)}
         onArchiveTournament={() => {
           void controller.archiveTournament().then((archived) => {
