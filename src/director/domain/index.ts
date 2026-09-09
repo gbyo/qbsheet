@@ -10,4 +10,5 @@ export * from './scheduling';
 export * from './scoringPresets';
 export * from './scheduleRecovery';
 export * from './stats';
+export * from './gameDefinitions';
 export * from './validation';

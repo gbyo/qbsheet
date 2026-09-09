@@ -26,6 +26,7 @@
  * builder provably cannot leak" is a property of today's builder.
  */
 import {
+  definitionRulesFor,
   orderDayItems,
   type DirectorId,
   type DirectorState,
@@ -357,6 +358,16 @@ export function buildAssignment(
     );
   }
   const rulesId = `scoring-rules-${tournament.id}`;
+  // An issued game is rebuilt from its pinned snapshot, never from whatever the tournament
+  // defaults have become since. A game whose refs name a missing snapshot fails closed here
+  // rather than silently adopting current rules.
+  const rules = definitionRulesFor(state, scheduled.id);
+  if (!rules) {
+    return fail(
+      'That game names an issued definition that is no longer present. ' +
+        'Reissue the game before building its assignment.',
+    );
+  }
   const warnings: string[] = [];
   if (!room) warnings.push('This game has no room; the assignment carries no room name.');
   if (state.players.filter((player) => player.teamId === scheduled.leftTeamId).length === 0)
@@ -377,7 +388,7 @@ export function buildAssignment(
       assignment_revision: scheduled.assignmentRevision > 0 ? scheduled.assignmentRevision : 1,
       ...(room ? { room_id: room.id } : {}),
       ...(options.handoffInstruction ? { handoff_instruction: options.handoffInstruction } : {}),
-      scorekeeper: { timed: tournament.rules.timed },
+      scorekeeper: { timed: rules.timed },
     },
   };
 
@@ -413,7 +424,7 @@ export function buildAssignment(
         ],
         phases: [{ $ref: phaseObject.id }],
       },
-      scoringRulesObject(tournament.rules, rulesId),
+      scoringRulesObject(rules, rulesId),
       {
         type: 'Registration',
         id: `registration-${scheduled.leftTeamId}`,

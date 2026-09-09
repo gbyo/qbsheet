@@ -12,6 +12,7 @@
  * this subsystem's authority.
  */
 import { isoNow, newDirectorId, type DirectorId, type DirectorState } from '../domain/model';
+import { pinIssuedDefinitions } from '../domain/gameDefinitions';
 import {
   alreadySeen,
   assessIncomingDocument,
@@ -242,6 +243,14 @@ export interface RecordPreparedInput {
  */
 export function recordPreparedAssignments(draft: DirectorState, input: RecordPreparedInput): void {
   const now = isoNow();
+  // The files in this report just escaped Director, so their games are issued now: pin the
+  // definition each file was cut from. The draft is unchanged since the build, so the pinned
+  // truth always matches the escaped bytes.
+  pinIssuedDefinitions(
+    draft,
+    input.report.written.map((written) => written.assignment.scheduledGameId),
+    now,
+  );
   for (const written of input.report.written) {
     const transfer: AssignmentTransfer = {
       id: newDirectorId('assignment-transfer'),
@@ -313,6 +322,13 @@ export function recordQbtcpDelivery(draft: DirectorState, roundId: DirectorId): 
   const now = isoNow();
   const games = draft.scheduledGames.filter(
     (game) => game.roundId === roundId && !game.bye && game.status !== 'cancelled',
+  );
+  // Delivery over QBTCP issues the same truth a file would: pin every delivered game so the
+  // native projection and any later file export rebuild from the snapshot, not live defaults.
+  pinIssuedDefinitions(
+    draft,
+    games.filter((game) => game.rightTeamId).map((game) => game.id),
+    now,
   );
   for (const game of games) {
     draft.transfers.assignments.push({

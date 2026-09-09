@@ -1752,6 +1752,54 @@ fn assignments_from_document(document: Option<&Value>) -> Vec<(String, Projected
         .collect()
 }
 
+/// Rules pinned at issue time for one scheduled game (#667).
+///
+/// A game whose definition was pinned must be generated from its snapshot, never from whatever
+/// the tournament defaults have become since. An explicit `definitionSnapshotId` reference wins;
+/// otherwise the newest non-superseded revision for the game wins. Returns the snapshot's
+/// stored rules object, which shares the Director camelCase shape `generated_scoring_rules`
+/// already accepts.
+fn snapshot_rules_for<'a>(
+    root: &'a Map<String, Value>,
+    scheduled: &Map<String, Value>,
+) -> Option<&'a Value> {
+    let scheduled_id = string_field(Some(scheduled), "id")?;
+    let definitions = root.get("gameDefinitions")?.as_array()?;
+    if let Some(wanted) = string_field(Some(scheduled), "definitionSnapshotId") {
+        return definitions
+            .iter()
+            .filter_map(Value::as_object)
+            .find(|entry| {
+                string_field(Some(entry), "scheduledGameId").as_deref()
+                    == Some(scheduled_id.as_str())
+                    && string_field(Some(entry), "id").as_deref() == Some(wanted.as_str())
+            })
+            .and_then(|entry| entry.get("rules"));
+    }
+    let mut best: Option<&Map<String, Value>> = None;
+    for entry in definitions.iter().filter_map(Value::as_object) {
+        if string_field(Some(entry), "scheduledGameId").as_deref() != Some(scheduled_id.as_str()) {
+            continue;
+        }
+        if entry
+            .get("supersededById")
+            .and_then(Value::as_str)
+            .is_some()
+        {
+            continue;
+        }
+        let revision = entry.get("revision").and_then(Value::as_u64).unwrap_or(0);
+        let best_revision = best
+            .and_then(|known| known.get("revision"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if best.is_none() || revision > best_revision {
+            best = Some(entry);
+        }
+    }
+    best.and_then(|entry| entry.get("rules"))
+}
+
 fn generated_assignment(
     root: &Map<String, Value>,
     scheduled: &Map<String, Value>,
@@ -1811,8 +1859,12 @@ fn generated_assignment(
         .or_else(|| packet_id.clone());
 
     // Interchange documents keep rules at the root; the native Director state keeps them under
-    // `tournament`. Accept both shapes without guessing a missing timed flag.
-    let rules_value = root.get("rules").or_else(|| tournament.get("rules"));
+    // `tournament`. Accept both shapes without guessing a missing timed flag. A pinned
+    // definition snapshot always wins over either: the issued game keeps the truth it was
+    // issued under no matter how the tournament defaults moved since.
+    let rules_value = snapshot_rules_for(root, scheduled)
+        .or_else(|| root.get("rules"))
+        .or_else(|| tournament.get("rules"));
     let rules = generated_scoring_rules(rules_value, &rules_id);
     let mut qbtcp_extension = json!({
         "version": 1,
@@ -3301,5 +3353,123 @@ mod tests {
         third.stop();
         drop(store);
         cleanup_database(&path);
+    }
+
+    #[test]
+    fn generated_assignment_prefers_pinned_definition_snapshot_rules() {
+        let root = json!({
+            "tournament": {
+                "id": "t-1",
+                "name": "Local Invitational",
+                "rules": {"tossupValue": 10, "tossupCount": 20, "bonusParts": 3}
+            },
+            "teams": [
+                {"id": "team-a", "name": "A"},
+                {"id": "team-b", "name": "B"}
+            ],
+            "gameDefinitions": [
+                {
+                    "id": "def-1",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 1,
+                    "rules": {"tossupValue": 10, "tossupCount": 24, "bonusParts": 3}
+                },
+                {
+                    "id": "def-2",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 2,
+                    "supersededById": "def-3",
+                    "rules": {"tossupValue": 10, "tossupCount": 25, "bonusParts": 3}
+                }
+            ]
+        });
+        let root_map = root.as_object().expect("root object");
+        let scheduled = json!({
+            "id": "scheduled-1",
+            "leftTeamId": "team-a",
+            "rightTeamId": "team-b",
+            "definitionSnapshotId": "def-1"
+        });
+        let round = json!({"id": "round-1", "name": "Round 1", "number": 1, "phaseId": "phase-1"});
+        let assignment = generated_assignment(
+            root_map,
+            scheduled.as_object().expect("scheduled object"),
+            round.as_object().expect("round object"),
+            "room-101",
+        )
+        .expect("assignment builds");
+        let objects = assignment
+            .get("objects")
+            .and_then(Value::as_array)
+            .expect("objects array");
+        let scoring = objects
+            .iter()
+            .find(|object| object.get("type").and_then(Value::as_str) == Some("ScoringRules"))
+            .expect("scoring rules object");
+        // The pinned revision 1 (24 tossups) wins over live tournament defaults (20) and over
+        // the superseded revision 2, which the explicit snapshot id does not name.
+        assert_eq!(
+            scoring
+                .get("regulation_tossup_count")
+                .and_then(Value::as_u64),
+            Some(24)
+        );
+    }
+
+    #[test]
+    fn generated_assignment_uses_newest_live_snapshot_without_explicit_reference() {
+        let root = json!({
+            "tournament": {
+                "id": "t-1",
+                "name": "Local Invitational",
+                "rules": {"tossupValue": 10, "tossupCount": 20, "bonusParts": 3}
+            },
+            "teams": [
+                {"id": "team-a", "name": "A"},
+                {"id": "team-b", "name": "B"}
+            ],
+            "gameDefinitions": [
+                {
+                    "id": "def-1",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 1,
+                    "supersededById": "def-2",
+                    "rules": {"tossupValue": 10, "tossupCount": 24, "bonusParts": 3}
+                },
+                {
+                    "id": "def-2",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 2,
+                    "rules": {"tossupValue": 10, "tossupCount": 26, "bonusParts": 3}
+                }
+            ]
+        });
+        let root_map = root.as_object().expect("root object");
+        let scheduled =
+            json!({"id": "scheduled-1", "leftTeamId": "team-a", "rightTeamId": "team-b"});
+        let round = json!({"id": "round-1", "name": "Round 1", "number": 1, "phaseId": "phase-1"});
+        let assignment = generated_assignment(
+            root_map,
+            scheduled.as_object().expect("scheduled object"),
+            round.as_object().expect("round object"),
+            "room-101",
+        )
+        .expect("assignment builds");
+        let objects = assignment
+            .get("objects")
+            .and_then(Value::as_array)
+            .expect("objects array");
+        let scoring = objects
+            .iter()
+            .find(|object| object.get("type").and_then(Value::as_str) == Some("ScoringRules"))
+            .expect("scoring rules object");
+        // No explicit reference: the newest non-superseded revision (26) wins over revision 1
+        // and over live defaults (20).
+        assert_eq!(
+            scoring
+                .get("regulation_tossup_count")
+                .and_then(Value::as_u64),
+            Some(26)
+        );
     }
 }
