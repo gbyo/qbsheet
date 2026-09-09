@@ -137,8 +137,14 @@ describe('Director tournament-critical regressions', () => {
     act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(false));
     expect(hook.result.current.error).toMatch(/requires 2 rounds/i);
 
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
     act(() =>
-      expect(hook.result.current.generateSchedule({ roundName: 'Swiss round 2' }).generated).toBe(true),
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Swiss round 2', packetId: secondPacket.id })
+          .generated,
+      ).toBe(true),
     );
     await settleRound(hook.result.current.state.rounds[1]!.id);
     expect(hook.result.current.state.phases[0]?.status).toBe('complete');
@@ -284,9 +290,16 @@ describe('Director tournament-critical regressions', () => {
       progress: { tossupsRead: 5, leftScore: 30, rightScore: 10 },
     });
 
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
+
     let secondRoundResult: ReturnType<typeof hook.result.current.generateSchedule>;
     act(() => {
-      secondRoundResult = hook.result.current.generateSchedule({ roundName: 'Round 2' });
+      secondRoundResult = hook.result.current.generateSchedule({
+        roundName: 'Round 2',
+        packetId: secondPacket.id,
+      });
     });
     expect(secondRoundResult!).toMatchObject({ generated: true });
     const secondRound = hook.result.current.state.rounds.at(-1);
@@ -509,8 +522,16 @@ describe('Director tournament-critical regressions', () => {
 
   test('dropping a team closes a released round without losing matchup history and leaves future rounds operable', async () => {
     const hook = await directorWithSetup(4, 1);
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
+
     act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 2', packetId: secondPacket.id }).generated,
+      ).toBe(true),
+    );
     const round = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 1');
     const futureRound = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 2');
     if (!round || !futureRound) throw new Error('test setup did not create both rounds');
@@ -808,7 +829,14 @@ describe('Director tournament-critical regressions', () => {
     expect(hook.result.current.state.phases[0]?.status).toBe('active');
     expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
 
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Final' }).generated).toBe(true));
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const finalPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!finalPacket) throw new Error('test setup did not create a final packet');
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Final', packetId: finalPacket.id }).generated,
+      ).toBe(true),
+    );
     const finalRound = hook.result.current.state.rounds.find((round) => round.id !== semifinalRound.id);
     const final = finalRound
       ? hook.result.current.state.scheduledGames.find((game) => game.roundId === finalRound.id && !game.bye)
