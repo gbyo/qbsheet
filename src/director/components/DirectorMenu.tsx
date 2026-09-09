@@ -105,6 +105,7 @@ export function DirectorMenu({
   const searchRef = useRef('');
   const [search, setSearch] = useState('');
   const [position, setPosition] = useState<FloatingMenuPosition | null>(null);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
@@ -113,7 +114,12 @@ export function DirectorMenu({
   useLayoutEffect(() => {
     const id = listboxRef.current?.id;
     if (id) onListboxId?.(id);
-  }, [onListboxId]);
+  }, [onListboxId, portalRoot]);
+
+  useLayoutEffect(() => {
+    if (!floating) return;
+    setPortalRoot(openerRef.current?.closest<HTMLDialogElement>('dialog') ?? document.body);
+  }, [floating, openerRef]);
 
   useLayoutEffect(() => {
     searchRef.current = search;
@@ -124,7 +130,7 @@ export function DirectorMenu({
   // do not steal focus back — a menu entry that opens a dialog has to be able to hand it over.
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
-  }, []);
+  }, [portalRoot]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -228,6 +234,5 @@ export function DirectorMenu({
       </Command.List>
     </Command>
   );
-  const portalRoot = openerRef.current?.closest<HTMLDialogElement>('dialog') ?? document.body;
-  return floating ? createPortal(menu, portalRoot) : menu;
+  return floating ? (portalRoot ? createPortal(menu, portalRoot) : null) : menu;
 }
