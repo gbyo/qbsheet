@@ -423,7 +423,6 @@ export function buildCanonicalStandingsReport(
   const hasPoolSplit = phases.some((phase) => (poolsByPhase.get(phase.id)?.length ?? 0) > 1);
   const multiStage = phases.length > 1 || hasPoolSplit;
   const overall = buildCanonicalSnapshot(state, { label: 'Overall' }, generatedAt);
-  const teamDetailRanks = Object.fromEntries(overall.teams.map((row) => [row.teamId, row.rank]));
   const built: BuiltSection[] = [];
 
   if (!multiStage) {
@@ -486,7 +485,6 @@ export function buildCanonicalStandingsReport(
     tournament: overall.tournament,
     generatedAt,
     sections: built.map((entry) => entry.section),
-    teamDetailRanks,
     displayRanks,
   };
 }

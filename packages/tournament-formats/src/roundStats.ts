@@ -29,7 +29,7 @@ export interface RoundStatDefinition {
  * every competitively played game in the row. A null is presentation-level
  * `—`; it is never silently replaced by a statistic over the known subset.
  */
-export interface RoundStatsRow {
+export interface RoundReportRow {
   roundId: string | null;
   roundName: string;
   phaseId: string | null;
@@ -62,9 +62,9 @@ export interface RoundStatsRow {
 }
 
 export interface RoundStatsReport {
-  rows: RoundStatsRow[];
+  rows: RoundReportRow[];
   /** Re-derived from all included games, never averaged from the rows above. */
-  total: RoundStatsRow;
+  total: RoundReportRow;
   showPhase: boolean;
   showSuperpowers: boolean;
   showPowers: boolean;
@@ -94,7 +94,7 @@ interface RoundGroup {
 }
 
 interface AggregateFacts {
-  row: RoundStatsRow;
+  row: RoundReportRow;
   hasSuperpowers: boolean;
   hasPowers: boolean;
   hasBonuses: boolean;

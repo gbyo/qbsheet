@@ -1,3 +1,4 @@
+import { reportTeamAnchor } from './reportHtml.js';
 import type { GameStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 
 export type StandingsReportSectionKind = 'final' | 'phase' | 'pool' | 'cumulative';
@@ -40,8 +41,6 @@ export interface CanonicalStandingsReport {
   generatedAt: string;
   sections: StandingsReportSection[];
   finalResults?: StandingsContextGame[];
-  /** Overall report ranks used by teamdetail.html's stable existing anchors. */
-  teamDetailRanks: Record<string, number>;
   /** Canonical competition ranks for unresolved ties; absent means ordinary sequential rank. */
   displayRanks?: Record<string, number>;
 }
@@ -67,10 +66,6 @@ function slugify(value: string): string {
 
 export function standingsGameAnchor(gameId: string): string {
   return `game-${slugify(gameId)}`;
-}
-
-function teamAnchor(teamId: string, rank: number): string {
-  return `team-${rank}-${slugify(teamId)}`;
 }
 
 function recordText(row: TeamStatsRow): string {
@@ -116,12 +111,11 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
   const showAdvancement = section.advancement !== undefined;
   const rows = section.teams
     .map((row) => {
-      const detailRank = report.teamDetailRanks[row.teamId] ?? row.rank;
       const displayRank = report.displayRanks?.[`${section.id}:${row.teamId}`] ?? row.rank;
       return (
         `<tr><td class="num">${displayRank}</td>` +
         `${showCalculated ? `<td class="num">${row.calculatedRank ?? ''}</td>` : ''}` +
-        `<td><a href="teamdetail.html#${teamAnchor(row.teamId, detailRank)}">${escapeHtml(row.teamName)}</a></td>` +
+        `<td><a href="teamdetail.html#${reportTeamAnchor(row)}">${escapeHtml(row.teamName)}</a></td>` +
         `${showClassifications ? `<td>${escapeHtml((row.classifications ?? []).join('; ') || '—')}</td>` : ''}` +
         `<td class="num">${escapeHtml(recordText(row))}</td><td class="num">${(row.winPercentage * 100).toFixed(1)}%</td>` +
         `<td class="num">${row.pointsFor}</td><td class="num">${row.pointsAgainst}</td><td class="num">${row.margin}</td>` +

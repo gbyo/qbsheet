@@ -38,6 +38,18 @@ describe('canonical stat report export', () => {
     expect(index).not.toContain('<script');
   });
 
+  test('every standings team link resolves to a teamdetail section anchor', () => {
+    const files = unzipSync(buildCanonicalStatReport(playedTournament(), generatedAt).bytes);
+    const standings = strFromU8(files['standings.html']!);
+    const teamdetail = strFromU8(files['teamdetail.html']!);
+
+    const linked = [...standings.matchAll(/href="teamdetail\.html#([^"]+)"/g)].map((m) => m[1]);
+    expect(linked.length).toBeGreaterThan(0);
+    for (const anchor of linked) {
+      expect(teamdetail).toContain(`id="${anchor}"`);
+    }
+  });
+
   test('the standalone standings download is exactly the canonical bundle page', () => {
     const state = playedTournament();
     const artifact = buildCanonicalStatReport(state, generatedAt);
@@ -81,7 +93,7 @@ describe('canonical stat report export', () => {
     expect(standings).toContain('Would advance to Playoffs');
     expect(standings).toContain('<th scope="col" class="num">TUH</th>');
     expect(standings).toContain('<th scope="col" class="num">PPTUH</th>');
-    expect(standings).toContain('href="teamdetail.html#team-1-team-a"');
+    expect(standings).toContain('href="teamdetail.html#team-team-a"');
     expect(games).toContain('id="game-game-1"');
   });
 

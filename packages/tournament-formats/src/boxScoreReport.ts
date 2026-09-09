@@ -78,7 +78,7 @@ function gameMeta(game: GameStatsRow, presentation: ReportPresentation): string 
   if (presentation.applicability.stage && game.phaseId) items.push(`Stage: ${reportEscape(game.phaseId)}`);
   if (presentation.applicability.packet && game.packetName)
     items.push(`Packet: ${reportEscape(game.packetName)}`);
-  if (typeof game.tossupsRead === 'number') items.push(`Tossups read: ${game.tossupsRead}`);
+  items.push(`Tossups read: ${typeof game.tossupsRead === 'number' ? game.tossupsRead : '—'}`);
   if (
     presentation.applicability.overtime &&
     typeof game.overtimeTossupsRead === 'number' &&
@@ -96,10 +96,22 @@ function gameMeta(game: GameStatsRow, presentation: ReportPresentation): string 
     items.push(`Forfeit: ${reportEscape(forfeitingName)} forfeited`);
   } else if (game.status === 'forfeit') {
     items.push('Forfeit');
+  } else if (game.winnerId === game.teamOneId || game.winnerId === game.teamTwoId) {
+    const winnerName = game.winnerId === game.teamOneId ? game.teamOneName : game.teamTwoName;
+    items.push(`Winner: ${reportEscape(winnerName)}`);
+  } else if (typeof game.teamOnePoints === 'number' && game.teamOnePoints === game.teamTwoPoints) {
+    items.push('Result: Tie');
   }
   if (game.detail === 'partial') items.push('Partial detailed statistics');
   return items.length > 0 ? `<p class="meta">${items.join(' · ')}</p>` : '';
 }
+
+/**
+ * A box score with this many player lines or fewer fits comfortably on one
+ * printed page, so print CSS keeps it together. Larger box scores may break
+ * across pages rather than leaving huge blank areas.
+ */
+const COMPACT_BOX_SCORE_PLAYER_LINES = 10;
 
 function gameSection(game: GameStatsRow, presentation: ReportPresentation): string {
   const teamStats = game.teamStats ?? [];
@@ -107,8 +119,9 @@ function gameSection(game: GameStatsRow, presentation: ReportPresentation): stri
   const detail = anyDetail
     ? teamStats.map((team) => teamBox(game, team, presentation)).join('')
     : '<p class="detail-note">Detailed statistics unavailable for this result.</p>';
+  const compact = (game.playerStats ?? []).length <= COMPACT_BOX_SCORE_PLAYER_LINES;
   return (
-    `<section class="game" id="${reportGameAnchor(game)}" aria-label="${reportEscape(game.teamOneName)} versus ${reportEscape(game.teamTwoName)}">` +
+    `<section class="game${compact ? ' game-compact' : ''}" id="${reportGameAnchor(game)}" aria-label="${reportEscape(game.teamOneName)} versus ${reportEscape(game.teamTwoName)}">` +
     `<div class="game-header"><h2>${reportEscape(game.roundName ?? 'Game')} · ${reportEscape(game.teamOneName)} vs ${reportEscape(game.teamTwoName)}</h2>` +
     `<p class="score">${reportEscape(game.teamOneName)} ${reportEscape(scoreText(game))} ${reportEscape(game.teamTwoName)}</p>${gameMeta(game, presentation)}</div>` +
     `${detail}</section>`

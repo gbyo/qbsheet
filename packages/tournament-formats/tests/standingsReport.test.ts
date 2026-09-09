@@ -40,7 +40,6 @@ function report(): CanonicalStandingsReport {
   return {
     tournament: { id: 'tournament', name: 'Cavalier <Classic>' },
     generatedAt: '2026-09-09T20:00:00.000Z',
-    teamDetailRanks: { 'team-a': 1, 'team-b': 2 },
     displayRanks: {
       'standings-prelims:team-a': 1,
       'standings-prelims:team-b': 1,
@@ -103,7 +102,8 @@ describe('stage-aware standings report HTML', () => {
     expect(html).toContain('Small School');
     expect(html).toContain('Would advance to Playoffs');
     expect(html).toContain('Unresolved — Tie at the advancement cutoff.');
-    expect(html).toContain('href="teamdetail.html#team-1-team-a"');
+    expect(html).toContain('href="teamdetail.html#team-team-a"');
+    expect(html).not.toContain('#team-1-team-a');
     expect(html).toContain('Finals &amp; placement results');
     expect(html).toContain('Tiebreaker results');
     expect(html).toContain(`games.html#${standingsGameAnchor('championship/1')}`);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import {
-  buildStatReportBundle,
+  buildRoundAwareStatReportBundle,
   deriveRoundStats,
   type GameStatsRow,
   type GameTeamStatsRow,
@@ -306,7 +306,7 @@ describe('deriveRoundStats', () => {
 describe('printable Round Report', () => {
   test('replaces grouped score lists with a linked statistical table and weighted footer', () => {
     const games = standardGames();
-    const pages = buildStatReportBundle(snapshot(games));
+    const pages = buildRoundAwareStatReportBundle(snapshot(games));
     const rounds = pages.find((page) => page.name === 'rounds.html')!.content;
     const scoreboard = pages.find((page) => page.name === 'games.html')!.content;
 
@@ -330,7 +330,7 @@ describe('printable Round Report', () => {
       left: { bonusesHeard: null, bonusPoints: null },
       right: { bonusesHeard: null, bonusPoints: null },
     });
-    const pages = buildStatReportBundle(snapshot([tossupOnly]));
+    const pages = buildRoundAwareStatReportBundle(snapshot([tossupOnly]));
     const rounds = pages.find((page) => page.name === 'rounds.html')!.content;
     expect(rounds).not.toContain('<th scope="col">Stage</th>');
     expect(rounds).not.toContain('>PPB</abbr>');
@@ -342,7 +342,7 @@ describe('printable Round Report', () => {
       left: { powers: null, gets: null, negs: null, bonusesHeard: null, bonusPoints: null },
       right: { powers: null, gets: null, negs: null, bonusesHeard: null, bonusPoints: null },
     });
-    const partialRounds = buildStatReportBundle(snapshot([partial])).find(
+    const partialRounds = buildRoundAwareStatReportBundle(snapshot([partial])).find(
       (page) => page.name === 'rounds.html',
     )!.content;
     expect(partialRounds).toContain('>—</td>');
