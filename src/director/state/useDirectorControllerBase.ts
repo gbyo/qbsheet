@@ -18,7 +18,6 @@ import {
   orderDayItems,
   phaseCanComplete,
   planTeamRestore,
-  tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
   advancementBasisToken,
@@ -40,6 +39,8 @@ import {
   unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
+  applyTournamentStatusTransition,
+  planTournamentStatusTransition,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -1483,52 +1484,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const setTournamentStatus = useCallback(
     (status: TournamentStatus): boolean => {
       const snapshot = stateRef.current;
-      const current = snapshot.tournament;
-      if (!current) {
-        setError('Create a tournament before changing its lifecycle.');
-        return false;
-      }
-      if (current.status === status) return true;
       if (status === 'archived' && liveSetupInFlightRef.current) {
         setError('Wait for QBSheet Live setup to finish before archiving this tournament.');
         return false;
       }
-      if (current.status === 'archived' && status === 'draft') {
-        setError('Use Reopen as draft to make an archived tournament editable.');
-        return false;
-      }
-      const completionBlockers =
-        current.status === 'running' && status === 'complete' ? tournamentCompletionBlockers(snapshot) : [];
-      const valid =
-        (current.status === 'draft' &&
-          status === 'running' &&
-          snapshot.rounds.some((round) => round.status !== 'planned')) ||
-        (current.status === 'running' && status === 'complete' && completionBlockers.length === 0) ||
-        (current.status === 'complete' && status === 'archived') ||
-        (current.status === 'complete' && status === 'running') ||
-        (current.status === 'archived' && status === 'draft');
-      if (!valid) {
-        setError(
-          completionBlockers.length > 0
-            ? `Cannot complete the tournament: ${completionBlockers.join(' ')}`
-            : `Cannot change a ${current.status} tournament to ${status}.`,
-        );
+      const plan = planTournamentStatusTransition(snapshot, status);
+      if (!plan.ok) {
+        setError(plan.message);
         return false;
       }
       return commit((draft) => {
-        if (!draft.tournament) return;
-        const from = draft.tournament.status;
-        draft.tournament.status = status;
-        draft.tournament.updatedAt = isoNow();
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: draft.tournament.updatedAt,
-          actor: 'Director',
-          type: 'tournament-updated',
-          summary: `Tournament lifecycle changed from ${from} to ${status}.`,
-          entityId: draft.tournament.id,
-          details: { from, to: status },
-        });
+        applyTournamentStatusTransition(draft, plan, 'Director');
       });
     },
     [commit],
@@ -1669,14 +1635,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const updateCatalogTournamentStatus = useCallback(
-    async (tournamentId: DirectorId, status: TournamentStatus, summary: string): Promise<boolean> => {
+    async (
+      tournamentId: DirectorId,
+      status: TournamentStatus,
+      reason?: 'explicit-reopen',
+    ): Promise<boolean> => {
       const current = stateRef.current.tournament;
       if (current?.id === tournamentId) {
         return setTournamentStatus(status);
       }
-      const read = repositoryRef.current.readTournament;
-      const saveDocument = repositoryRef.current.saveDocument;
-      if (!read || !saveDocument) {
+      const repository = repositoryRef.current;
+      if (!repository.readTournament || !repository.saveDocument) {
         setError('This storage backend does not support editing inactive tournaments.');
         return false;
       }
@@ -1703,31 +1672,20 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
         await persistenceQueueRef.current;
         assertCatalogClaim();
-        const document = await read(tournamentId);
+        const document = await repository.readTournament(tournamentId);
         if (!document.tournament) throw new Error('The selected catalog document has no tournament.');
         if (document.tournament.status === status) return true;
-        if (document.tournament.status === 'archived' && status !== 'draft') {
-          setError(archivedTournamentReadOnlyMessage);
+        const plan = planTournamentStatusTransition(document, status, {
+          allowArchivedReopen: reason === 'explicit-reopen',
+          ...(reason ? { reason } : {}),
+        });
+        if (!plan.ok) {
+          setError(plan.message);
           return false;
         }
-        const from = document.tournament.status;
-        document.tournament.status = status;
-        document.tournament.updatedAt = isoNow();
-        document.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: operatorDisplayName(loadOperatorProfile()),
-          type: 'tournament-updated',
-          summary,
-          entityId: tournamentId,
-          details: {
-            from,
-            to: status,
-            ...(from === 'archived' && status === 'draft' ? { reason: 'explicit-reopen' } : {}),
-          },
-        });
+        applyTournamentStatusTransition(document, plan, operatorDisplayName(loadOperatorProfile()));
         assertCatalogClaim();
-        await saveDocument(document, false);
+        await repository.saveDocument(document, false);
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
@@ -1745,7 +1703,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!tournamentId) return false;
       const current = stateRef.current.tournament;
       if (current?.id === tournamentId) return setTournamentStatus('archived');
-      return updateCatalogTournamentStatus(tournamentId, 'archived', 'Archived tournament from the catalog.');
+      return updateCatalogTournamentStatus(tournamentId, 'archived');
     },
     [setTournamentStatus, updateCatalogTournamentStatus],
   );
@@ -1755,30 +1713,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!tournamentId) return false;
       const current = stateRef.current.tournament;
       if (current?.id === tournamentId) {
-        if (current.status !== 'archived') {
-          setError('Only an archived tournament can be reopened as a draft.');
+        const plan = planTournamentStatusTransition(stateRef.current, 'draft', {
+          allowArchivedReopen: true,
+          reason: 'explicit-reopen',
+        });
+        if (!plan.ok) {
+          setError(plan.message);
           return false;
         }
-        return commit(
-          (draft) => {
-            if (!draft.tournament) return;
-            const now = isoNow();
-            draft.tournament.status = 'draft';
-            draft.tournament.updatedAt = now;
-            draft.audit.push({
-              id: newDirectorId('audit'),
-              at: now,
-              actor: 'Director',
-              type: 'tournament-updated',
-              summary: 'Reopened tournament as a draft.',
-              entityId: draft.tournament.id,
-              details: { from: 'archived', to: 'draft', reason: 'explicit-reopen' },
-            });
-          },
-          { allowArchivedReopen: true },
-        );
+        return commit((draft) => applyTournamentStatusTransition(draft, plan, 'Director'), {
+          allowArchivedReopen: true,
+        });
       }
-      return updateCatalogTournamentStatus(tournamentId, 'draft', 'Reopened tournament from the catalog.');
+      return updateCatalogTournamentStatus(tournamentId, 'draft', 'explicit-reopen');
     },
     [commit, updateCatalogTournamentStatus],
   );
