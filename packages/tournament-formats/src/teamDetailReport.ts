@@ -118,7 +118,9 @@ function teamSection(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
     `${row.gamesPlayed} games`,
     `${reportPointsMetricValue(row, presentation)} ${reportPointsMetricLabel(presentation)}`,
     ...(presentation.options.showPapg ? [`${row.papg.toFixed(presentation.precision.ppg)} PAPG`] : []),
-    ...(presentation.options.showPointsForAgainstMargin ? [`${row.pointsFor} PF`, `${row.pointsAgainst} PA`, `${row.margin} margin`] : []),
+    ...(presentation.options.showPointsForAgainstMargin
+      ? [`${row.pointsFor} PF`, `${row.pointsAgainst} PA`, `${row.margin} margin`]
+      : []),
     row.tossupsHeardKnown ? `${row.tossupsHeard} TUH` : 'TUH —',
     row.pptuh === null ? 'PPTUH —' : `${row.pptuh.toFixed(presentation.precision.rate)} PPTUH`,
     ...(presentation.applicability.bonuses
@@ -132,7 +134,7 @@ function teamSection(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
     `<p>${reportEscape(summary)}</p>` +
     `${presentation.options.showClassifications && classifications ? `<p class="meta">Classifications: ${reportEscape(classifications)}</p>` : ''}` +
     `<h3>Game-by-game</h3>` +
-    `${games.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">TUH</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}${presentation.applicability.bouncebacks ? '<th scope="col" class="num">Bouncebacks</th>' : ''}${presentation.applicability.packet ? '<th scope="col">Packet</th>' : ''}</tr></thead><tbody>${body}</tbody><tfoot>${totalsRow(row, presentation)}</tfoot></table></div>` : '<p class="meta">No games.</p>'}` +
+    `${games.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">TUH</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}${presentation.applicability.bouncebacks ? '<th scope="col" class="num">Bounceback pts</th>' : ''}${presentation.applicability.packet ? '<th scope="col">Packet</th>' : ''}</tr></thead><tbody>${body}</tbody><tfoot>${totalsRow(row, presentation)}</tfoot></table></div>` : '<p class="meta">No games.</p>'}` +
     `<h3>Roster</h3>${rosterTable(snapshot, row, presentation)}</section>`
   );
 }
