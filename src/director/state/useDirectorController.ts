@@ -791,13 +791,34 @@ function assignmentSnapshotBlocker(before: DirectorState, next: DirectorState): 
   return null;
 }
 
+function qbtcpSessionBelongsToGame(
+  state: DirectorState,
+  session: DirectorState['qbtcpSessions'][number],
+  scheduledGameId: DirectorId,
+): boolean {
+  if (session.matchId) return session.matchId === scheduledGameId;
+  const target = state.scheduledGames.find((game) => game.id === scheduledGameId);
+  if (!target?.roomId || target.roomId !== session.roomId) return false;
+  const operational = state.scheduledGames.filter(
+    (game) =>
+      !game.bye && game.roomId === session.roomId && ['released', 'live', 'submitted'].includes(game.status),
+  );
+  if (operational.length > 0) {
+    return operational.length === 1 && operational[0].id === scheduledGameId;
+  }
+  const unresolved = state.scheduledGames.filter(
+    (game) => !game.bye && game.roomId === session.roomId && !['accepted', 'cancelled'].includes(game.status),
+  );
+  return unresolved.length === 1 && unresolved[0].id === scheduledGameId;
+}
+
 function qbtcpSessionIdsForGame(state: DirectorState, scheduledGameId: DirectorId): string[] {
   return state.qbtcpSessions
     .filter(
       (session) =>
-        session.matchId === scheduledGameId &&
         session.state !== 'abandoned' &&
-        qbtcpSessionHasUnresolvedWork(state, session),
+        qbtcpSessionHasUnresolvedWork(state, session) &&
+        qbtcpSessionBelongsToGame(state, session, scheduledGameId),
     )
     .map((session) => session.sessionId);
 }
@@ -812,7 +833,9 @@ async function retireQbtcpSessions(sessionIds: string[]): Promise<string | null>
 }
 
 function abandonQbtcpSessionsForGame(draft: DirectorState, scheduledGameId: DirectorId): void {
-  for (const session of draft.qbtcpSessions.filter((entry) => entry.matchId === scheduledGameId)) {
+  for (const session of draft.qbtcpSessions.filter((entry) =>
+    qbtcpSessionBelongsToGame(draft, entry, scheduledGameId),
+  )) {
     session.state = 'abandoned';
     session.resumable = false;
     session.resultReceived = false;
@@ -2633,6 +2656,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
       ) {
         setError(`Room “${name}” already exists.`);
         return false;
+      }
+      const assignmentVisibleChange =
+        (changes.name !== undefined && changes.name.trim() !== current.name) ||
+        (changes.building !== undefined && (changes.building.trim() || undefined) !== current.building) ||
+        (changes.floor !== undefined && (changes.floor.trim() || undefined) !== current.floor) ||
+        (changes.accessibility !== undefined &&
+          (changes.accessibility.trim() || undefined) !== current.accessibility) ||
+        (changes.directions !== undefined &&
+          (changes.directions.trim() || undefined) !== current.directions) ||
+        (changes.moderatorId !== undefined && changes.moderatorId !== current.moderatorId) ||
+        (changes.scorekeeperId !== undefined && changes.scorekeeperId !== current.scorekeeperId) ||
+        (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId);
+      if (assignmentVisibleChange) {
+        const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'room', id: roomId });
+        if (assignmentBlocker) {
+          setError(assignmentBlocker);
+          return false;
+        }
       }
       return commit((draft) => {
         const room = draft.rooms.find((entry) => entry.id === roomId);

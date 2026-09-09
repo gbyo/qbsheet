@@ -1914,27 +1914,21 @@ export function effectiveRoundDeliveryMode(
   const round =
     typeof roundOrId === 'string' ? state.rounds.find((entry) => entry.id === roundOrId) : roundOrId;
   if (round?.deliveryMode) return round.deliveryMode;
-  if (round && state.scheduledGames.some((game) => game.roundId === round.id && game.roomId !== null)) {
-    return 'qbtcp';
-  }
-  if (
+
+  const roundGames = round ? state.scheduledGames.filter((game) => game.roundId === round.id) : [];
+  const hasQbtcpActivity =
     state.qbtcpSessions.some(
       (session) =>
         session.state !== 'abandoned' &&
-        state.scheduledGames.some(
-          (game) =>
-            game.roundId === round?.id && (game.id === session.matchId || game.roomId === session.roomId),
-        ),
+        roundGames.some((game) => game.id === session.matchId || game.roomId === session.roomId),
     ) ||
     state.qbtcpHelpRequests.some(
-      (request) =>
-        request.status === 'open' &&
-        state.scheduledGames.some((game) => game.roundId === round?.id && game.roomId === request.roomId),
-    )
-  ) {
-    return 'qbtcp';
-  }
-  return state.transfers.locations.length > 0 ? 'usb' : 'manual';
+      (request) => request.status === 'open' && roundGames.some((game) => game.roomId === request.roomId),
+    );
+  if (hasQbtcpActivity) return 'qbtcp';
+  if (state.transfers.locations.length > 0) return 'usb';
+  if (roundGames.some((game) => game.roomId !== null)) return 'qbtcp';
+  return 'manual';
 }
 
 /**

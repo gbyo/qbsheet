@@ -1324,6 +1324,31 @@ describe('Director integration hardening', () => {
     expect(electronic.hook.result.current.state.rounds[0].status).not.toBe('released');
   });
 
+  test('an explicit USB round can start with partial room assignments without QBTCP', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.generateSchedule({ deliveryMode: 'manual' }).generated).toBe(true);
+    });
+    const roundId = hook.result.current.state.rounds[0].id;
+    act(() => {
+      hook.result.current.addTransferLocation({
+        kind: 'removable-drive',
+        label: 'USB',
+        path: '/mnt/usb',
+      });
+      expect(hook.result.current.setRoundDeliveryMode(roundId, 'usb')).toBe(true);
+    });
+    let result: StartRoundResult | undefined;
+    await act(async () => {
+      result = await hook.result.current.startRound(roundId);
+    });
+    expect(result?.ok).toBe(true);
+    expect(result?.manual).not.toBe(true);
+    expect(result?.pendingHandoffs).toHaveLength(1);
+    expect(result?.summary).toMatch(/handoff/i);
+    expect(hook.result.current.state.rounds[0].status).toBe('released');
+  });
+
   test('an electronic first round cannot start while the native QBTCP server is down', async () => {
     const { hook } = await directorWithSetup(2);
     act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
@@ -1379,7 +1404,6 @@ describe('Director integration hardening', () => {
       {
         roomId: scheduled.roomId,
         sessionId: 'live-session',
-        matchId: scheduled.id,
         deviceId: 'device-1',
         operatorName: 'Scorekeeper',
         state: 'live',
@@ -1496,6 +1520,19 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.teams.find((team) => team.id === teamId)?.displayName).not.toBe(
       'Rebound Team',
     );
+
+    let roomChanged = true;
+    act(() => {
+      roomChanged = hook.result.current.updateRoom(scheduled.roomId!, { name: 'Renamed live room' });
+    });
+    expect(roomChanged).toBe(false);
+    expect(hook.result.current.error).toMatch(/live QBTCP scorer assignment/i);
+
+    let notesChanged = false;
+    act(() => {
+      notesChanged = hook.result.current.updateRoom(scheduled.roomId!, { notes: 'HQ-only note' });
+    });
+    expect(notesChanged).toBe(true);
   });
 
   test('tournament detail updates normalize persisted text and reject blank names', async () => {

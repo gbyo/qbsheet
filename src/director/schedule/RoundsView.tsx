@@ -168,7 +168,7 @@ export function RoundsView({
               variant="primary"
               icon="plus"
               onClick={() => {
-                const result = controller.generateSchedule();
+                const result = controller.generateSchedule({ deliveryMode: 'manual' });
                 onAnnounce(
                   result.generated
                     ? 'Round added at the end of the day.'
@@ -626,6 +626,7 @@ function RoundWorkspaceRow({
           round={round}
           drives={drives}
           transfers={transfers}
+          controller={controller}
           onAnnounce={onAnnounce}
           onClose={() => setUsbOpen(false)}
         />
@@ -727,6 +728,11 @@ function RoundRoomsDialog({
       size="lg"
       onClose={onClose}
       onSubmit={() => {
+        const mode = Object.values(draft).some((roomId) => roomId !== null) ? 'qbtcp' : 'manual';
+        if (!controller.setRoundDeliveryMode(round.id, mode)) {
+          onAnnounce(errorNotice('The round delivery mode could not be changed; review the Director error.'));
+          return;
+        }
         void controller.assignRoundRooms(round.id, draft).then((saved) => {
           if (saved) {
             onAnnounce(`Rooms assigned to ${round.name}.`);
@@ -893,12 +899,14 @@ function RoundUsbDialog({
   round,
   drives,
   transfers,
+  controller,
   onAnnounce,
   onClose,
 }: {
   round: DirectorState['rounds'][number];
   drives: DirectorState['transfers']['locations'];
   transfers: TransfersRuntime;
+  controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
@@ -914,6 +922,10 @@ function RoundUsbDialog({
       onClose={onClose}
       onSubmit={() => {
         if (!driveId) return;
+        if (round.status !== 'released' && !controller.setRoundDeliveryMode(round.id, 'usb')) {
+          onAnnounce(errorNotice('USB delivery could not be selected; review the Director error.'));
+          return;
+        }
         void transfers.prepareTo(driveId, { kind: 'round', roundId: round.id });
         onAnnounce(`${round.name} assignment files are being prepared for USB.`);
         onClose();
