@@ -326,6 +326,7 @@ function completeState(value: Record<string, unknown>): DirectorState {
     pools: arrayOrEmpty(candidate.pools, 'pools'),
     rounds: normalizeRounds(candidate.rounds),
     scheduledGames: normalizeScheduledGames(candidate.scheduledGames),
+    gameDefinitions: normalizeGameDefinitions(candidate.gameDefinitions),
     games: migrateGames(candidate.games),
     submissions: supersedeDuplicateAcceptedSubmissions(candidate.submissions),
     protests: migrateProtests(candidate.protests),
@@ -411,6 +412,35 @@ function normalizeScheduledGames(value: unknown): DirectorState['scheduledGames'
           }
         : {}),
     };
+  });
+}
+
+/**
+ * Normalize persisted definition snapshots (#667). Snapshots are immutable once written, so
+ * normalization only validates addressability and fails closed on corruption: a snapshot that
+ * cannot be resolved by id would otherwise let an issued game silently fall back to current
+ * defaults. Tournaments predating snapshots normalize to an empty history.
+ */
+function normalizeGameDefinitions(value: unknown): DirectorState['gameDefinitions'] {
+  return arrayOfRecords(value === undefined ? [] : value, 'gameDefinitions').map((entry, index) => {
+    const label = `gameDefinitions[${index}]`;
+    const id = stringOrNull(entry.id);
+    const scheduledGameId = stringOrNull(entry.scheduledGameId);
+    const revision = entry.revision;
+    if (
+      !id ||
+      !scheduledGameId ||
+      typeof revision !== 'number' ||
+      !Number.isInteger(revision) ||
+      revision < 1
+    ) {
+      throw new Error(`Director storage contains an invalid ${label} entry.`);
+    }
+    if (!isRecord(entry.rules)) throw new Error(`Director storage contains an invalid ${label} entry.`);
+    if (typeof entry.createdAt !== 'string' || typeof entry.digest !== 'string' || !entry.digest) {
+      throw new Error(`Director storage contains an invalid ${label} entry.`);
+    }
+    return entry as unknown as DirectorState['gameDefinitions'][number];
   });
 }
 

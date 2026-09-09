@@ -438,6 +438,60 @@ export interface ScheduledGame {
   bracketKey?: string;
   /** Provenance for a cancellation, retained so later recovery cannot guess its cause. */
   cancellation?: ScheduledGameCancellation;
+  /**
+   * The issued competitive-definition revision for this game, if any scorer assignment has
+   * escaped Director (file/USB preparation, download/share, QBTCP delivery, or round release).
+   * Absent means unissued: future assignments derive from current tournament defaults.
+   */
+  definitionRevision?: number;
+  /** The snapshot carrying the issued revision's exact competitive semantics. */
+  definitionSnapshotId?: DirectorId | null;
+}
+
+/** One roster line as issued to a scorer: identity and display name, nothing operational. */
+export interface IssuedRosterPlayer {
+  playerId: DirectorId;
+  name: string;
+  captain?: boolean;
+}
+
+/**
+ * An immutable competitive definition issued to a scorer for one scheduled game (#667).
+ *
+ * Once persisted, a snapshot is never edited in place. Tournament defaults may keep changing
+ * for future games, but every transport and every recovery path rebuilds this game's
+ * assignment from its snapshot, so `(scheduledGameId, definitionRevision)` always means the
+ * exact same scoring/procedure semantics. A new revision is created only by explicit reissue,
+ * and previous revisions are retained so a late result from an older artifact is recognized
+ * rather than misread.
+ *
+ * Only competitive fields participate in the digest: room display names, handoff instructions,
+ * tokens, and filesystem paths travel with assignments but never change what a tossup is worth.
+ */
+export interface GameDefinitionSnapshot {
+  id: DirectorId;
+  scheduledGameId: DirectorId;
+  /** 1-based revision within this scheduled game. */
+  revision: number;
+  createdAt: string;
+  /** The exact scoring truth as issued: answer tiers/values, bonus shape, counts, procedure flags. */
+  rules: TournamentRules;
+  roundId: DirectorId;
+  packetId: DirectorId | null;
+  leftTeamId: DirectorId;
+  rightTeamId: DirectorId;
+  /** Active roster as issued; a later roster amendment does not rewrite history. */
+  leftRoster: IssuedRosterPlayer[];
+  rightRoster: IssuedRosterPlayer[];
+  /** The scheduled game's assignmentRevision at issue time, for correlation. */
+  assignmentRevision: number;
+  /** Deterministic digest over the competitive fields above (see `digestGameDefinition`). */
+  digest: string;
+  /**
+   * When set, this revision was superseded by the named revision's explicit reissue. Retained
+   * for late-result recognition; never reused for new assignments.
+   */
+  supersededById?: DirectorId | null;
 }
 
 export interface TeamGameScore {
@@ -557,6 +611,7 @@ export interface AuditEvent {
     | 'roster-amendment'
     | 'qbtcp-help-resolved'
     | 'checkpoint-created'
+    | 'definition-reissued'
     | 'imported'
     | 'exported';
   summary: string;
@@ -642,6 +697,12 @@ export interface DirectorState {
   pools: Pool[];
   rounds: Round[];
   scheduledGames: ScheduledGame[];
+  /**
+   * Immutable issued competitive definitions, one revision history per scheduled game (#667).
+   * Empty for tournaments created before definitions were pinned; absent history means the
+   * game was never issued, never that it shares current defaults.
+   */
+  gameDefinitions: GameDefinitionSnapshot[];
   games: GameRecord[];
   submissions: ResultSubmission[];
   protests: Protest[];
@@ -728,6 +789,7 @@ export function emptyDirectorState(): DirectorState {
     pools: [],
     rounds: [],
     scheduledGames: [],
+    gameDefinitions: [],
     games: [],
     submissions: [],
     protests: [],

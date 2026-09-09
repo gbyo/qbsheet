@@ -18,8 +18,10 @@ import {
   orderDayItems,
   phaseCanComplete,
   planTeamRestore,
+  pinIssuedDefinitions,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  reissueGameDefinition,
   advancementBasisToken,
   roundCloseBlockers,
   roomAssignmentConflicts,
@@ -62,6 +64,7 @@ import {
   type LivePublicationSettings,
   type PlayerGameStat,
   type ProtestScoreAdjustment,
+  type ReissueDefinitionResult,
   type ResultSubmission,
   type ScheduledGame,
   type RoundDeliveryMode,
@@ -560,6 +563,7 @@ export interface DirectorController {
   setPhaseArchived(phaseId: DirectorId, archived: boolean): boolean;
   setPoolArchived(poolId: DirectorId, archived: boolean): boolean;
   updateRules(changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean;
+  reissueGameDefinition(scheduledGameId: DirectorId): ReissueDefinitionResult;
   generateSchedule(options?: {
     seed?: number;
     avoidRematches?: boolean;
@@ -4360,6 +4364,51 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const reissueGameDefinitionAction = useCallback(
+    (scheduledGameId: DirectorId): ReissueDefinitionResult => {
+      // Dry-run on a clone first: commit has no abort, and a failed reissue must not persist.
+      const preview = reissueGameDefinition(
+        structuredClone(stateRef.current),
+        scheduledGameId,
+        'Director',
+        isoNow(),
+      );
+      if (!preview.ok) {
+        setError(preview.reason);
+        return preview;
+      }
+      // Scalar captures: narrowing does not survive closure assignment, so the union
+      // itself is re-read from committed state below.
+      let snapshotId: DirectorId | null = preview.snapshot.id;
+      let created = preview.created;
+      let failure: string | null = null;
+      const committed = commit((draft) => {
+        const outcome = reissueGameDefinition(draft, scheduledGameId, 'Director', isoNow());
+        if (outcome.ok) {
+          snapshotId = outcome.snapshot.id;
+          created = outcome.created;
+        } else {
+          failure = outcome.reason;
+        }
+      });
+      if (!committed) {
+        setError('The reissue could not be saved.');
+        return { ok: false, reason: 'The reissue could not be saved.' };
+      }
+      if (failure !== null) {
+        setError(failure);
+        return { ok: false, reason: failure };
+      }
+      const snapshot = stateRef.current.gameDefinitions.find((entry) => entry.id === snapshotId);
+      if (!snapshot) {
+        setError('The reissue could not be saved.');
+        return { ok: false, reason: 'The reissue could not be saved.' };
+      }
+      return { ok: true, snapshot, created };
+    },
+    [commit],
+  );
+
   const selectPhase = useCallback(
     (phaseId: DirectorId) => {
       const snapshot = stateRef.current;
@@ -4583,6 +4632,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       const release = (): boolean =>
         commit((draft) => {
+          // Release fixes every releasable game's definition even when its transport runs
+          // later: no scorer may ever score a game whose truth can still silently change.
+          pinIssuedDefinitions(
+            draft,
+            draft.scheduledGames
+              .filter(
+                (game) =>
+                  game.roundId === roundId && !game.bye && game.status !== 'cancelled' && game.rightTeamId,
+              )
+              .map((game) => game.id),
+          );
           applyRoundRelease(draft, roundId);
         });
       if (effectiveRoundDeliveryMode(snapshot, round) !== 'qbtcp' || !isNativeDirector()) return release();
@@ -7323,6 +7383,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     setPhaseArchived,
     setPoolArchived,
     updateRules,
+    reissueGameDefinition: reissueGameDefinitionAction,
     generateSchedule,
     prepareRound,
     releaseRound,
