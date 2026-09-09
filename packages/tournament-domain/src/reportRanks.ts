@@ -18,7 +18,13 @@ export function canonicalCompetitionRanks(
   games: readonly GameRecord[],
   tiebreakers?: TournamentRules['tiebreakers'],
 ): Map<DirectorId, number> {
-  const order = tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
+  const order: TournamentRules['tiebreakers'] = tiebreakers ?? [
+    'record',
+    'points',
+    'margin',
+    'powers',
+    'gets',
+  ];
   let groups: TeamStanding[][] = [[...standings]];
 
   for (const key of order) {
@@ -48,7 +54,10 @@ export function canonicalCompetitionRanks(
   );
   const flattened = normalizedGroups.flat();
   const canonical = rankTeamStandings(standings, games, tiebreakers);
-  if (flattened.map((row) => row.teamId).join('\u0000') !== canonical.map((row) => row.teamId).join('\u0000')) {
+  if (
+    flattened.map((row) => row.teamId).join('\u0000') !==
+    canonical.map((row) => row.teamId).join('\u0000')
+  ) {
     throw new Error('Canonical standings tie groups no longer match canonical standings ordering.');
   }
 
