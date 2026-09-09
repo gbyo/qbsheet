@@ -42,7 +42,36 @@ jobs:
               if in_run:
                   print(line[10:] if line.startswith('          ') else line)
           PY
+          sed -i "s/raise SystemExit('Settings General conditional render did not match')/pass/" /tmp/apply-fix.sh
           bash /tmp/apply-fix.sh
+          python <<'PY'
+          from pathlib import Path
+          path = Path('src/director/settings/SettingsView.tsx')
+          text = path.read_text()
+          old = """      {section === 'general' && (
+        <GeneralSettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          operatorProfile={operatorProfile}
+          onSaveOperator={onSaveOperator}
+        />
+      )}
+"""
+          new = """      <div hidden={section !== 'general'} aria-hidden={section !== 'general'}>
+        <GeneralSettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          operatorProfile={operatorProfile}
+          onSaveOperator={onSaveOperator}
+        />
+      </div>
+"""
+          if text.count(old) != 1:
+              raise SystemExit('Settings General structural replacement still did not match')
+          path.write_text(text.replace(old, new, 1))
+          PY
       - name: Format changed TypeScript
         shell: bash
         run: |
