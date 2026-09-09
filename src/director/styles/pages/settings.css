@@ -9,9 +9,7 @@
   align-items: flex-start;
 }
 
-#settings-audit
-  .director-list-item:has(.director-list-main > .director-disclosure)
-  .director-list-main {
+#settings-audit .director-list-item:has(.director-list-main > .director-disclosure) .director-list-main {
   padding-right: 168px;
 }
 
@@ -34,9 +32,7 @@
 }
 
 @media (max-width: 640px) {
-  #settings-audit
-    .director-list-item:has(.director-list-main > .director-disclosure)
-    .director-list-main {
+  #settings-audit .director-list-item:has(.director-list-main > .director-disclosure) .director-list-main {
     padding-right: 0;
   }
 
