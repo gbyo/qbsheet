@@ -88,7 +88,8 @@ describe('Director shell tournament file menu item', () => {
   });
 
   test('forwards native success once and closes the menu', async () => {
-    setNativeInvoke(vi.fn(async () => nativeFile()));
+    const invoke = vi.fn(async () => nativeFile());
+    setNativeInvoke(invoke);
     const { onFile } = renderShell();
 
     fireEvent.click(screen.getByRole('menuitem', { name: 'Open tournament file…' }));
@@ -97,6 +98,12 @@ describe('Director shell tournament file menu item', () => {
     expect(onFile).toHaveBeenCalledWith({
       fileName: 'shell.qbst',
       bytes: new Uint8Array(new TextEncoder().encode('native shell bytes')),
+    });
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', {
+      filters: [
+        { name: 'Accepted files', extensions: ['qbst', 'qbj', 'yft', 'json'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
     });
     expect(screen.queryByRole('menu')).toBeNull();
   });

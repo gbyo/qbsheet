@@ -255,6 +255,7 @@ export function DirectorShell({
                 New tournament…
               </MenuItem>
               <ShellFileMenuItem
+                accept={TOURNAMENT_FILE_ACCEPT}
                 onFile={(file) => {
                   closeMenu();
                   onOpenFile(file);
@@ -423,9 +424,11 @@ export function DirectorShell({
  * otherwise; the operator sees the same entry either way.
  */
 function ShellFileMenuItem({
+  accept,
   onFile,
   onError,
 }: {
+  accept: string;
   onFile: (file: PickedFile) => void;
   onError: (message: string) => void;
 }) {
@@ -446,7 +449,7 @@ function ShellFileMenuItem({
             inputRef.current?.click();
             return;
           }
-          void pickDirectorFiles({ native: true, onPick, onError });
+          void pickDirectorFiles({ native: true, accept, onPick, onError });
         }}
       >
         <span className="director-menu-item-icon" aria-hidden="true">
@@ -457,7 +460,7 @@ function ShellFileMenuItem({
       <input
         ref={inputRef}
         type="file"
-        accept={TOURNAMENT_FILE_ACCEPT}
+        accept={accept}
         className="director-visually-hidden-input"
         tabIndex={-1}
         aria-hidden="true"

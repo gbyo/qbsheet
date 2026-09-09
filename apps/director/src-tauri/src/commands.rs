@@ -98,6 +98,105 @@ pub struct SelectedFile {
     pub byte_length: usize,
 }
 
+const MAX_NATIVE_FILTERS: usize = 8;
+const MAX_NATIVE_FILTER_NAME_LENGTH: usize = 64;
+const MAX_NATIVE_FILTER_EXTENSIONS: usize = 16;
+const MAX_NATIVE_FILTER_EXTENSION_LENGTH: usize = 16;
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeFilePickerFilter {
+    pub name: String,
+    pub extensions: Vec<String>,
+}
+
+fn default_native_file_picker_filters() -> Vec<NativeFilePickerFilter> {
+    vec![
+        NativeFilePickerFilter {
+            name: "QBSheet, QBJ, and portable archive".to_owned(),
+            extensions: vec!["qbst".to_owned(), "qbj".to_owned()],
+        },
+        NativeFilePickerFilter {
+            name: "JSON".to_owned(),
+            extensions: vec!["json".to_owned()],
+        },
+        NativeFilePickerFilter {
+            name: "All files".to_owned(),
+            extensions: vec!["*".to_owned()],
+        },
+    ]
+}
+
+fn normalize_native_filter_extension(extension: &str) -> Option<String> {
+    let extension = extension.trim();
+    let extension = extension.strip_prefix('.').unwrap_or(extension);
+    if extension.is_empty()
+        || extension.len() > MAX_NATIVE_FILTER_EXTENSION_LENGTH
+        || !extension
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        || !extension
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return None;
+    }
+    Some(extension.to_ascii_lowercase())
+}
+
+fn native_file_picker_filters(
+    requested: Option<Vec<NativeFilePickerFilter>>,
+) -> Vec<NativeFilePickerFilter> {
+    let Some(requested) = requested else {
+        return default_native_file_picker_filters();
+    };
+
+    let mut seen_extensions = std::collections::HashSet::new();
+    let mut filters = Vec::new();
+    for filter in requested.into_iter().take(MAX_NATIVE_FILTERS) {
+        let name = filter.name.trim();
+        if name.is_empty()
+            || name.chars().count() > MAX_NATIVE_FILTER_NAME_LENGTH
+            || name.chars().any(char::is_control)
+        {
+            continue;
+        }
+
+        let mut extensions = Vec::new();
+        for extension in filter
+            .extensions
+            .into_iter()
+            .take(MAX_NATIVE_FILTER_EXTENSIONS)
+        {
+            let Some(extension) = normalize_native_filter_extension(&extension) else {
+                if extension.trim() == "*"
+                    && name == "All files"
+                    && seen_extensions.insert("*".to_owned())
+                {
+                    extensions.push("*".to_owned());
+                }
+                continue;
+            };
+            if seen_extensions.insert(extension.clone()) {
+                extensions.push(extension);
+            }
+        }
+        if !extensions.is_empty() {
+            filters.push(NativeFilePickerFilter {
+                name: name.to_owned(),
+                extensions,
+            });
+        }
+    }
+
+    if filters.is_empty() {
+        default_native_file_picker_filters()
+    } else {
+        filters
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedFile {
@@ -471,14 +570,15 @@ pub fn checkpoint_store(
 }
 
 #[tauri::command]
-pub async fn open_tournament_file(app: AppHandle) -> Result<Option<SelectedFile>, CommandError> {
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title("Open QBSheet tournament")
-        .add_filter("QBSheet, QBJ, and portable archive", &["qbst", "qbj"])
-        .add_filter("JSON", &["json"])
-        .add_filter("All files", &["*"]);
+pub async fn open_tournament_file(
+    app: AppHandle,
+    filters: Option<Vec<NativeFilePickerFilter>>,
+) -> Result<Option<SelectedFile>, CommandError> {
+    let mut dialog = app.dialog().file().set_title("Open QBSheet tournament");
+    for filter in native_file_picker_filters(filters) {
+        let extensions: Vec<&str> = filter.extensions.iter().map(String::as_str).collect();
+        dialog = dialog.add_filter(filter.name, &extensions);
+    }
     if let Some(window) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&window);
     }
@@ -834,6 +934,35 @@ mod tests {
         drop(blocker);
         drop(store);
         cleanup(&path);
+    }
+
+    #[test]
+    fn native_filter_request_is_normalized_and_deduplicated() {
+        let filters = native_file_picker_filters(Some(vec![NativeFilePickerFilter {
+            name: " Accepted files ".to_owned(),
+            extensions: vec![".QBST".to_owned(), "qbst".to_owned(), "qbj".to_owned()],
+        }]));
+
+        assert_eq!(
+            filters,
+            vec![NativeFilePickerFilter {
+                name: "Accepted files".to_owned(),
+                extensions: vec!["qbst".to_owned(), "qbj".to_owned()],
+            }]
+        );
+    }
+
+    #[test]
+    fn malformed_or_empty_native_filters_keep_the_existing_defaults() {
+        let expected = default_native_file_picker_filters();
+        assert_eq!(native_file_picker_filters(None), expected);
+        assert_eq!(
+            native_file_picker_filters(Some(vec![NativeFilePickerFilter {
+                name: "".to_owned(),
+                extensions: vec!["*".to_owned(), "application/json".to_owned()],
+            }])),
+            expected
+        );
     }
 
     #[test]

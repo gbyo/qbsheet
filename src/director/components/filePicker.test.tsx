@@ -3,7 +3,7 @@
 import { fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { FilePicker } from './FilePicker';
-import { pickDirectorFiles } from './filePickerContract';
+import { nativeFilePickerFilters, pickDirectorFiles } from './filePickerContract';
 
 function setNativeInvoke(invoke: (command: string) => Promise<unknown>) {
   Object.defineProperty(window, '__TAURI_INTERNALS__', {
@@ -36,22 +36,74 @@ describe('pickDirectorFiles', () => {
 
     await pickDirectorFiles({ native: true, onPick });
 
-    expect(invoke).toHaveBeenCalledWith('open_tournament_file');
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', { filters: [] });
     expect(onPick).toHaveBeenCalledTimes(1);
     expect(onPick).toHaveBeenCalledWith([
       { fileName: 'round.qbst', bytes: new Uint8Array(new TextEncoder().encode('native bytes')) },
     ]);
   });
 
+  test('forwards a qbst-only native filter', async () => {
+    const invoke = vi.fn(async () => ({
+      fileName: 'round.qbst',
+      contentBase64: btoa('native bytes'),
+    }));
+    setNativeInvoke(invoke);
+
+    await pickDirectorFiles({ native: true, accept: '.qbst', onPick: vi.fn() });
+
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', {
+      filters: [
+        { name: 'Accepted files', extensions: ['qbst'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+  });
+
+  test.each([
+    ['.qbj,application/json', ['qbj', 'json']],
+    ['.csv,.sqbs,.txt,text/plain', ['csv', 'sqbs', 'txt']],
+  ])('forwards native accepted types for %s', async (accept, extensions) => {
+    const invoke = vi.fn(async () => null);
+    setNativeInvoke(invoke);
+
+    await pickDirectorFiles({ native: true, accept, onPick: vi.fn() });
+
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', {
+      filters: [
+        { name: 'Accepted files', extensions },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+  });
+
+  test('deduplicates multiple extensions and safely falls back for malformed or empty input', () => {
+    expect(nativeFilePickerFilters('.qbj, .QBJ, application/json, .qbst')).toEqual([
+      { name: 'Accepted files', extensions: ['qbj', 'json', 'qbst'] },
+      { name: 'All files', extensions: ['*'] },
+    ]);
+    expect(nativeFilePickerFilters('application/pdf,*/*,.*')).toEqual([]);
+    expect(nativeFilePickerFilters('')).toEqual([]);
+  });
+
   test('treats native cancellation as a silent no-op', async () => {
-    setNativeInvoke(vi.fn(async () => null));
+    const invoke = vi.fn(async () => null);
+    setNativeInvoke(invoke);
     const onPick = vi.fn();
     const onError = vi.fn();
 
-    await expect(pickDirectorFiles({ native: true, onPick, onError })).resolves.toBeUndefined();
+    await expect(
+      pickDirectorFiles({ native: true, accept: '.qbst', onPick, onError }),
+    ).resolves.toBeUndefined();
 
     expect(onPick).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', {
+      filters: [
+        { name: 'Accepted files', extensions: ['qbst'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
   });
 
   test('surfaces native bridge failures without rejecting', async () => {
@@ -119,4 +171,37 @@ test('FilePicker resets its hidden input so the same browser file can be selecte
 
   fireEvent.change(input);
   await waitFor(() => expect(onPick).toHaveBeenCalledTimes(2));
+});
+
+test('FilePicker preserves its accept string for the browser input', () => {
+  const view = render(
+    <FilePicker accept=".qbst,.qbj,application/json" onPick={vi.fn()}>
+      Open
+    </FilePicker>,
+  );
+
+  expect(view.container.querySelector('input[type="file"]')).toHaveAttribute(
+    'accept',
+    '.qbst,.qbj,application/json',
+  );
+});
+
+test('FilePicker forwards its accept contract when it prefers the native dialog', async () => {
+  const invoke = vi.fn(async () => null);
+  setNativeInvoke(invoke);
+  const view = render(
+    <FilePicker accept=".qbst" preferNative onPick={vi.fn()}>
+      Open
+    </FilePicker>,
+  );
+
+  fireEvent.click(view.getByRole('button', { name: 'Open' }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith('open_tournament_file', {
+      filters: [
+        { name: 'Accepted files', extensions: ['qbst'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    }),
+  );
 });
