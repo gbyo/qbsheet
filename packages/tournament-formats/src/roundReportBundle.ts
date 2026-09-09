@@ -130,14 +130,9 @@ interface RoundColumns {
   notes: boolean;
 }
 
-function roundColumns(
-  rows: readonly RoundStatsRow[],
-  total: RoundStatsRow | null | undefined,
-): RoundColumns {
+function roundColumns(rows: readonly RoundStatsRow[], total: RoundStatsRow | null | undefined): RoundColumns {
   const all = total ? [...rows, total] : [...rows];
-  const phases = new Set(
-    rows.map((row) => row.phaseId).filter((value): value is string => Boolean(value)),
-  );
+  const phases = new Set(rows.map((row) => row.phaseId).filter((value): value is string => Boolean(value)));
   return {
     stage: phases.size > 1,
     superpower: all.some((row) => row.superpowerApplicable === true),

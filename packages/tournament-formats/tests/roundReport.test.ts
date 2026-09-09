@@ -109,8 +109,12 @@ describe('printable round report', () => {
     value.roundTotal = { ...noPowerOrBonus, roundId: 'overall', roundName: 'Overall' };
     const rounds = buildStatReportBundle(value).find((page) => page.name === 'rounds.html')?.content ?? '';
 
-    expect(rounds).not.toContain('title="Superpowers plus powers divided by positive tossup conversions">Power %');
-    expect(rounds).not.toContain('title="Negs normalized to the historical regulation tossup count">Negs/reg');
+    expect(rounds).not.toContain(
+      'title="Superpowers plus powers divided by positive tossup conversions">Power %',
+    );
+    expect(rounds).not.toContain(
+      'title="Negs normalized to the historical regulation tossup count">Negs/reg',
+    );
     expect(rounds).not.toContain('title="Bonus points divided by bonuses heard">PPB');
     expect(rounds).not.toContain('<th scope="col">Packet</th>');
   });

@@ -99,7 +99,8 @@ function historicalGameDefinition(game: GameRecord): HistoricalGameDefinition {
       ? objects.find((entry) => entry.type === 'ScoringRules')
       : undefined);
 
-  const answerTypes = scoringRules && Array.isArray(scoringRules.answer_types) ? scoringRules.answer_types : null;
+  const answerTypes =
+    scoringRules && Array.isArray(scoringRules.answer_types) ? scoringRules.answer_types : null;
   const resolvedAnswerTypes =
     answerTypes?.map((entry) => {
       if (isRecord(entry) && entry.type === 'AnswerType') return entry;
@@ -318,7 +319,7 @@ export function buildCanonicalSnapshot(
       roundName: roundName.get(game.roundId) ?? game.roundId,
       ...(phaseId ? { phaseId, phaseName: phaseName.get(phaseId) } : {}),
       packetId: resolvedPacketId ?? null,
-      packetName: resolvedPacketId ? packetName.get(resolvedPacketId) ?? null : null,
+      packetName: resolvedPacketId ? (packetName.get(resolvedPacketId) ?? null) : null,
       teamIds: game.scores.map((score) => score.teamId),
       teamPoints: game.scores.map((score) => score.score),
       played: forfeitHasPlayedStatistics(game, historical),

@@ -140,7 +140,9 @@ function packetLabel(games: readonly RoundStatsGameFacts[]): string | null {
 }
 
 function uniquePhase(games: readonly RoundStatsGameFacts[]): { phaseId?: string; phaseName?: string } {
-  const ids = [...new Set(games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)))];
+  const ids = [
+    ...new Set(games.map((game) => game.phaseId).filter((value): value is string => Boolean(value))),
+  ];
   if (ids.length !== 1) return {};
   const names = [
     ...new Set(
@@ -193,9 +195,7 @@ function aggregateRow(
   const points = played.reduce(
     (sum, game) =>
       sum +
-      game.teamPoints
-        .filter((value) => Number.isFinite(value))
-        .reduce((inner, value) => inner + value, 0),
+      game.teamPoints.filter((value) => Number.isFinite(value)).reduce((inner, value) => inner + value, 0),
     0,
   );
   const pointsPerTeamPerXTuh =
@@ -211,19 +211,12 @@ function aggregateRow(
   const powerRelevant = applicability(played, 'powerApplicable', 'powers');
   const negRelevant = applicability(played, 'negApplicable', 'negs');
   const bonusRelevant = applicability(played, 'bonusApplicable', 'bonusesHeard');
-  const superpowerComparable = applicabilityComparable(
-    played,
-    'superpowerApplicable',
-    'superpowers',
-  );
+  const superpowerComparable = applicabilityComparable(played, 'superpowerApplicable', 'superpowers');
   const powerComparable = applicabilityComparable(played, 'powerApplicable', 'powers');
   const negComparable = applicabilityComparable(played, 'negApplicable', 'negs');
 
   const superpowerRate =
-    superpowerComparable &&
-    positiveConversions !== null &&
-    positiveConversions > 0 &&
-    superpowers !== null
+    superpowerComparable && positiveConversions !== null && positiveConversions > 0 && superpowers !== null
       ? superpowers / positiveConversions
       : null;
   const powerRate =
@@ -264,10 +257,7 @@ function aggregateRow(
       : null;
   const bonusMaximumDenominator =
     bonusCoverageComplete && bonusGames.every((game) => finitePositive(game.maximumBonusScore))
-      ? bonusGames.reduce(
-          (sum, game) => sum + (game.bonusesHeard ?? 0) * (game.maximumBonusScore ?? 0),
-          0,
-        )
+      ? bonusGames.reduce((sum, game) => sum + (game.bonusesHeard ?? 0) * (game.maximumBonusScore ?? 0), 0)
       : null;
   const bonusConversionRate =
     bonusRelevant === true &&
@@ -315,9 +305,7 @@ function aggregateRow(
     bonusGames.length > 0 &&
     bonusGames.some((game) => !finitePositive(game.maximumBonusScore))
   ) {
-    notes.push(
-      'Bonus maximum is unknown for at least one included game; bonus conversion is unavailable.',
-    );
+    notes.push('Bonus maximum is unknown for at least one included game; bonus conversion is unavailable.');
   }
 
   const teams = new Set(facts.flatMap((game) => [...game.teamIds])).size;
@@ -372,9 +360,6 @@ export function deriveRoundStats(facts: readonly RoundStatsGameFacts[]): Canonic
   );
   return {
     rows,
-    total:
-      facts.length > 0
-        ? aggregateRow(facts, { roundId: 'overall', roundName: 'Overall' })
-        : null,
+    total: facts.length > 0 ? aggregateRow(facts, { roundId: 'overall', roundName: 'Overall' }) : null,
   };
 }
