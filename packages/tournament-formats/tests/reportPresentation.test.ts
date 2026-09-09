@@ -3,6 +3,7 @@ import {
   buildReportPresentation,
   pointsPerX,
   type ReportOptions,
+  type ReportPresentationCapabilities,
   type ReportScoringDefinition,
 } from '../src/reportPresentation';
 import { buildExtendedStatReportBundle } from '../src/printableStatReport';
@@ -20,7 +21,15 @@ const baseDefinition: ReportScoringDefinition = {
   overtime: false,
 };
 
-function presentation(definitions: ReportScoringDefinition[] = [baseDefinition], options?: ReportOptions) {
+function presentation(
+  definitions: ReportScoringDefinition[] = [baseDefinition],
+  options?: ReportOptions,
+  capabilities: ReportPresentationCapabilities = {
+    packetRecorded: true,
+    stageRecorded: true,
+    lightningRecorded: false,
+  },
+) {
   return buildReportPresentation({
     metadata: {
       tournamentName: 'Rules & <Reports>',
@@ -34,7 +43,7 @@ function presentation(definitions: ReportScoringDefinition[] = [baseDefinition],
     },
     definitions,
     ...(options ? { options } : {}),
-    capabilities: { packetRecorded: true, stageRecorded: true, lightningRecorded: false },
+    capabilities,
   });
 }
 
@@ -104,6 +113,22 @@ describe('rules-aware report presentation', () => {
     expect(standings).not.toContain('>PPB</th>');
     expect(standings).not.toContain('>BH</th>');
     expect(teams).not.toContain('>Bonus pts</th>');
+  });
+
+  test('bounceback and lightning applicability requires both configured rules and canonical recorded data', () => {
+    const rules = [{ ...baseDefinition, useBonuses: true, bouncebacks: true, lightning: true }];
+    const unavailable = presentation(rules);
+    expect(unavailable.applicability.bouncebacks).toBe(false);
+    expect(unavailable.applicability.lightning).toBe(false);
+
+    const recorded = presentation(rules, undefined, {
+      bouncebacksRecorded: true,
+      lightningRecorded: true,
+      packetRecorded: true,
+      stageRecorded: true,
+    });
+    expect(recorded.applicability.bouncebacks).toBe(true);
+    expect(recorded.applicability.lightning).toBe(true);
   });
 
   test('mixed historical definitions keep semantic identities and decline incompatible normalization', () => {
