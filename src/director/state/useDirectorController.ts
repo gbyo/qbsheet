@@ -24,6 +24,7 @@ import {
   roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
+  packetReuseBlocker,
   resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
@@ -563,6 +564,7 @@ export interface LiveActions {
 function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | null {
   const round = draft.rounds.find((entry) => entry.id === roundId);
   if (!round || round.status !== 'prepared') return null;
+  if (packetReuseBlocker(draft, roundId)) return null;
   round.status = 'released';
   round.releasedAt = isoNow();
   const phase = draft.phases.find((entry) => entry.id === round.phaseId);
@@ -3727,9 +3729,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This round cannot be prepared until every matchup is valid.');
         return false;
       }
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
+        return false;
+      }
       return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
-        if (!target || target.status !== 'planned') return;
+        if (!target || target.status !== 'planned' || packetReuseBlocker(draft, roundId)) return;
         target.status = 'prepared';
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -3777,6 +3784,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
               ? 'A room can only host one game in a round.'
               : 'This round cannot be released until every game has a valid matchup and available room.'),
         );
+        return false;
+      }
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
         return false;
       }
       return commit((draft) => {
@@ -4934,6 +4946,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           packet.assignedGameIds.push(...games.filter((game) => !game.bye).map((game) => game.id));
         }
       }
+      const packetBlocker = packetReuseBlocker(next, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
+        return false;
+      }
       next.audit.push({
         id: newDirectorId('audit'),
         at: isoNow(),
@@ -5099,6 +5116,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
         return fail(round.name, `${round.name} cannot start until every matchup is valid.`);
       }
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) return fail(round.name, packetBlocker);
       const teamName = (teamId: DirectorId | null): string =>
         (teamId && snapshot.teams.find((team) => team.id === teamId)?.displayName) || 'Unknown team';
       const gameLabel = (game: ScheduledGame): string =>
@@ -5211,6 +5230,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!latestRound || !['planned', 'prepared'].includes(latestRound.status)) {
         return fail(round.name, 'The round changed while starting. Review its current status and try again.');
       }
+      const latestPacketBlocker = packetReuseBlocker(latest, roundId);
+      if (latestPacketBlocker) return fail(latestRound.name, latestPacketBlocker);
       if (latestRoomsInPlay) {
         const latestRoomIds = latestActiveGames.map((game) => game.roomId);
         const duplicateLatestRoom = latestRoomIds.find(
