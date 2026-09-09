@@ -249,6 +249,11 @@ export function buildAssignment(
   const room = scheduled.roomId ? state.rooms.find((entry) => entry.id === scheduled.roomId) : undefined;
   const packetId = scheduled.packetId ?? round.packetId ?? null;
   const packet = packetId ? state.packets.find((entry) => entry.id === packetId) : undefined;
+  if (packet?.retired === true && scheduled.status !== 'accepted') {
+    return fail(
+      `Packet “${packet.name}” (${packet.id}) is retired; restore it or assign a replacement before exporting this assignment.`,
+    );
+  }
   const rulesId = `scoring-rules-${tournament.id}`;
   const warnings: string[] = [];
   if (!room) warnings.push('This game has no room; the assignment carries no room name.');

@@ -11,6 +11,7 @@ import {
   generateRoundRobinRound,
   orderDayItems,
   packetReuseBlocker,
+  packetRetirementImpact,
   packetUseConflicts,
   previewAdvancement,
   recommendTournamentPlan,
@@ -2340,7 +2341,7 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.packets).toEqual(before);
   });
 
-  test('packet retirement preserves historical references and selects only live inventory', async () => {
+  test('packet retirement clears future references, preserves history, and selects only live inventory', async () => {
     const { hook } = await directorWithSetup();
     act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
     const first = hook.result.current.state.packets[0];
@@ -2356,9 +2357,14 @@ describe('Director integration hardening', () => {
     act(() => expect(hook.result.current.setPacketRetired(first.id, true)).toBe(true));
     expect(hook.result.current.state.packets.find((packet) => packet.id === first.id)).toMatchObject({
       retired: true,
-      assignedGameIds: [scheduled.id],
+      assignedGameIds: [],
     });
+    expect(hook.result.current.state.rounds[0]?.packetId).toBeNull();
+    expect(hook.result.current.state.scheduledGames[0]?.packetId).toBeNull();
     expect(hook.result.current.state.tournament?.currentPacketId).toBe(second.id);
+    const auditCountAfterRetirement = hook.result.current.state.audit.length;
+    act(() => expect(hook.result.current.setPacketRetired(first.id, true)).toBe(true));
+    expect(hook.result.current.state.audit).toHaveLength(auditCountAfterRetirement);
 
     act(() => hook.result.current.selectPacket(first.id));
     expect(hook.result.current.error).toMatch(/retired packets cannot be selected/i);
@@ -2372,6 +2378,91 @@ describe('Director integration hardening', () => {
       details: { retired: false, retainsHistory: true },
     });
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+  });
+
+  test('packet retirement reconciles a per-game future override and blocks stale released state', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule({ roundName: 'Round 1' }));
+    const scheduled = hook.result.current.state.scheduledGames[0];
+    const packet = hook.result.current.state.packets[0];
+    const round = hook.result.current.state.rounds[0];
+    if (!scheduled || !packet || !round) throw new Error('test setup did not generate packet state');
+
+    const withOverride = structuredClone(hook.result.current.state);
+    const overridden = withOverride.scheduledGames.find((game) => game.id === scheduled.id);
+    if (!overridden) throw new Error('test setup lost the scheduled game');
+    overridden.packetId = packet.id;
+    withOverride.packets[0]!.assignedGameIds = [scheduled.id];
+    await act(async () =>
+      expect(await hook.result.current.editTournamentSnapshot(withOverride, 'Retirement test setup')).toBe(
+        true,
+      ),
+    );
+
+    const impact = packetRetirementImpact(hook.result.current.state, packet.id);
+    expect(impact.futureRoundIds).toContain(round.id);
+    expect(impact.futureGameIds).toContain(scheduled.id);
+    act(() => expect(hook.result.current.setPacketRetired(packet.id, true)).toBe(true));
+    expect(
+      hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.packetId,
+    ).toBeNull();
+    expect(hook.result.current.state.rounds.find((entry) => entry.id === round.id)?.packetId).toBeNull();
+
+    const stale = structuredClone(hook.result.current.state);
+    stale.rounds.find((entry) => entry.id === round.id)!.packetId = packet.id;
+    stale.packets.find((entry) => entry.id === packet.id)!.assignedRoundIds = [round.id];
+    await act(async () =>
+      expect(await hook.result.current.editTournamentSnapshot(stale, 'Retirement stale-state test')).toBe(
+        true,
+      ),
+    );
+    expect(runPreflight(hook.result.current.state).some((issue) => issue.id === 'retired-packet')).toBe(true);
+    act(() => expect(hook.result.current.prepareRound(round.id)).toBe(false));
+    expect(hook.result.current.error).toMatch(/retired packet/i);
+
+    const preparedStale = structuredClone(hook.result.current.state);
+    preparedStale.rounds.find((entry) => entry.id === round.id)!.status = 'prepared';
+    preparedStale.scheduledGames.find((game) => game.id === scheduled.id)!.roomId =
+      preparedStale.rooms[0]!.id;
+    await act(async () =>
+      expect(await hook.result.current.editTournamentSnapshot(preparedStale, 'Retirement release test')).toBe(
+        true,
+      ),
+    );
+    act(() => expect(hook.result.current.releaseRound(round.id)).toBe(false));
+    expect(hook.result.current.error).toMatch(/retired packet/i);
+  });
+
+  test('retiring a packet keeps an accepted packet reference and usage history', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => hook.result.current.generateSchedule({ roundName: 'Round 1' }));
+    const round = hook.result.current.state.rounds[0];
+    const scheduled = hook.result.current.state.scheduledGames[0];
+    const packet = hook.result.current.state.packets[0];
+    if (!round || !scheduled || !packet) throw new Error('test setup did not generate packet state');
+    const state = structuredClone(hook.result.current.state);
+    const historical = state.scheduledGames.find((game) => game.id === scheduled.id)!;
+    historical.status = 'accepted';
+    state.games.push({
+      id: 'accepted-history',
+      scheduledGameId: scheduled.id,
+      roundId: round.id,
+      packetId: packet.id,
+      status: 'accepted',
+      scores: [],
+      playerStats: [],
+      source: 'manual',
+      acceptedAt: '2026-09-09T12:00:00.000Z',
+    });
+    state.packets.find((entry) => entry.id === packet.id)!.usedGameIds = [scheduled.id];
+    await act(async () =>
+      expect(await hook.result.current.editTournamentSnapshot(state, 'Retirement history test')).toBe(true),
+    );
+    act(() => expect(hook.result.current.setPacketRetired(packet.id, true)).toBe(true));
+    const current = hook.result.current.state;
+    expect(current.scheduledGames.find((game) => game.id === scheduled.id)?.packetId).toBe(packet.id);
+    expect(current.games.find((game) => game.id === 'accepted-history')?.packetId).toBe(packet.id);
+    expect(current.packets.find((entry) => entry.id === packet.id)?.usedGameIds).toEqual([scheduled.id]);
   });
 
   test('scoring rule updates keep incomplete numeric edits out of persisted state', async () => {
