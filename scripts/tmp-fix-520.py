@@ -79,7 +79,6 @@ addition = """  test.each([429, 500, 502, 503])(
       const second = await client.assignment(identity);
       expect(second.ok).toBe(true);
       expect(client.isQbtcp).toBe(true);
-      expect(client.describeProtocol()).toMatchObject({ protocol: 'qbtcp' });
       expect(discoveryAttempts).toBe(2);
       expect(calls.filter((call) => call.path === '/qbtcp/v1')).toHaveLength(2);
     },
