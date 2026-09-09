@@ -38,6 +38,7 @@ export function SettingsView({
   onSaveOperator,
   navigationTarget,
   onClearNavigationTarget,
+  onRestoreCheckpoint,
 }: {
   state: DirectorState;
   controller: DirectorController;
@@ -46,6 +47,7 @@ export function SettingsView({
   onSaveOperator?: (profile: OperatorProfile) => void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
+  onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
 }) {
   /*
    * Settings is the canonical surface for tournament and operator identity, so
@@ -105,7 +107,12 @@ export function SettingsView({
         />
       )}
       {section === 'recovery' && (
-        <RecoverySettings state={state} controller={controller} onAnnounce={onAnnounce} />
+        <RecoverySettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onRestoreCheckpoint={onRestoreCheckpoint}
+        />
       )}
       {section === 'audit' && <AuditHistory state={state} />}
       {section === 'system' && <SystemDiagnostics state={state} controller={controller} />}
@@ -354,10 +361,12 @@ function RecoverySettings({
   state,
   controller,
   onAnnounce,
+  onRestoreCheckpoint,
 }: {
   state: DirectorState;
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
+  onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
 }) {
   const confirmAction = useConfirm();
   const checkpoints = controller.checkpoints ?? [];
@@ -421,7 +430,7 @@ function RecoverySettings({
                         tone: 'danger',
                       });
                       if (!approved) return;
-                      const restored = await controller.restoreCheckpoint(entry.id);
+                      const restored = await (onRestoreCheckpoint ?? controller.restoreCheckpoint)(entry.id);
                       onAnnounce(
                         restored
                           ? 'Tournament restored. The previous state is also available in Recovery.'

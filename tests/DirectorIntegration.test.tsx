@@ -130,6 +130,10 @@ async function directorWithSetup(teamCount = 2) {
   return { hook, repository };
 }
 
+async function waitForDurable(hook: { result: { current: ReturnType<typeof useDirectorController> } }) {
+  await waitFor(() => expect(hook.result.current.canLeaveCurrentDocument().ok).toBe(true));
+}
+
 describe('Director integration hardening', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -1027,6 +1031,7 @@ describe('Director integration hardening', () => {
     act(() => {
       expect(electronic.hook.result.current.generateSchedule().generated).toBe(true);
     });
+    await waitForDurable(electronic.hook);
     const roomId = electronic.hook.result.current.state.rooms[0].id;
     const pairedGame = electronic.hook.result.current.state.scheduledGames.find(
       (game) => game.roomId === roomId && !game.bye,
@@ -1118,6 +1123,7 @@ describe('Director integration hardening', () => {
       actor: 'Archive Boundary Director',
       type: 'tournament-updated',
     });
+    await waitForDurable(hook);
     const historicalImport = structuredClone(hook.result.current.state);
     historicalImport.audit.push({
       id: 'historical-imported-event',
@@ -1813,6 +1819,7 @@ describe('Director integration hardening', () => {
   test('round lifecycle actions require complete field and ledger validation', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const roundId = hook.result.current.state.rounds[0]?.id;
     if (!roundId) throw new Error('test setup did not generate a round');
 
@@ -1833,6 +1840,7 @@ describe('Director integration hardening', () => {
   test('cancelling a scheduled game rejects pending submissions and lets an unassigned slot close', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const generated = hook.result.current.state.scheduledGames[0];
     const round = hook.result.current.state.rounds[0];
     if (!generated || !round || !generated.rightTeamId) {
@@ -1888,6 +1896,7 @@ describe('Director integration hardening', () => {
       reason: expect.stringContaining('Room closed'),
     });
 
+    await waitForDurable(hook);
     const lateSubmissionState = structuredClone(hook.result.current.state);
     lateSubmissionState.games.push({
       id: 'late-cancellation-game',
@@ -2030,6 +2039,7 @@ describe('Director integration hardening', () => {
     act(() => {
       expect(hook.result.current.importSnapshot(roomless)).toBe(true);
     });
+    await waitForDurable(hook);
     const issueIds = runPreflight(hook.result.current.state, false, true).map((issue) => issue.id);
     expect(issueIds).not.toContain('qbtcp-offline');
     expect(issueIds).not.toContain('games-without-rooms');
@@ -2572,6 +2582,7 @@ describe('Director integration hardening', () => {
   test('rejecting a submission reopens the assignment for a later result', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
     const rightTeamId = scheduled.rightTeamId;
@@ -2612,6 +2623,7 @@ describe('Director integration hardening', () => {
   test('a second submission cannot become a second canonical accepted result', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
     const rightTeamId = scheduled.rightTeamId;
@@ -2675,6 +2687,7 @@ describe('Director integration hardening', () => {
   test('rejecting a retry attached to a canonical result does not reopen that result', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
     const rightTeamId = scheduled.rightTeamId;
@@ -2684,6 +2697,7 @@ describe('Director integration hardening', () => {
         scores: [score(scheduled.leftTeamId, 20), score(rightTeamId, 10)],
       });
     });
+    await waitForDurable(hook);
     const game = hook.result.current.state.games[0];
     if (!game) throw new Error('test setup did not accept a result');
     const imported = structuredClone(hook.result.current.state);
@@ -2758,6 +2772,7 @@ describe('Director integration hardening', () => {
   test('protests cannot target an accepted bye or unmatched scheduled game', async () => {
     const { hook } = await directorWithSetup();
     act(() => hook.result.current.generateSchedule());
+    await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
     const rightTeamId = scheduled.rightTeamId;
@@ -2767,6 +2782,7 @@ describe('Director integration hardening', () => {
         scores: [score(scheduled.leftTeamId, 20), score(rightTeamId, 10)],
       });
     });
+    await waitForDurable(hook);
     const game = hook.result.current.state.games[0];
     if (!game) throw new Error('test setup did not accept a result');
 

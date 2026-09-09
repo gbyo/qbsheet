@@ -1,8 +1,9 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import type { DirectorState } from '../src/director/domain';
 import { MemoryDirectorRepository } from '../src/director/persistence';
 import { claimDirectorWriter } from '../src/director/persistence/DirectorWriterClaim';
+import { downloadArchive } from '../src/director/publish/PublishView';
 import { useDirectorController } from '../src/director/state/useDirectorController';
 
 class FailingMemoryRepository extends MemoryDirectorRepository {
@@ -94,6 +95,102 @@ describe('Director persistence and browser writer reliability', () => {
     hook.unmount();
   });
 
+  test('blocks switching away from a failed current revision, then allows it after retry', async () => {
+    const repository = new FailingMemoryRepository();
+    const hook = await createTournament(repository);
+    const first = structuredClone(await repository.load());
+    const second = structuredClone(first);
+    second.tournament!.id = 'other-tournament';
+    second.tournament!.name = 'Other tournament';
+    await repository.saveDocument!(second, false);
+    repository.fail = true;
+
+    act(() => expect(hook.result.current.updateTournament({ name: 'Unsaved tournament' })).toBe(true));
+    await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+
+    await act(async () => expect(await hook.result.current.switchTournament('other-tournament')).toBe(false));
+    expect(hook.result.current.state.tournament?.name).toBe('Unsaved tournament');
+    expect(hook.result.current.canLeaveCurrentDocument()).toMatchObject({
+      ok: false,
+      reason: 'unsaved',
+    });
+
+    repository.fail = false;
+    await act(async () => expect(await hook.result.current.retryPersistence()).toBe(true));
+    await act(async () => expect(await hook.result.current.switchTournament('other-tournament')).toBe(true));
+    expect(hook.result.current.state.tournament?.name).toBe('Other tournament');
+    hook.unmount();
+  });
+
+  test('blocks New while the current revision is unsaved', async () => {
+    const repository = new FailingMemoryRepository();
+    const hook = await createTournament(repository);
+    repository.fail = true;
+
+    act(() => expect(hook.result.current.updateTournament({ name: 'Unsaved tournament' })).toBe(true));
+    await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+
+    act(() =>
+      expect(
+        hook.result.current.createTournament({ name: 'New tournament', date: '', venue: '', organizer: '' }),
+      ).toBe(false),
+    );
+    expect(hook.result.current.state.tournament?.name).toBe('Unsaved tournament');
+    hook.unmount();
+  });
+
+  test('blocks opening/importing a replacement while the current revision is unsaved', async () => {
+    const repository = new FailingMemoryRepository();
+    const hook = await createTournament(repository);
+    const archive = JSON.parse(hook.result.current.exportSnapshot()) as DirectorState;
+    archive.tournament!.id = 'imported-tournament';
+    archive.tournament!.name = 'Imported tournament';
+    repository.fail = true;
+
+    act(() => expect(hook.result.current.updateTournament({ name: 'Unsaved tournament' })).toBe(true));
+    await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+
+    act(() => expect(hook.result.current.importSnapshot(archive)).toBe(false));
+    expect(hook.result.current.state.tournament?.name).toBe('Unsaved tournament');
+    expect(hook.result.current.state.tournament?.id).not.toBe('imported-tournament');
+    hook.unmount();
+  });
+
+  test('blocks restoring a recovery point while the current revision is unsaved', async () => {
+    const repository = new FailingMemoryRepository();
+    const hook = await createTournament(repository);
+    await act(async () => hook.result.current.checkpoint('Before the unsaved edit'));
+    const [checkpoint] = hook.result.current.checkpoints;
+    repository.fail = true;
+
+    act(() => expect(hook.result.current.updateTournament({ name: 'Unsaved tournament' })).toBe(true));
+    await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+
+    await act(async () => expect(await hook.result.current.restoreCheckpoint(checkpoint.id)).toBe(false));
+    expect(hook.result.current.state.tournament?.name).toBe('Unsaved tournament');
+    hook.unmount();
+  });
+
+  test('recovery export preserves the unsaved transition block', async () => {
+    const repository = new FailingMemoryRepository();
+    const hook = await createTournament(repository);
+    repository.fail = true;
+    act(() => expect(hook.result.current.updateTournament({ name: 'Unsaved tournament' })).toBe(true));
+    await waitFor(() => expect(hook.result.current.persistence.status).toBe('failed'));
+    const before = hook.result.current.persistence;
+
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    try {
+      await act(async () => downloadArchive(hook.result.current.state, () => undefined));
+    } finally {
+      click.mockRestore();
+    }
+
+    expect(hook.result.current.persistence).toEqual(before);
+    expect(hook.result.current.canLeaveCurrentDocument()).toMatchObject({ ok: false, reason: 'unsaved' });
+    hook.unmount();
+  });
+
   test('a newer failed revision is not cleared by an older successful save', async () => {
     const repository = new OrderedMemoryRepository();
     const hook = await createTournament(repository);
@@ -110,6 +207,7 @@ describe('Director persistence and browser writer reliability', () => {
     expect(hook.result.current.persistence.durableRevision).toBeLessThan(
       hook.result.current.persistence.revision,
     );
+    expect(hook.result.current.canLeaveCurrentDocument()).toMatchObject({ ok: false, reason: 'unsaved' });
     hook.unmount();
   });
 
