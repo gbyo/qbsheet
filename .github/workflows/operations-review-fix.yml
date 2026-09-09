@@ -40,6 +40,10 @@ jobs:
                   '            text(assignment, "kind").unwrap_or_else(|| "room".to_owned()),\n',
                   '''            match text(assignment, "kind").as_deref() {\n                Some("hq") => "hq".to_owned(),\n                Some("runner") => "runner".to_owned(),\n                _ => "room".to_owned(),\n            },\n''',
               )],
+              Path('src/director/persistence/stateMigrations.ts'): [(
+                  "  const normalizedRooms = rooms.map((room) => {\n",
+                  "  const normalizedRooms: Array<Record<string, unknown>> = rooms.map((room) => {\n",
+              )],
           }
 
           for path, edits in replacements.items():
