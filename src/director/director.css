@@ -46,3 +46,5 @@
 @import './styles/pages/transfers.css';
 @import './styles/pages/settings.css';
 @import './styles/pages/help.css';
+
+@import './styles/fixes.css';
