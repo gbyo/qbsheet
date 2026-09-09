@@ -1,11 +1,14 @@
 import {
   buildExtendedStatReportBundle,
+  defaultReportOptions,
   zipStatReportBundle,
+  type ReportOptions,
   type StatReportPage,
 } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
 import { buildCanonicalSnapshot } from './canonicalReports';
 import { safeReportName } from './downloads';
+import { withReportPresentation } from './reportPresentation';
 
 export interface CanonicalStatReportArtifact {
   fileName: string;
@@ -17,8 +20,13 @@ export interface CanonicalStatReportArtifact {
 export function buildCanonicalStatReport(
   state: DirectorState,
   generatedAt = new Date().toISOString(),
+  options: ReportOptions = defaultReportOptions,
 ): CanonicalStatReportArtifact {
-  const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
+  const snapshot = withReportPresentation(
+    state,
+    buildCanonicalSnapshot(state, undefined, generatedAt),
+    options,
+  );
   const pages = buildExtendedStatReportBundle(snapshot);
   return {
     fileName: `${safeReportName(state.tournament?.name ?? 'tournament')}-stat-report.zip`,
@@ -36,7 +44,11 @@ export function buildCanonicalStandingsHtml(
   state: DirectorState,
   generatedAt = new Date().toISOString(),
 ): string {
-  const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
+  const snapshot = withReportPresentation(
+    state,
+    buildCanonicalSnapshot(state, undefined, generatedAt),
+    defaultReportOptions,
+  );
   const standings = buildExtendedStatReportBundle(snapshot).find((page) => page.name === 'standings.html');
   if (!standings) throw new Error('The canonical stat report did not include standings.html.');
   return standings.content;

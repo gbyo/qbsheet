@@ -1,19 +1,13 @@
+import {
+  answerCount,
+  reportNumber,
+  reportPageFiles,
+  reportPageLabels,
+  reportPresentationOf,
+  reportUnknown,
+  type ReportPresentation,
+} from './reportPresentation.js';
 import type { GameStatsRow, PlayerStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
-
-interface ReportLink {
-  href: string;
-  label: string;
-}
-
-const reportNav: readonly ReportLink[] = [
-  { href: 'index.html', label: 'Index' },
-  { href: 'standings.html', label: 'Standings' },
-  { href: 'individuals.html', label: 'Individuals' },
-  { href: 'games.html', label: 'Games' },
-  { href: 'rounds.html', label: 'Rounds' },
-  { href: 'teamdetail.html', label: 'Teams' },
-  { href: 'playerdetail.html', label: 'Players' },
-];
 
 export function reportEscape(value: unknown): string {
   return String(value ?? '')
@@ -53,10 +47,12 @@ export function reportRoundAnchor(roundId: string): string {
 }
 
 const reportStyle = [
-  'body{font:15px/1.5 system-ui,-apple-system,sans-serif;color:#1f2933;margin:0 auto;max-width:1040px;padding:16px}',
-  'nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 24px;padding:0 0 12px;border-bottom:2px solid #1f2933}',
-  'h1{font-size:24px}h2{font-size:19px;margin-top:28px}h3{font-size:16px;margin-top:22px}',
-  '.meta{color:#52606d}.table-wrap{overflow-x:auto}.game{margin:28px 0 40px}.game-header{border-bottom:2px solid #1f2933;padding-bottom:8px}',
+  'body{font:15px/1.5 system-ui,-apple-system,sans-serif;color:#1f2933;margin:0 auto;max-width:1120px;padding:16px}',
+  'nav ul{list-style:none;display:flex;flex-wrap:wrap;gap:4px 16px;margin:0 0 20px;padding:0 0 12px;border-bottom:2px solid #1f2933}',
+  'h1{font-size:24px;margin-bottom:4px}h2{font-size:19px;margin-top:28px}h3{font-size:16px;margin-top:22px}',
+  '.event-meta{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0 0 18px;color:#52606d}.meta{color:#52606d}',
+  '.report-note{padding:9px 12px;border-left:3px solid #9aa5b1;background:#f1f4f6;color:#52606d}',
+  '.table-wrap{overflow-x:auto}.game{margin:28px 0 40px}.game-header{border-bottom:2px solid #1f2933;padding-bottom:8px}',
   '.score{font-size:18px;font-weight:650}.detail-note{padding:10px 12px;background:#f1f4f6;border-left:3px solid #9aa5b1}',
   '.team-box{margin:20px 0}.bonus-summary{display:flex;flex-wrap:wrap;gap:8px 18px;margin:-10px 0 20px;color:#52606d}',
   'table{border-collapse:collapse;width:100%;margin:12px 0 24px}',
@@ -68,20 +64,95 @@ const reportStyle = [
   '@media print{body{max-width:none;padding:8px}.game{break-inside:avoid-page}.table-wrap{overflow:visible}nav{display:none}}',
 ].join('');
 
+function dateOnly(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return value;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  }).format(date);
+}
+
+function reportEventMeta(presentation: ReportPresentation): string {
+  const metadata = presentation.metadata;
+  const start = dateOnly(metadata.startDate);
+  const end = dateOnly(metadata.endDate);
+  const date = start && end && end !== start ? `${start} – ${end}` : start;
+  const items = [
+    date ? `Date: ${date}` : undefined,
+    metadata.venue ? `Site: ${metadata.venue}` : undefined,
+    metadata.questionSet ? `Question set: ${metadata.questionSet}` : undefined,
+    metadata.organizer ? `Organizer: ${metadata.organizer}` : undefined,
+    `Scope: ${metadata.scopeLabel}`,
+  ].filter((value): value is string => Boolean(value));
+  return `<div class="event-meta">${items.map((item) => `<span>${reportEscape(item)}</span>`).join('')}</div>`;
+}
+
 export function renderReportPage(snapshot: StatsSnapshot, title: string, body: string): string {
-  const nav = `<nav aria-label="Stat reports"><ul>${reportNav
-    .map((link) => `<li><a href="${link.href}">${reportEscape(link.label)}</a></li>`)
+  const presentation = reportPresentationOf(snapshot);
+  const nav = `<nav aria-label="Stat reports"><ul><li><a href="index.html">Index</a></li>${presentation.options.pages
+    .map((page) => `<li><a href="${reportPageFiles[page]}">${reportEscape(reportPageLabels[page])}</a></li>`)
     .join('')}</ul></nav>`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${reportEscape(title)} · ${reportEscape(snapshot.tournament.name)}</title><style>${reportStyle}</style></head><body>${nav}<h1>${reportEscape(snapshot.tournament.name)}</h1>${body}<footer>Generated ${reportEscape(snapshot.generatedAt)} · QBSheet stat report</footer></body></html>`;
+  const mixed = presentation.mixedDefinitionNote
+    ? `<p class="report-note">${reportEscape(presentation.mixedDefinitionNote)}</p>`
+    : '';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${reportEscape(title)} · ${reportEscape(presentation.metadata.tournamentName)}</title><style>${reportStyle}</style></head><body>${nav}<h1>${reportEscape(presentation.metadata.tournamentName)}</h1>${reportEventMeta(presentation)}${mixed}${body}<footer>Generated ${reportEscape(presentation.metadata.generatedAt)} · QBSheet stat report</footer></body></html>`;
 }
 
 export function reportNumberCell(value: number | null | undefined, digits?: number): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '<td class="num">—</td>';
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `<td class="num">${reportUnknown}</td>`;
   return `<td class="num">${digits === undefined ? String(value) : value.toFixed(digits)}</td>`;
 }
 
+export function reportAnswerHeaders(presentation: ReportPresentation): string {
+  return presentation.answerColumns
+    .map((column) => {
+      const valueLabel =
+        column.pointValue !== null
+          ? String(column.pointValue)
+          : column.pointValues.length > 1
+            ? column.pointValues.join('/')
+            : '';
+      const visibleLabel = valueLabel ? `${column.shortLabel} (${valueLabel})` : column.shortLabel;
+      const detail =
+        column.pointValue !== null
+          ? `${column.pointValue} pts`
+          : column.pointValues.length > 1
+            ? `mixed values: ${column.pointValues.join(', ')}`
+            : 'point value unavailable';
+      return `<th scope="col" class="num" title="${reportEscape(`${column.label} · ${detail}`)}">${reportEscape(visibleLabel)}</th>`;
+    })
+    .join('');
+}
+
+export function reportAnswerCells(
+  row: { answerCounts?: import('./reportPresentation.js').ReportAnswerCounts },
+  presentation: ReportPresentation,
+): string {
+  return presentation.answerColumns.map((column) => reportNumberCell(answerCount(row, column.key))).join('');
+}
+
+export function reportPointsMetricLabel(presentation: ReportPresentation): string {
+  if (presentation.options.pointsMetric === 'pointsPerX') {
+    return presentation.pointsNormalization?.label ?? 'Pts/X';
+  }
+  return 'PPG';
+}
+
+export function reportPointsMetricValue(
+  row: { ppg: number; pointsPerX?: number | null },
+  presentation: ReportPresentation,
+): string {
+  return presentation.options.pointsMetric === 'pointsPerX'
+    ? reportNumber(row.pointsPerX, presentation.precision.rate)
+    : reportNumber(row.ppg, presentation.precision.ppg);
+}
+
 export function reportScopeNote(snapshot: StatsSnapshot): string {
-  const extensions = snapshot.extensions ?? {};
-  const scope = typeof extensions.scopeLabel === 'string' ? extensions.scopeLabel : 'Overall';
-  return `<p class="meta">Scope: ${reportEscape(scope)} · ${snapshot.teams.length} teams · ${snapshot.games.length} games.</p>`;
+  const presentation = reportPresentationOf(snapshot);
+  return `<p class="meta">${snapshot.teams.length} teams · ${snapshot.games.length} games · Scope: ${reportEscape(presentation.metadata.scopeLabel)}.</p>`;
 }
