@@ -11,7 +11,7 @@ import type { IanaTimeZone } from './timezone.js';
 import type { TournamentTimelineEvent } from './timeline.js';
 import type { LivePublication } from './publication.js';
 
-export const directorSchemaVersion = 8;
+export const directorSchemaVersion = 9;
 
 export type {
   ArtifactClassification,
@@ -220,11 +220,75 @@ export interface Room {
   accessibility?: string;
   directions?: string;
   notes?: string;
+  /**
+   * Legacy runtime status.
+   *
+   * Operational readiness is derived (see `operations.ts`); this field survives so that older
+   * documents, the SQLite projection, and archives written by earlier builds keep round-tripping.
+   * Nothing in the operations layer reads it as authority.
+   *
+   * @deprecated Derive readiness with `deriveOperationalRoom` instead of reading this.
+   */
   status: RoomStatus;
+  /**
+   * Default moderator for this room.
+   *
+   * These three fields are the *default* configuration a round inherits when it has no explicit
+   * operational assignment yet. Per-round staffing lives on `OperationalAssignment`.
+   */
   moderatorId: DirectorId | null;
   scorekeeperId: DirectorId | null;
+  /** @deprecated Single-resource default; `defaultEquipmentIds` supersedes it. Kept for round-trips. */
   equipmentId: DirectorId | null;
+  /** Default equipment for this room. Supports the multiple resources the interchange format allows. */
+  defaultEquipmentIds?: DirectorId[];
+  /** Operator intent: whether the room may be used for future assignment at all. */
   available: boolean;
+}
+
+/** What an operational assignment is for. Room duty is the common case. */
+export type OperationalAssignmentKind = 'room' | 'hq' | 'runner';
+
+/**
+ * Which parts of an assignment the director chose explicitly.
+ *
+ * Auto-fill and repair may replace anything that is not pinned. A pinned value that becomes
+ * impossible is surfaced as a decision rather than silently overwritten.
+ */
+export interface OperationalAssignmentPins {
+  room?: boolean;
+  moderator?: boolean;
+  scorekeeper?: boolean;
+  /** Equipment ids the director placed by hand. Auto-fill keeps these and fills around them. */
+  equipmentIds?: DirectorId[];
+  /** Staff ids on a non-room duty the director placed by hand. */
+  staffIds?: DirectorId[];
+}
+
+/**
+ * How a round is actually being operated.
+ *
+ * A `Room` record says what a room *is*; an assignment says how it is *being used* for one round.
+ * That split is what lets a moderator move between rounds, equipment travel, and runner/HQ duty
+ * exist at all without inventing room-shaped slots for people who are not in a room.
+ *
+ * Assignments are round-scoped. A room-kind assignment normally also names the scheduled game it
+ * operates, which is what makes "who is scoring this match?" answerable without re-deriving the
+ * schedule.
+ */
+export interface OperationalAssignment {
+  id: DirectorId;
+  roundId: DirectorId;
+  kind: OperationalAssignmentKind;
+  scheduledGameId?: DirectorId | null;
+  roomId?: DirectorId | null;
+  moderatorId?: DirectorId | null;
+  scorekeeperId?: DirectorId | null;
+  /** Staff on a non-room duty (runner, HQ). Room duty uses the moderator/scorekeeper slots. */
+  staffIds?: DirectorId[];
+  equipmentIds: DirectorId[];
+  pinned?: OperationalAssignmentPins;
+  notes?: string;
 }
 
 export interface Packet {
@@ -514,6 +578,17 @@ export interface QbtcpRoomSession {
   matchId?: string;
   deviceId: string;
   operatorName?: string;
+  /**
+   * The staff member Director believes is operating this session.
+   *
+   * Set when a pairing invitation named an expected scorekeeper, or when an operator name maps
+   * unambiguously onto exactly one staff member. Left absent for an ad hoc scorer rather than
+   * guessed: a wrong identity is worse than an unknown one, because the operations layer reports
+   * it as "the wrong person is in this room".
+   */
+  staffId?: DirectorId;
+  /** The scorekeeper the room's assignment expects, recorded when the invitation was issued. */
+  expectedStaffId?: DirectorId;
   state: 'paired' | 'assigned' | 'live' | 'result-received' | 'abandoned';
   resumable?: boolean;
   resultReceived?: boolean;
@@ -574,6 +649,13 @@ export interface DirectorState {
   qbtcpSessions: QbtcpRoomSession[];
   qbtcpHelpRequests: QbtcpHelpRequest[];
   qbtcpRosterAmendments: QbtcpRosterAmendment[];
+  /**
+   * How each round is operated: rooms, staff, and equipment for that round only.
+   *
+   * Separate from `rooms` because a room is a place and an assignment is a shift. See
+   * `OperationalAssignment`.
+   */
+  operationalAssignments: OperationalAssignment[];
   /**
    * Public and staff events that are not games: lunch, check-in, awards.
    *
@@ -653,6 +735,7 @@ export function emptyDirectorState(): DirectorState {
     qbtcpSessions: [],
     qbtcpHelpRequests: [],
     qbtcpRosterAmendments: [],
+    operationalAssignments: [],
     timeline: [],
     live: null,
     transfers: emptyTransferState(),
