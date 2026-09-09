@@ -36,8 +36,9 @@ export function useDirectorController(
   return useMemo<DirectorController>(() => {
     const resultBlocker = (scheduledGameId: string): string | null =>
       releasedRoundResultBlocker(base.state, scheduledGameId);
+    const raise = (message: string) => setSafetyIssue({ message, state: base.state, baseError: base.error });
     const reject = (message: string): false => {
-      setSafetyIssue({ message, state: base.state, baseError: base.error });
+      raise(message);
       return false;
     };
     const allow = () => setSafetyIssue(null);
@@ -81,7 +82,7 @@ export function useDirectorController(
       async startRound(roundId): Promise<StartRoundResult> {
         const blocker = unresolvedReleasedRoundBlocker(base.state, roundId);
         if (blocker) {
-          setSafetyError(blocker);
+          raise(blocker);
           const round = base.state.rounds.find((entry) => entry.id === roundId);
           return {
             ok: false,
