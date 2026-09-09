@@ -129,10 +129,15 @@ export function Tabs<T extends string>({
   onChange: (value: T) => void;
   ariaLabel: string;
 }) {
-  const move = (delta: number) => {
+  const selectAt = (index: number, current: HTMLButtonElement) => {
+    const next = tabs[index];
+    if (!next) return;
+    onChange(next.value);
+    current.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]').item(index)?.focus();
+  };
+  const move = (delta: number, current: HTMLButtonElement) => {
     const index = tabs.findIndex((tab) => tab.value === value);
-    const next = tabs[(index + delta + tabs.length) % tabs.length];
-    if (next) onChange(next.value);
+    selectAt((index + delta + tabs.length) % tabs.length, current);
   };
   return (
     <div className="director-tablist" role="tablist" aria-label={ariaLabel}>
@@ -150,17 +155,16 @@ export function Tabs<T extends string>({
           onKeyDown={(event) => {
             if (event.key === 'ArrowRight') {
               event.preventDefault();
-              move(1);
+              move(1, event.currentTarget);
             } else if (event.key === 'ArrowLeft') {
               event.preventDefault();
-              move(-1);
+              move(-1, event.currentTarget);
             } else if (event.key === 'Home') {
               event.preventDefault();
-              if (tabs[0]) onChange(tabs[0].value);
+              selectAt(0, event.currentTarget);
             } else if (event.key === 'End') {
               event.preventDefault();
-              const last = tabs.at(-1);
-              if (last) onChange(last.value);
+              selectAt(tabs.length - 1, event.currentTarget);
             }
           }}
         >
