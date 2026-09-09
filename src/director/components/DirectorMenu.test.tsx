@@ -111,6 +111,21 @@ describe('DirectorMenu', () => {
     expect(menu.parentElement?.parentElement).toBe(document.body);
   });
 
+  test('a floating menu stays in a native dialog top layer while escaping its scrolling body', () => {
+    render(
+      <dialog open data-testid="dialog">
+        <div data-testid="dialog-body" style={{ overflow: 'hidden' }}>
+          <Harness />
+        </div>
+      </dialog>,
+    );
+    open();
+
+    const menu = screen.getByRole('listbox', { name: 'Test menu' });
+    expect(screen.getByTestId('dialog-body').contains(menu)).toBe(false);
+    expect(screen.getByTestId('dialog').contains(menu)).toBe(true);
+  });
+
   test('opens onto the filter field with every entry offered', () => {
     render(<Harness />);
     open();
