@@ -21,20 +21,14 @@ export function releasedRoundResultBlocker(state: DirectorState, scheduledGameId
  * Normal tournament operation has one released round with unresolved play at a time. Checking
  * scheduled-game state instead of room occupancy also protects manual and roomless tournaments.
  */
-export function unresolvedReleasedRoundBlocker(
-  state: DirectorState,
-  roundId: DirectorId,
-): string | null {
+export function unresolvedReleasedRoundBlocker(state: DirectorState, roundId: DirectorId): string | null {
   const blockingRound = state.rounds.find(
     (round) =>
       round.id !== roundId &&
       round.status === 'released' &&
       state.scheduledGames.some(
         (game) =>
-          game.roundId === round.id &&
-          !game.bye &&
-          game.status !== 'accepted' &&
-          game.status !== 'cancelled',
+          game.roundId === round.id && !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
       ),
   );
   return blockingRound
@@ -46,10 +40,7 @@ export function unresolvedReleasedRoundBlocker(
  * Advancement is a canonical phase transition, not a live standings preview. The source phase is
  * marked complete by the ordinary round-close path only after its competitive work is resolved.
  */
-export function advancementCommitBlocker(
-  state: DirectorState,
-  sourcePhaseId: DirectorId,
-): string | null {
+export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: DirectorId): string | null {
   const source = state.phases.find((phase) => phase.id === sourcePhaseId);
   if (!source) return null; // Let the base controller report its source/target validation error.
   if (source.status === 'complete') return null;
@@ -62,9 +53,10 @@ export function advancementCommitBlocker(
       game.status !== 'cancelled'
     );
   }).length;
-  const suffix = unresolvedGames > 0
-    ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
-    : '';
+  const suffix =
+    unresolvedGames > 0
+      ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
+      : '';
   return `Finish ${source.name} before committing advancement.${suffix}`;
 }
 

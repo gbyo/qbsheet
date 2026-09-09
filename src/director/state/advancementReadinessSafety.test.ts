@@ -2,7 +2,10 @@ import { describe, expect, test } from 'vitest';
 import { emptyDirectorState, type DirectorState } from '../domain';
 import { advancementCommitBlocker } from './tournamentSafety';
 
-function advancementState(status: DirectorState['phases'][number]['status'], gameStatus = 'accepted'): DirectorState {
+function advancementState(
+  status: DirectorState['phases'][number]['status'],
+  gameStatus = 'accepted',
+): DirectorState {
   const state = emptyDirectorState();
   state.phases.push({
     id: 'prelims',
@@ -21,11 +24,15 @@ function advancementState(status: DirectorState['phases'][number]['status'], gam
 
 describe('advancement readiness safety', () => {
   test.each(['planned', 'active'] as const)('blocks advancement while source phase is %s', (status) => {
-    expect(advancementCommitBlocker(advancementState(status), 'prelims')).toContain('Finish Preliminary phase');
+    expect(advancementCommitBlocker(advancementState(status), 'prelims')).toContain(
+      'Finish Preliminary phase',
+    );
   });
 
   test('reports unresolved source games', () => {
-    expect(advancementCommitBlocker(advancementState('active', 'released'), 'prelims')).toContain('1 game remain');
+    expect(advancementCommitBlocker(advancementState('active', 'released'), 'prelims')).toContain(
+      '1 game remain',
+    );
   });
 
   test('allows advancement only after the source phase is complete', () => {
