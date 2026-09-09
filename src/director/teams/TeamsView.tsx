@@ -23,6 +23,7 @@ import {
   TextArea,
   TextInput,
   Toolbar,
+  normalizeSearchText,
   useConfirm,
   type Column,
 } from '../components';
@@ -76,23 +77,22 @@ export function TeamsView({
   const [schoolsOpen, setSchoolsOpen] = useState(false);
 
   const visibleTeams = useMemo(() => {
-    const needle = search.trim().toLocaleLowerCase();
+    const needle = normalizeSearchText(search.trim());
     return state.teams.filter((team) => {
       if (!needle) return true;
       const players = state.players
         .filter((player) => player.teamId === team.id)
         .map((player) => player.name)
         .join(' ');
-      return [
-        team.displayName,
-        organizationNameFor(state, team.organizationId),
-        team.teamLetter,
-        team.status,
-        players,
-      ]
-        .join(' ')
-        .toLocaleLowerCase()
-        .includes(needle);
+      return normalizeSearchText(
+        [
+          team.displayName,
+          organizationNameFor(state, team.organizationId),
+          team.teamLetter,
+          team.status,
+          players,
+        ].join(' '),
+      ).includes(needle);
     });
   }, [search, state]);
 

@@ -29,6 +29,30 @@ test('a rejected bulk import does not announce success or close the paste dialog
   expect(screen.getByRole('dialog')).toBeTruthy();
 });
 
+test('team filtering matches unaccented team, organization, and player searches without changing display text', () => {
+  const state = directorFixture({ games: 1 });
+  const team = state.teams[0]!;
+  team.displayName = 'Café A';
+  team.organizationId = 'org-café';
+  state.organizations = [{ id: 'org-café', name: 'Café University', shortName: '', notes: '' }];
+  state.players[0]!.name = 'José García';
+
+  render(<TeamsView state={state} controller={{} as DirectorController} onAnnounce={vi.fn()} />);
+
+  const filter = screen.getByRole('searchbox', { name: 'Filter teams' });
+  fireEvent.change(filter, { target: { value: 'Jose' } });
+  expect(screen.getByRole('button', { name: 'Café A' })).toBeInTheDocument();
+  expect(screen.getByText('1 of 2 teams')).toBeInTheDocument();
+
+  fireEvent.change(filter, { target: { value: 'University' } });
+  expect(screen.getByRole('button', { name: 'Café A' })).toBeInTheDocument();
+
+  fireEvent.change(filter, { target: { value: 'unrelated' } });
+  expect(screen.getByText('No teams match the current search.')).toBeInTheDocument();
+  expect(team.displayName).toBe('Café A');
+  expect(state.players[0]!.name).toBe('José García');
+});
+
 test('navigation opens a team repeatedly and pasted names preserve pending removals and unsaved drafts', async () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;

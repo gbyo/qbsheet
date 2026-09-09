@@ -4,7 +4,8 @@ import { Button } from '../components/Controls';
 import { Callout } from '../components/Status';
 import { Dialog } from '../components/Dialog';
 import { ConfirmProvider, useConfirm } from '../components/Dialog';
-import { FormActions } from '../components/Fields';
+import { DirtyFormProvider, FormActions, useDirtyForms } from '../components/Fields';
+import { normalizeSearchText } from '../components/search';
 import { FilePicker } from '../components/FilePicker';
 import { SummaryItem, SummaryList } from '../components/Layout';
 import { ActionMenu, MenuItem } from '../components/Menu';
@@ -85,7 +86,9 @@ import type { PickedFile } from '../components/FilePicker';
 export default function DirectorApp() {
   return (
     <ConfirmProvider>
-      <DirectorAppContent />
+      <DirtyFormProvider>
+        <DirectorAppContent />
+      </DirtyFormProvider>
     </ConfirmProvider>
   );
 }
@@ -93,6 +96,8 @@ export default function DirectorApp() {
 function DirectorAppContent() {
   const controller = useDirectorController();
   const { loading, state, syncQbtcp, canLeaveCurrentDocument, retryPersistence } = controller;
+  const dirtyForms = useDirtyForms();
+  const confirm = useConfirm();
   const nativeDirector = isNativeDirector();
   const [activeSection, setActiveSection] = useState<SectionId>('overview');
   const [search, setSearch] = useState('');
@@ -126,17 +131,43 @@ function DirectorAppContent() {
     action: () => boolean | Promise<boolean>;
   } | null>(null);
 
+  const discardDirtyFormsBefore = useCallback(
+    async (action: () => boolean | Promise<boolean>): Promise<boolean> => {
+      const dirty = dirtyForms.filter((form) => form.dirty);
+      if (dirty.length === 0) return Boolean(await action());
+      const confirmed = await confirm({
+        title: 'Discard unsaved changes?',
+        body: `You have unsaved changes in ${dirty.map((form) => form.label).join(' and ')}.`,
+        consequence: 'Continuing will discard those drafts; saved tournament data is not changed.',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        tone: 'warning',
+      });
+      if (!confirmed) return false;
+      dirty.forEach((form) => form.discard());
+      return Boolean(await action());
+    },
+    [confirm, dirtyForms],
+  );
+
   const requestDocumentTransition = useCallback(
     (action: () => boolean | Promise<boolean>, onBlocked?: () => void): boolean | Promise<boolean> => {
-      const check = canLeaveCurrentDocument();
-      if (!check.ok) {
-        onBlocked?.();
-        setBlockedTransition({ check, action });
+      const start = () => {
+        const check = canLeaveCurrentDocument();
+        if (!check.ok) {
+          onBlocked?.();
+          setBlockedTransition({ check, action });
+          return false;
+        }
+        return action();
+      };
+      if (dirtyForms.some((form) => form.dirty)) {
+        void discardDirtyFormsBefore(start);
         return false;
       }
-      return action();
+      return start();
     },
-    [canLeaveCurrentDocument, setBlockedTransition],
+    [canLeaveCurrentDocument, discardDirtyFormsBefore, dirtyForms, setBlockedTransition],
   );
 
   const retryBlockedTransition = useCallback(async () => {
@@ -156,11 +187,17 @@ function DirectorAppContent() {
 
   const navigate = useCallback(
     (section: SectionId, target?: DirectorNavigationTarget | null) => {
-      setActiveSection(canonicalSection(section));
-      setAnnouncement(null);
-      setNavigationTarget(target ? { ...target, section: canonicalSection(target.section) } : null);
+      const nextSection = canonicalSection(section);
+      const change = () => {
+        setActiveSection(nextSection);
+        setAnnouncement(null);
+        setNavigationTarget(target ? { ...target, section: nextSection } : null);
+        return true;
+      };
+      if (nextSection === activeSection) return change();
+      void discardDirtyFormsBefore(change);
     },
-    [setActiveSection, setAnnouncement, setNavigationTarget],
+    [activeSection, discardDirtyFormsBefore, setAnnouncement, setNavigationTarget],
   );
 
   const importFile = useCallback(
@@ -176,9 +213,10 @@ function DirectorAppContent() {
     [announce, controller, requestDocumentTransition],
   );
 
-  const saveOperator = useCallback((profile: OperatorProfile) => {
+  const saveOperator = useCallback((profile: OperatorProfile): boolean => {
     setOperatorProfile(profile);
     saveOperatorProfile(profile);
+    return true;
   }, []);
 
   if (controller.documentTransition)
@@ -225,6 +263,7 @@ function DirectorAppContent() {
             onAnnounce={announce}
             nativeServerReady={qbtcpServerStatus?.running ?? false}
             nativeServerAvailable={nativeDirector}
+            qbtcpHealth={controller.qbtcpHealth}
           />
         );
       case 'teams':
@@ -964,15 +1003,11 @@ function searchTournament(
   state: ReturnType<typeof useDirectorController>['state'],
   query: string,
 ): SearchResult[] {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = normalizeSearchText(query.trim());
   if (!needle) return [];
   const results: SearchResult[] = [];
   const matches = (values: unknown[]) =>
-    values.some((value) =>
-      String(value ?? '')
-        .toLocaleLowerCase()
-        .includes(needle),
-    );
+    values.some((value) => normalizeSearchText(String(value ?? '')).includes(needle));
   const push = (result: Omit<SearchResult, 'group'>) =>
     results.push({ ...result, group: groupForSection(result.section) });
 

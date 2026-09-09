@@ -13,6 +13,7 @@ use qbtcp_server::{
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::net::TcpListener;
 
 pub const DEFAULT_QBTCP_PORT: u16 = 8787;
@@ -50,6 +51,8 @@ pub enum ServerError {
     Unavailable,
     #[error("QBTCP server is not running")]
     NotRunning,
+    #[error("could not advertise QBTCP on {0}: enter a non-loopback IPv4 address reachable by scorekeeper devices")]
+    AdvertisedAddress(String),
     #[error("QBTCP operation failed: {0}")]
     Operation(String),
 }
@@ -61,15 +64,30 @@ pub struct RoomPairingInvitation {
     pub room_name: String,
     pub pairing_code: String,
     pub pairing_url: Option<String>,
+    pub issued_at: String,
+    pub expires_at: String,
     pub expires_in_seconds: u64,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AdvertisedAddressCandidate {
+    pub interface_name: String,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerStatus {
     pub running: bool,
+    /// The listener remains broad; this is only the endpoint embedded in new pairing links.
     pub address: Option<String>,
+    pub bind_address: Option<String>,
     pub port: Option<u16>,
+    pub address_candidates: Vec<AdvertisedAddressCandidate>,
+    pub address_selection_required: bool,
+    pub advertised_address_source: Option<String>,
+    pub expired_pairing_room_ids: Vec<String>,
     pub protocol: Option<String>,
     pub paired_rooms: usize,
     pub pairing_invitations: Vec<RoomPairingInvitation>,
@@ -143,6 +161,7 @@ pub struct ServerRosterAmendmentSnapshot {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerSnapshot {
+    pub tournament_id: Option<String>,
     pub results: Vec<ServerResultSnapshot>,
     pub progress: Vec<ServerProgressSnapshot>,
     pub presence: Vec<ServerPresenceSnapshot>,
@@ -203,10 +222,12 @@ impl ServerRuntime {
             status
                 .pairing_invitations
                 .retain(|invitation| enabled_room_ids.contains(&invitation.room_id));
-            let (pairing_code, pairing_url) = legacy_pairing_fields(&status.pairing_invitations);
-            status.pairing_code = pairing_code;
-            status.pairing_url = pairing_url;
         }
+        refresh_automatic_address(&mut status);
+        prune_expired_invitations(&mut status);
+        let (pairing_code, pairing_url) = legacy_pairing_fields(&status.pairing_invitations);
+        status.pairing_code = pairing_code;
+        status.pairing_url = pairing_url;
         status
     }
 
@@ -260,7 +281,9 @@ impl ServerRuntime {
         let server =
             Arc::new(QbtcpServer::new(Arc::clone(&state), config).map_err(ServerError::Config)?);
 
-        let address = detect_lan_address();
+        let address_candidates = detect_lan_candidates();
+        let address = select_candidate_address(&address_candidates);
+        let address_selection_required = address.is_none() && address_candidates.len() > 1;
         let pairing_invitations = state
             .enabled_rooms()
             .into_iter()
@@ -294,16 +317,18 @@ impl ServerRuntime {
         inner.status = ServerStatus {
             running: true,
             address: address.clone(),
+            bind_address: Some(format!("0.0.0.0:{port}")),
             port: Some(port),
+            address_candidates,
+            address_selection_required,
+            advertised_address_source: address.as_ref().map(|_| "automatic".to_owned()),
+            expired_pairing_room_ids: Vec::new(),
             protocol: Some("QBTCP v1".to_owned()),
             paired_rooms: state.paired_room_count(),
             pairing_invitations,
             pairing_code,
             pairing_url,
-            message: Some(match address {
-                Some(_) => "QBTCP server started.".to_owned(),
-                None => "QBTCP server started, but no non-loopback LAN address was found; pairing links are unavailable.".to_owned(),
-            }),
+            message: Some(start_message(address_selection_required, address.is_some())),
         };
         inner.task = Some(task);
         inner.server = Some(server);
@@ -349,6 +374,8 @@ impl ServerRuntime {
                 .status
                 .pairing_invitations
                 .retain(|invitation| enabled_room_ids.contains(&invitation.room_id));
+            refresh_automatic_address(&mut inner.status);
+            prune_expired_invitations(&mut inner.status);
             let (pairing_code, pairing_url) =
                 legacy_pairing_fields(&inner.status.pairing_invitations);
             inner.status.pairing_code = pairing_code;
@@ -376,12 +403,48 @@ impl ServerRuntime {
         inner.status.pairing_invitations.push(invitation.clone());
         inner
             .status
+            .expired_pairing_room_ids
+            .retain(|room_id| room_id != &invitation.room_id);
+        inner
+            .status
             .pairing_invitations
             .sort_by(|left, right| left.room_id.cmp(&right.room_id));
         let (pairing_code, pairing_url) = legacy_pairing_fields(&inner.status.pairing_invitations);
         inner.status.pairing_code = pairing_code;
         inner.status.pairing_url = pairing_url;
         Ok(invitation)
+    }
+
+    /// Choose the endpoint embedded in pairing links. This is intentionally separate from the
+    /// broad listener bind address: an operator can identify the scorer LAN even when the host has
+    /// VPN, VM, or container interfaces that are not reachable by scorekeeper devices.
+    pub fn set_advertised_address(&self, address: &str) -> Result<ServerStatus, ServerError> {
+        let address = address.trim();
+        let parsed = address
+            .parse::<Ipv4Addr>()
+            .map_err(|_| ServerError::AdvertisedAddress(address.to_owned()))?;
+        if parsed.is_unspecified() || parsed.is_loopback() || parsed.is_multicast() {
+            return Err(ServerError::AdvertisedAddress(address.to_owned()));
+        }
+
+        let mut inner = self.inner.lock().map_err(|_| ServerError::Unavailable)?;
+        if !inner
+            .running
+            .as_ref()
+            .is_some_and(|running| running.load(Ordering::Acquire))
+        {
+            return Err(ServerError::NotRunning);
+        }
+        let port = inner.status.port.ok_or(ServerError::Unavailable)?;
+        inner.status.address = Some(address.to_owned());
+        inner.status.advertised_address_source = Some("operator".to_owned());
+        inner.status.address_selection_required = false;
+        rebuild_pairing_urls(&mut inner.status, Some(address), port);
+        inner.status.message = Some(format!("QBTCP pairing links will use {address}."));
+        let (pairing_code, pairing_url) = legacy_pairing_fields(&inner.status.pairing_invitations);
+        inner.status.pairing_code = pairing_code;
+        inner.status.pairing_url = pairing_url;
+        Ok(inner.status.clone())
     }
 
     pub fn snapshot(&self) -> Result<ServerSnapshot, ServerError> {
@@ -391,6 +454,25 @@ impl ServerRuntime {
             .as_ref()
             .ok_or(ServerError::Unavailable)
             .and_then(|state| state.snapshot())
+    }
+
+    /// Revoke the native writer authority for sessions a Director is settling administratively.
+    /// The retained result/event history is intentionally preserved, while late finals are marked
+    /// late-after-abandon by the shared QBTCP core instead of being applied to a reused room.
+    pub fn abandon_sessions(&self, session_ids: &[String]) -> Result<(), ServerError> {
+        let server = self
+            .inner
+            .lock()
+            .map_err(|_| ServerError::Unavailable)?
+            .server
+            .clone()
+            .ok_or(ServerError::NotRunning)?;
+        for session_id in session_ids {
+            server
+                .abandon_session(session_id)
+                .map_err(|error| ServerError::Operation(format!("{error:?}")))?;
+        }
+        Ok(())
     }
 
     /// Rooms among `room_ids` a scorer is connected to right now.
@@ -847,7 +929,13 @@ impl DirectorQbtcpState {
                 amendment: record.amendment,
             })
             .collect();
+        let tournament_id = self
+            .tournament
+            .read()
+            .map_err(|_| ServerError::Unavailable)
+            .map(|tournament| Some(tournament.id.clone()))?;
         Ok(ServerSnapshot {
+            tournament_id,
             results,
             progress,
             presence,
@@ -1802,20 +1890,55 @@ fn u32_field(object: Option<&serde_json::Map<String, Value>>, key: &str) -> Opti
     u64_field(object, key).and_then(|value| u32::try_from(value).ok())
 }
 
-pub(crate) fn detect_lan_address() -> Option<String> {
-    if_addrs::get_if_addrs()
-        .ok()
-        .and_then(|interfaces| {
-            select_lan_address(interfaces.into_iter().map(|interface| interface.ip()))
+fn detect_lan_candidates() -> Vec<AdvertisedAddressCandidate> {
+    let Ok(interfaces) = if_addrs::get_if_addrs() else {
+        return Vec::new();
+    };
+    let mut candidates = interfaces
+        .into_iter()
+        .filter_map(|interface| match interface.ip() {
+            IpAddr::V4(address) if !address.is_unspecified() && !address.is_loopback() => {
+                Some(AdvertisedAddressCandidate {
+                    interface_name: interface.name,
+                    address: address.to_string(),
+                })
+            }
+            _ => None,
         })
-        .map(|address| address.to_string())
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| {
+        left.address
+            .cmp(&right.address)
+            .then_with(|| left.interface_name.cmp(&right.interface_name))
+    });
+    candidates.dedup_by(|left, right| left.address == right.address);
+    candidates
 }
 
+/// Legacy local-live address discovery. QBTCP uses the conservative candidate flow above so its
+/// pairing links never inherit this interface-enumeration heuristic.
+pub(crate) fn detect_lan_address() -> Option<String> {
+    if_addrs::get_if_addrs().ok().and_then(|interfaces| {
+        interfaces
+            .into_iter()
+            .map(|interface| interface.ip())
+            .find_map(|address| match address {
+                IpAddr::V4(address) if !address.is_unspecified() && !address.is_loopback() => {
+                    Some(address.to_string())
+                }
+                _ => None,
+            })
+    })
+}
+
+/// Auto-selection is deliberately conservative. An interface enumeration is not a reachability
+/// decision, so more than one address requires an operator choice instead of picking a VPN,
+/// container bridge, or secondary adapter by accident.
 fn select_lan_address<I>(addresses: I) -> Option<Ipv4Addr>
 where
     I: IntoIterator<Item = IpAddr>,
 {
-    let mut fallback = None;
+    let mut candidates = Vec::new();
     for address in addresses {
         let IpAddr::V4(address) = address else {
             continue;
@@ -1823,12 +1946,93 @@ where
         if address.is_unspecified() || address.is_loopback() {
             continue;
         }
-        if address.is_private() {
-            return Some(address);
+        if !candidates.contains(&address) {
+            candidates.push(address);
         }
-        fallback.get_or_insert(address);
     }
-    fallback
+    if candidates.len() == 1 {
+        candidates.first().copied()
+    } else {
+        None
+    }
+}
+
+fn select_candidate_address(candidates: &[AdvertisedAddressCandidate]) -> Option<String> {
+    let addresses = candidates
+        .iter()
+        .filter_map(|candidate| candidate.address.parse::<Ipv4Addr>().ok())
+        .map(IpAddr::V4)
+        .collect::<Vec<_>>();
+    select_lan_address(addresses).map(|address| address.to_string())
+}
+
+fn refresh_automatic_address(status: &mut ServerStatus) {
+    if !status.running {
+        return;
+    }
+    let candidates = detect_lan_candidates();
+    status.address_candidates = candidates.clone();
+    if status.advertised_address_source.as_deref() == Some("operator") {
+        return;
+    }
+    let address = select_candidate_address(&candidates);
+    let changed = status.address != address;
+    status.address = address.clone();
+    status.address_selection_required = address.is_none() && candidates.len() > 1;
+    status.advertised_address_source = address.as_ref().map(|_| "automatic".to_owned());
+    if changed {
+        if let Some(port) = status.port {
+            rebuild_pairing_urls(status, address.as_deref(), port);
+        }
+        status.message = Some(start_message(
+            status.address_selection_required,
+            address.is_some(),
+        ));
+    }
+}
+
+fn rebuild_pairing_urls(status: &mut ServerStatus, address: Option<&str>, port: u16) {
+    for invitation in &mut status.pairing_invitations {
+        invitation.pairing_url =
+            pairing_url(address, port, &invitation.pairing_code, &invitation.room_id);
+    }
+}
+
+fn start_message(address_selection_required: bool, has_address: bool) -> String {
+    if has_address {
+        "QBTCP server started.".to_owned()
+    } else if address_selection_required {
+        "QBTCP server started, but multiple local IPv4 addresses were found; choose the scorer LAN before issuing links.".to_owned()
+    } else {
+        "QBTCP server started, but no usable IPv4 address was found; pairing links are unavailable until one is provided.".to_owned()
+    }
+}
+
+fn prune_expired_invitations(status: &mut ServerStatus) {
+    if !status.running {
+        status.pairing_invitations.clear();
+        status.pairing_code = None;
+        status.pairing_url = None;
+        status.expired_pairing_room_ids.clear();
+        return;
+    }
+    let now = OffsetDateTime::now_utc();
+    let mut expired = status.expired_pairing_room_ids.clone();
+    status.pairing_invitations.retain(|invitation| {
+        let active = OffsetDateTime::parse(&invitation.expires_at, &Rfc3339)
+            .map(|expires_at| expires_at > now)
+            .unwrap_or(false);
+        if !active && !expired.contains(&invitation.room_id) {
+            expired.push(invitation.room_id.clone());
+        }
+        active
+    });
+    expired.sort();
+    expired.dedup();
+    status.expired_pairing_room_ids = expired;
+    let (pairing_code, pairing_url) = legacy_pairing_fields(&status.pairing_invitations);
+    status.pairing_code = pairing_code;
+    status.pairing_url = pairing_url;
 }
 
 fn pairing_url(address: Option<&str>, port: u16, code: &str, room_id: &str) -> Option<String> {
@@ -1852,6 +2056,8 @@ fn pairing_invitation(
         room_name: invitation.room_name,
         pairing_code: invitation.code.clone(),
         pairing_url: pairing_url(address, port, &invitation.code, &invitation.room_id),
+        issued_at: invitation.issued_at,
+        expires_at: invitation.expires_at,
         expires_in_seconds: invitation.expires_in.as_secs(),
     }
 }
@@ -2600,16 +2806,85 @@ mod tests {
     }
 
     #[test]
-    fn lan_address_selection_prefers_private_non_loopback_and_has_no_loopback_fallback() {
+    fn lan_address_selection_requires_one_unambiguous_non_loopback_ipv4() {
         let selected = select_lan_address([
             IpAddr::V4(Ipv4Addr::LOCALHOST),
             IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
             IpAddr::V4(Ipv4Addr::new(203, 0, 113, 10)),
             IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
         ]);
-        assert_eq!(selected, Some(Ipv4Addr::new(192, 168, 1, 20)));
+        assert_eq!(selected, None);
+        assert_eq!(
+            select_lan_address([IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20))]),
+            Some(Ipv4Addr::new(192, 168, 1, 20))
+        );
         assert_eq!(select_lan_address([IpAddr::V4(Ipv4Addr::LOCALHOST)]), None);
         assert!(pairing_url(None, 8787, "12345678", "room/101").is_none());
+    }
+
+    #[test]
+    fn vpn_first_and_physical_lan_are_actionably_ambiguous() {
+        let candidates = vec![
+            AdvertisedAddressCandidate {
+                interface_name: "utun0".to_owned(),
+                address: "10.8.0.2".to_owned(),
+            },
+            AdvertisedAddressCandidate {
+                interface_name: "en0".to_owned(),
+                address: "192.168.1.54".to_owned(),
+            },
+        ];
+        assert_eq!(select_candidate_address(&candidates), None);
+        assert_eq!(
+            select_candidate_address(&candidates[1..2]),
+            Some("192.168.1.54".to_owned())
+        );
+        assert!(pairing_url(None, 8787, "12345678", "room-101").is_none());
+        assert!(
+            pairing_url(Some("192.168.1.54"), 8787, "12345678", "room-101")
+                .expect("operator-selected host")
+                .contains("192.168.1.54")
+        );
+    }
+
+    #[test]
+    fn expired_invitation_is_pruned_but_reissue_can_restore_the_room() {
+        let mut status = ServerStatus {
+            running: true,
+            pairing_invitations: vec![RoomPairingInvitation {
+                room_id: "room-101".to_owned(),
+                room_name: "Room 101".to_owned(),
+                pairing_code: "12345678".to_owned(),
+                pairing_url: Some("https://qbsheet.com/old".to_owned()),
+                issued_at: "2026-09-09T11:00:00Z".to_owned(),
+                expires_at: "2026-09-09T11:01:00Z".to_owned(),
+                expires_in_seconds: 60,
+            }],
+            pairing_code: Some("12345678".to_owned()),
+            pairing_url: Some("https://qbsheet.com/old".to_owned()),
+            ..ServerStatus::default()
+        };
+        prune_expired_invitations(&mut status);
+        assert!(status.pairing_invitations.is_empty());
+        assert_eq!(status.pairing_code, None);
+        assert_eq!(status.pairing_url, None);
+        assert_eq!(status.expired_pairing_room_ids, vec!["room-101"]);
+
+        status.pairing_invitations.push(RoomPairingInvitation {
+            room_id: "room-101".to_owned(),
+            room_name: "Room 101".to_owned(),
+            pairing_code: "87654321".to_owned(),
+            pairing_url: Some("https://qbsheet.com/new".to_owned()),
+            issued_at: "2999-09-09T11:00:00Z".to_owned(),
+            expires_at: "2999-09-09T11:01:00Z".to_owned(),
+            expires_in_seconds: 60,
+        });
+        status
+            .expired_pairing_room_ids
+            .retain(|room_id| room_id != "room-101");
+        prune_expired_invitations(&mut status);
+        assert_eq!(status.pairing_invitations.len(), 1);
+        assert!(status.expired_pairing_room_ids.is_empty());
     }
 
     #[tokio::test(flavor = "current_thread")]
