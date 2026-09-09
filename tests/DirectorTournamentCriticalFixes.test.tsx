@@ -520,6 +520,9 @@ describe('Director tournament-critical regressions', () => {
     if (!game || !game.leftTeamId || !game.rightTeamId) throw new Error('test setup did not create a game');
     const leftTeamId = game.leftTeamId;
     const rightTeamId = game.rightTeamId;
+    await act(async () => {
+      expect((await hook.result.current.startRound(game.roundId)).ok).toBe(true);
+    });
     act(() =>
       expect(
         hook.result.current.addManualResult({
