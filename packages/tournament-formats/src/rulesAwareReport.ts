@@ -46,7 +46,8 @@ function teamRowHtml(
     `<tr><td class="num">${row.rank}</td>` +
     `${showCalculatedRank ? reportNumberCell(row.calculatedRank ?? row.rank) : ''}` +
     `<td><a href="teamdetail.html#${reportTeamAnchor(row)}">${reportEscape(row.teamName)}</a></td>` +
-    `<td class="num">${reportEscape(recordText(row))}</td><td class="num">${reportPercent(row.winPercentage, presentation.precision.percentage)}</td>` +
+    `<td class="num">${reportEscape(recordText(row))}</td><td class="num">${row.gamesPlayed}</td>` +
+    `<td class="num">${reportPercent(row.winPercentage, presentation.precision.percentage)}</td>` +
     `${presentation.options.showPointsForAgainstMargin ? `${reportNumberCell(row.pointsFor)}${reportNumberCell(row.pointsAgainst)}${reportNumberCell(row.margin)}` : ''}` +
     `<td class="num">${reportEscape(reportPointsMetricValue(row, presentation))}</td>` +
     `${presentation.options.showPapg ? `<td class="num">${reportNumber(row.papg, presentation.precision.ppg)}</td>` : ''}` +
@@ -70,7 +71,7 @@ export function renderRulesAwareStandings(snapshot: StatsSnapshot): string {
     .join('');
   const table =
     `<div class="table-wrap"><table><caption>Team standings</caption><thead><tr><th scope="col" class="num">#</th>` +
-    `${showCalculatedRank ? '<th scope="col" class="num">Calc</th>' : ''}<th scope="col">Team</th><th scope="col" class="num">Record</th><th scope="col" class="num">Win %</th>` +
+    `${showCalculatedRank ? '<th scope="col" class="num">Calc</th>' : ''}<th scope="col">Team</th><th scope="col" class="num">Record</th><th scope="col" class="num">GP</th><th scope="col" class="num">Win %</th>` +
     `${presentation.options.showPointsForAgainstMargin ? '<th scope="col" class="num">PF</th><th scope="col" class="num">PA</th><th scope="col" class="num">Margin</th>' : ''}` +
     `<th scope="col" class="num">${reportEscape(reportPointsMetricLabel(presentation))}</th>` +
     `${presentation.options.showPapg ? '<th scope="col" class="num">PAPG</th>' : ''}` +
@@ -84,6 +85,7 @@ function playerRowHtml(
   row: PlayerStatsRow,
   presentation: ReportPresentation,
   showGrade: boolean,
+  showPlayerPpb: boolean,
 ): string {
   const team = snapshotTeamLinkFallback(row.teamId);
   return (
@@ -92,7 +94,7 @@ function playerRowHtml(
     `${showGrade ? `<td class="num">${reportEscape(row.schoolYear ?? '—')}</td>` : ''}` +
     `<td class="num">${row.gamesPlayed}</td>${reportNumberCell(row.tossupsHeard)}${reportAnswerCells(row, presentation)}` +
     `${reportNumberCell(row.points)}<td class="num">${reportEscape(reportPointsMetricValue(row, presentation))}</td>${reportNumberCell(row.pptuh, presentation.precision.rate)}` +
-    `${presentation.applicability.bonuses ? `${reportNumberCell(row.bonusPoints)}${reportNumberCell(row.ppb, presentation.precision.ppb)}` : ''}</tr>`
+    `${presentation.applicability.bonuses ? `${reportNumberCell(row.bonusPoints)}${showPlayerPpb ? reportNumberCell(row.ppb, presentation.precision.ppb) : ''}` : ''}</tr>`
   );
 }
 
@@ -103,12 +105,17 @@ function snapshotTeamLinkFallback(teamId: string): Pick<TeamStatsRow, 'teamId'> 
 export function renderRulesAwareIndividuals(snapshot: StatsSnapshot): string {
   const presentation = reportPresentationOf(snapshot);
   const showGrade = snapshot.players.some((row) => typeof row.schoolYear === 'number');
-  const rows = snapshot.players.map((row) => playerRowHtml(row, presentation, showGrade)).join('');
+  const showPlayerPpb =
+    presentation.applicability.bonuses &&
+    snapshot.players.some((row) => row.bonusesHeard > 0 && typeof row.ppb === 'number');
+  const rows = snapshot.players
+    .map((row) => playerRowHtml(row, presentation, showGrade, showPlayerPpb))
+    .join('');
   const table =
     `<div class="table-wrap"><table><caption>Individual statistics</caption><thead><tr><th scope="col" class="num">#</th><th scope="col">Player</th><th scope="col">Team</th>` +
     `${showGrade ? '<th scope="col" class="num">Grade</th>' : ''}<th scope="col" class="num">GP</th><th scope="col" class="num">TUH</th>${reportAnswerHeaders(presentation)}` +
     `<th scope="col" class="num">Pts</th><th scope="col" class="num">${reportEscape(reportPointsMetricLabel(presentation))}</th><th scope="col" class="num">PPTUH</th>` +
-    `${presentation.applicability.bonuses ? '<th scope="col" class="num">Bonus pts</th><th scope="col" class="num">PPB</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`;
+    `${presentation.applicability.bonuses ? `<th scope="col" class="num">Bonus pts</th>${showPlayerPpb ? '<th scope="col" class="num">PPB</th>' : ''}` : ''}</tr></thead><tbody>${rows}</tbody></table></div>`;
   return renderReportPage(snapshot, 'Individuals', `${reportScopeNote(snapshot)}${table}`);
 }
 
@@ -140,29 +147,35 @@ export function renderRulesAwareRounds(snapshot: StatsSnapshot): string {
     .map(([roundId, group]) => {
       const rows = group.games
         .flatMap((game) => {
+          const stageCell = presentation.applicability.stage
+            ? `<td>${reportEscape(game.phaseId ?? '—')}</td>`
+            : '';
           const stats = game.teamStats ?? [];
           if (stats.length === 0) {
             return [
-              `<tr><td>${reportEscape(game.teamOneName)} vs ${reportEscape(game.teamTwoName)}</td><td>—</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(`${game.teamOnePoints ?? '—'}–${game.teamTwoPoints ?? '—'}`)}</a></td>` +
+              `<tr>${stageCell}<td>${reportEscape(game.teamOneName)} vs ${reportEscape(game.teamTwoName)}</td><td>—</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(`${game.teamOnePoints ?? '—'}–${game.teamTwoPoints ?? '—'}`)}</a></td>` +
                 `${presentation.answerColumns.map(() => reportNumberCell(null)).join('')}${reportNumberCell(null)}` +
                 `${presentation.applicability.bonuses ? `${reportNumberCell(null)}${reportNumberCell(null)}${reportNumberCell(null)}` : ''}` +
+                `${presentation.applicability.bouncebacks ? reportNumberCell(null) : ''}` +
                 `${presentation.applicability.packet ? `<td>${reportEscape(game.packetName ?? '—')}</td>` : ''}</tr>`,
             ];
           }
           return stats.map(
             (line) =>
-              `<tr><td>${reportEscape(line.teamName)}</td><td>${reportEscape(opponent(game, line.teamId))}</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(scoreFor(game, line.teamId))}</a></td>` +
+              `<tr>${stageCell}<td>${reportEscape(line.teamName)}</td><td>${reportEscape(opponent(game, line.teamId))}</td><td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(scoreFor(game, line.teamId))}</a></td>` +
               `${reportAnswerCells(line, presentation)}${reportNumberCell(line.tossupsHeard)}` +
               `${presentation.applicability.bonuses ? `${reportNumberCell(line.bonusesHeard)}${reportNumberCell(line.bonusPoints)}${reportNumberCell(line.ppb, presentation.precision.ppb)}` : ''}` +
+              `${presentation.applicability.bouncebacks ? reportNumberCell(line.bouncebacks) : ''}` +
               `${presentation.applicability.packet ? `<td>${reportEscape(game.packetName ?? '—')}</td>` : ''}</tr>`,
           );
         })
         .join('');
       return (
         `<section id="${reportRoundAnchor(roundId)}"><h2>${reportEscape(group.name)}</h2>` +
-        `<div class="table-wrap"><table><thead><tr><th scope="col">Team</th><th scope="col">Opponent</th><th scope="col" class="num">Score</th>` +
+        `<div class="table-wrap"><table><thead><tr>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Team</th><th scope="col">Opponent</th><th scope="col" class="num">Score</th>` +
         `${reportAnswerHeaders(presentation)}<th scope="col" class="num">TUH</th>` +
         `${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}` +
+        `${presentation.applicability.bouncebacks ? '<th scope="col" class="num">Bounceback pts</th>' : ''}` +
         `${presentation.applicability.packet ? '<th scope="col">Packet</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div></section>`
       );
     })
