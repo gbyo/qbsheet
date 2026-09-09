@@ -13,15 +13,6 @@
   overflow: visible;
 }
 
-/* Custom selects/comboboxes/multi-selects are mounted inside dialog bodies.
-   The dialog itself already allows visible overflow; temporarily release the
-   body clipping only while one of those popovers is open. */
-.director-dialog-body:has(.director-select-trigger[aria-expanded='true']),
-.director-dialog-body:has(.director-combobox-field [aria-expanded='true']),
-.director-dialog-body:has(.director-multiselect-trigger[aria-expanded='true']) {
-  overflow: visible;
-}
-
 /* A flush panel is correct for the tiebreaker rows, but not for the reorder
    instruction notice that precedes them. Give that notice the normal panel
    inset without taking the list itself out of flush mode. */

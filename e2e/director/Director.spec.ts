@@ -113,13 +113,16 @@ test('Director layout keeps dialog, table, status, and narrow-window contracts',
   expect(teamFormInsets.actionRight).toBeGreaterThanOrEqual(12);
 
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / club').fill('Northview');
+  await page.getByRole('combobox', { name: 'School / club' }).fill('Northview');
   await teamForm.locator('.director-dialog-footer').getByRole('button', { name: 'Add team' }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 
   // Schools and clubs is its own management surface rather than a stray header action.
   await page.getByRole('button', { name: 'Schools & clubs' }).click();
   const schools = page.getByRole('dialog');
+  await schools.getByLabel('Name').fill('Northview');
+  await schools.getByRole('button', { name: 'Add', exact: true }).click();
+  await schools.getByRole('button', { name: 'Northview', exact: true }).click();
   await schools.getByLabel('City').fill('Springfield');
   await schools.getByRole('button', { name: /^Save/ }).click();
   await schools.getByRole('button', { name: 'Done' }).click();
@@ -213,7 +216,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   ]) {
     await page.getByRole('button', { name: 'Add team' }).click();
     await page.getByLabel('Display name').fill(team);
-    await page.getByLabel('School / club').fill(school);
+    await page.getByRole('combobox', { name: 'School / club' }).fill(school);
     await submitDialog('Add team').click();
   }
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
@@ -483,8 +486,15 @@ test('Director supports keyboard search, inline edits, and audited result review
 
   const navigation = page.locator('nav[aria-label="Director sections"]');
   await navigation.getByRole('button', { name: /(^|: )Teams$/ }).click();
+  await page.getByRole('button', { name: 'Schools & clubs' }).click();
+  const schools = page.getByRole('dialog');
+  await schools.getByLabel('Name').fill('Northview High');
+  await schools.getByRole('button', { name: 'Add', exact: true }).click();
+  await schools.getByRole('button', { name: 'Northview High', exact: true }).click();
+  await schools.getByRole('button', { name: 'Done' }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
-  await page.getByLabel('School / club').fill('Northview High');
+  await page.getByRole('combobox', { name: 'School / club' }).fill('Northview High');
+  await page.getByRole('option', { name: /Northview High/ }).click();
   await page.getByLabel('Team letter').fill('A');
   await expect(page.getByLabel('Display name')).toHaveValue('Northview High A');
   await page.getByLabel('Display name').fill('Northview A');
@@ -501,7 +511,7 @@ test('Director supports keyboard search, inline edits, and audited result review
   await expect(page.getByText('4 players', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Riverside A');
-  await page.getByLabel('School / club').fill('Riverside High');
+  await page.getByRole('combobox', { name: 'School / club' }).fill('Riverside High');
   await page
     .getByRole('dialog')
     .locator('.director-dialog-footer')
@@ -612,7 +622,7 @@ test('Director opens every indexed search entity at its exact operational target
   await navigation.getByRole('button', { name: /(^|: )Teams$/ }).click();
   await page.getByRole('button', { name: 'Add team' }).click();
   await page.getByLabel('Display name').fill('Northview A');
-  await page.getByLabel('School / club').fill('Northview High');
+  await page.getByRole('combobox', { name: 'School / club' }).fill('Northview High');
   await page.getByLabel('Player 1 name').fill('Ada Lovelace');
   await page
     .getByRole('dialog')
