@@ -12,10 +12,33 @@ import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { tournamentState } from '../../../tests/directorFixtures';
 import { SettingsView, auditPageSize } from './SettingsView';
+import { DirtyFormProvider } from '../components/Fields';
 
 afterEach(cleanup);
 
 const controller = { checkpoint: vi.fn(async () => undefined) } as unknown as DirectorController;
+
+function settingsController(updateTournament: (draft: unknown) => boolean = vi.fn(() => true)) {
+  return { checkpoint: vi.fn(async () => undefined), updateTournament } as unknown as DirectorController;
+}
+
+function renderGeneral(options?: {
+  updateTournament?: (draft: unknown) => boolean;
+  onSaveOperator?: (profile: { displayName: string; role?: string }) => boolean;
+}) {
+  const state = tournamentState();
+  render(
+    <DirtyFormProvider>
+      <SettingsView
+        state={state}
+        controller={settingsController(options?.updateTournament)}
+        onAnnounce={vi.fn()}
+        operatorProfile={{ displayName: 'Director', role: 'Local operator' }}
+        onSaveOperator={options?.onSaveOperator ?? vi.fn(() => true)}
+      />
+    </DirtyFormProvider>,
+  );
+}
 
 function stateWithAudit(count: number): DirectorState {
   const state = tournamentState();
@@ -82,4 +105,52 @@ test('a short history is drawn whole with no control at all', () => {
   expect(auditRows()).toEqual(['Event 2', 'Event 1', 'Event 0']);
   expect(screen.queryByRole('button', { name: 'Load more' })).toBeNull();
   expect(screen.getByText(/^3 meaningful changes/)).toBeTruthy();
+});
+
+test('General forms visibly mark dirty drafts and keep them across Settings section switches', () => {
+  renderGeneral();
+  const name = screen.getByLabelText('Name');
+  fireEvent.change(name, { target: { value: 'Draft tournament name' } });
+
+  expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  expect(screen.getByRole('button', { name: 'Save tournament details' })).toBeEnabled();
+
+  fireEvent.click(screen.getByRole('button', { name: /^Recovery/ }));
+  fireEvent.click(screen.getByRole('button', { name: /^General/ }));
+
+  expect(screen.getByLabelText('Name')).toHaveValue('Draft tournament name');
+  expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+});
+
+test('successful General save reports Saved and clears the dirty state', () => {
+  const updateTournament = vi.fn(() => true);
+  renderGeneral({ updateTournament });
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Committed name' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save tournament details' }));
+
+  expect(updateTournament).toHaveBeenCalledWith(expect.objectContaining({ name: 'Committed name' }));
+  expect(screen.getByRole('status')).toHaveTextContent('Saved');
+  expect(screen.getByRole('button', { name: 'Save tournament details' })).toBeDisabled();
+});
+
+test('rejected General save keeps the draft dirty and Discard changes restores the baseline', () => {
+  const updateTournament = vi.fn(() => false);
+  renderGeneral({ updateTournament });
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Rejected draft' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Save tournament details' }));
+
+  expect(screen.getByRole('status')).toHaveTextContent('Unsaved changes');
+  fireEvent.click(screen.getAllByRole('button', { name: 'Discard changes' })[0]!);
+
+  expect(screen.getByLabelText('Name')).toHaveValue(tournamentState().tournament?.name);
+  expect(screen.queryByText('Unsaved changes')).toBeNull();
+});
+
+test('dirty General forms install the native browser reload warning', () => {
+  renderGeneral();
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Reload draft' } });
+
+  const event = new Event('beforeunload', { cancelable: true }) as BeforeUnloadEvent;
+  window.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
 });

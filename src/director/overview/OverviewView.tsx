@@ -83,6 +83,7 @@ export function OverviewView({
   onAnnounce,
   nativeServerReady = false,
   nativeServerAvailable = true,
+  qbtcpHealth,
 }: {
   state: DirectorState;
   controller: DirectorController;
@@ -90,6 +91,7 @@ export function OverviewView({
   onAnnounce: (announcement: AnnounceInput) => void;
   nativeServerReady?: boolean;
   nativeServerAvailable?: boolean;
+  qbtcpHealth?: { lastSuccessfulAt: string | null; error: string | null };
 }) {
   const tournament = state.tournament;
   const round = currentOperationalRound(state) ?? latestRound(state.rounds);
@@ -114,7 +116,7 @@ export function OverviewView({
   const roundIndex = dayItems.findIndex((item) => item.id === round?.id);
   const preceding = roundIndex > 0 ? dayItems[roundIndex - 1] : undefined;
   const nextEvent = round?.status !== 'released' && preceding?.kind === 'event' ? preceding.event : undefined;
-  const issues = runPreflight(state, nativeServerReady, nativeServerAvailable);
+  const issues = runPreflight(state, nativeServerReady, nativeServerAvailable, qbtcpHealth);
   const blockers = issues.filter((issue) => issue.severity === 'blocker');
   const [showAllAttention, setShowAllAttention] = useState(false);
 

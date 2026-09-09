@@ -1,7 +1,12 @@
 export interface NativeServerStatus {
   running: boolean;
   address?: string;
+  bindAddress?: string;
   port?: number;
+  addressCandidates?: NativeAdvertisedAddressCandidate[];
+  addressSelectionRequired?: boolean;
+  advertisedAddressSource?: 'automatic' | 'operator' | string;
+  expiredPairingRoomIds?: string[];
   protocol?: string;
   pairedRooms?: number;
   pairingInvitations?: NativeRoomPairingInvitation[];
@@ -10,11 +15,18 @@ export interface NativeServerStatus {
   message?: string;
 }
 
+export interface NativeAdvertisedAddressCandidate {
+  interfaceName: string;
+  address: string;
+}
+
 export interface NativeRoomPairingInvitation {
   roomId: string;
   roomName: string;
   pairingCode: string;
   pairingUrl?: string;
+  issuedAt: string;
+  expiresAt: string;
   expiresInSeconds: number;
 }
 
@@ -89,6 +101,8 @@ export interface NativePresenceSnapshot {
 }
 
 export interface NativeServerSnapshot {
+  /** The document currently loaded by the native server, when provided by newer hosts. */
+  tournamentId?: string;
   results: NativeResultSnapshot[];
   progress: NativeProgressSnapshot[];
   presence: NativePresenceSnapshot[];
@@ -140,7 +154,29 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
   return {
     running: value.running,
     ...(typeof value.address === 'string' ? { address: value.address } : {}),
+    ...(typeof value.bindAddress === 'string' ? { bindAddress: value.bindAddress } : {}),
     ...(typeof value.port === 'number' ? { port: value.port } : {}),
+    ...(Array.isArray(value.addressCandidates)
+      ? {
+          addressCandidates: value.addressCandidates.filter(
+            (entry): entry is NativeAdvertisedAddressCandidate =>
+              isRecord(entry) && typeof entry.interfaceName === 'string' && typeof entry.address === 'string',
+          ),
+        }
+      : {}),
+    ...(typeof value.addressSelectionRequired === 'boolean'
+      ? { addressSelectionRequired: value.addressSelectionRequired }
+      : {}),
+    ...(typeof value.advertisedAddressSource === 'string'
+      ? { advertisedAddressSource: value.advertisedAddressSource }
+      : {}),
+    ...(Array.isArray(value.expiredPairingRoomIds)
+      ? {
+          expiredPairingRoomIds: value.expiredPairingRoomIds.filter(
+            (roomId): roomId is string => typeof roomId === 'string',
+          ),
+        }
+      : {}),
     ...(typeof value.protocol === 'string' ? { protocol: value.protocol } : {}),
     ...(typeof value.pairedRooms === 'number' ? { pairedRooms: value.pairedRooms } : {}),
     ...(Array.isArray(invitations)
@@ -152,6 +188,8 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
               typeof (entry as Record<string, unknown>).roomId === 'string' &&
               typeof (entry as Record<string, unknown>).roomName === 'string' &&
               typeof (entry as Record<string, unknown>).pairingCode === 'string' &&
+              typeof (entry as Record<string, unknown>).issuedAt === 'string' &&
+              typeof (entry as Record<string, unknown>).expiresAt === 'string' &&
               typeof (entry as Record<string, unknown>).expiresInSeconds === 'number',
           ),
         }
@@ -222,6 +260,15 @@ export async function issueNativeRoomPairing(roomId: string): Promise<NativeRoom
   return invitation as NativeRoomPairingInvitation;
 }
 
+export async function setNativeQbtcpAdvertisedAddress(address: string): Promise<NativeServerStatus> {
+  const native = bridge();
+  if (!native) throw new Error('Open the Tauri Director app to choose the QBTCP advertised address.');
+  return normalizeStatus(
+    await native.invoke('director_set_qbtcp_advertised_address', { address }),
+    'The native server returned an invalid advertised-address status.',
+  );
+}
+
 export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResult> {
   const native = bridge();
   if (!native)
@@ -243,6 +290,7 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
     return {
       status: 'ok',
       snapshot: {
+        ...(typeof snapshot.tournamentId === 'string' ? { tournamentId: snapshot.tournamentId } : {}),
         results: snapshot.results
           .map(normalizeNativeResult)
           .filter((result): result is NativeResultSnapshot => result !== null),
@@ -261,6 +309,13 @@ export async function readNativeServerSnapshot(): Promise<NativeSnapshotReadResu
       message: reason instanceof Error ? reason.message : 'The native server snapshot could not be read.',
     };
   }
+}
+
+/** Retire native scorer authorities before Director settles their scheduled game administratively. */
+export async function abandonNativeQbtcpSessions(sessionIds: string[]): Promise<void> {
+  const native = bridge();
+  if (!native || sessionIds.length === 0) return;
+  await native.invoke('director_abandon_qbtcp_sessions', { sessionIds });
 }
 
 /**

@@ -1,6 +1,9 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useMemo, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { IconButton } from './Controls';
+import { normalizeSearchText } from './search';
+
+export { normalizeSearchText } from './search';
 
 /**
  * Page-local list filtering.
@@ -101,12 +104,27 @@ export function useTextFilter<T>(
   fields: (item: T) => (string | undefined | null)[],
 ) {
   return useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = normalizeSearchText(query.trim());
     if (!needle) return items;
     return items.filter((item) =>
-      fields(item).some((field) => (field ?? '').toLocaleLowerCase().includes(needle)),
+      fields(item).some((field) => normalizeSearchText(field ?? '').includes(needle)),
     );
   }, [items, query, fields]);
+}
+
+const TabGroupContext = createContext<string | null>(null);
+
+/** Provides one stable ID namespace to a tab list and its panels. */
+export function TabGroup({ id, children }: { id?: string; children: ReactNode }) {
+  const generatedId = useId();
+  const tabsId = id ?? `director-tabs-${generatedId}`;
+  return <TabGroupContext.Provider value={tabsId}>{children}</TabGroupContext.Provider>;
+}
+
+function useTabGroupId(explicitId?: string): string {
+  const contextId = useContext(TabGroupContext);
+  const generatedId = useId();
+  return explicitId ?? contextId ?? `director-tabs-${generatedId}`;
 }
 
 /**
@@ -123,12 +141,16 @@ export function Tabs<T extends string>({
   tabs,
   onChange,
   ariaLabel,
+  id,
 }: {
   value: T;
   tabs: { value: T; label: ReactNode; count?: number; countTone?: 'neutral' | 'warning' | 'danger' }[];
   onChange: (value: T) => void;
   ariaLabel: string;
+  /** A stable, document-unique ID shared with the matching TabPanel tabsId. */
+  id?: string;
 }) {
+  const tabsId = useTabGroupId(id);
   const selectAt = (index: number, current: HTMLButtonElement) => {
     const next = tabs[index];
     if (!next) return;
@@ -140,15 +162,15 @@ export function Tabs<T extends string>({
     selectAt((index + delta + tabs.length) % tabs.length, current);
   };
   return (
-    <div className="director-tablist" role="tablist" aria-label={ariaLabel}>
+    <div id={tabsId} className="director-tablist" role="tablist" aria-label={ariaLabel}>
       {tabs.map((tab) => (
         <button
           key={tab.value}
           type="button"
           role="tab"
-          id={`director-tab-${tab.value}`}
+          id={`${tabsId}-tab-${tab.value}`}
           aria-selected={tab.value === value}
-          aria-controls={`director-tabpanel-${tab.value}`}
+          aria-controls={`${tabsId}-tabpanel-${tab.value}`}
           tabIndex={tab.value === value ? 0 : -1}
           className="director-tab"
           onClick={() => onChange(tab.value)}
@@ -180,12 +202,22 @@ export function Tabs<T extends string>({
   );
 }
 
-export function TabPanel<T extends string>({ value, children }: { value: T; children: ReactNode }) {
+export function TabPanel<T extends string>({
+  value,
+  children,
+  tabsId,
+}: {
+  value: T;
+  children: ReactNode;
+  /** Match the id on the associated Tabs, or provide it through TabGroup. */
+  tabsId?: string;
+}) {
+  const groupId = useTabGroupId(tabsId);
   return (
     <div
       role="tabpanel"
-      id={`director-tabpanel-${value}`}
-      aria-labelledby={`director-tab-${value}`}
+      id={`${groupId}-tabpanel-${value}`}
+      aria-labelledby={`${groupId}-tab-${value}`}
       tabIndex={0}
       className="director-stack"
     >
