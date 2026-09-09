@@ -4,6 +4,7 @@ import {
   type DirectorController,
   type StartRoundResult,
 } from './useDirectorControllerBase';
+import { finalPlacementCommitObserved } from './finalPlacementSafety';
 import {
   advancementCommitBlocker,
   advancementCorrectionBlocker,
@@ -135,6 +136,20 @@ export function useDirectorController(
         }
         allow();
         return base.updateRules(changes);
+      },
+      setFinalPlacement(input) {
+        const before = JSON.parse(base.exportSnapshot()) as typeof base.state;
+        const result = base.setFinalPlacement(input);
+        if (!result.applied) return result;
+        const after = JSON.parse(base.exportSnapshot()) as typeof base.state;
+        if (!finalPlacementCommitObserved(before, after, input.order)) {
+          const message =
+            'Final placement was not saved. This Director tab may not currently have write authority; review the warning above and try again.';
+          raise(message);
+          return { applied: false, message };
+        }
+        allow();
+        return result;
       },
     };
   }, [base, safetyError]);
