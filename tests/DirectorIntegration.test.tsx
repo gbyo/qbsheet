@@ -26,7 +26,11 @@ import {
 } from '../src/director/domain';
 import { scoringRulesObject } from '../src/director/transfers/assignment';
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
-import { useDirectorController, type StartRoundResult } from '../src/director/state/useDirectorController';
+import {
+  useDirectorController,
+  type DirectorController,
+  type StartRoundResult,
+} from '../src/director/state/useDirectorController';
 import {
   IndexedDbDirectorRepository,
   MemoryDirectorRepository,
@@ -188,7 +192,7 @@ function team(id: string, status: DirectorState['teams'][number]['status'] = 'co
   } satisfies DirectorState['teams'][number];
 }
 
-async function directorWithSetup(teamCount = 2) {
+async function directorWithSetup(teamCount = 2, roomCount = 1) {
   const repository = new MemoryDirectorRepository();
   const hook = renderHook(() => useDirectorController(repository));
   await waitFor(() => expect(hook.result.current.loading).toBe(false));
@@ -202,11 +206,22 @@ async function directorWithSetup(teamCount = 2) {
     for (let index = 0; index < teamCount; index += 1) {
       hook.result.current.addTeam({ displayName: `Team ${index + 1}` });
     }
-    hook.result.current.addRoom({ name: 'Room 1' });
+    for (let index = 0; index < roomCount; index += 1) {
+      hook.result.current.addRoom({ name: `Room ${index + 1}` });
+    }
     hook.result.current.addPacket('Packet 1');
   });
   await waitFor(() => expect(hook.result.current.saving).toBe(false));
   return { hook, repository };
+}
+
+function releaseRoundForResults(hook: { result: { current: DirectorController } }, roundId: string): void {
+  act(() => {
+    expect(hook.result.current.prepareRound(roundId)).toBe(true);
+  });
+  act(() => {
+    expect(hook.result.current.releaseRound(roundId)).toBe(true);
+  });
 }
 
 async function waitForDurable(hook: { result: { current: ReturnType<typeof useDirectorController> } }) {
@@ -460,7 +475,7 @@ describe('Director integration hardening', () => {
   });
 
   test('scoring values lock once results exist; procedure and tiebreakers stay editable', async () => {
-    const { hook } = await directorWithSetup(4);
+    const { hook } = await directorWithSetup(4, 2);
     act(() => {
       expect(hook.result.current.updateRules({ tossupValue: 12 })).toBe(true);
       expect(hook.result.current.generateSchedule().generated).toBe(true);
@@ -470,6 +485,7 @@ describe('Director integration hardening', () => {
       (entry) => entry.roundId === roundId && !entry.bye,
     );
     if (!game) throw new Error('test setup produced no playable game');
+    releaseRoundForResults(hook, roundId);
     act(() => {
       expect(
         hook.result.current.addManualResult({
@@ -516,6 +532,8 @@ describe('Director integration hardening', () => {
     const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const leftPlayer = hook.result.current.state.players.find((player) => player.teamId === leftTeamId);
     if (!scheduled || !leftPlayer) throw new Error('test setup produced no playable roster');
+    // Results only settle in a released round, so release it before asserting count validation.
+    releaseRoundForResults(hook, scheduled.roundId);
 
     const values = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY];
     for (const value of values) {
@@ -854,7 +872,7 @@ describe('Director integration hardening', () => {
   });
 
   test('advancement commit: wildcards rebracket into playoff pools with audit', async () => {
-    const { hook } = await directorWithSetup(18);
+    const { hook } = await directorWithSetup(18, 9);
     const set = recommendTournamentPlan(18);
     act(() => {
       expect(hook.result.current.applyTournamentPlan(set?.recommended ?? ({} as never))).toBe(true);
@@ -865,6 +883,18 @@ describe('Director integration hardening', () => {
     expect(live.tournament?.currentPhaseId).toBe(prelim.id);
     const prelimNumbers = set?.recommended.stages[0].roundNumbers ?? [];
     expect(prelimNumbers.length).toBeGreaterThan(0);
+
+    // Every round here is really released, and a packet cannot be exposed in two rounds, so the
+    // inventory needs one packet per round rather than the single setup packet.
+    act(() => {
+      for (let index = 0; index < prelimNumbers.length; index += 1) {
+        expect(hook.result.current.addPacket(`Prelim packet ${index + 1}`)).toBe(true);
+      }
+    });
+    const prelimPacketIds = hook.result.current.state.packets
+      .filter((packet) => packet.name.startsWith('Prelim packet '))
+      .map((packet) => packet.id);
+    expect(prelimPacketIds).toHaveLength(prelimNumbers.length);
 
     act(() => {
       expect(
@@ -883,11 +913,14 @@ describe('Director integration hardening', () => {
     let gameIndex = 0;
     for (let index = 0; index < prelimNumbers.length; index += 1) {
       act(() => {
-        expect(hook.result.current.generateSchedule().generated).toBe(true);
+        expect(hook.result.current.generateSchedule({ packetId: prelimPacketIds[index] }).generated).toBe(
+          true,
+        );
       });
       live = hook.result.current.state;
       const roundId = live.tournament?.currentRoundId;
       expect(roundId).toBeTruthy();
+      releaseRoundForResults(hook, roundId!);
       const games = live.scheduledGames.filter(
         (game) => game.roundId === roundId && !game.bye && game.rightTeamId,
       );
@@ -906,6 +939,9 @@ describe('Director integration hardening', () => {
           ).toBe(true);
         });
       }
+      act(() => {
+        expect(hook.result.current.closeRound(roundId!)).toBe(true);
+      });
     }
     live = hook.result.current.state;
     const gamesBefore = live.games.length;
@@ -1008,7 +1044,7 @@ describe('Director integration hardening', () => {
   });
 
   test('final placement: explicit order overrides nothing but the final ranking', async () => {
-    const { hook } = await directorWithSetup(4);
+    const { hook } = await directorWithSetup(4, 2);
     act(() => {
       expect(hook.result.current.generateSchedule().generated).toBe(true);
     });
@@ -1017,6 +1053,7 @@ describe('Director integration hardening', () => {
       (game) => game.roundId === round.id && !game.bye,
     );
     expect(games.length).toBeGreaterThan(0);
+    releaseRoundForResults(hook, round.id);
     act(() => {
       for (const game of games) {
         expect(
@@ -1399,6 +1436,9 @@ describe('Director integration hardening', () => {
     const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     if (!scheduled || !scheduled.rightTeamId || !scheduled.roomId)
       throw new Error('test setup did not create a room game');
+    // The settlement below is a canonical result, which only lands in a released round.
+    releaseRoundForResults(hook, scheduled.roundId);
+    await waitForDurable(hook);
     const live = structuredClone(hook.result.current.state);
     live.qbtcpSessions = [
       {
@@ -2665,6 +2705,7 @@ describe('Director integration hardening', () => {
     if (!scheduled || !scheduled.leftTeamId || !scheduled.rightTeamId) {
       throw new Error('test setup did not generate a two-team game');
     }
+    releaseRoundForResults(hook, scheduled.roundId);
     const rightTeamId = scheduled.rightTeamId;
 
     act(() => {
@@ -3172,15 +3213,16 @@ describe('Director integration hardening', () => {
     const round = hook.result.current.state.rounds[0];
     if (!scheduled || !round || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
 
+    releaseRoundForResults(hook, round.id);
     act(() => {
-      expect(hook.result.current.prepareRound(round.id)).toBe(true);
-      expect(hook.result.current.releaseRound(round.id)).toBe(true);
       expect(
         hook.result.current.addManualResult({
           scheduledGameId: scheduled.id,
           scores: [score(scheduled.leftTeamId, 120), score(scheduled.rightTeamId!, 90)],
         }),
       ).toBe(true);
+    });
+    act(() => {
       expect(hook.result.current.closeRound(round.id)).toBe(true);
     });
     expect(hook.result.current.state.rounds[0]?.status).toBe('closed');
@@ -3201,6 +3243,9 @@ describe('Director integration hardening', () => {
     await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
+    // Releasing dirties the document again, and an import needs the changes durable first.
+    await waitForDurable(hook);
     const rightTeamId = scheduled.rightTeamId;
     const imported = structuredClone(hook.result.current.state);
     const gameId = 'game-qbtcp-review';
@@ -3232,7 +3277,7 @@ describe('Director integration hardening', () => {
 
     expect(hook.result.current.state.games.find((game) => game.id === gameId)?.status).toBe('rejected');
     expect(hook.result.current.state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe(
-      'scheduled',
+      'released',
     );
   });
 
@@ -3242,6 +3287,9 @@ describe('Director integration hardening', () => {
     await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
+    // Releasing dirties the document again, and an import needs the changes durable first.
+    await waitForDurable(hook);
     const rightTeamId = scheduled.rightTeamId;
     const imported = structuredClone(hook.result.current.state);
     const gameId = 'game-two-submissions';
@@ -3306,6 +3354,7 @@ describe('Director integration hardening', () => {
     await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
     const rightTeamId = scheduled.rightTeamId;
     act(() => {
       hook.result.current.addManualResult({
@@ -3346,6 +3395,7 @@ describe('Director integration hardening', () => {
     act(() => hook.result.current.generateSchedule());
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
     const rightTeamId = scheduled.rightTeamId;
     act(() => {
       hook.result.current.addManualResult({
@@ -3391,6 +3441,7 @@ describe('Director integration hardening', () => {
     await waitForDurable(hook);
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
     const rightTeamId = scheduled.rightTeamId;
     act(() => {
       hook.result.current.addManualResult({
@@ -3678,6 +3729,7 @@ describe('Director integration hardening', () => {
     act(() => hook.result.current.generateSchedule());
     const scheduled = hook.result.current.state.scheduledGames[0];
     if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup did not generate a game');
+    releaseRoundForResults(hook, scheduled.roundId);
     const invoke = vi.fn(async (command: string) => {
       if (command !== 'director_server_snapshot') throw new Error(`unexpected command ${command}`);
       return {
@@ -3714,7 +3766,7 @@ describe('Director integration hardening', () => {
     const state = hook.result.current.state;
     const submission = state.submissions.find((entry) => entry.transportResultId === 'transport-unmatched');
     expect(submission?.status).toBe('review');
-    expect(state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe('scheduled');
+    expect(state.scheduledGames.find((game) => game.id === scheduled.id)?.status).toBe('released');
     expect(submission && hook.result.current.acceptSubmission(submission.id)).toBe(false);
     if (!submission) throw new Error('test setup did not stage an unmatched result');
     act(() => {
