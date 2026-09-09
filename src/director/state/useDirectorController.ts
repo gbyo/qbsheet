@@ -25,6 +25,8 @@ import {
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -4140,6 +4142,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('An accepting operator is required.');
         return false;
       }
+      if (submission.warnings?.includes(ingestWarnings.invalidStatisticCount)) {
+        setError('This result contains an invalid statistic count and cannot be accepted.');
+        return false;
+      }
       const game = snapshot.games.find((entry) => entry.id === submission.gameId);
       const scheduled = game
         ? snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -6181,14 +6187,6 @@ function validateResultForScheduledGame(
   ) {
     return 'A result must contain exactly the two teams assigned to the scheduled game.';
   }
-  const countFields: Array<keyof Omit<TeamGameScore, 'teamId' | 'score'>> = [
-    'powers',
-    'gets',
-    'negs',
-    'bonuses',
-    'bonusPoints',
-    'bouncebacks',
-  ];
   for (const score of scores) {
     if (!score || typeof score !== 'object') {
       return 'Each result score must be a team score object.';
@@ -6199,11 +6197,8 @@ function validateResultForScheduledGame(
     if (!state.teams.some((team) => team.id === score.teamId)) {
       return 'A result references a team that is not in this tournament.';
     }
-    for (const field of countFields) {
-      if (!Number.isInteger(score[field]) || !Number.isFinite(score[field]) || score[field] < 0) {
-        return `${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidTeamGameScoreCountField(score);
+    if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
   if (!Array.isArray(playerStats)) return 'Detailed player statistics must be an array when supplied.';
   const playerIds = new Set<string>();
@@ -6215,17 +6210,8 @@ function validateResultForScheduledGame(
     const player = state.players.find((candidate) => candidate.id === stat.playerId);
     if (!player || player.teamId !== stat.teamId)
       return 'Player statistics must reference the player roster for that team.';
-    const playerFields: Array<keyof Omit<PlayerGameStat, 'playerId' | 'teamId' | 'tossupsHeard'>> = [
-      'powers',
-      'gets',
-      'negs',
-      'bonusPoints',
-    ];
-    for (const field of playerFields) {
-      if (!Number.isInteger(stat[field]) || !Number.isFinite(stat[field]) || stat[field] < 0) {
-        return `Player ${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidPlayerGameStatCountField(stat);
+    if (invalidCountField) return `Player ${invalidCountField} must be a finite non-negative whole number.`;
     if (
       stat.tossupsHeard !== null &&
       (!Number.isInteger(stat.tossupsHeard) || !Number.isFinite(stat.tossupsHeard) || stat.tossupsHeard < 0)

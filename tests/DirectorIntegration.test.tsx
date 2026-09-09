@@ -19,6 +19,7 @@ import {
   scoringRulePresets,
   type DirectorState,
   type TeamGameScore,
+  type TournamentRules,
 } from '../src/director/domain';
 import { scoringRulesObject } from '../src/director/transfers/assignment';
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
@@ -60,6 +61,7 @@ function acceptedGame(
   leftScore: number,
   rightTeamId: string,
   rightScore: number,
+  overrides: Partial<DirectorState['games'][number]> = {},
 ): DirectorState['games'][number] {
   return {
     id,
@@ -72,6 +74,7 @@ function acceptedGame(
     source: 'manual',
     detailedStats: 'unknown',
     acceptedAt: id,
+    ...overrides,
   };
 }
 
@@ -418,6 +421,58 @@ describe('Director integration hardening', () => {
     });
     expect(hook.result.current.state.tournament?.rules.bouncebacks).toBe(true);
     expect(hook.result.current.state.tournament?.rules.tiebreakers).toEqual(['record', 'points']);
+  });
+
+  test('canonical result acceptance rejects invalid team and player superpower counts', async () => {
+    const { hook } = await directorWithSetup();
+    const leftTeamId = hook.result.current.state.teams[0]?.id;
+    const rightTeamId = hook.result.current.state.teams[1]?.id;
+    if (!leftTeamId || !rightTeamId) throw new Error('test setup produced no teams');
+    act(() => {
+      expect(hook.result.current.addPlayer(leftTeamId, 'Left Player')).toBe(true);
+      expect(hook.result.current.addPlayer(rightTeamId, 'Right Player')).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
+    const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
+    const leftPlayer = hook.result.current.state.players.find((player) => player.teamId === leftTeamId);
+    if (!scheduled || !leftPlayer) throw new Error('test setup produced no playable roster');
+
+    const values = [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY];
+    for (const value of values) {
+      act(() => {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: scheduled.id,
+            scores: [{ ...score(leftTeamId, 100), superpowers: value }, score(rightTeamId, 0)],
+          }),
+        ).toBe(false);
+      });
+      expect(hook.result.current.error).toMatch(/superpowers.*finite non-negative whole number/i);
+    }
+
+    for (const value of values) {
+      act(() => {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: scheduled.id,
+            scores: [score(leftTeamId, 100), score(rightTeamId, 0)],
+            playerStats: [
+              {
+                playerId: leftPlayer.id,
+                teamId: leftTeamId,
+                superpowers: value,
+                powers: 0,
+                gets: 0,
+                negs: 0,
+                bonusPoints: 0,
+                tossupsHeard: null,
+              },
+            ],
+          }),
+        ).toBe(false);
+      });
+      expect(hook.result.current.error).toMatch(/Player superpowers.*finite non-negative whole number/i);
+    }
   });
 
   test('legacy scoring rules migrate with behavior-preserving defaults', () => {
@@ -3361,6 +3416,87 @@ describe('Director integration hardening', () => {
     expect(standings.every((standing) => standing.wins === 1 && standing.losses === 1)).toBe(true);
   });
 
+  test('a forfeit uses its administrative outcome at the advancement cutoff', () => {
+    const state = emptyDirectorState();
+    state.tournament = {
+      id: 'tournament-forfeit-cutoff',
+      name: 'Forfeit cutoff',
+      date: '',
+      venue: '',
+      organizer: '',
+      status: 'running',
+      timeZone: 'America/New_York',
+      rules: { ...defaultRules, tiebreakers: ['record', 'head-to-head'] },
+      formatId: 'format-prelim',
+      currentPhaseId: 'phase-prelim',
+      currentPacketId: null,
+      currentRoundId: 'round-prelim',
+      createdAt: '',
+      updatedAt: '',
+    };
+    state.teams = [team('A'), team('B'), team('C')];
+    state.phases = [
+      {
+        id: 'phase-prelim',
+        name: 'Prelim',
+        kind: 'preliminary',
+        order: 1,
+        formatId: 'format-prelim',
+        poolIds: ['pool-prelim'],
+        roundIds: ['round-prelim'],
+        advancementRule: {
+          qualifiersPerPool: 1,
+          wildcards: 0,
+          tiebreakers: ['record', 'head-to-head'],
+          manualOverrideAllowed: false,
+        },
+        carryover: false,
+        status: 'active',
+      },
+    ];
+    state.pools = [
+      { id: 'pool-prelim', phaseId: 'phase-prelim', name: 'Prelim', teamIds: ['A', 'B', 'C'], order: 1 },
+    ];
+    state.rounds = [
+      {
+        id: 'round-prelim',
+        phaseId: 'phase-prelim',
+        name: 'Prelim round',
+        number: 1,
+        revision: 1,
+        status: 'closed',
+        packetId: null,
+        scheduledGameIds: [],
+        scheduledStart: null,
+        releasedAt: null,
+        startedAt: null,
+        closedAt: null,
+      },
+    ];
+    state.games = [
+      acceptedGame('forfeit', 'round-prelim', 'A', 0, 'B', 0, {
+        status: 'forfeit',
+        forfeitedTeamId: 'A',
+      }),
+      acceptedGame('b-c', 'round-prelim', 'B', 10, 'C', 20),
+      acceptedGame('c-a', 'round-prelim', 'C', 0, 'A', 10),
+    ];
+    state.scheduledGames = state.games.map((game) =>
+      scheduledForGame(game, game.scores[0]!.teamId, game.scores[1]!.teamId, {
+        poolId: 'pool-prelim',
+      }),
+    );
+    state.rounds[0]!.scheduledGameIds = state.scheduledGames.map((game) => game.id);
+
+    const preview = previewAdvancement(state, state.phases[0]!);
+    expect(preview.unresolved).toEqual([
+      {
+        teamIds: ['A', 'B', 'C'],
+        reason: 'The qualification cutoff is tied after the configured standings tiebreakers.',
+      },
+    ]);
+  });
+
   test('dropped teams stay out of display without erasing opponents historical results', () => {
     const state = emptyDirectorState();
     state.teams = [team('active'), team('dropped', 'dropped')];
@@ -3487,6 +3623,11 @@ describe('Director integration hardening', () => {
     bScore: number;
     dScore: number;
     winnerScore?: number;
+    tiebreakers?: TournamentRules['tiebreakers'];
+    bDetailedStats?: DirectorState['games'][number]['detailedStats'];
+    dDetailedStats?: DirectorState['games'][number]['detailedStats'];
+    bPowers?: number;
+    dPowers?: number;
   }) {
     const state = emptyDirectorState();
     state.tournament = {
@@ -3518,7 +3659,7 @@ describe('Director integration hardening', () => {
         advancementRule: {
           qualifiersPerPool: 1,
           wildcards: options.wildcards,
-          tiebreakers: defaultRules.tiebreakers,
+          tiebreakers: options.tiebreakers ?? defaultRules.tiebreakers,
           manualOverrideAllowed: true,
         },
         carryover: false,
@@ -3547,9 +3688,15 @@ describe('Director integration hardening', () => {
     ];
     const winner = options.winnerScore ?? 100;
     state.games = [
-      acceptedGame('2026-03-01', 'round-prelim', 'A', winner, 'B', options.bScore),
-      acceptedGame('2026-03-02', 'round-prelim', 'C', 10, 'D', options.dScore),
+      acceptedGame('2026-03-01', 'round-prelim', 'A', winner, 'B', options.bScore, {
+        ...(options.bDetailedStats === undefined ? {} : { detailedStats: options.bDetailedStats }),
+      }),
+      acceptedGame('2026-03-02', 'round-prelim', 'C', 10, 'D', options.dScore, {
+        ...(options.dDetailedStats === undefined ? {} : { detailedStats: options.dDetailedStats }),
+      }),
     ];
+    if (options.bPowers !== undefined) state.games[0]!.scores[1]!.powers = options.bPowers;
+    if (options.dPowers !== undefined) state.games[1]!.scores[1]!.powers = options.dPowers;
     state.scheduledGames = [
       scheduledForGame(state.games[0]!, 'A', 'B', { poolId: 'pool-1' }),
       scheduledForGame(state.games[1]!, 'C', 'D', { poolId: 'pool-2' }),
@@ -3575,6 +3722,27 @@ describe('Director integration hardening', () => {
     expect(preview.wildcards).toHaveLength(1);
     expect(preview.unresolved).toHaveLength(1);
     expect(preview.unresolved[0]?.reason).toMatch(/wildcard cutoff is tied/);
+  });
+
+  test('unknown detailed stats do not decide an advancement wildcard cutoff as zero', () => {
+    const state = wildcardState({
+      wildcards: 1,
+      bScore: 0,
+      dScore: 0,
+      tiebreakers: ['record', 'powers'],
+      bDetailedStats: 'unknown',
+      dDetailedStats: 'complete',
+      bPowers: 0,
+      dPowers: 3,
+    });
+    const preview = previewAdvancement(state, state.phases[0]!);
+    expect(preview.wildcards.map((team) => team.id)).toEqual(['B']);
+    expect(preview.unresolved).toEqual([
+      {
+        teamIds: ['B', 'D'],
+        reason: 'The wildcard cutoff is tied after the configured standings tiebreakers.',
+      },
+    ]);
   });
 
   test('known old state migrates and future state is not rewritten', () => {
