@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  acceptedGame,
-  playedTournament,
-  scheduledGame,
-  score,
-  team,
-} from '../../../tests/directorFixtures';
+import { acceptedGame, playedTournament, scheduledGame, score, team } from '../../../tests/directorFixtures';
 import { buildCanonicalStandingsReport } from './standingsReport';
 
 const generatedAt = '2026-09-09T20:00:00.000Z';
@@ -45,9 +39,7 @@ describe('canonical standings report composition', () => {
       },
     );
     state.scheduledGames[0]!.poolId = 'pool-a';
-    state.scheduledGames.push(
-      scheduledGame('scheduled-pool-b', 'team-c', 'team-d', { poolId: 'pool-b' }),
-    );
+    state.scheduledGames.push(scheduledGame('scheduled-pool-b', 'team-c', 'team-d', { poolId: 'pool-b' }));
     state.games.push(
       acceptedGame('game-pool-b', 'scheduled-pool-b', [score('team-c', 250), score('team-d', 200)]),
     );

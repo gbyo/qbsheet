@@ -47,7 +47,9 @@ export function buildCanonicalStandingsReport(
     phases.map((phase) => [
       phase.id,
       state.pools
-        .filter((pool) => pool.phaseId === phase.id && pool.archived !== true && phase.poolIds.includes(pool.id))
+        .filter(
+          (pool) => pool.phaseId === phase.id && pool.archived !== true && phase.poolIds.includes(pool.id),
+        )
         .slice()
         .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)),
     ]),
