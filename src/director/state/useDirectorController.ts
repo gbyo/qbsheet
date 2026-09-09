@@ -2,8 +2,13 @@ import { useMemo, useState } from 'react';
 import {
   useDirectorController as useBaseDirectorController,
   type DirectorController,
+  type StartRoundResult,
 } from './useDirectorControllerBase';
-import { releasedRoundResultBlocker, scheduledGameIdForSubmission } from './tournamentSafety';
+import {
+  releasedRoundResultBlocker,
+  scheduledGameIdForSubmission,
+  unresolvedReleasedRoundBlocker,
+} from './tournamentSafety';
 
 export * from './useDirectorControllerBase';
 
@@ -31,8 +36,9 @@ export function useDirectorController(
   return useMemo<DirectorController>(() => {
     const resultBlocker = (scheduledGameId: string): string | null =>
       releasedRoundResultBlocker(base.state, scheduledGameId);
+    const raise = (message: string) => setSafetyIssue({ message, state: base.state, baseError: base.error });
     const reject = (message: string): false => {
-      setSafetyIssue({ message, state: base.state, baseError: base.error });
+      raise(message);
       return false;
     };
     const allow = () => setSafetyIssue(null);
@@ -66,6 +72,30 @@ export function useDirectorController(
         }
         allow();
         return base.acceptSubmission(submissionId, actor);
+      },
+      releaseRound(roundId) {
+        const blocker = unresolvedReleasedRoundBlocker(base.state, roundId);
+        if (blocker) return reject(blocker);
+        allow();
+        return base.releaseRound(roundId);
+      },
+      async startRound(roundId): Promise<StartRoundResult> {
+        const blocker = unresolvedReleasedRoundBlocker(base.state, roundId);
+        if (blocker) {
+          raise(blocker);
+          const round = base.state.rounds.find((entry) => entry.id === roundId);
+          return {
+            ok: false,
+            roundId,
+            roundName: round?.name ?? 'Unknown round',
+            deliveredGames: 0,
+            pendingHandoffs: [],
+            summary: blocker,
+            reason: blocker,
+          };
+        }
+        allow();
+        return base.startRound(roundId);
       },
     };
   }, [base, safetyError]);
