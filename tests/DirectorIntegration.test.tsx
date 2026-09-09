@@ -496,6 +496,34 @@ describe('Director integration hardening', () => {
     });
     expect(hook.result.current.state.games.some((entry) => entry.status === 'accepted')).toBe(true);
 
+    // While the round still has assignments in circulation, every rule edit is refused up front.
+    act(() => {
+      expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(false);
+    });
+    expect(hook.result.current.error).toMatch(/assignments in circulation/i);
+
+    // Resolve the rest of the round so the assignment guard clears and the value lock is what
+    // decides the remaining edits.
+    for (const remaining of hook.result.current.state.scheduledGames.filter(
+      (entry) =>
+        entry.roundId === roundId &&
+        !entry.bye &&
+        entry.status !== 'accepted' &&
+        entry.status !== 'cancelled',
+    )) {
+      act(() => {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: remaining.id,
+            scores: [
+              score(remaining.leftTeamId, 90),
+              score(remaining.rightTeamId ?? remaining.leftTeamId, 40),
+            ],
+          }),
+        ).toBe(true);
+      });
+    }
+
     // Reinterpreting values are refused with a lock message; nothing changes.
     act(() => {
       expect(hook.result.current.updateRules({ tossupValue: 14 })).toBe(false);

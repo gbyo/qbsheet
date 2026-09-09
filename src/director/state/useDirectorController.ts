@@ -7,6 +7,7 @@ import {
 import {
   advancementCommitBlocker,
   advancementCorrectionBlocker,
+  assignmentRuleChangeBlocker,
   partialAdvancementCommitBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
@@ -126,6 +127,14 @@ export function useDirectorController(
         }
         allow();
         return base.ruleProtest(protestId, ruling, scoreAdjustment);
+      },
+      updateRules(changes) {
+        if (Object.keys(changes).length > 0) {
+          const blocker = assignmentRuleChangeBlocker(base.state);
+          if (blocker) return reject(blocker);
+        }
+        allow();
+        return base.updateRules(changes);
       },
     };
   }, [base, safetyError]);
