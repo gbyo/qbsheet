@@ -151,6 +151,16 @@ describe('a one-game assignment', () => {
     if (!built.ok) return;
     expect(built.assignment.warnings.join(' ')).toContain('Greenwood A has no roster');
   });
+
+  it('refuses to export an unresolved game that still references a retired packet', () => {
+    const state = directorFixture();
+    state.scheduledGames[0].status = 'scheduled';
+    state.packets[0].retired = true;
+    const built = buildAssignment(state, 'game-5-1');
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.failure.reason).toMatch(/packet.*retired/i);
+  });
 });
 
 describe('selecting which games to prepare', () => {
