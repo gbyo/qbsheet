@@ -28,7 +28,7 @@ export const qbtcpPrefix = '/qbtcp/v1';
 /** The pre-QBTCP prefix, retained by servers as deprecated aliases onto the same handlers. */
 export const legacyApiPrefix = '/api/v1';
 
-export type QbtcpProtocol = 'qbtcp/v1' | 'api/v1' | 'qbtcp/unsupported';
+export type QbtcpProtocol = 'qbtcp/v1' | 'api/v1' | 'qbtcp/unsupported' | 'qbtcp/unresolved';
 
 /** What the discovery endpoint says about a server, once it has been asked. */
 export interface IQbtcpDiscovery {
@@ -127,13 +127,19 @@ export const unsupportedQbtcpRoutes: IQbtcpRoutes = {
   protocol: 'qbtcp/unsupported',
 };
 
+/** A diagnostic-only marker used while discovery has not identified either wire surface. */
+export const unresolvedQbtcpRoutes: IQbtcpRoutes = {
+  ...qbtcpRoutes,
+  protocol: 'qbtcp/unresolved',
+};
+
 /**
  * Read a discovery response.
  *
  * Strict about the two fields a client acts on and forgiving about everything else, because a
  * server is allowed to add capabilities and a client that refused an unfamiliar one would break on
- * every upgrade. An unreadable response is not an error — it means this server does not speak
- * QBTCP, and the legacy table is used.
+ * every upgrade. An unreadable response returns null; the client must distinguish that malformed
+ * outcome from an explicit discovery 404 before selecting the legacy table.
  */
 export function readDiscovery(value: unknown): IQbtcpDiscovery | null {
   if (typeof value !== 'object' || value === null) return null;

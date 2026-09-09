@@ -47,7 +47,7 @@ import Scorer, { IScorerAlert, IScorerRecoveryStatus, IScorerSubmitResult } from
 import { IGameCorrection } from '../scoring/gameCorrection';
 import useGameEvents from './useGameEvents';
 import { IGameSessionHistory, loadGame } from './GameSession';
-import { readScorerRecovery } from './ScorerRecovery';
+import { readScorerRecovery, scorerRecoveryIdentity } from './ScorerRecovery';
 import { IQbsheetBackup } from './QBSheetBackup';
 import type {
   IRosterAddResult,
@@ -239,6 +239,10 @@ export default function ScorerHost(props: IScorerHostProps) {
    */
   const [recovered] = useState(() => loadGame(gameKey));
   const activeSetup = recovered?.setup ?? durableFallback.setup ?? setup;
+  const recoveryIdentity = useMemo(
+    () => scorerRecoveryIdentity(gamePackage, activeSetup),
+    [activeSetup, gamePackage],
+  );
   const initialEvents = recovered?.events ?? durableFallback.events;
   const recoveringFromDurableRecord = recovered === null && durableFallback.events.length > 0;
   const events = useGameEvents(
@@ -310,7 +314,10 @@ export default function ScorerHost(props: IScorerHostProps) {
         if (qbj === null) return undefined;
         // Anything scored while the request was in flight is newer than what came back.
         if (events.events.length > 0) return undefined;
-        const payload = readScorerRecovery(qbj, activeSetup);
+        // This is an authenticated snapshot for the session already assigned to this room. Keep
+        // the pre-identity fallback for old server snapshots, while still rejecting an explicit
+        // identity mismatch rather than trusting a stale payload.
+        const payload = readScorerRecovery(qbj, recoveryIdentity, { allowLegacy: true });
         if (!payload) {
           setServerRecoveryNotice(
             'Tournament control is holding a snapshot of this game, but it cannot be reopened here automatically. Use Recover from QBJ in the Game menu, or score from the paper scoresheet.',
@@ -347,6 +354,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     eventCount,
     restore,
     activeSetup,
+    recoveryIdentity,
     serverRecoveryAttempt,
   ]);
 
@@ -404,6 +412,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       onProgress={onProgress}
       onRecoverySnapshot={onRecoverySnapshot}
       qbjMeta={qbjMeta}
+      recoveryIdentity={recoveryIdentity}
       qbjPlayerIds={qbjPlayerIds}
       onRequestControl={onRequestControl}
       controlRequest={controlRequest}

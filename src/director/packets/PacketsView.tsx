@@ -66,6 +66,7 @@ export function PacketsView({
           notes: packet.notes,
         })),
       );
+      if (!result.ok) return;
       onAnnounce(
         `${result.inserted} packet${result.inserted === 1 ? '' : 's'} imported${
           result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''

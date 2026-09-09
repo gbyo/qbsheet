@@ -6,9 +6,12 @@ import {
   type Team,
   type TournamentRules,
 } from './model';
+import { activeTournamentTeams } from './field';
 import {
   acceptedGameRecords,
   deriveTeamStandings,
+  tiebreakerIsComparable,
+  teamTiebreakerValue,
   type DirectorStandingsOptions,
   type TeamStanding,
 } from './stats';
@@ -112,6 +115,7 @@ function compareWildcardStandings(
 ): number {
   const order = configuredTiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
   for (const key of order) {
+    if (!tiebreakerIsComparable(key, group, games)) continue;
     const difference = criterionValue(right, key, group, games) - criterionValue(left, key, group, games);
     if (difference !== 0) return difference;
   }
@@ -138,7 +142,7 @@ function standingsByPool(
 ): Array<{ poolId: DirectorId | null; standings: TeamStanding[] }> {
   const tiebreakers = phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers;
   if (phase.poolIds.length === 0) {
-    const teamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+    const teamIds = activeTournamentTeams(state).map((team) => team.id);
     return [
       {
         poolId: null,
@@ -153,8 +157,8 @@ function standingsByPool(
   }
   return phase.poolIds.map((poolId) => {
     const pool = state.pools.find((entry) => entry.id === poolId);
-    const teamIds = (pool?.teamIds ?? []).filter(
-      (teamId) => state.teams.find((team) => team.id === teamId)?.status === 'confirmed',
+    const teamIds = (pool?.teamIds ?? []).filter((teamId) =>
+      activeTournamentTeams(state).some((team) => team.id === teamId),
     );
     return {
       poolId,
@@ -184,6 +188,7 @@ function unresolvedCutoffTeams(
   if (cutoffCount <= 0 || cutoffCount >= standings.length) return [];
   let group = [...standings];
   for (const key of order) {
+    if (!tiebreakerIsComparable(key, group, games)) continue;
     const partitions: TeamStanding[][] = [];
     for (const standing of group) {
       const value = criterionValue(standing, key, group, games);
@@ -211,25 +216,5 @@ function criterionValue(
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
 ): number {
-  if (key === 'head-to-head') {
-    const groupIds = new Set(group.map((entry) => entry.teamId));
-    let points = 0;
-    let played = 0;
-    for (const game of games) {
-      const own = game.scores.find((score) => score.teamId === standing.teamId);
-      const opponent = game.scores.find(
-        (score) => score.teamId !== standing.teamId && groupIds.has(score.teamId),
-      );
-      if (!own || !opponent) continue;
-      played += 1;
-      points += own.score > opponent.score ? 1 : own.score === opponent.score ? 0.5 : 0;
-    }
-    return played === 0 ? 0 : points / played;
-  }
-  if (key === 'record') return standing.winPercentage;
-  if (key === 'points') return standing.pointsFor;
-  if (key === 'margin') return standing.margin;
-  if (key === 'powers') return standing.powers;
-  if (key === 'gets') return standing.gets;
-  return 0;
+  return teamTiebreakerValue(standing, key, group, games) ?? 0;
 }

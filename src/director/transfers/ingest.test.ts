@@ -65,6 +65,27 @@ describe('a completed result', () => {
     const captain = assessment.playerStats.find((player) => player.playerId === 'team-1-player-1');
     expect(captain).toMatchObject({ powers: 4, gets: 8, negs: 1, tossupsHeard: 20 });
   });
+
+  it('stages a tied winner-required final for review with an actionable warning', () => {
+    const state = directorFixture();
+    const result = scoreAssignment(assignmentFor(state, 'game-5-1').document) as {
+      objects: Array<Record<string, unknown>>;
+    };
+    const match = result.objects.find((object) => object.type === 'Match');
+    const teams = match?.match_teams as Array<Record<string, unknown>> | undefined;
+    if (!teams || teams.length !== 2) throw new Error('test setup did not produce two team scores');
+    teams[1]!.points = teams[0]!.points;
+
+    const { assessment, outcome } = stage(state, result);
+
+    expect(assessment.classification).toBe('needs-review');
+    expect(assessment.warnings).toContain(ingestWarnings.winnerRequiredTie);
+    expect(assessment.detail).toMatch(/winner|overtime|forfeit/i);
+    expect(state.submissions.find((entry) => entry.id === outcome.submissionId)).toMatchObject({
+      status: 'review',
+      reason: expect.stringMatching(/winner|overtime|forfeit/i),
+    });
+  });
 });
 
 describe('an unplayed assignment that came back', () => {

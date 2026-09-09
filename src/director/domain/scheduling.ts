@@ -11,6 +11,7 @@ import {
   newDirectorId,
   isoNow,
 } from './model';
+import { activeTournamentTeams } from './field';
 import {
   generateRoundRobinSchedule,
   planSingleEliminationBracket,
@@ -149,7 +150,7 @@ export function formatGenerationAvailability(state: DirectorState): FormatGenera
   if (!phase || phase.formatId !== format.id) {
     return { supported: false, message: 'Choose a valid current phase for this format before generating.' };
   }
-  const confirmedCount = state.teams.filter((team) => team.status === 'confirmed').length;
+  const confirmedCount = activeTournamentTeams(state).length;
   if (confirmedCount < 2) {
     return { supported: false, message: 'Add at least two confirmed teams before generating a round.' };
   }
@@ -237,7 +238,7 @@ function poolConfigurationProblem(
   requireAllConfirmedTeams: boolean,
 ): string | null {
   const teamsById = new Map(state.teams.map((team) => [team.id, team]));
-  const confirmedTeamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+  const confirmedTeamIds = activeTournamentTeams(state).map((team) => team.id);
   const counts = new Map<DirectorId, number>();
   for (const pool of pools) {
     if (pool.phaseId !== phase.id) return `Pool ${pool.name} belongs to a different phase.`;
@@ -262,7 +263,7 @@ function poolConfigurationProblem(
       .join(', ')}.`;
   }
   for (const pool of pools) {
-    const confirmed = pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status === 'confirmed');
+    const confirmed = pool.teamIds.filter((teamId) => confirmedTeamIds.includes(teamId));
     const invalid = pool.teamIds.filter((teamId) => {
       const team = teamsById.get(teamId);
       return !team || (team.status !== 'confirmed' && team.status !== 'dropped');
@@ -286,7 +287,7 @@ function seededRandom(seed: number): () => number {
 }
 
 function activeTeams(state: DirectorState, seed?: number): Team[] {
-  const teams = state.teams.filter((team) => team.status === 'confirmed');
+  const teams = activeTournamentTeams(state);
   if (seed === undefined) return [...teams].sort((a, b) => (a.seed ?? 9999) - (b.seed ?? 9999));
   const random = seededRandom(seed);
   return [...teams]
@@ -804,7 +805,7 @@ function generateSwissRound(
     return failedGenerationResult(state, options, 'missing-phase', 'Choose a valid Swiss phase first.');
   }
 
-  const confirmedTeams = state.teams.filter((team) => team.status === 'confirmed');
+  const confirmedTeams = activeTournamentTeams(state);
   const standings = deriveTeamStandings(state, acceptedGameRecords(state, { phaseId }), {
     phaseId,
     includeDroppedTeams: true,
@@ -820,7 +821,7 @@ function generateSwissRound(
     previousOpponentIds.get(game.leftTeamId)?.add(game.rightTeamId);
     previousOpponentIds.get(game.rightTeamId)?.add(game.leftTeamId);
   }
-  const swissTeams = state.teams.map((team) => {
+  const swissTeams = activeTournamentTeams(state).map((team) => {
     const standing = standingById.get(team.id) ?? emptyStanding(team.id);
     const byeCount = state.scheduledGames.filter((game) => {
       const round = state.rounds.find((entry) => entry.id === game.roundId);
@@ -914,7 +915,9 @@ function emptyStanding(teamId: DirectorId): TeamStanding {
     tossupsHeard: 0,
     tossupsHeardKnown: true,
     powers: 0,
+    powersKnown: true,
     gets: 0,
+    getsKnown: true,
     negs: 0,
     bonuses: 0,
     bonusPoints: 0,
@@ -937,9 +940,7 @@ function generateManualRound(
       'Choose teams and pairings in the manual round builder before creating the round.',
     );
   }
-  const confirmedById = new Map(
-    state.teams.filter((team) => team.status === 'confirmed').map((team) => [team.id, team]),
-  );
+  const confirmedById = new Map(activeTournamentTeams(state).map((team) => [team.id, team]));
   const selectedIds = options.manualPairings.flatMap((pairing) =>
     pairing.rightTeamId === null ? [pairing.leftTeamId] : [pairing.leftTeamId, pairing.rightTeamId],
   );
@@ -1020,14 +1021,12 @@ function generateSingleEliminationRound(
   options: ScheduleOptions,
 ): ScheduleGenerationResult {
   const format = state.formats.find((entry) => entry.id === formatId);
-  const teams = state.teams
-    .filter((team) => team.status === 'confirmed')
-    .sort(
-      (left, right) =>
-        (left.seed ?? Number.MAX_SAFE_INTEGER) - (right.seed ?? Number.MAX_SAFE_INTEGER) ||
-        left.displayName.localeCompare(right.displayName) ||
-        left.id.localeCompare(right.id),
-    );
+  const teams = activeTournamentTeams(state).sort(
+    (left, right) =>
+      (left.seed ?? Number.MAX_SAFE_INTEGER) - (right.seed ?? Number.MAX_SAFE_INTEGER) ||
+      left.displayName.localeCompare(right.displayName) ||
+      left.id.localeCompare(right.id),
+  );
   if (!format || teams.length < 2) {
     return failedGenerationResult(
       state,
@@ -1365,7 +1364,8 @@ function generatePoolRound(
   }
 
   const teamsById = new Map(state.teams.map((team) => [team.id, team]));
-  const confirmedTeamIds = state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id);
+  const confirmedTeamIds = activeTournamentTeams(state).map((team) => team.id);
+  const confirmedTeamIdSet = new Set(confirmedTeamIds);
   const poolTeamIds = pools.flatMap((pool) => pool.teamIds);
   const poolTeamCounts = new Map<DirectorId, number>();
   for (const teamId of poolTeamIds) poolTeamCounts.set(teamId, (poolTeamCounts.get(teamId) ?? 0) + 1);
@@ -1400,7 +1400,7 @@ function generatePoolRound(
     pool,
     teams: pool.teamIds
       .map((teamId) => teamsById.get(teamId))
-      .filter((team): team is Team => team?.status === 'confirmed'),
+      .filter((team): team is Team => team !== undefined && confirmedTeamIdSet.has(team.id)),
   }));
   const expectedTeams = activeTeamsByPool.flatMap(({ teams }) => teams);
   const expectedByeCount = activeTeamsByPool.reduce((count, { teams }) => count + (teams.length % 2), 0);
@@ -1414,7 +1414,7 @@ function generatePoolRound(
       });
     }
     const missing = pool.teamIds.filter(
-      (teamId) => teamsById.get(teamId)?.status !== 'dropped' && !teams.some((team) => team.id === teamId),
+      (teamId) => !confirmedTeamIdSet.has(teamId) && teamsById.get(teamId)?.status !== 'dropped',
     );
     if (missing.length > 0) {
       conflicts.push({
@@ -1698,7 +1698,7 @@ export function generatePlannedRoundRobinGames(state: DirectorState): ScheduledG
     .sort((a, b) => a.number - b.number);
   const generated = generateRoundRobinSchedule({
     phaseId: phase.id,
-    teams: state.teams.filter((team) => team.status === 'confirmed').map(toCoreTeam),
+    teams: activeTournamentTeams(state).map(toCoreTeam),
     rounds: rounds.map((round) => ({ id: round.id, number: round.number })),
     roomIds: state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id),
     repetitions: format.kind === 'double-round-robin' ? 2 : 1,

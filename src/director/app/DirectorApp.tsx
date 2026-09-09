@@ -344,6 +344,7 @@ function DirectorAppContent() {
         }}
         onNewTournament={() => setNewTournamentOpen(true)}
         onOpenFile={importFile}
+        onOpenFileError={(message) => announce(errorNotice(message))}
         onManageTournaments={() => setManageOpen(true)}
         onArchiveTournament={() => {
           void controller.archiveTournament().then((archived) => {
@@ -631,23 +632,37 @@ function humanRoundStatus(status: string): string {
 
 /* ------------------------------------------------------------ New tournament */
 
-function NewTournamentDialog({
-  onClose,
-  onCreate,
-}: {
-  onClose: () => void;
-  onCreate: (input: NewTournamentInput) => boolean;
-}) {
+type NewTournamentDialogProps =
+  | {
+      onClose: () => void;
+      onCreate: (input: NewTournamentInput) => boolean;
+      controller?: never;
+      onCreated?: never;
+    }
+  | {
+      onClose: () => void;
+      controller: ReturnType<typeof useDirectorController>;
+      onCreated: (name: string) => void;
+      onCreate?: never;
+    };
+
+export function NewTournamentDialog(props: NewTournamentDialogProps) {
+  const { onClose } = props;
   const form = useFormState<TournamentFormValues>({
     initial: emptyTournamentForm(localCalendarDate(), localTimeZone()),
     validate: validateTournamentForm,
     onSubmit: (draft) => {
-      return onCreate({
+      const input = {
         name: draft.name.trim(),
         date: draft.date,
         venue: draft.venue,
         organizer: draft.organizer,
-      });
+      };
+      if (props.onCreate) return props.onCreate(input);
+      const created = props.controller.createTournament(input);
+      if (!created) return false;
+      props.onCreated(draft.name.trim());
+      return true;
     },
   });
 

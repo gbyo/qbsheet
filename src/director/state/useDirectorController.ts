@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  activeTournamentTeams,
   closeRound,
   defaultRules,
   emptyDirectorState,
@@ -21,10 +22,13 @@ import {
   roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
+  resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -172,6 +176,9 @@ export interface ImportedTeamInput {
     notes?: string;
   }>;
 }
+
+export type BulkImportResult =
+  { ok: true; inserted: number; skipped: number } | { ok: false; inserted: 0; skipped: 0 };
 
 export interface NewRoomInput {
   name: string;
@@ -358,7 +365,7 @@ export interface DirectorController {
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
   mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
-  addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
+  addImportedTeams(teams: ImportedTeamInput[]): BulkImportResult;
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
@@ -411,7 +418,7 @@ export interface DirectorController {
       tiebreaker?: boolean;
       notes?: string;
     }>,
-  ): { inserted: number; skipped: number };
+  ): BulkImportResult;
   updatePacket(
     packetId: DirectorId,
     changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
@@ -1707,11 +1714,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addImportedTeams = useCallback(
-    (inputs: ImportedTeamInput[]): { inserted: number; skipped: number } => {
-      if (inputs.length === 0) return { inserted: 0, skipped: 0 };
+    (inputs: ImportedTeamInput[]): BulkImportResult => {
+      if (inputs.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const teamIds = new Set(draft.teams.map((team) => team.id));
         const teamNames = new Set(draft.teams.map((team) => team.displayName.toLocaleLowerCase()));
         const playerIds = new Set(draft.players.map((player) => player.id));
@@ -1799,7 +1806,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -2611,10 +2618,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         tiebreaker?: boolean;
         notes?: string;
       }>,
-    ): { inserted: number; skipped: number } => {
+    ): BulkImportResult => {
+      if (packets.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const now = isoNow();
         const existingNames = new Set(draft.packets.map((packet) => packet.name.trim().toLocaleLowerCase()));
         for (const input of packets) {
@@ -2651,7 +2659,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -3632,7 +3640,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       if (!snapshot.tournament)
         return { conflicts: ['Create a tournament before generating a schedule.'], generated: false };
-      if (snapshot.teams.filter((team) => team.status === 'confirmed').length < 2) {
+      if (activeTournamentTeams(snapshot).length < 2) {
         return {
           conflicts: ['Add at least two confirmed teams before generating a schedule.'],
           generated: false,
@@ -3808,6 +3816,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
       );
       if (unresolved) {
         setError('Every game must have an accepted result or be cancelled before the round closes.');
+        return false;
+      }
+      const invalidCanonical = snapshot.scheduledGames
+        .filter((game) => game.roundId === roundId && !game.bye)
+        .map((game) => {
+          const result = canonicalAcceptedGame(snapshot, game.id);
+          return result
+            ? resultDecisionIssue(snapshot, game, result.scores, { forfeitedTeamId: result.forfeitedTeamId })
+            : null;
+        })
+        .find((issue) => issue !== null);
+      if (invalidCanonical) {
+        setError(invalidCanonical.message);
         return false;
       }
       return commit((draft) => {
@@ -4200,6 +4221,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('An accepting operator is required.');
         return false;
       }
+      if (submission.warnings?.includes(ingestWarnings.invalidStatisticCount)) {
+        setError('This result contains an invalid statistic count and cannot be accepted.');
+        return false;
+      }
       const game = snapshot.games.find((entry) => entry.id === submission.gameId);
       const scheduled = game
         ? snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -4508,6 +4533,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const correctedScore = correctedScores.find((entry) => entry.teamId === adjustment.teamId);
         if (!correctedScore) return false;
         correctedScore.score += adjustment.delta;
+        const scheduled = snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+        const decisionIssue = scheduled ? resultDecisionIssue(snapshot, scheduled, correctedScores) : null;
+        if (decisionIssue) {
+          setError(decisionIssue.message);
+          return false;
+        }
         const correctionIssue = planBracketCorrection(snapshot, game.id, correctedScores).issue;
         if (correctionIssue) {
           setError(correctionIssue);
@@ -5870,7 +5901,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         // new one instead of leaving a dangling reference.
         tournament.currentPhaseId = null;
         tournament.currentRoundId = null;
-        const activeTeams = draft.teams.filter((team) => team.status !== 'dropped');
+        const activeTeams = activeTournamentTeams(draft);
         // Timeline events (Lunch, breaks) survive a plan change; new rounds
         // sequence after them so day order stays duplicate-free.
         let dayOrder = nextDayOrder(draft.rounds, draft.timeline);
@@ -6254,14 +6285,6 @@ function validateResultForScheduledGame(
   ) {
     return 'A result must contain exactly the two teams assigned to the scheduled game.';
   }
-  const countFields: Array<keyof Omit<TeamGameScore, 'teamId' | 'score'>> = [
-    'powers',
-    'gets',
-    'negs',
-    'bonuses',
-    'bonusPoints',
-    'bouncebacks',
-  ];
   for (const score of scores) {
     if (!score || typeof score !== 'object') {
       return 'Each result score must be a team score object.';
@@ -6272,12 +6295,11 @@ function validateResultForScheduledGame(
     if (!state.teams.some((team) => team.id === score.teamId)) {
       return 'A result references a team that is not in this tournament.';
     }
-    for (const field of countFields) {
-      if (!Number.isInteger(score[field]) || !Number.isFinite(score[field]) || score[field] < 0) {
-        return `${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidTeamGameScoreCountField(score);
+    if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
+  const decisionIssue = resultDecisionIssue(state, scheduled, scores);
+  if (decisionIssue) return decisionIssue.message;
   if (!Array.isArray(playerStats)) return 'Detailed player statistics must be an array when supplied.';
   const playerIds = new Set<string>();
   for (const stat of playerStats) {
@@ -6288,17 +6310,8 @@ function validateResultForScheduledGame(
     const player = state.players.find((candidate) => candidate.id === stat.playerId);
     if (!player || player.teamId !== stat.teamId)
       return 'Player statistics must reference the player roster for that team.';
-    const playerFields: Array<keyof Omit<PlayerGameStat, 'playerId' | 'teamId' | 'tossupsHeard'>> = [
-      'powers',
-      'gets',
-      'negs',
-      'bonusPoints',
-    ];
-    for (const field of playerFields) {
-      if (!Number.isInteger(stat[field]) || !Number.isFinite(stat[field]) || stat[field] < 0) {
-        return `Player ${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidPlayerGameStatCountField(stat);
+    if (invalidCountField) return `Player ${invalidCountField} must be a finite non-negative whole number.`;
     if (
       stat.tossupsHeard !== null &&
       (!Number.isInteger(stat.tossupsHeard) || !Number.isFinite(stat.tossupsHeard) || stat.tossupsHeard < 0)
@@ -6398,6 +6411,7 @@ function applyAcceptedResultCorrection(
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
   if (!scheduled || scheduled.bye || canonicalAcceptedGame(state, scheduled.id)?.id !== gameId)
     return undefined;
+  if (resultDecisionIssue(state, scheduled, scores)) return undefined;
   const bracketPlan = planBracketCorrection(state, gameId, scores);
   if (bracketPlan.issue) return undefined;
   const previous = structuredClone(game);

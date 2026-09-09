@@ -1,5 +1,10 @@
-import { useMemo, useState } from 'react';
-import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
+import { useCallback, useMemo, useState } from 'react';
+import {
+  resultDecisionIssue,
+  type DirectorState,
+  type ProtestScoreAdjustment,
+  type TeamGameScore,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   ActionMenu,
@@ -32,6 +37,18 @@ import { errorNotice, type AnnounceInput } from '../notices';
 type ResultsViewMode = 'review' | 'games' | 'protests' | 'history';
 type SubmissionAction = 'reject' | 'associate' | 'edit' | 'protest';
 
+export function resultsViewForTarget(
+  state: DirectorState,
+  target: DirectorNavigationTarget | null | undefined,
+): ResultsViewMode | null {
+  if (target?.section !== 'results') return null;
+  if (target.entityType === 'game') return 'games';
+  if (target.entityType !== 'submission') return null;
+
+  const submission = state.submissions.find((entry) => entry.id === target.entityId);
+  return submission && ['received', 'review'].includes(submission.status) ? 'review' : 'history';
+}
+
 export function ResultsView({
   state,
   controller,
@@ -54,15 +71,9 @@ export function ResultsView({
   const unresolvedGameCount = state.scheduledGames.filter(
     (game) => !game.bye && !['accepted', 'cancelled'].includes(game.status),
   ).length;
-  const targetType = navigationTarget?.section === 'results' ? navigationTarget.entityType : undefined;
+  const targetView = resultsViewForTarget(state, navigationTarget);
   const [view, setView] = useState<ResultsViewMode>(
-    targetType === 'game'
-      ? 'games'
-      : reviewCount > 0
-        ? 'review'
-        : openProtestCount > 0
-          ? 'protests'
-          : 'games',
+    () => targetView ?? (reviewCount > 0 ? 'review' : openProtestCount > 0 ? 'protests' : 'games'),
   );
   const [roundFilter, setRoundFilter] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
@@ -72,8 +83,14 @@ export function ResultsView({
       : undefined;
   const roundId = targetedRoundId ?? roundFilter;
 
-  if (targetType === 'game' && view !== 'games') setView('games');
-  if (targetType === 'submission' && view === 'games') setView('review');
+  // Render the target's queue immediately. The resolved view is committed to
+  // local state when the one-shot highlight clears the target, so navigation
+  // does not depend on a render-phase state update or an effect-driven flash.
+  const selectedView = targetView ?? view;
+  const clearTargetAfterNavigation = useCallback(() => {
+    if (targetView) setView(targetView);
+    onClearNavigationTarget?.();
+  }, [onClearNavigationTarget, targetView]);
 
   const switchView = (next: ResultsViewMode) => {
     setView(next);
@@ -102,7 +119,7 @@ export function ResultsView({
 
       <div className="director-results-toolbar">
         <Segmented<ResultsViewMode>
-          value={view}
+          value={selectedView}
           onChange={switchView}
           ariaLabel="Results view"
           options={[
@@ -126,14 +143,14 @@ export function ResultsView({
               ]}
               onChange={(value) => {
                 setRoundFilter(value);
-                onClearNavigationTarget?.();
+                clearTargetAfterNavigation();
               }}
             />
           )}
         />
       </div>
 
-      {view === 'review' && (
+      {selectedView === 'review' && (
         <SubmissionQueue
           state={state}
           controller={controller}
@@ -141,10 +158,10 @@ export function ResultsView({
           history={false}
           onAnnounce={onAnnounce}
           navigationTarget={navigationTarget}
-          onClearNavigationTarget={onClearNavigationTarget}
+          onClearNavigationTarget={clearTargetAfterNavigation}
         />
       )}
-      {view === 'history' && (
+      {selectedView === 'history' && (
         <SubmissionQueue
           state={state}
           controller={controller}
@@ -152,20 +169,22 @@ export function ResultsView({
           history
           onAnnounce={onAnnounce}
           navigationTarget={navigationTarget}
-          onClearNavigationTarget={onClearNavigationTarget}
+          onClearNavigationTarget={clearTargetAfterNavigation}
         />
       )}
-      {view === 'games' && (
+      {selectedView === 'games' && (
         <GamesQueue
           state={state}
           controller={controller}
           roundId={roundId}
           onAnnounce={onAnnounce}
           navigationTarget={navigationTarget}
-          onClearNavigationTarget={onClearNavigationTarget}
+          onClearNavigationTarget={clearTargetAfterNavigation}
         />
       )}
-      {view === 'protests' && <ProtestsQueue state={state} controller={controller} onAnnounce={onAnnounce} />}
+      {selectedView === 'protests' && (
+        <ProtestsQueue state={state} controller={controller} onAnnounce={onAnnounce} />
+      )}
 
       {manualOpen && (
         <ManualResultDialog
@@ -1096,9 +1115,16 @@ function ManualResultDialog({
           bonusPoints: 0,
           bouncebacks: 0,
         });
+        const scores = [score(selected.leftTeamId, left), score(selected.rightTeamId, right)];
+        const decisionIssue = resultDecisionIssue(state, selected, scores);
+        if (decisionIssue) {
+          setScoreError(decisionIssue.message);
+          onAnnounce(errorNotice(decisionIssue.message));
+          return;
+        }
         const accepted = controller.addManualResult({
           scheduledGameId: selected.id,
-          scores: [score(selected.leftTeamId, left), score(selected.rightTeamId, right)],
+          scores,
         });
         onAnnounce(
           accepted

@@ -6,6 +6,7 @@
  * entry. And the schedule panel listed every game ever scheduled, so by the afternoon the three
  * rooms that had not reported were buried in two hundred that had.
  */
+import { StrictMode, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { DirectorState } from '../domain';
@@ -60,6 +61,183 @@ function controllerWith(overrides: Partial<DirectorController> = {}): DirectorCo
     ...overrides,
   } as unknown as DirectorController;
 }
+
+function NavigationHarness({
+  state,
+  targets,
+}: {
+  state: DirectorState;
+  targets: { label: string; target: DirectorNavigationTarget }[];
+}) {
+  const [navigationTarget, setNavigationTarget] = useState<DirectorNavigationTarget | null>(null);
+  return (
+    <>
+      {targets.map(({ label, target }) => (
+        <button key={label} type="button" onClick={() => setNavigationTarget(target)}>
+          {label}
+        </button>
+      ))}
+      <ResultsView
+        state={state}
+        controller={controllerWith()}
+        onAnnounce={vi.fn()}
+        navigationTarget={navigationTarget}
+        onClearNavigationTarget={() => setNavigationTarget(null)}
+      />
+    </>
+  );
+}
+
+async function settleNavigation(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
+}
+
+describe('Results navigation target view synchronization', () => {
+  const reviewTarget: DirectorNavigationTarget = {
+    section: 'results',
+    entityType: 'submission',
+    entityId: 'submission-1',
+  };
+
+  test.each([
+    ['Games', /^Games/],
+    ['Protests', /^Protests/],
+    ['History', /^History/],
+  ])('review submission switches from %s to Needs review and receives focus', async (_name, startView) => {
+    renderResults(
+      <NavigationHarness
+        state={stateForReview()}
+        targets={[{ label: 'Navigate to submission', target: reviewTarget }]}
+      />,
+    );
+    showView(startView);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate to submission' }));
+
+    expect(screen.getByRole('button', { name: 'Needs review 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('list', { name: 'Results needing review' })).toBeTruthy();
+    await settleNavigation();
+    expect(document.activeElement).toHaveAttribute('data-director-navigation-id', 'submission-1');
+  });
+
+  test.each(['accepted', 'rejected'] as const)(
+    '%s submission switches to History from another tab',
+    async (status) => {
+      const state = stateForReview();
+      state.submissions[0].status = status;
+      renderResults(
+        <NavigationHarness
+          state={state}
+          targets={[{ label: 'Navigate to submission', target: reviewTarget }]}
+        />,
+      );
+      showView(/^Protests/);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Navigate to submission' }));
+
+      expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByRole('list', { name: 'Result history' })).toBeTruthy();
+      await settleNavigation();
+      expect(document.activeElement).toHaveAttribute('data-director-navigation-id', 'submission-1');
+    },
+  );
+
+  test('changing from a review submission target to a historical target changes queues', async () => {
+    const state = stateForReview();
+    state.submissions.push({
+      ...state.submissions[0],
+      id: 'submission-2',
+      receivedAt: '2026-09-05T15:00:00.000Z',
+      status: 'accepted',
+    });
+    renderResults(
+      <NavigationHarness
+        state={state}
+        targets={[
+          { label: 'Navigate to review submission', target: reviewTarget },
+          {
+            label: 'Navigate to historical submission',
+            target: { ...reviewTarget, entityId: 'submission-2' },
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate to review submission' }));
+    expect(screen.getByRole('list', { name: 'Results needing review' })).toBeTruthy();
+    await settleNavigation();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate to historical submission' }));
+    expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('list', { name: 'Result history' })).toBeTruthy();
+    expect(document.querySelector('[data-director-navigation-id="submission-2"]')).toBeTruthy();
+  });
+
+  test('a game target switches from History to Games and remains focusable', async () => {
+    const gameTarget: DirectorNavigationTarget = {
+      section: 'results',
+      entityType: 'game',
+      entityId: 'scheduled-1',
+    };
+    renderResults(
+      <NavigationHarness
+        state={stateForReview()}
+        targets={[{ label: 'Navigate to game', target: gameTarget }]}
+      />,
+    );
+    showView(/^History/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate to game' }));
+
+    expect(screen.getByRole('button', { name: /^Games/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('list', { name: 'Scheduled games' })).toBeTruthy();
+    await settleNavigation();
+    expect(document.activeElement).toHaveAttribute('data-director-navigation-id', 'scheduled-1');
+  });
+
+  test('a round-only target preserves the selected view and applies its filter', () => {
+    const state = stateForReview();
+    state.rounds.push({ ...state.rounds[0], id: 'round-2', name: 'Round 2', number: 2 });
+    const roundTarget: DirectorNavigationTarget = {
+      section: 'results',
+      entityType: 'round',
+      entityId: 'round-2',
+    };
+    renderResults(
+      <NavigationHarness state={state} targets={[{ label: 'Navigate to round', target: roundTarget }]} />,
+    );
+    showView(/^Protests/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Navigate to round' }));
+
+    expect(screen.getByRole('button', { name: /^Protests/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('combobox', { name: 'Round' })).toHaveTextContent('Round 2');
+  });
+
+  test('target synchronization does not emit a render-phase update warning', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      renderResults(
+        <StrictMode>
+          <NavigationHarness
+            state={stateForReview()}
+            targets={[{ label: 'Navigate to submission', target: reviewTarget }]}
+          />
+        </StrictMode>,
+      );
+      showView(/^History/);
+      fireEvent.click(screen.getByRole('button', { name: 'Navigate to submission' }));
+
+      expect(
+        consoleError.mock.calls.filter((args) => String(args[0]).includes('Cannot update a component')),
+      ).toHaveLength(0);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});
 
 describe('rejecting a result', () => {
   test('the first press asks rather than rejecting', () => {
@@ -327,4 +505,19 @@ test('round navigation scopes manual entry to that round even when an earlier ro
   const options = within(screen.getByRole('listbox', { name: 'Scheduled game' })).getAllByRole('option');
   expect(options).toHaveLength(1);
   expect(options[0]).toHaveTextContent('Round 2');
+});
+
+test('manual entry shows an actionable error for a tied winner-required final', () => {
+  const state = stateForReview();
+  const addManualResult = vi.fn(() => true);
+  renderResults(
+    <ResultsView state={state} controller={controllerWith({ addManualResult })} onAnnounce={vi.fn()} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Enter result' }));
+  fireEvent.change(screen.getByLabelText('Ninety Six'), { target: { value: '200' } });
+  fireEvent.change(screen.getByLabelText('Greenwood'), { target: { value: '200' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Accept manual result' }));
+
+  expect(screen.getByText(/requires a winner.*tied.*overtime.*forfeit/i)).toBeInTheDocument();
+  expect(addManualResult).not.toHaveBeenCalled();
 });
