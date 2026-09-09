@@ -26,6 +26,7 @@
 import {
   isoNow,
   newDirectorId,
+  resultDecisionIssue,
   type DirectorId,
   type DirectorState,
   type GameRecord,
@@ -73,6 +74,7 @@ export const ingestWarnings = {
   lateAfterAbandon: 'late-after-abandon',
   transportReviewRequired: 'transport-review-required',
   directorAssociation: 'director-association',
+  winnerRequiredTie: 'winner-required-tie',
 } as const;
 
 export type IngestWarning = (typeof ingestWarnings)[keyof typeof ingestWarnings];
@@ -118,6 +120,8 @@ export function describeWarning(code: string): string {
       return 'The transport flagged this result for review.';
     case ingestWarnings.directorAssociation:
       return 'A director explicitly associated this result with the selected scheduled game; verify the matchup before accepting it.';
+    case ingestWarnings.winnerRequiredTie:
+      return 'This final is tied but the format requires a winner; finish any required overtime and enter a decisive score, or record an explicit administrative forfeit before accepting it.';
     default:
       return code;
   }
@@ -564,6 +568,13 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
       warnings.add(ingestWarnings.rosterMismatch);
   }
   if (statistics.scores.length < 2) warnings.add(ingestWarnings.statisticsWarning);
+  if (
+    scheduled &&
+    statistics.scores.length === 2 &&
+    resultDecisionIssue(state, scheduled, statistics.scores)
+  ) {
+    warnings.add(ingestWarnings.winnerRequiredTie);
+  }
 
   // Duplicate and conflict are the same question asked of the same set of prior submissions: does
   // Director already hold a result for this game, and does it say the same thing? Fingerprints are

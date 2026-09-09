@@ -19,6 +19,7 @@
 export * from './model.js';
 export * from './dayOrder.js';
 export * from './stats.js';
+export * from './results.js';
 export * from './canonicalStats.js';
 export * from './transfers.js';
 export * from './timezone.js';

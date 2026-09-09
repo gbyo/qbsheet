@@ -15,8 +15,10 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  roundCloseBlockers,
   roomAssignmentConflicts,
   roomAssignmentIsValid,
   roomHasUnresolvedWork,
@@ -25,6 +27,7 @@ import {
   packetReuseBlocker,
   packetRetirementImpact,
   retiredPacketBlocker,
+  resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -320,6 +323,22 @@ export type DocumentTransitionCheck =
       error: string | null;
     };
 
+export type DirectorDocumentTransition =
+  | { kind: 'switching'; tournamentId: DirectorId }
+  | { kind: 'restoring-checkpoint'; checkpointId: string }
+  | { kind: 'recovery-edit'; reason: string };
+
+function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
+  switch (transition.kind) {
+    case 'switching':
+      return 'The tournament is being opened. Wait for opening to finish, then try again.';
+    case 'restoring-checkpoint':
+      return 'The tournament is being restored. Wait for recovery to finish, then try again.';
+    case 'recovery-edit':
+      return 'The tournament is being changed through recovery. Wait for recovery to finish, then try again.';
+  }
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
@@ -509,7 +528,7 @@ export interface DirectorController {
   dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
   checkpoints: DirectorCheckpoint[];
-  recovering: boolean;
+  documentTransition: DirectorDocumentTransition | null;
   documentEpoch: number;
   restoreCheckpoint(checkpointId: string): Promise<boolean>;
   editTournamentSnapshot(value: DirectorState, reason: string): Promise<boolean>;
@@ -616,9 +635,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
     isNativeDirector() ? 'native' : 'checking',
   );
   const [checkpoints, setCheckpoints] = useState<DirectorCheckpoint[]>([]);
-  const [recovering, setRecovering] = useState(false);
+  const [documentTransition, setDocumentTransition] = useState<DirectorDocumentTransition | null>(null);
   const [documentEpoch, setDocumentEpoch] = useState(0);
-  const documentTransitionRef = useRef(false);
+  const documentTransitionRef = useRef<DirectorDocumentTransition | null>(null);
   const documentEpochRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<TournamentCatalogEntry[]>([]);
@@ -1066,7 +1085,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const commit = useCallback(
     (mutator: (draft: DirectorState) => void): boolean => {
       /*
-       * A commit dropped mid-recovery is a failure, and says so.
+       * A commit dropped while a document is being replaced is a failure, and says so.
        *
        * `restoreCheckpoint` and `editTournamentSnapshot` replace the whole document, and they
        * await storage while doing it. A click that lands inside that window cannot be applied
@@ -1074,7 +1093,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
        * either, so every caller that returns a success boolean returns this one.
        */
       if (documentTransitionRef.current) {
-        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        setError(documentTransitionConflictMessage(documentTransitionRef.current));
         return false;
       }
       if (!ensureWriter()) return false;
@@ -1130,16 +1149,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.status === status) return true;
+      const completionBlockers =
+        current.status === 'running' && status === 'complete' ? tournamentCompletionBlockers(snapshot) : [];
       const valid =
         (current.status === 'draft' &&
           status === 'running' &&
           snapshot.rounds.some((round) => round.status !== 'planned')) ||
-        (current.status === 'running' && status === 'complete' && tournamentCanComplete(snapshot)) ||
+        (current.status === 'running' && status === 'complete' && completionBlockers.length === 0) ||
         (current.status === 'complete' && status === 'archived') ||
         (current.status === 'complete' && status === 'running') ||
         (current.status === 'archived' && status === 'draft');
       if (!valid) {
-        setError(`Cannot change a ${current.status} tournament to ${status}.`);
+        setError(
+          completionBlockers.length > 0
+            ? `Cannot complete the tournament: ${completionBlockers.join(' ')}`
+            : `Cannot change a ${current.status} tournament to ${status}.`,
+        );
         return false;
       }
       return commit((draft) => {
@@ -1183,9 +1208,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The tournament is already changing. Wait for that operation to finish.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'switching', tournamentId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // All writes queued before the switch belong to the outgoing document. Waiting here prevents
         // a late save from racing the incoming document selection.
@@ -1225,12 +1251,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
-        setError(reason instanceof Error ? reason.message : 'The selected tournament could not be opened.');
+        setError(
+          reason instanceof Error
+            ? `The selected tournament could not be opened. ${reason.message}`
+            : 'The selected tournament could not be opened.',
+        );
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [ensureDocumentTransitionAllowed, refreshTournaments, settleWriterReady],
@@ -3851,36 +3881,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only a released round can be closed.');
         return false;
       }
-      if (!roundScheduleIsValid(snapshot, roundId)) {
-        setError('This round contains an invalid matchup or round membership and cannot be closed.');
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        setError(blockers.join(' '));
         return false;
       }
-      const resolvedBracket = snapshot.tournament?.formatId
-        ? resolveDirectorBracket(snapshot, snapshot.tournament.formatId)
-        : null;
-      const cancelledBracketGame = snapshot.scheduledGames.find((game) => {
-        if (game.roundId !== roundId || !game.bracketKey || game.status !== 'cancelled') return false;
-        // A legacy cancelled row may be followed by an explicit replacement. Allow the old
-        // historical row to close only once the authoritative resolver has a decisive outcome for
-        // that bracket key; a merely accepted but stale replacement must still be repaired.
-        return !resolvedBracket?.games.some(
-          (resolved) =>
-            resolved.key === game.bracketKey &&
-            resolved.winnerTeamId !== null &&
-            resolved.loserTeamId !== null,
-        );
-      });
-      if (cancelledBracketGame) {
-        setError(
-          'This elimination round contains a cancelled game without a bracket outcome. Generate a replacement or record an explicit forfeit/administrative resolution before closing it.',
-        );
-        return false;
-      }
-      const unresolved = snapshot.scheduledGames.some(
-        (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
-      );
-      if (unresolved) {
-        setError('Every game must have an accepted result or be cancelled before the round closes.');
+      const invalidCanonical = snapshot.scheduledGames
+        .filter((game) => game.roundId === roundId && !game.bye)
+        .map((game) => {
+          const result = canonicalAcceptedGame(snapshot, game.id);
+          return result
+            ? resultDecisionIssue(snapshot, game, result.scores, { forfeitedTeamId: result.forfeitedTeamId })
+            : null;
+        })
+        .find((issue) => issue !== null);
+      if (invalidCanonical) {
+        setError(invalidCanonical.message);
         return false;
       }
       return commit((draft) => {
@@ -4585,6 +4601,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const correctedScore = correctedScores.find((entry) => entry.teamId === adjustment.teamId);
         if (!correctedScore) return false;
         correctedScore.score += adjustment.delta;
+        const scheduled = snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+        const decisionIssue = scheduled ? resultDecisionIssue(snapshot, scheduled, correctedScores) : null;
+        if (decisionIssue) {
+          setError(decisionIssue.message);
+          return false;
+        }
         const correctionIssue = planBracketCorrection(snapshot, game.id, correctedScores).issue;
         if (correctionIssue) {
           setError(correctionIssue);
@@ -4784,7 +4806,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const checkpoint = useCallback(
     async (reason: string) => {
-      if (documentTransitionRef.current) throw new Error('Wait for tournament recovery to finish.');
+      if (documentTransitionRef.current)
+        throw new Error(documentTransitionConflictMessage(documentTransitionRef.current));
       if (!ensureWriter()) throw new Error('This tournament is read-only in this Director tab.');
       const snapshot = structuredClone(stateRef.current);
       const next = structuredClone(snapshot);
@@ -4824,9 +4847,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This storage backend does not support recovery points.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'restoring-checkpoint', checkpointId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4893,9 +4917,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The recovery point could not be restored.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [
@@ -4918,9 +4942,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (!ensureWriter()) return false;
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'recovery-edit', reason };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4965,9 +4990,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The edit could not be saved.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
@@ -5370,10 +5395,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const remaining = snapshot.scheduledGames.filter(
         (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
       ).length;
-      if (remaining > 0) {
-        const reason =
-          `${round.name} still has ${remaining} game${remaining === 1 ? '' : 's'} ` +
-          `without an accepted result.`;
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        const reason = blockers.join(' ');
+        setError(reason);
         return { finished: false, roundId, roundName: round.name, remaining, summary: reason, reason };
       }
       if (!closeRoundAction(roundId)) {
@@ -6170,7 +6195,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
     checkpoints,
-    recovering,
+    documentTransition,
     documentEpoch,
     restoreCheckpoint,
     editTournamentSnapshot,
@@ -6178,23 +6203,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
     importSnapshot,
     live,
   };
-}
-
-function tournamentCanComplete(state: DirectorState): boolean {
-  if (!state.tournament || state.rounds.length === 0) return false;
-  if (state.rounds.some((round) => round.status !== 'closed')) return false;
-  if (state.scheduledGames.some((game) => !game.bye && !['accepted', 'cancelled'].includes(game.status))) {
-    return false;
-  }
-  if (
-    state.submissions.some((submission) => submission.status === 'received' || submission.status === 'review')
-  ) {
-    return false;
-  }
-  if (state.protests.some((protest) => protest.status === 'open')) return false;
-  if (state.qbtcpHelpRequests.some((request) => request.status === 'open')) return false;
-  if (state.qbtcpRosterAmendments.some((amendment) => amendment.status === 'pending')) return false;
-  return true;
 }
 
 function fingerprintForScores(scores: TeamGameScore[]): string {
@@ -6354,6 +6362,8 @@ function validateResultForScheduledGame(
     const invalidCountField = invalidTeamGameScoreCountField(score);
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
+  const decisionIssue = resultDecisionIssue(state, scheduled, scores);
+  if (decisionIssue) return decisionIssue.message;
   if (!Array.isArray(playerStats)) return 'Detailed player statistics must be an array when supplied.';
   const playerIds = new Set<string>();
   for (const stat of playerStats) {
@@ -6390,6 +6400,14 @@ function validateDetailedStats(
     return 'Detailed statistics cannot be marked complete when tossups heard is unknown.';
   }
   return null;
+}
+
+/** Keep structural schedule validation and operational close blockers as one controller guard. */
+function roundCloseBlockersForController(state: DirectorState, roundId: DirectorId): string[] {
+  if (!roundScheduleIsValid(state, roundId)) {
+    return ['This round contains an invalid matchup or round membership and cannot be closed.'];
+  }
+  return roundCloseBlockers(state, roundId);
 }
 
 function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
@@ -6465,6 +6483,7 @@ function applyAcceptedResultCorrection(
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
   if (!scheduled || scheduled.bye || canonicalAcceptedGame(state, scheduled.id)?.id !== gameId)
     return undefined;
+  if (resultDecisionIssue(state, scheduled, scores)) return undefined;
   const bracketPlan = planBracketCorrection(state, gameId, scores);
   if (bracketPlan.issue) return undefined;
   const previous = structuredClone(game);

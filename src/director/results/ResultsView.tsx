@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
+import {
+  resultDecisionIssue,
+  type DirectorState,
+  type ProtestScoreAdjustment,
+  type TeamGameScore,
+} from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   ActionMenu,
@@ -1110,9 +1115,16 @@ function ManualResultDialog({
           bonusPoints: 0,
           bouncebacks: 0,
         });
+        const scores = [score(selected.leftTeamId, left), score(selected.rightTeamId, right)];
+        const decisionIssue = resultDecisionIssue(state, selected, scores);
+        if (decisionIssue) {
+          setScoreError(decisionIssue.message);
+          onAnnounce(errorNotice(decisionIssue.message));
+          return;
+        }
         const accepted = controller.addManualResult({
           scheduledGameId: selected.id,
-          scores: [score(selected.leftTeamId, left), score(selected.rightTeamId, right)],
+          scores,
         });
         onAnnounce(
           accepted
