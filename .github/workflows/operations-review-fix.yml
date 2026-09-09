@@ -44,6 +44,13 @@ jobs:
                   "  const normalizedRooms = rooms.map((room) => {\n",
                   "  const normalizedRooms: Array<Record<string, unknown>> = rooms.map((room) => {\n",
               )],
+              Path('src/director/domain/operations.test.ts'): [(
+                  """import {\n  type OperationalAssignment,\n  type Room,\n  type Round,\n  type ScheduledGame,\n  type StaffMember,\n} from './model';\n""",
+                  """import { type OperationalAssignment, type Room, type StaffMember } from './model';\n""",
+              ), (
+                  """function round(id: string, number: number, status: Round['status']): Round {\n  return {\n    id,\n    phaseId: 'phase-1',\n    name: `Round ${number}`,\n    number,\n    revision: 1,\n    status,\n    packetId: null,\n    scheduledGameIds: [],\n    dayOrder: number,\n    scheduledStart: null,\n    releasedAt: status === 'released' ? '2026-09-09T10:00:00.000Z' : null,\n    startedAt: null,\n    closedAt: status === 'closed' ? '2026-09-09T11:00:00.000Z' : null,\n  };\n}\n\nfunction game(\n  id: string,\n  roundId: string,\n  leftTeamId: string,\n  rightTeamId: string | null,\n  roomId: string | null,\n  overrides: Partial<ScheduledGame> = {},\n): ScheduledGame {\n  return {\n    id,\n    roundId,\n    roomId,\n    packetId: null,\n    leftTeamId,\n    rightTeamId,\n    bye: false,\n    status: 'scheduled',\n    assignmentRevision: 1,\n    ...overrides,\n  };\n}\n\n""",
+                  "",
+              )],
           }
 
           for path, edits in replacements.items():
