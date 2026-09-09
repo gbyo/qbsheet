@@ -1,0 +1,56 @@
+name: Repair planner delimiter regression
+
+on:
+  push:
+    branches:
+      - fix/operations-review-followups
+    paths:
+      - .github/workflows/fix-planner-delimiter.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore the original delimiter literal
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src/director/domain/operationsPlanner.ts')
+          text = path.read_text()
+          slash = chr(92)
+          old = slash + slash + 'u001f'
+          new = slash + 'u001f'
+          count = text.count(old)
+          if count != 2:
+              raise SystemExit(f'expected exactly two double-escaped delimiters, found {count}')
+          path.write_text(text.replace(old, new))
+
+      - name: Format and validate
+        run: |
+          npx prettier --write src/director/domain/operationsPlanner.ts
+          npx vitest --run src/director/domain/operationsPlanner.test.ts
+          npm run typecheck
+
+      - name: Commit validated correction
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/director/domain/operationsPlanner.ts
+          git commit -m "fix: preserve planner equipment comparison delimiter"
+          git push origin HEAD:fix/operations-review-followups
