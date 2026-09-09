@@ -1,0 +1,249 @@
+name: Apply fix 523
+
+on:
+  push:
+    branches: [fix/523-shell-file-open-errors]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/523-shell-file-open-errors
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply shared file-selection fix and tests
+        shell: bash
+        run: |
+          cat > src/director/components/fileSelection.ts <<'EOF'
+          import { openNativeTournamentFile } from '../platform/native';
+
+          export interface PickedFile {
+            fileName: string;
+            bytes: Uint8Array;
+          }
+
+          export function decodeBase64File(base64: string): Uint8Array {
+            const binary = atob(base64);
+            return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+          }
+
+          export async function pickNativeTournamentFile(
+            openFile: typeof openNativeTournamentFile = openNativeTournamentFile,
+          ): Promise<PickedFile | null> {
+            const selected = await openFile();
+            if (!selected) return null;
+            return {
+              fileName: selected.fileName,
+              bytes: decodeBase64File(selected.contentBase64),
+            };
+          }
+
+          export async function readBrowserPickedFile(
+            file: Pick<File, 'name' | 'arrayBuffer'>,
+          ): Promise<PickedFile> {
+            return {
+              fileName: file.name,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            };
+          }
+          EOF
+          python <<'PY'
+          from pathlib import Path
+
+          picker = Path('src/director/components/FilePicker.tsx')
+          text = picker.read_text()
+          text = text.replace("import { isNativeDirector, openNativeTournamentFile } from '../platform/native';", "import { isNativeDirector } from '../platform/native';\nimport { pickNativeTournamentFile, readBrowserPickedFile } from './fileSelection';\nexport type { PickedFile } from './fileSelection';", 1)
+          old = """export interface PickedFile {
+  fileName: string;
+  bytes: Uint8Array;
+}
+
+function decodeBase64(base64: string): Uint8Array {
+  const binary = atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+"""
+          if text.count(old) != 1:
+              raise SystemExit('FilePicker PickedFile/decode block did not match')
+          text = text.replace(old, '', 1)
+          old = """      const selected = await openNativeTournamentFile();
+      if (!selected) return;
+      await onPick([{ fileName: selected.fileName, bytes: decodeBase64(selected.contentBase64) }]);
+"""
+          new = """      const selected = await pickNativeTournamentFile();
+      if (!selected) return;
+      await onPick([selected]);
+"""
+          if text.count(old) != 1:
+              raise SystemExit('FilePicker native selection block did not match')
+          text = text.replace(old,new,1)
+          old = """              const picked = await Promise.all(
+                files.map(async (file) => ({
+                  fileName: file.name,
+                  bytes: new Uint8Array(await file.arrayBuffer()),
+                })),
+              );
+"""
+          new = """              const picked = await Promise.all(files.map(readBrowserPickedFile));
+"""
+          if text.count(old) != 1:
+              raise SystemExit('FilePicker browser read block did not match')
+          picker.write_text(text)
+
+          shell = Path('src/director/app/DirectorShell.tsx')
+          text = shell.read_text()
+          text = text.replace("import { isNativeDirector, openNativeTournamentFile } from '../platform/native';", "import { isNativeDirector } from '../platform/native';", 1)
+          text = text.replace("import type { PickedFile } from '../components/FilePicker';", "import { pickNativeTournamentFile, readBrowserPickedFile, type PickedFile } from '../components/fileSelection';", 1)
+          text = text.replace("  onOpenFile,\n  onManageTournaments,", "  onOpenFile,\n  onOpenFileError,\n  onManageTournaments,", 1)
+          text = text.replace("  onOpenFile: (file: PickedFile) => void;\n  onManageTournaments: () => void;", "  onOpenFile: (file: PickedFile) => void;\n  onOpenFileError?: (message: string) => void;\n  onManageTournaments: () => void;", 1)
+          old = """              <ShellFileMenuItem
+                onFile={(file) => {
+                  closeMenu();
+                  onOpenFile(file);
+                }}
+              />
+"""
+          new = """              <ShellFileMenuItem
+                onFile={(file) => {
+                  closeMenu();
+                  onOpenFile(file);
+                }}
+                onError={(message) => {
+                  closeMenu();
+                  onOpenFileError?.(message);
+                }}
+              />
+"""
+          if text.count(old) != 1:
+              raise SystemExit('ShellFileMenuItem call site did not match')
+          text = text.replace(old,new,1)
+          start = text.index('function ShellFileMenuItem(')
+          end = text.index('\nfunction SectionLink(', start)
+          replacement = '''function ShellFileMenuItem({
+  onFile,
+  onError,
+}: {
+  onFile: (file: PickedFile) => void;
+  onError?: (message: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const native = isNativeDirector();
+  const reportError = (reason: unknown, fallback: string) =>
+    onError?.(reason instanceof Error ? reason.message : fallback);
+
+  const openNative = async () => {
+    try {
+      const selected = await pickNativeTournamentFile();
+      if (selected) onFile(selected);
+    } catch (reason: unknown) {
+      reportError(reason, 'That tournament file could not be selected.');
+    }
+  };
+
+  return (
+    <>
+      <button
+        role="menuitem"
+        type="button"
+        className="director-menu-item"
+        onClick={() => {
+          if (native) void openNative();
+          else inputRef.current?.click();
+        }}
+      >
+        <span className="director-menu-item-icon" aria-hidden="true">
+          <Icon name="file" size={15} />
+        </span>
+        <span>Open tournament file…</span>
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept={TOURNAMENT_FILE_ACCEPT}
+        className="director-visually-hidden-input"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (!file) return;
+          void readBrowserPickedFile(file)
+            .then(onFile)
+            .catch((reason: unknown) => reportError(reason, 'That tournament file could not be read.'));
+        }}
+      />
+    </>
+  );
+}
+'''
+          shell.write_text(text[:start] + replacement + text[end:])
+
+          app = Path('src/director/app/DirectorApp.tsx')
+          text = app.read_text()
+          needle = "        onOpenFile={importFile}\n        onManageTournaments={() => setManageOpen(true)}"
+          replacement = "        onOpenFile={importFile}\n        onOpenFileError={(message) => announce(errorNotice(message))}\n        onManageTournaments={() => setManageOpen(true)}"
+          if text.count(needle) != 1:
+              raise SystemExit('DirectorShell file-open props did not match')
+          app.write_text(text.replace(needle,replacement,1))
+          PY
+          cat > src/director/components/fileSelection.test.ts <<'EOF'
+          import { describe, expect, test, vi } from 'vitest';
+          import { pickNativeTournamentFile, readBrowserPickedFile } from './fileSelection';
+
+          describe('shared Director file selection', () => {
+            test('normalizes native selections and cancellation', async () => {
+              const selected = await pickNativeTournamentFile(
+                vi.fn(async () => ({ fileName: 'event.qbsheet', contentBase64: btoa('abc') })),
+              );
+              expect(selected?.fileName).toBe('event.qbsheet');
+              expect(Array.from(selected?.bytes ?? [])).toEqual([97, 98, 99]);
+              await expect(pickNativeTournamentFile(vi.fn(async () => null))).resolves.toBeNull();
+            });
+
+            test('preserves native selection failures for the UI error boundary', async () => {
+              await expect(
+                pickNativeTournamentFile(vi.fn(async () => Promise.reject(new Error('native dialog failed')))),
+              ).rejects.toThrow('native dialog failed');
+            });
+
+            test('reads browser files once and preserves read failures', async () => {
+              const arrayBuffer = vi.fn(async () => Uint8Array.from([1, 2, 3]).buffer);
+              await expect(readBrowserPickedFile({ name: 'event.qbsheet', arrayBuffer })).resolves.toEqual({
+                fileName: 'event.qbsheet',
+                bytes: Uint8Array.from([1, 2, 3]),
+              });
+              expect(arrayBuffer).toHaveBeenCalledTimes(1);
+
+              await expect(
+                readBrowserPickedFile({
+                  name: 'broken.qbsheet',
+                  arrayBuffer: vi.fn(async () => Promise.reject(new Error('read failed'))),
+                }),
+              ).rejects.toThrow('read failed');
+            });
+          });
+          EOF
+      - run: npx prettier --write src/director/components/fileSelection.ts src/director/components/fileSelection.test.ts src/director/components/FilePicker.tsx src/director/app/DirectorShell.tsx src/director/app/DirectorApp.tsx
+      - run: npx vitest --run src/director/components/fileSelection.test.ts
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-523.yml
+          git add src/director/components/fileSelection.ts src/director/components/fileSelection.test.ts src/director/components/FilePicker.tsx src/director/app/DirectorShell.tsx src/director/app/DirectorApp.tsx
+          git commit -m 'fix: share tournament file selection error handling (#523)'
+          git push origin HEAD:fix/523-shell-file-open-errors
