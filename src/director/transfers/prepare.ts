@@ -26,8 +26,10 @@
 import type { DirectorState } from '../domain/model';
 import {
   buildAssignment,
-  selectScheduledGames,
+  assignmentExportEligibility,
+  selectScheduledGameCandidates,
   type AssignmentBuildFailure,
+  type AssignmentBuildOptions,
   type AssignmentSelection,
   type PreparedAssignment,
 } from './assignment';
@@ -43,6 +45,8 @@ export interface PrepareRequest {
   destinationLabel: string;
   selection: AssignmentSelection;
   handoffInstruction?: string;
+  /** Explicit maintenance override for a clearly labelled historical re-export. */
+  allowHistoricalReExport?: boolean;
   directorBuild: string;
   /** Group assignments into `Assignments/Round N/` rather than one flat directory. */
   groupByRound?: boolean;
@@ -56,10 +60,16 @@ export interface PreparedWrite {
   byteLength: number;
 }
 
+export interface AssignmentSkip {
+  scheduledGameId: string;
+  reason: string;
+}
+
 export interface PrepareReport {
   ok: boolean;
   written: PreparedWrite[];
   failures: AssignmentBuildFailure[];
+  skipped: AssignmentSkip[];
   warnings: string[];
   rootPath: string;
   manifestPath?: string;
@@ -67,6 +77,15 @@ export interface PrepareReport {
   message: string;
   /** Set when nothing could be written at all. */
   error?: string;
+}
+
+function skippedSummary(skipped: AssignmentSkip[]): string {
+  const completed = skipped.filter((entry) => entry.reason.includes('already completed')).length;
+  const active = skipped.length - completed;
+  const parts: string[] = [];
+  if (completed > 0) parts.push(`${completed} completed game${completed === 1 ? '' : 's'} skipped`);
+  if (active > 0) parts.push(`${active} active or pending game${active === 1 ? '' : 's'} skipped`);
+  return parts.join('; ');
 }
 
 function totalBytes(values: string[]): number {
@@ -84,14 +103,29 @@ function totalBytes(values: string[]): number {
 export function planAssignments(
   state: DirectorState,
   selection: AssignmentSelection,
-  options: { handoffInstruction?: string } = {},
-): { assignments: PreparedAssignment[]; failures: AssignmentBuildFailure[]; warnings: string[] } {
-  const games = selectScheduledGames(state, selection);
+  options: AssignmentBuildOptions = {},
+): {
+  assignments: PreparedAssignment[];
+  failures: AssignmentBuildFailure[];
+  skipped: AssignmentSkip[];
+  warnings: string[];
+} {
+  // Keep the candidate set in schedule order while retaining otherwise valid ineligible games for
+  // the report below. Byes/cancelled/malformed games remain omitted just as they were before.
+  const games = selectScheduledGameCandidates(state, selection).filter(
+    (game) => !game.bye && game.status !== 'cancelled' && Boolean(game.rightTeamId),
+  );
   const assignments: PreparedAssignment[] = [];
   const failures: AssignmentBuildFailure[] = [];
+  const skipped: AssignmentSkip[] = [];
   const warnings = new Set<string>();
   const taken = new Set<string>();
   for (const game of games) {
+    const eligibility = assignmentExportEligibility(state, game, options);
+    if (!eligibility.eligible) {
+      skipped.push({ scheduledGameId: game.id, reason: eligibility.reason });
+      continue;
+    }
     const built = buildAssignment(state, game.id, options);
     if (!built.ok) {
       failures.push(built.failure);
@@ -102,7 +136,7 @@ export function planAssignments(
     built.assignment.warnings.forEach((warning) => warnings.add(warning));
     assignments.push({ ...built.assignment, fileName });
   }
-  return { assignments, failures, warnings: [...warnings] };
+  return { assignments, failures, skipped, warnings: [...warnings] };
 }
 
 function manifestEntry(assignment: PreparedAssignment): TransferManifestEntry {
@@ -134,12 +168,14 @@ export async function prepareAssignments(
   const paths = exchangePaths(request.basePath);
   const plan = planAssignments(state, request.selection, {
     ...(request.handoffInstruction ? { handoffInstruction: request.handoffInstruction } : {}),
+    ...(request.allowHistoricalReExport ? { allowHistoricalReExport: true } : {}),
   });
   const warnings = [...plan.warnings];
   const base: PrepareReport = {
     ok: false,
     written: [],
     failures: plan.failures,
+    skipped: plan.skipped,
     warnings,
     rootPath: paths.root,
     message: '',
@@ -151,7 +187,10 @@ export async function prepareAssignments(
     return {
       ...base,
       error: 'That selection contains no game with two teams.',
-      message: 'There was nothing to prepare.',
+      message:
+        plan.skipped.length > 0
+          ? `${skippedSummary(plan.skipped)}. There was nothing to prepare.`
+          : 'There was nothing to prepare.',
     };
 
   const readme = readmeText(tournament.name);
@@ -236,15 +275,17 @@ export async function prepareAssignments(
   }
 
   const count = written.length;
+  const skippedText = plan.skipped.length > 0 ? `; ${skippedSummary(plan.skipped)}` : '';
   const message =
     failures.length === 0
-      ? `${count} assignment${count === 1 ? '' : 's'} prepared.\n\nQBSheet finished writing to ${request.destinationLabel}. Eject the drive normally before removing it.`
-      : `${count} assignment${count === 1 ? '' : 's'} prepared; ${failures.length} could not be written.`;
+      ? `${count} assignment${count === 1 ? '' : 's'} prepared${skippedText}.\n\nQBSheet finished writing to ${request.destinationLabel}. Eject the drive normally before removing it.`
+      : `${count} assignment${count === 1 ? '' : 's'} prepared${skippedText}; ${failures.length} could not be written.`;
 
   return {
     ok: true,
     written,
     failures,
+    skipped: plan.skipped,
     warnings,
     rootPath: paths.root,
     ...(manifestPath ? { manifestPath } : {}),

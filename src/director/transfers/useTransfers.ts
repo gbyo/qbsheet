@@ -223,7 +223,8 @@ export function useTransfers(
       options: { announce?: boolean } = {},
     ): Promise<ImportSummary | null> => {
       const fileSystem = platform.fileSystem;
-      if (!fileSystem || !location.connected || controllerRef.current.recovering) return null;
+      if (!fileSystem || !location.connected || controllerRef.current.documentTransition !== null)
+        return null;
       const tournamentId = stateRef.current.tournament?.id;
       const epoch = controllerRef.current.documentEpoch;
       if (scanningRef.current.has(location.id)) return null;
@@ -236,7 +237,7 @@ export function useTransfers(
           includeAssignments: true,
         });
         if (
-          controllerRef.current.recovering ||
+          controllerRef.current.documentTransition !== null ||
           stateRef.current.tournament?.id !== tournamentId ||
           controllerRef.current.documentEpoch !== epoch
         )
@@ -373,7 +374,7 @@ export function useTransfers(
     async (locationId: DirectorId, selection: AssignmentSelection) => {
       const fileSystem = platform.fileSystem;
       const location = stateRef.current.transfers.locations.find((entry) => entry.id === locationId);
-      if (!fileSystem || !location || controllerRef.current.recovering) return null;
+      if (!fileSystem || !location || controllerRef.current.documentTransition !== null) return null;
       if (!location.connected) {
         onAnnounce(errorNotice(`${location.label} is no longer connected. Nothing was written.`));
         return null;
@@ -397,7 +398,7 @@ export function useTransfers(
           groupByRound: selection.kind === 'released',
         });
         if (
-          controllerRef.current.recovering ||
+          controllerRef.current.documentTransition !== null ||
           stateRef.current.tournament?.id !== tournamentId ||
           controllerRef.current.documentEpoch !== epoch
         )
@@ -413,7 +414,7 @@ export function useTransfers(
             ? stateRef.current.rounds.find((entry) => entry.id === selection.roundId)
             : undefined;
         const message =
-          round && report.ok && report.failures.length === 0
+          round && report.ok && report.failures.length === 0 && report.skipped.length === 0
             ? `${round.name} copied to ${location.label} — eject normally.`
             : report.message;
         setStatus(message);
@@ -517,6 +518,7 @@ export function useTransfers(
             byteLength: new TextEncoder().encode(assignment.text).byteLength,
           })),
           failures: plan.failures,
+          skipped: plan.skipped,
           warnings: plan.warnings,
           rootPath: 'downloads',
           message: '',

@@ -15,17 +15,27 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  planTeamRestore,
+  tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  roundCloseBlockers,
   roomAssignmentConflicts,
   roomAssignmentIsValid,
   roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
+  packetReuseBlocker,
+  packetRetirementImpact,
+  retiredPacketBlocker,
+  resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  unresolvedBracketDependencyForTeam,
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -174,6 +184,9 @@ export interface ImportedTeamInput {
   }>;
 }
 
+export type BulkImportResult =
+  { ok: true; inserted: number; skipped: number } | { ok: false; inserted: 0; skipped: 0 };
+
 export interface NewRoomInput {
   name: string;
   building?: string;
@@ -249,7 +262,8 @@ export interface MoveReleasedGameResult {
 
 export interface CommitAdvancementAssignment {
   teamId: DirectorId;
-  targetPoolId: DirectorId;
+  /** Required for a pooled target; omitted for a non-pool target phase. */
+  targetPoolId?: DirectorId;
 }
 
 export interface CommitAdvancementInput {
@@ -282,6 +296,16 @@ export interface SetFinalPlacementResult {
   message: string;
 }
 
+export type AdministrativeResultReplacement =
+  | { kind: 'reopen' }
+  | { kind: 'forfeit'; forfeitedTeamId: DirectorId }
+  | {
+      kind: 'scores';
+      scores: TeamGameScore[];
+      playerStats?: PlayerGameStat[];
+      detailedStats?: DetailedStatsStatus;
+    };
+
 export interface FinishRoundResult {
   finished: boolean;
   roundId: DirectorId;
@@ -302,12 +326,48 @@ export interface DirectorPersistenceHealth {
   error: string | null;
 }
 
+export type DocumentTransitionCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'unsaved';
+      revision: number;
+      durableRevision: number;
+      error: string | null;
+    };
+
+export type DirectorDocumentTransition =
+  | { kind: 'switching'; tournamentId: DirectorId }
+  | { kind: 'restoring-checkpoint'; checkpointId: string }
+  | { kind: 'recovery-edit'; reason: string };
+
+const archivedTournamentReadOnlyMessage =
+  'This tournament is archived. Reopen it as a draft before making changes.';
+
+interface CommitOptions {
+  /** The only archived write exception: the explicit archived → draft lifecycle transition. */
+  allowArchivedReopen?: boolean;
+}
+
+function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
+  switch (transition.kind) {
+    case 'switching':
+      return 'The tournament is being opened. Wait for opening to finish, then try again.';
+    case 'restoring-checkpoint':
+      return 'The tournament is being restored. Wait for recovery to finish, then try again.';
+    case 'recovery-edit':
+      return 'The tournament is being changed through recovery. Wait for recovery to finish, then try again.';
+  }
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
   saving: boolean;
   error: string | null;
   persistence: DirectorPersistenceHealth;
+  /** Whether the current in-memory document may be replaced or left safely. */
+  canLeaveCurrentDocument(): DocumentTransitionCheck;
   retryPersistence(): Promise<boolean>;
   writerStatus: 'native' | 'held' | 'checking' | 'blocked' | 'unavailable';
   repositoryKind: DirectorRepository['kind'];
@@ -331,7 +391,7 @@ export interface DirectorController {
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
   mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
-  addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
+  addImportedTeams(teams: ImportedTeamInput[]): BulkImportResult;
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
@@ -384,7 +444,7 @@ export interface DirectorController {
       tiebreaker?: boolean;
       notes?: string;
     }>,
-  ): { inserted: number; skipped: number };
+  ): BulkImportResult;
   updatePacket(
     packetId: DirectorId,
     changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
@@ -462,6 +522,16 @@ export interface DirectorController {
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
   rejectSubmission(submissionId: DirectorId, reason?: string): boolean;
   editAcceptedResult(gameId: DirectorId, scores: TeamGameScore[], note?: string): boolean;
+  correctAdministrativeResult(
+    scheduledGameId: DirectorId,
+    replacement: AdministrativeResultReplacement,
+    reason: string,
+  ): boolean;
+  correctForfeit(
+    scheduledGameId: DirectorId,
+    replacement: AdministrativeResultReplacement,
+    reason: string,
+  ): boolean;
   addProtest(
     gameId: DirectorId,
     description: string,
@@ -489,7 +559,7 @@ export interface DirectorController {
   dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
   checkpoints: DirectorCheckpoint[];
-  recovering: boolean;
+  documentTransition: DirectorDocumentTransition | null;
   documentEpoch: number;
   restoreCheckpoint(checkpointId: string): Promise<boolean>;
   editTournamentSnapshot(value: DirectorState, reason: string): Promise<boolean>;
@@ -527,6 +597,7 @@ export interface LiveActions {
 function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | null {
   const round = draft.rounds.find((entry) => entry.id === roundId);
   if (!round || round.status !== 'prepared') return null;
+  if (retiredPacketBlocker(draft, roundId) || packetReuseBlocker(draft, roundId)) return null;
   round.status = 'released';
   round.releasedAt = isoNow();
   const phase = draft.phases.find((entry) => entry.id === round.phaseId);
@@ -595,9 +666,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
     isNativeDirector() ? 'native' : 'checking',
   );
   const [checkpoints, setCheckpoints] = useState<DirectorCheckpoint[]>([]);
-  const [recovering, setRecovering] = useState(false);
+  const [documentTransition, setDocumentTransition] = useState<DirectorDocumentTransition | null>(null);
   const [documentEpoch, setDocumentEpoch] = useState(0);
-  const documentTransitionRef = useRef(false);
+  const documentTransitionRef = useRef<DirectorDocumentTransition | null>(null);
   const documentEpochRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<TournamentCatalogEntry[]>([]);
@@ -879,6 +950,37 @@ export function useDirectorController(repository = createDirectorRepository()): 
     return false;
   }, []);
 
+  const ensureTournamentEditable = useCallback((): boolean => {
+    if (stateRef.current.tournament?.status !== 'archived') return true;
+    setError(archivedTournamentReadOnlyMessage);
+    return false;
+  }, []);
+
+  const canLeaveCurrentDocument = useCallback((): DocumentTransitionCheck => {
+    const revision = stateRevisionRef.current;
+    const durableRevision = durableRevisionRef.current;
+    if (revision <= durableRevision) return { ok: true };
+    return {
+      ok: false,
+      reason: 'unsaved',
+      revision,
+      durableRevision,
+      error: persistence.error ?? error,
+    };
+  }, [error, persistence.error]);
+
+  const ensureDocumentTransitionAllowed = useCallback(
+    (operation: string): boolean => {
+      const check = canLeaveCurrentDocument();
+      if (check.ok) return true;
+      setError(
+        `Cannot ${operation}: the latest tournament changes are still only in memory. Retry the save or export a recovery archive first.`,
+      );
+      return false;
+    },
+    [canLeaveCurrentDocument],
+  );
+
   const refreshCheckpoints = useCallback(async () => {
     const tournamentId = stateRef.current.tournament?.id;
     const entries =
@@ -1018,9 +1120,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
    * that it needs publishing. See `docs/QBLIVE.md#8-the-durable-outbox`.
    */
   const commit = useCallback(
-    (mutator: (draft: DirectorState) => void): boolean => {
+    (mutator: (draft: DirectorState) => void, options: CommitOptions = {}): boolean => {
       /*
-       * A commit dropped mid-recovery is a failure, and says so.
+       * A commit dropped while a document is being replaced is a failure, and says so.
        *
        * `restoreCheckpoint` and `editTournamentSnapshot` replace the whole document, and they
        * await storage while doing it. A click that lands inside that window cannot be applied
@@ -1028,7 +1130,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
        * either, so every caller that returns a success boolean returns this one.
        */
       if (documentTransitionRef.current) {
-        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        setError(documentTransitionConflictMessage(documentTransitionRef.current));
+        return false;
+      }
+      if (!options.allowArchivedReopen && !ensureTournamentEditable()) return false;
+      if (options.allowArchivedReopen && stateRef.current.tournament?.status !== 'archived') {
+        setError('Only an archived tournament can be reopened as a draft.');
         return false;
       }
       if (!ensureWriter()) return false;
@@ -1040,6 +1147,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const next = structuredClone(stateRef.current);
       const auditStart = next.audit.length;
       mutator(next);
+      if (options.allowArchivedReopen && next.tournament?.status !== 'draft') {
+        setError('Reopening an archived tournament must transition it to draft.');
+        return false;
+      }
       if (next.tournament && next.tournament.id !== previousTournamentId) {
         writerEpochRef.current += 1;
         if (previousTournamentId) {
@@ -1072,7 +1183,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [ensureWriter, persist, settleWriterReady],
+    [ensureTournamentEditable, ensureWriter, persist, settleWriterReady],
   );
 
   const setTournamentStatus = useCallback(
@@ -1084,16 +1195,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.status === status) return true;
+      if (current.status === 'archived' && status === 'draft') {
+        setError('Use Reopen as draft to make an archived tournament editable.');
+        return false;
+      }
+      const completionBlockers =
+        current.status === 'running' && status === 'complete' ? tournamentCompletionBlockers(snapshot) : [];
       const valid =
         (current.status === 'draft' &&
           status === 'running' &&
           snapshot.rounds.some((round) => round.status !== 'planned')) ||
-        (current.status === 'running' && status === 'complete' && tournamentCanComplete(snapshot)) ||
+        (current.status === 'running' && status === 'complete' && completionBlockers.length === 0) ||
         (current.status === 'complete' && status === 'archived') ||
         (current.status === 'complete' && status === 'running') ||
         (current.status === 'archived' && status === 'draft');
       if (!valid) {
-        setError(`Cannot change a ${current.status} tournament to ${status}.`);
+        setError(
+          completionBlockers.length > 0
+            ? `Cannot complete the tournament: ${completionBlockers.join(' ')}`
+            : `Cannot change a ${current.status} tournament to ${status}.`,
+        );
         return false;
       }
       return commit((draft) => {
@@ -1127,6 +1248,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const switchTournament = useCallback(
     async (tournamentId: DirectorId): Promise<boolean> => {
       if (stateRef.current.tournament?.id === tournamentId) return true;
+      if (!ensureDocumentTransitionAllowed('switch tournaments')) return false;
       const open = repositoryRef.current.openTournament;
       if (!open) {
         setError('This storage backend does not support multiple tournaments.');
@@ -1136,9 +1258,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The tournament is already changing. Wait for that operation to finish.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'switching', tournamentId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // All writes queued before the switch belong to the outgoing document. Waiting here prevents
         // a late save from racing the incoming document selection.
@@ -1147,7 +1270,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           await clearLocalLive(false).catch(() => undefined);
           await stopLocalLiveServer().catch(() => undefined);
         }
-        const loaded = await open(tournamentId);
+        const loaded = await repositoryRef.current.openTournament!(tournamentId);
         const previousTournamentId = stateRef.current.tournament?.id;
         writerEpochRef.current += 1;
         if (previousTournamentId) {
@@ -1178,15 +1301,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
-        setError(reason instanceof Error ? reason.message : 'The selected tournament could not be opened.');
+        setError(
+          reason instanceof Error
+            ? `The selected tournament could not be opened. ${reason.message}`
+            : 'The selected tournament could not be opened.',
+        );
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
-    [refreshTournaments, settleWriterReady],
+    [ensureDocumentTransitionAllowed, refreshTournaments, settleWriterReady],
   );
 
   const updateCatalogTournamentStatus = useCallback(
@@ -1227,6 +1354,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const document = await read(tournamentId);
         if (!document.tournament) throw new Error('The selected catalog document has no tournament.');
         if (document.tournament.status === status) return true;
+        if (document.tournament.status === 'archived' && status !== 'draft') {
+          setError(archivedTournamentReadOnlyMessage);
+          return false;
+        }
+        const from = document.tournament.status;
         document.tournament.status = status;
         document.tournament.updatedAt = isoNow();
         document.audit.push({
@@ -1236,6 +1368,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'tournament-updated',
           summary,
           entityId: tournamentId,
+          details: {
+            from,
+            to: status,
+            ...(from === 'archived' && status === 'draft' ? { reason: 'explicit-reopen' } : {}),
+          },
         });
         assertCatalogClaim();
         await saveDocument(document, false);
@@ -1265,14 +1402,38 @@ export function useDirectorController(repository = createDirectorRepository()): 
     async (tournamentId = stateRef.current.tournament?.id): Promise<boolean> => {
       if (!tournamentId) return false;
       const current = stateRef.current.tournament;
-      if (current?.id === tournamentId) return setTournamentStatus('draft');
+      if (current?.id === tournamentId) {
+        if (current.status !== 'archived') {
+          setError('Only an archived tournament can be reopened as a draft.');
+          return false;
+        }
+        return commit(
+          (draft) => {
+            if (!draft.tournament) return;
+            const now = isoNow();
+            draft.tournament.status = 'draft';
+            draft.tournament.updatedAt = now;
+            draft.audit.push({
+              id: newDirectorId('audit'),
+              at: now,
+              actor: 'Director',
+              type: 'tournament-updated',
+              summary: 'Reopened tournament as a draft.',
+              entityId: draft.tournament.id,
+              details: { from: 'archived', to: 'draft', reason: 'explicit-reopen' },
+            });
+          },
+          { allowArchivedReopen: true },
+        );
+      }
       return updateCatalogTournamentStatus(tournamentId, 'draft', 'Reopened tournament from the catalog.');
     },
-    [setTournamentStatus, updateCatalogTournamentStatus],
+    [commit, updateCatalogTournamentStatus],
   );
 
   const createTournament = useCallback(
     (input: NewTournamentInput): boolean => {
+      if (!ensureDocumentTransitionAllowed('create a new tournament')) return false;
       const now = isoNow();
       const tournamentId = newDirectorId('tournament');
       const formatId = newDirectorId('format');
@@ -1329,7 +1490,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         });
       });
     },
-    [commit],
+    [commit, ensureDocumentTransitionAllowed],
   );
 
   const updateTournament = useCallback(
@@ -1648,11 +1809,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addImportedTeams = useCallback(
-    (inputs: ImportedTeamInput[]): { inserted: number; skipped: number } => {
-      if (inputs.length === 0) return { inserted: 0, skipped: 0 };
+    (inputs: ImportedTeamInput[]): BulkImportResult => {
+      if (inputs.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const teamIds = new Set(draft.teams.map((team) => team.id));
         const teamNames = new Set(draft.teams.map((team) => team.displayName.toLocaleLowerCase()));
         const playerIds = new Set(draft.players.map((player) => player.id));
@@ -1740,7 +1901,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -1859,6 +2020,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      const bracketDependency = unresolvedBracketDependencyForTeam(snapshot, teamId);
+      if (bracketDependency) {
+        setError(
+          `${bracketDependency.reason} Record a forfeit or administrative withdrawal resolution ` +
+            'for that bracket position before dropping the team.',
+        );
+        return false;
+      }
       const openRound = snapshot.rounds.find(
         (round) =>
           round.status !== 'closed' &&
@@ -1915,11 +2084,31 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Team “${current.displayName}” already exists.`);
         return false;
       }
+      const restorePlan = planTeamRestore(snapshot, teamId);
       return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
         team.status = 'confirmed';
         team.updatedAt = isoNow();
+        for (const scheduledGameId of restorePlan.safeGameIds) {
+          const scheduled = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+          if (!scheduled) continue;
+          const round = draft.rounds.find((entry) => entry.id === scheduled.roundId);
+          scheduled.status = round?.status === 'released' ? 'released' : 'scheduled';
+          delete scheduled.cancellation;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: team.updatedAt,
+          actor: 'Director',
+          type: 'schedule-repaired',
+          summary: `${team.displayName} restored; ${restorePlan.safeGameIds.length} drop-cancelled game(s) reopened.`,
+          entityId: teamId,
+          details: {
+            restoredScheduledGameIds: restorePlan.safeGameIds,
+            reviewRequired: restorePlan.review,
+          },
+        });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: team.updatedAt,
@@ -2552,10 +2741,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         tiebreaker?: boolean;
         notes?: string;
       }>,
-    ): { inserted: number; skipped: number } => {
+    ): BulkImportResult => {
+      if (packets.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const now = isoNow();
         const existingNames = new Set(draft.packets.map((packet) => packet.name.trim().toLocaleLowerCase()));
         for (const input of packets) {
@@ -2592,7 +2782,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -2654,10 +2844,55 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.retired === retired) return true;
+      const impact = retired ? packetRetirementImpact(snapshot, packetId) : null;
       return commit((draft) => {
         const packet = draft.packets.find((entry) => entry.id === packetId);
         if (!packet) return;
         packet.retired = retired || undefined;
+        const clearedFutureRoundIds = new Set<DirectorId>();
+        const clearedFutureGameIds = new Set<DirectorId>();
+        if (impact) {
+          const historicalGameIds = new Set(impact.historicalGameIds);
+          const futureGameIds = new Set(impact.futureGameIds);
+          const futureRoundIds = new Set(impact.futureRoundIds);
+          for (const round of draft.rounds) {
+            if (!futureRoundIds.has(round.id) || round.status === 'released' || round.status === 'closed')
+              continue;
+            if (round.packetId === packetId) {
+              round.packetId = null;
+              round.revision += 1;
+              clearedFutureRoundIds.add(round.id);
+              for (const game of draft.scheduledGames.filter((entry) => entry.roundId === round.id)) {
+                if (historicalGameIds.has(game.id)) {
+                  if (game.packetId !== packetId) {
+                    game.packetId = packetId;
+                    game.assignmentRevision += 1;
+                  }
+                } else if (game.packetId === packetId) {
+                  game.packetId = null;
+                  game.assignmentRevision += 1;
+                  clearedFutureGameIds.add(game.id);
+                }
+              }
+            }
+            if (round.status === 'prepared') round.status = 'planned';
+          }
+          for (const game of draft.scheduledGames) {
+            if (futureGameIds.has(game.id) && game.packetId === packetId) {
+              game.packetId = null;
+              game.assignmentRevision += 1;
+              clearedFutureGameIds.add(game.id);
+              const round = draft.rounds.find((entry) => entry.id === game.roundId);
+              if (round?.status === 'prepared') round.status = 'planned';
+            }
+          }
+          packet.assignedRoundIds = packet.assignedRoundIds.filter((id) => !futureRoundIds.has(id));
+          const recordToScheduled = new Map(draft.games.map((game) => [game.id, game.scheduledGameId]));
+          packet.assignedGameIds = packet.assignedGameIds.filter((id) => {
+            const scheduledId = recordToScheduled.get(id) ?? id;
+            return !futureGameIds.has(scheduledId);
+          });
+        }
         if (retired && draft.tournament?.currentPacketId === packetId) {
           const replacement = draft.packets.find((entry) => entry.id !== packetId && entry.retired !== true);
           draft.tournament.currentPacketId = replacement?.id ?? null;
@@ -2670,7 +2905,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'packet-changed',
           summary: `${retired ? 'Retired' : 'Restored'} ${packet.name}.`,
           entityId: packetId,
-          details: { retired, retainsHistory: true },
+          details: {
+            retired,
+            retainsHistory: true,
+            ...(impact
+              ? {
+                  historicalGameIds: impact.historicalGameIds,
+                  futureRoundIds: impact.futureRoundIds,
+                  futureGameIds: [...clearedFutureGameIds],
+                  releasedUnresolvedGameIds: impact.releasedUnresolvedGameIds,
+                  clearedFutureRoundIds: [...clearedFutureRoundIds],
+                }
+              : {}),
+          },
         });
       });
     },
@@ -2964,7 +3211,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
     (
       phaseId: DirectorId,
       changes: Partial<
-        Pick<NonNullable<DirectorState['phases'][number]>, 'name' | 'kind' | 'carryover' | 'advancementRule'>
+        Pick<
+          NonNullable<DirectorState['phases'][number]>,
+          'name' | 'kind' | 'carryover' | 'advancementRule' | 'teamIds'
+        >
       >,
     ): boolean => {
       const snapshot = stateRef.current;
@@ -2985,6 +3235,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A phase type is locked after a round has been generated.');
         return false;
       }
+      if (changes.teamIds !== undefined) {
+        if (phase.roundIds.length > 0) {
+          setError('The phase competitive field is locked after a round has been generated.');
+          return false;
+        }
+        if (phase.poolIds.length > 0) {
+          setError('Pool membership is the competitive field for this phase; edit its pools instead.');
+          return false;
+        }
+        if (new Set(changes.teamIds).size !== changes.teamIds.length) {
+          setError('A phase competitive field cannot contain the same team twice.');
+          return false;
+        }
+        if (changes.teamIds.some((teamId) => !snapshot.teams.some((team) => team.id === teamId))) {
+          setError('A phase competitive field can only contain teams in the tournament.');
+          return false;
+        }
+      }
       const advancementError = validateAdvancementRule(changes.advancementRule);
       if (advancementError) {
         setError(advancementError);
@@ -2996,6 +3264,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (changes.name !== undefined) target.name = changes.name.trim();
         if (changes.kind !== undefined) target.kind = changes.kind;
         if (changes.carryover !== undefined) target.carryover = changes.carryover;
+        if (changes.teamIds !== undefined) target.teamIds = [...changes.teamIds];
         if (changes.advancementRule !== undefined) {
           target.advancementRule = changes.advancementRule
             ? { ...changes.advancementRule, tiebreakers: [...changes.advancementRule.tiebreakers] }
@@ -3087,10 +3356,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return fail('Assign at least one team before committing advancement.');
       }
       const targetPoolIds = new Set(target.poolIds);
+      const targetIsPooled = target.poolIds.length > 0;
       const seenTeams = new Set<DirectorId>();
       for (const assignment of input.assignments) {
-        if (!targetPoolIds.has(assignment.targetPoolId)) {
+        if (targetIsPooled && (!assignment.targetPoolId || !targetPoolIds.has(assignment.targetPoolId))) {
           return fail('Every assigned team needs a playoff pool in the target stage.');
+        }
+        if (!targetIsPooled && assignment.targetPoolId !== undefined) {
+          return fail('A non-pool target stage does not accept pool assignments.');
         }
         if (seenTeams.has(assignment.teamId)) {
           return fail('Each team can only be placed in one playoff pool.');
@@ -3129,6 +3402,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!draftTarget) return;
         const byPool = new Map<DirectorId, DirectorId[]>();
         for (const assignment of input.assignments) {
+          if (!assignment.targetPoolId) continue;
           const list = byPool.get(assignment.targetPoolId) ?? [];
           list.push(assignment.teamId);
           byPool.set(assignment.targetPoolId, list);
@@ -3136,6 +3410,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         for (const [poolId, teamIds] of byPool) {
           const pool = draft.pools.find((entry) => entry.id === poolId);
           if (pool) pool.teamIds = teamIds;
+        }
+        if (target.poolIds.length === 0) {
+          draftTarget.teamIds = input.assignments.map((assignment) => assignment.teamId);
+        } else {
+          draftTarget.teamIds = undefined;
         }
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -3652,9 +3931,25 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This round cannot be prepared until every matchup is valid.');
         return false;
       }
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
+        return false;
+      }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) {
+        setError(retiredBlocker);
+        return false;
+      }
       return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
-        if (!target || target.status !== 'planned') return;
+        if (
+          !target ||
+          target.status !== 'planned' ||
+          retiredPacketBlocker(draft, roundId) ||
+          packetReuseBlocker(draft, roundId)
+        )
+          return;
         target.status = 'prepared';
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -3704,6 +3999,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
+        return false;
+      }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) {
+        setError(retiredBlocker);
+        return false;
+      }
       return commit((draft) => {
         applyRoundRelease(draft, roundId);
       });
@@ -3719,36 +4024,22 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Only a released round can be closed.');
         return false;
       }
-      if (!roundScheduleIsValid(snapshot, roundId)) {
-        setError('This round contains an invalid matchup or round membership and cannot be closed.');
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        setError(blockers.join(' '));
         return false;
       }
-      const resolvedBracket = snapshot.tournament?.formatId
-        ? resolveDirectorBracket(snapshot, snapshot.tournament.formatId)
-        : null;
-      const cancelledBracketGame = snapshot.scheduledGames.find((game) => {
-        if (game.roundId !== roundId || !game.bracketKey || game.status !== 'cancelled') return false;
-        // A legacy cancelled row may be followed by an explicit replacement. Allow the old
-        // historical row to close only once the authoritative resolver has a decisive outcome for
-        // that bracket key; a merely accepted but stale replacement must still be repaired.
-        return !resolvedBracket?.games.some(
-          (resolved) =>
-            resolved.key === game.bracketKey &&
-            resolved.winnerTeamId !== null &&
-            resolved.loserTeamId !== null,
-        );
-      });
-      if (cancelledBracketGame) {
-        setError(
-          'This elimination round contains a cancelled game without a bracket outcome. Generate a replacement or record an explicit forfeit/administrative resolution before closing it.',
-        );
-        return false;
-      }
-      const unresolved = snapshot.scheduledGames.some(
-        (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
-      );
-      if (unresolved) {
-        setError('Every game must have an accepted result or be cancelled before the round closes.');
+      const invalidCanonical = snapshot.scheduledGames
+        .filter((game) => game.roundId === roundId && !game.bye)
+        .map((game) => {
+          const result = canonicalAcceptedGame(snapshot, game.id);
+          return result
+            ? resultDecisionIssue(snapshot, game, result.scores, { forfeitedTeamId: result.forfeitedTeamId })
+            : null;
+        })
+        .find((issue) => issue !== null);
+      if (invalidCanonical) {
+        setError(invalidCanonical.message);
         return false;
       }
       return commit((draft) => {
@@ -3850,8 +4141,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (room?.status === 'finished') room.status = room.available ? 'available' : 'offline';
         if (room?.status === 'live') markRoomAvailableIfIdle(draft, room.id);
         const now = isoNow();
+        const auditId = newDirectorId('audit');
+        target.cancellation = {
+          reasonKind: 'manual',
+          reason: normalizedReason,
+          at: now,
+          auditId,
+        };
         draft.audit.push({
-          id: newDirectorId('audit'),
+          id: auditId,
           at: now,
           actor: 'Director',
           type: 'schedule-cancelled',
@@ -4141,6 +4439,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('An accepting operator is required.');
         return false;
       }
+      if (submission.warnings?.includes(ingestWarnings.invalidStatisticCount)) {
+        setError('This result contains an invalid statistic count and cannot be accepted.');
+        return false;
+      }
       const game = snapshot.games.find((entry) => entry.id === submission.gameId);
       const scheduled = game
         ? snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -4352,6 +4654,161 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const correctAdministrativeResult = useCallback(
+    (scheduledGameId: DirectorId, replacement: AdministrativeResultReplacement, reason: string): boolean => {
+      const snapshot = stateRef.current;
+      const scheduled = snapshot.scheduledGames.find((game) => game.id === scheduledGameId);
+      const current = scheduled ? canonicalAcceptedGame(snapshot, scheduled.id) : undefined;
+      const normalizedReason = reason.trim();
+      if (!scheduled || !current || current.status !== 'forfeit') {
+        setError('Only the current canonical administrative forfeit can be corrected.');
+        return false;
+      }
+      if (!normalizedReason) {
+        setError('A correction reason is required for an administrative forfeit.');
+        return false;
+      }
+      if (
+        replacement.kind === 'forfeit' &&
+        ![scheduled.leftTeamId, scheduled.rightTeamId].includes(replacement.forfeitedTeamId)
+      ) {
+        setError('The replacement forfeiting team must be one of the teams assigned to this game.');
+        return false;
+      }
+      const playerStats = replacement.kind === 'scores' ? (replacement.playerStats ?? []) : [];
+      if (replacement.kind === 'scores') {
+        const validationError = validateResultForScheduledGame(
+          snapshot,
+          scheduled,
+          replacement.scores,
+          playerStats,
+        );
+        if (validationError) {
+          setError(validationError);
+          return false;
+        }
+        const detailedStatsError = validateDetailedStats(replacement.detailedStats, playerStats);
+        if (detailedStatsError) {
+          setError(detailedStatsError);
+          return false;
+        }
+      }
+      const correctionPlan = planAdministrativeResultCorrection(snapshot, scheduledGameId, replacement);
+      if (correctionPlan.issue) {
+        setError(correctionPlan.issue);
+        return false;
+      }
+      return commit((draft) => {
+        const targetScheduled = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+        const previous = targetScheduled ? canonicalAcceptedGame(draft, scheduledGameId) : undefined;
+        if (!targetScheduled || !previous || previous.status !== 'forfeit') return;
+        const now = isoNow();
+        const replacementSubmissionId =
+          replacement.kind === 'reopen' ? undefined : newDirectorId('submission');
+        const previousSubmissions = draft.submissions.filter(
+          (submission) => submission.gameId === previous.id && submission.status === 'accepted',
+        );
+        for (const submission of previousSubmissions) {
+          submission.status = 'superseded';
+          if (replacementSubmissionId) submission.supersededBySubmissionId = replacementSubmissionId;
+        }
+        previous.status = 'rejected';
+        previous.note = [previous.note, `Superseded by administrative correction: ${normalizedReason}`]
+          .filter(Boolean)
+          .join(' · ');
+
+        for (const update of correctionPlan.updates) {
+          const dependent = draft.scheduledGames.find((game) => game.id === update.scheduledGameId);
+          if (!dependent) continue;
+          dependent.leftTeamId = update.leftTeamId;
+          dependent.rightTeamId = update.rightTeamId;
+          dependent.assignmentRevision += 1;
+          const dependentRound = draft.rounds.find((round) => round.id === dependent.roundId);
+          if (dependentRound) dependentRound.revision += 1;
+        }
+
+        if (replacement.kind === 'reopen') {
+          targetScheduled.status =
+            draft.rounds.find((round) => round.id === targetScheduled.roundId)?.status === 'released'
+              ? 'released'
+              : 'scheduled';
+          for (const session of draft.qbtcpSessions.filter((entry) => entry.matchId === targetScheduled.id)) {
+            session.state = 'abandoned';
+            session.resumable = false;
+            session.resultReceived = false;
+            session.progress = null;
+          }
+        } else {
+          const scores =
+            replacement.kind === 'forfeit'
+              ? [zeroGameScore(targetScheduled.leftTeamId), zeroGameScore(targetScheduled.rightTeamId!)]
+              : structuredClone(replacement.scores);
+          const replacementGameId = newDirectorId('game-record');
+          const replacementGame: GameRecord = {
+            id: replacementGameId,
+            scheduledGameId: targetScheduled.id,
+            roundId: targetScheduled.roundId,
+            packetId: effectivePacketId(draft, targetScheduled),
+            status: replacement.kind === 'forfeit' ? 'forfeit' : 'accepted',
+            ...(replacement.kind === 'forfeit' ? { forfeitedTeamId: replacement.forfeitedTeamId } : {}),
+            scores,
+            playerStats: structuredClone(playerStats),
+            source: 'manual',
+            detailedStats:
+              replacement.kind === 'forfeit'
+                ? 'unknown'
+                : (replacement.detailedStats ?? (playerStats.length > 0 ? 'incomplete' : 'unknown')),
+            finishedAt: now,
+            acceptedAt: now,
+            note: normalizedReason,
+          };
+          draft.games.push(replacementGame);
+          targetScheduled.status = 'accepted';
+          markPacketUsed(draft, targetScheduled.id, replacementGame.packetId);
+          markRoomFinished(draft, targetScheduled.roomId);
+          draft.submissions.push({
+            id: replacementSubmissionId!,
+            gameId: replacementGameId,
+            receivedAt: now,
+            fingerprint: fingerprintForScores(scores),
+            status: 'accepted',
+            rawSubmission: {
+              source: 'manual',
+              correction: replacement.kind,
+              correctedFrom: previous.id,
+              ...(replacement.kind === 'forfeit'
+                ? { forfeitedTeamId: replacement.forfeitedTeamId }
+                : { scores: structuredClone(scores) }),
+              reason: normalizedReason,
+            },
+            acceptedBy: operatorDisplayName(loadOperatorProfile()),
+            acceptedAt: now,
+            supersedesSubmissionId: previousSubmissions.at(-1)?.id,
+          });
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: now,
+          actor: 'Director',
+          type: 'result-edited',
+          summary: `Corrected the administrative result for ${scheduledGameId}.`,
+          entityId: previous.id,
+          details: {
+            scheduledGameId,
+            correctionKind: replacement.kind,
+            reason: normalizedReason,
+            supersededGameId: previous.id,
+            replacementSubmissionId,
+            reconciledDependentGameIds: correctionPlan.updates.map((update) => update.scheduledGameId),
+          },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const correctForfeit = correctAdministrativeResult;
+
   const addProtest = useCallback(
     (
       gameId: DirectorId,
@@ -4449,6 +4906,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const correctedScore = correctedScores.find((entry) => entry.teamId === adjustment.teamId);
         if (!correctedScore) return false;
         correctedScore.score += adjustment.delta;
+        const scheduled = snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+        const decisionIssue = scheduled ? resultDecisionIssue(snapshot, scheduled, correctedScores) : null;
+        if (decisionIssue) {
+          setError(decisionIssue.message);
+          return false;
+        }
         const correctionIssue = planBracketCorrection(snapshot, game.id, correctedScores).issue;
         if (correctionIssue) {
           setError(correctionIssue);
@@ -4513,6 +4976,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       const snapshot = read.snapshot;
       setQbtcpHealth({ lastSuccessfulAt: isoNow(), error: null });
+      // QBTCP polling is a read from the native server, but applying its observations changes the
+      // Director document (sessions, progress, help, roster amendments, and result inboxes). An
+      // archived document remains a historical view, even when the server is still running.
+      if (stateRef.current.tournament?.status === 'archived') return;
       const next = structuredClone(stateRef.current);
       let changed = applyNativeSessions(next, snapshot.sessions);
       changed = applyNativePresence(next, snapshot) || changed;
@@ -4591,6 +5058,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const syncTransferVolumesAction = useCallback(
     (volumes: TransferVolume[]) => {
+      // Removable-volume reconciliation changes persisted transfer inventory. It must not make an
+      // archived historical document drift merely because a drive was mounted or removed.
+      if (stateRef.current.tournament?.status === 'archived') return;
       // Volume polling runs on a timer, so it must not write state on a tick where nothing moved:
       // a save per poll would rewrite the tournament document every few seconds all day.
       const next = structuredClone(stateRef.current);
@@ -4648,7 +5118,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const checkpoint = useCallback(
     async (reason: string) => {
-      if (documentTransitionRef.current) throw new Error('Wait for tournament recovery to finish.');
+      if (documentTransitionRef.current)
+        throw new Error(documentTransitionConflictMessage(documentTransitionRef.current));
+      if (!ensureTournamentEditable()) throw new Error(archivedTournamentReadOnlyMessage);
       if (!ensureWriter()) throw new Error('This tournament is read-only in this Director tab.');
       const snapshot = structuredClone(stateRef.current);
       const next = structuredClone(snapshot);
@@ -4676,20 +5148,30 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshCheckpoints();
       });
     },
-    [assertWriteAuthority, captureWriteAuthority, enqueuePersistence, ensureWriter, refreshCheckpoints],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      enqueuePersistence,
+      ensureTournamentEditable,
+      ensureWriter,
+      refreshCheckpoints,
+    ],
   );
 
   const restoreCheckpoint = useCallback(
     async (checkpointId: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (!ensureTournamentEditable()) return false;
+      if (!ensureDocumentTransitionAllowed('restore a recovery point')) return false;
       if (!ensureWriter()) return false;
       if (!repositoryRef.current.restoreCheckpoint) {
         setError('This storage backend does not support recovery points.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'restoring-checkpoint', checkpointId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4756,27 +5238,37 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The recovery point could not be restored.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
-    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      ensureDocumentTransitionAllowed,
+      ensureTournamentEditable,
+      ensureWriter,
+      refreshCheckpoints,
+      refreshTournaments,
+    ],
   );
 
   const editTournamentSnapshot = useCallback(
     async (value: DirectorState, reason: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
-      if (!ensureWriter()) return false;
       const before = structuredClone(stateRef.current);
       const startingRevision = stateRevisionRef.current;
       if (!before.tournament || value.tournament?.id !== before.tournament.id) {
         setError('Structural edits must belong to the open tournament.');
         return false;
       }
-      documentTransitionRef.current = true;
+      if (!ensureTournamentEditable()) return false;
+      if (!ensureWriter()) return false;
+      const transition: DirectorDocumentTransition = { kind: 'recovery-edit', reason };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4821,12 +5313,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The edit could not be saved.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
-    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      ensureTournamentEditable,
+      ensureWriter,
+      refreshCheckpoints,
+      refreshTournaments,
+    ],
   );
 
   const setRoundPacket = useCallback(
@@ -4851,6 +5350,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           packet.assignedRoundIds.push(roundId);
           packet.assignedGameIds.push(...games.filter((game) => !game.bye).map((game) => game.id));
         }
+      }
+      const packetBlocker = packetReuseBlocker(next, roundId);
+      if (packetBlocker) {
+        setError(packetBlocker);
+        return false;
       }
       next.audit.push({
         id: newDirectorId('audit'),
@@ -5017,6 +5521,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
         return fail(round.name, `${round.name} cannot start until every matchup is valid.`);
       }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) return fail(round.name, retiredBlocker);
+      const packetBlocker = packetReuseBlocker(snapshot, roundId);
+      if (packetBlocker) return fail(round.name, packetBlocker);
       const teamName = (teamId: DirectorId | null): string =>
         (teamId && snapshot.teams.find((team) => team.id === teamId)?.displayName) || 'Unknown team';
       const gameLabel = (game: ScheduledGame): string =>
@@ -5129,6 +5637,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (!latestRound || !['planned', 'prepared'].includes(latestRound.status)) {
         return fail(round.name, 'The round changed while starting. Review its current status and try again.');
       }
+      const latestPacketBlocker = packetReuseBlocker(latest, roundId);
+      if (latestPacketBlocker) return fail(latestRound.name, latestPacketBlocker);
+      const latestRetiredBlocker = retiredPacketBlocker(latest, roundId);
+      if (latestRetiredBlocker) return fail(latestRound.name, latestRetiredBlocker);
       if (latestRoomsInPlay) {
         const latestRoomIds = latestActiveGames.map((game) => game.roomId);
         const duplicateLatestRoom = latestRoomIds.find(
@@ -5213,10 +5725,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const remaining = snapshot.scheduledGames.filter(
         (game) => game.roundId === roundId && !game.bye && !['accepted', 'cancelled'].includes(game.status),
       ).length;
-      if (remaining > 0) {
-        const reason =
-          `${round.name} still has ${remaining} game${remaining === 1 ? '' : 's'} ` +
-          `without an accepted result.`;
+      const blockers = roundCloseBlockersForController(snapshot, roundId);
+      if (blockers.length > 0) {
+        const reason = blockers.join(' ');
+        setError(reason);
         return { finished: false, roundId, roundName: round.name, remaining, summary: reason, reason };
       }
       if (!closeRoundAction(roundId)) {
@@ -5243,6 +5755,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The Director archive is not valid.');
         return false;
       }
+      if (!ensureDocumentTransitionAllowed('open or import a tournament')) return false;
       if (
         next.tournament &&
         (stateRef.current.tournament?.id === next.tournament.id ||
@@ -5295,7 +5808,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [ensureWriter, persist, settleWriterReady, tournaments],
+    [ensureDocumentTransitionAllowed, ensureWriter, persist, settleWriterReady, tournaments],
   );
 
   // -------------------------------------------------------------------------
@@ -5925,6 +6438,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     saving,
     error,
     persistence,
+    canLeaveCurrentDocument,
     retryPersistence,
     writerStatus,
     repositoryKind,
@@ -5996,6 +6510,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     acceptSubmission,
     rejectSubmission,
     editAcceptedResult,
+    correctAdministrativeResult,
+    correctForfeit,
     addProtest,
     ruleProtest,
     syncQbtcp,
@@ -6011,7 +6527,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
     checkpoints,
-    recovering,
+    documentTransition,
     documentEpoch,
     restoreCheckpoint,
     editTournamentSnapshot,
@@ -6019,23 +6535,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
     importSnapshot,
     live,
   };
-}
-
-function tournamentCanComplete(state: DirectorState): boolean {
-  if (!state.tournament || state.rounds.length === 0) return false;
-  if (state.rounds.some((round) => round.status !== 'closed')) return false;
-  if (state.scheduledGames.some((game) => !game.bye && !['accepted', 'cancelled'].includes(game.status))) {
-    return false;
-  }
-  if (
-    state.submissions.some((submission) => submission.status === 'received' || submission.status === 'review')
-  ) {
-    return false;
-  }
-  if (state.protests.some((protest) => protest.status === 'open')) return false;
-  if (state.qbtcpHelpRequests.some((request) => request.status === 'open')) return false;
-  if (state.qbtcpRosterAmendments.some((amendment) => amendment.status === 'pending')) return false;
-  return true;
 }
 
 function fingerprintForScores(scores: TeamGameScore[]): string {
@@ -6182,14 +6681,6 @@ function validateResultForScheduledGame(
   ) {
     return 'A result must contain exactly the two teams assigned to the scheduled game.';
   }
-  const countFields: Array<keyof Omit<TeamGameScore, 'teamId' | 'score'>> = [
-    'powers',
-    'gets',
-    'negs',
-    'bonuses',
-    'bonusPoints',
-    'bouncebacks',
-  ];
   for (const score of scores) {
     if (!score || typeof score !== 'object') {
       return 'Each result score must be a team score object.';
@@ -6200,12 +6691,11 @@ function validateResultForScheduledGame(
     if (!state.teams.some((team) => team.id === score.teamId)) {
       return 'A result references a team that is not in this tournament.';
     }
-    for (const field of countFields) {
-      if (!Number.isInteger(score[field]) || !Number.isFinite(score[field]) || score[field] < 0) {
-        return `${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidTeamGameScoreCountField(score);
+    if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
+  const decisionIssue = resultDecisionIssue(state, scheduled, scores);
+  if (decisionIssue) return decisionIssue.message;
   if (!Array.isArray(playerStats)) return 'Detailed player statistics must be an array when supplied.';
   const playerIds = new Set<string>();
   for (const stat of playerStats) {
@@ -6216,17 +6706,8 @@ function validateResultForScheduledGame(
     const player = state.players.find((candidate) => candidate.id === stat.playerId);
     if (!player || player.teamId !== stat.teamId)
       return 'Player statistics must reference the player roster for that team.';
-    const playerFields: Array<keyof Omit<PlayerGameStat, 'playerId' | 'teamId' | 'tossupsHeard'>> = [
-      'powers',
-      'gets',
-      'negs',
-      'bonusPoints',
-    ];
-    for (const field of playerFields) {
-      if (!Number.isInteger(stat[field]) || !Number.isFinite(stat[field]) || stat[field] < 0) {
-        return `Player ${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidPlayerGameStatCountField(stat);
+    if (invalidCountField) return `Player ${invalidCountField} must be a finite non-negative whole number.`;
     if (
       stat.tossupsHeard !== null &&
       (!Number.isInteger(stat.tossupsHeard) || !Number.isFinite(stat.tossupsHeard) || stat.tossupsHeard < 0)
@@ -6251,6 +6732,14 @@ function validateDetailedStats(
     return 'Detailed statistics cannot be marked complete when tossups heard is unknown.';
   }
   return null;
+}
+
+/** Keep structural schedule validation and operational close blockers as one controller guard. */
+function roundCloseBlockersForController(state: DirectorState, roundId: DirectorId): string[] {
+  if (!roundScheduleIsValid(state, roundId)) {
+    return ['This round contains an invalid matchup or round membership and cannot be closed.'];
+  }
+  return roundCloseBlockers(state, roundId);
 }
 
 function canonicalAcceptedGame(state: DirectorState, scheduledGameId: DirectorId): GameRecord | undefined {
@@ -6326,6 +6815,7 @@ function applyAcceptedResultCorrection(
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
   if (!scheduled || scheduled.bye || canonicalAcceptedGame(state, scheduled.id)?.id !== gameId)
     return undefined;
+  if (resultDecisionIssue(state, scheduled, scores)) return undefined;
   const bracketPlan = planBracketCorrection(state, gameId, scores);
   if (bracketPlan.issue) return undefined;
   const previous = structuredClone(game);
@@ -6400,6 +6890,118 @@ interface BracketCorrectionUpdate {
 interface BracketCorrectionPlan {
   updates: BracketCorrectionUpdate[];
   issue?: string;
+}
+
+function planAdministrativeResultCorrection(
+  state: DirectorState,
+  scheduledGameId: DirectorId,
+  replacement: AdministrativeResultReplacement,
+): BracketCorrectionPlan {
+  const scheduled = state.scheduledGames.find((entry) => entry.id === scheduledGameId);
+  const current = scheduled ? canonicalAcceptedGame(state, scheduledGameId) : undefined;
+  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+  const phase = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
+  const format = phase ? state.formats.find((entry) => entry.id === phase.formatId) : undefined;
+  if (!current || !scheduled || !format || format.kind !== 'single-elimination' || !scheduled.bracketKey) {
+    return { updates: [] };
+  }
+
+  const previousOutcome = outcomeForGame(current, scheduled);
+  const corrected = structuredClone(state);
+  const correctedGame = corrected.games.find((entry) => entry.id === current.id);
+  const correctedScheduled = corrected.scheduledGames.find((entry) => entry.id === scheduledGameId);
+  if (!correctedGame || !correctedScheduled) return { updates: [] };
+  if (replacement.kind === 'reopen') {
+    correctedGame.status = 'rejected';
+    correctedScheduled.status = 'scheduled';
+  } else if (replacement.kind === 'forfeit') {
+    correctedGame.status = 'forfeit';
+    correctedGame.forfeitedTeamId = replacement.forfeitedTeamId;
+    correctedGame.scores = [
+      zeroGameScore(correctedScheduled.leftTeamId),
+      zeroGameScore(correctedScheduled.rightTeamId!),
+    ];
+  } else {
+    correctedGame.status = 'accepted';
+    delete correctedGame.forfeitedTeamId;
+    correctedGame.scores = structuredClone(replacement.scores);
+  }
+  const correctedOutcome =
+    replacement.kind === 'reopen'
+      ? { winnerTeamId: null, loserTeamId: null }
+      : outcomeForGame(correctedGame, correctedScheduled);
+  if (
+    previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
+    previousOutcome.loserTeamId === correctedOutcome.loserTeamId
+  ) {
+    return { updates: [] };
+  }
+  const after = resolveDirectorBracket(corrected, format.id);
+  if (!after || !format.bracket) return { updates: [] };
+  return bracketCorrectionUpdates(state, format.bracket, scheduled.bracketKey, after, scheduledGameId);
+}
+
+function bracketCorrectionUpdates(
+  state: DirectorState,
+  bracket: NonNullable<DirectorState['formats'][number]['bracket']>,
+  sourceKey: string,
+  after: NonNullable<ReturnType<typeof resolveDirectorBracket>>,
+  sourceScheduledGameId: DirectorId,
+): BracketCorrectionPlan {
+  const updates: BracketCorrectionUpdate[] = [];
+  for (const key of dependentBracketKeys(bracket, sourceKey)) {
+    const expected = after.games.find((candidate) => candidate.key === key);
+    const dependents = state.scheduledGames.filter((candidate) => candidate.bracketKey === key);
+    for (const dependent of dependents) {
+      if (
+        expected?.ready &&
+        dependent.leftTeamId === expected.slotA.teamId &&
+        dependent.rightTeamId === expected.slotB.teamId
+      ) {
+        continue;
+      }
+      if (!expected?.ready) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} is no longer resolvable.`,
+        };
+      }
+      const hasUnresolvedRecord = state.games.some(
+        (candidate) =>
+          candidate.scheduledGameId === dependent.id &&
+          candidate.status !== 'rejected' &&
+          candidate.status !== 'cancelled',
+      );
+      if (dependent.status !== 'scheduled' || hasUnresolvedRecord) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} has already been released or has a result.`,
+        };
+      }
+      updates.push({
+        scheduledGameId: dependent.id,
+        leftTeamId: expected.slotA.teamId as DirectorId,
+        rightTeamId: expected.slotB.teamId as DirectorId,
+      });
+    }
+  }
+  return { updates };
+}
+
+function outcomeForGame(
+  game: Pick<GameRecord, 'status' | 'scores' | 'forfeitedTeamId'>,
+  scheduled: Pick<ScheduledGame, 'leftTeamId' | 'rightTeamId'>,
+): { winnerTeamId: DirectorId | null; loserTeamId: DirectorId | null } {
+  if (
+    game.status === 'forfeit' &&
+    game.forfeitedTeamId &&
+    [scheduled.leftTeamId, scheduled.rightTeamId].includes(game.forfeitedTeamId)
+  ) {
+    const winnerTeamId =
+      game.forfeitedTeamId === scheduled.leftTeamId ? scheduled.rightTeamId : scheduled.leftTeamId;
+    return { winnerTeamId, loserTeamId: game.forfeitedTeamId };
+  }
+  return winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
 }
 
 function planBracketCorrection(

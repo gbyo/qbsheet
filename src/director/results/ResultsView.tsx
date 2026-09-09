@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { DirectorState, ProtestScoreAdjustment, TeamGameScore } from '../domain';
-import type { DirectorController } from '../state/useDirectorController';
+import {
+  resultDecisionIssue,
+  type DirectorState,
+  type ProtestScoreAdjustment,
+  type TeamGameScore,
+} from '../domain';
+import type { AdministrativeResultReplacement, DirectorController } from '../state/useDirectorController';
 import {
   ActionMenu,
   Button,
@@ -30,7 +35,7 @@ import { describeWarning } from '../transfers/ingest';
 import { errorNotice, type AnnounceInput } from '../notices';
 
 type ResultsViewMode = 'review' | 'games' | 'protests' | 'history';
-type SubmissionAction = 'reject' | 'associate' | 'edit' | 'protest';
+type SubmissionAction = 'reject' | 'associate' | 'edit' | 'correct-forfeit' | 'protest';
 
 export function resultsViewForTarget(
   state: DirectorState,
@@ -356,7 +361,18 @@ function SubmissionItem({
                       Associate with scheduled game…
                     </MenuItem>
                   )}
-                  {submission.status === 'accepted' && game && scheduled && (
+                  {submission.status === 'accepted' && game?.status === 'forfeit' && scheduled && (
+                    <MenuItem
+                      icon="edit"
+                      onSelect={() => {
+                        close();
+                        setAction('correct-forfeit');
+                      }}
+                    >
+                      Correct forfeit…
+                    </MenuItem>
+                  )}
+                  {submission.status === 'accepted' && game && game.status !== 'forfeit' && scheduled && (
                     <MenuItem
                       icon="edit"
                       onSelect={() => {
@@ -459,6 +475,9 @@ function SubmissionActionDialog({
   const [right, setRight] = useState(String(rightScore?.score ?? ''));
   const [category, setCategory] = useState<'tossup' | 'bonus' | 'procedure' | 'other'>('other');
   const [description, setDescription] = useState('');
+  const currentForfeitingTeam = game.forfeitedTeamId ?? scheduled?.leftTeamId ?? '';
+  const [correctionKind, setCorrectionKind] = useState<AdministrativeResultReplacement['kind']>('reopen');
+  const [correctionForfeitingTeamId, setCorrectionForfeitingTeamId] = useState(currentForfeitingTeam);
 
   if (mode === 'reject') {
     return (
@@ -526,6 +545,108 @@ function SubmissionActionDialog({
             />
           )}
         />
+      </Dialog>
+    );
+  }
+
+  if (mode === 'correct-forfeit' && scheduled) {
+    return (
+      <Dialog
+        title="Correct administrative forfeit"
+        description={`Currently recorded: ${teamLabel(state, currentForfeitingTeam)} forfeited. The original action stays in audit history.`}
+        onClose={onClose}
+        onSubmit={() => {
+          if (!reason.trim()) {
+            onAnnounce(errorNotice('A correction reason is required for an administrative forfeit.'));
+            return;
+          }
+          let replacement: AdministrativeResultReplacement;
+          if (correctionKind === 'reopen') replacement = { kind: 'reopen' };
+          else if (correctionKind === 'forfeit') {
+            replacement = { kind: 'forfeit', forfeitedTeamId: correctionForfeitingTeamId };
+          } else {
+            const nextLeft = Number(left);
+            const nextRight = Number(right);
+            if (
+              !left.trim() ||
+              !right.trim() ||
+              !Number.isInteger(nextLeft) ||
+              !Number.isInteger(nextRight)
+            ) {
+              onAnnounce(errorNotice('Replacement scores must be finite whole numbers.'));
+              return;
+            }
+            replacement = {
+              kind: 'scores',
+              scores: [
+                { ...scoreForTeam(game, scheduled.leftTeamId), score: nextLeft },
+                { ...scoreForTeam(game, scheduled.rightTeamId!), score: nextRight },
+              ],
+            };
+          }
+          const saved = controller.correctForfeit(scheduled.id, replacement, reason);
+          onAnnounce(
+            saved
+              ? 'Administrative result corrected; the original forfeit remains in audit history.'
+              : errorNotice('The forfeit correction was not saved; review the Director error.'),
+          );
+          if (saved) onClose();
+        }}
+        submitLabel="Save correction"
+      >
+        <Field
+          label="Correction outcome"
+          render={({ id, labelId, describedBy }) => (
+            <Select<AdministrativeResultReplacement['kind']>
+              id={id}
+              ariaLabelledBy={labelId}
+              ariaDescribedBy={describedBy}
+              value={correctionKind}
+              options={[
+                { value: 'reopen', label: 'Reopen game' },
+                { value: 'forfeit', label: 'Switch forfeiting team' },
+                { value: 'scores', label: 'Replace with played result' },
+              ]}
+              onChange={setCorrectionKind}
+            />
+          )}
+        />
+        {correctionKind === 'forfeit' && (
+          <Field
+            label="Forfeiting team"
+            render={({ id, labelId, describedBy }) => (
+              <Select
+                id={id}
+                ariaLabelledBy={labelId}
+                ariaDescribedBy={describedBy}
+                value={correctionForfeitingTeamId}
+                options={[scheduled.leftTeamId, scheduled.rightTeamId!].map((teamId) => ({
+                  value: teamId,
+                  label: teamLabel(state, teamId),
+                }))}
+                onChange={setCorrectionForfeitingTeamId}
+              />
+            )}
+          />
+        )}
+        {correctionKind === 'scores' && (
+          <FieldGrid>
+            <Field label={teamLabel(state, scheduled.leftTeamId)}>
+              <NumberInput step={1} value={left} onChange={(event) => setLeft(event.target.value)} />
+            </Field>
+            <Field label={teamLabel(state, scheduled.rightTeamId)}>
+              <NumberInput step={1} value={right} onChange={(event) => setRight(event.target.value)} />
+            </Field>
+          </FieldGrid>
+        )}
+        <Field label="Correction reason">
+          <TextArea
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Wrong team selected; game should be played"
+          />
+        </Field>
       </Dialog>
     );
   }
@@ -1110,9 +1231,16 @@ function ManualResultDialog({
           bonusPoints: 0,
           bouncebacks: 0,
         });
+        const scores = [score(selected.leftTeamId, left), score(selected.rightTeamId, right)];
+        const decisionIssue = resultDecisionIssue(state, selected, scores);
+        if (decisionIssue) {
+          setScoreError(decisionIssue.message);
+          onAnnounce(errorNotice(decisionIssue.message));
+          return;
+        }
         const accepted = controller.addManualResult({
           scheduledGameId: selected.id,
-          scores: [score(selected.leftTeamId, left), score(selected.rightTeamId, right)],
+          scores,
         });
         onAnnounce(
           accepted
@@ -1196,6 +1324,21 @@ function teamLabel(state: DirectorState, id: string | null): string {
 }
 function matchupLabel(state: DirectorState, game: DirectorState['scheduledGames'][number]): string {
   return `${teamLabel(state, game.leftTeamId)} vs ${teamLabel(state, game.rightTeamId)}`;
+}
+function scoreForTeam(game: DirectorState['games'][number], teamId: string): TeamGameScore {
+  return (
+    game.scores.find((entry) => entry.teamId === teamId) ?? {
+      teamId,
+      score: 0,
+      superpowers: 0,
+      powers: 0,
+      gets: 0,
+      negs: 0,
+      bonuses: 0,
+      bonusPoints: 0,
+      bouncebacks: 0,
+    }
+  );
 }
 function gameStatusLabel(status: DirectorState['scheduledGames'][number]['status']): string {
   return (

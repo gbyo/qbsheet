@@ -10,6 +10,7 @@ import { buildAssignment, currentOperationalRound, selectScheduledGames } from '
 import { findSecretKeys } from './canonical';
 import { assignmentFileName, sanitizeFileSegment, uniqueFileName } from './filenames';
 import { buildManifest, exchangePaths, parseManifest, readmeText } from './layout';
+import { planAssignments } from './prepare';
 import { assignmentFor, directorFixture, fixtureTournamentId } from './testFixtures';
 
 describe('a one-game assignment', () => {
@@ -151,6 +152,16 @@ describe('a one-game assignment', () => {
     if (!built.ok) return;
     expect(built.assignment.warnings.join(' ')).toContain('Greenwood A has no roster');
   });
+
+  it('refuses to export an unresolved game that still references a retired packet', () => {
+    const state = directorFixture();
+    state.scheduledGames[0].status = 'scheduled';
+    state.packets[0].retired = true;
+    const built = buildAssignment(state, 'game-5-1');
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.failure.reason).toMatch(/packet.*retired/i);
+  });
 });
 
 describe('selecting which games to prepare', () => {
@@ -177,6 +188,107 @@ describe('selecting which games to prepare', () => {
     expect(selectScheduledGames(state, { kind: 'current-round' }).map((game) => game.id)).toEqual([
       'game-5-2',
     ]);
+  });
+
+  it('keeps completed games out of every ordinary export scope', () => {
+    const state = directorFixture({ games: 3 });
+    const completed = state.scheduledGames[0]!;
+    completed.status = 'accepted';
+    state.games.push({
+      id: 'result-game-5-1',
+      scheduledGameId: completed.id,
+      roundId: completed.roundId,
+      packetId: completed.packetId,
+      status: 'accepted',
+      scores: [],
+      playerStats: [],
+      source: 'manual',
+    });
+
+    const remaining = ['game-5-2', 'game-5-3'];
+    expect(selectScheduledGames(state, { kind: 'current-round' }).map((game) => game.id)).toEqual(remaining);
+    expect(selectScheduledGames(state, { kind: 'round', roundId: 'round-5' }).map((game) => game.id)).toEqual(
+      remaining,
+    );
+    expect(selectScheduledGames(state, { kind: 'released' }).map((game) => game.id)).toEqual(remaining);
+    expect(selectScheduledGames(state, { kind: 'unconnected-rooms' }).map((game) => game.id)).toEqual(
+      remaining,
+    );
+
+    const plan = planAssignments(state, { kind: 'round', roundId: 'round-5' });
+    expect(plan.assignments.map((assignment) => assignment.scheduledGameId)).toEqual(remaining);
+    expect(plan.skipped).toEqual([
+      {
+        scheduledGameId: completed.id,
+        reason: 'That game is already completed; its canonical assignment must not be reissued.',
+      },
+    ]);
+    expect(buildAssignment(state, completed.id).ok).toBe(false);
+
+    // The explicit maintenance path preserves the canonical game identity and revision when a
+    // director genuinely needs a historical copy; it is not part of ordinary selection.
+    const historical = buildAssignment(state, completed.id, { allowHistoricalReExport: true });
+    expect(historical.ok).toBe(true);
+    if (historical.ok) {
+      expect(historical.assignment.scheduledGameId).toBe(completed.id);
+      expect(historical.assignment.assignmentRevision).toBe(completed.assignmentRevision);
+    }
+  });
+
+  it('does not turn submitted or in-progress work into a blank assignment', () => {
+    const state = directorFixture({ games: 3 });
+    state.scheduledGames[0]!.status = 'submitted';
+    state.scheduledGames[1]!.status = 'live';
+    state.games.push(
+      {
+        id: 'result-game-5-1',
+        scheduledGameId: 'game-5-1',
+        roundId: 'round-5',
+        packetId: 'packet-5',
+        status: 'submitted',
+        scores: [],
+        playerStats: [],
+        source: 'qbtcp',
+      },
+      {
+        id: 'result-game-5-2',
+        scheduledGameId: 'game-5-2',
+        roundId: 'round-5',
+        packetId: 'packet-5',
+        status: 'live',
+        scores: [],
+        playerStats: [],
+        source: 'qbtcp',
+      },
+    );
+    const plan = planAssignments(state, { kind: 'current-round' });
+    expect(plan.assignments.map((assignment) => assignment.scheduledGameId)).toEqual(['game-5-3']);
+    expect(plan.skipped.map((entry) => entry.scheduledGameId)).toEqual(['game-5-1', 'game-5-2']);
+    expect(plan.skipped.map((entry) => entry.reason)).toEqual([
+      'A result is awaiting review; a fresh assignment could conflict with it.',
+      'That game is already in progress; use the scorer recovery workflow instead.',
+    ]);
+  });
+
+  it('repeated exports keep unresolved assignment identity deterministic', () => {
+    const state = directorFixture({ games: 3 });
+    state.scheduledGames[0]!.status = 'accepted';
+    state.games.push({
+      id: 'result-game-5-1',
+      scheduledGameId: 'game-5-1',
+      roundId: 'round-5',
+      packetId: 'packet-5',
+      status: 'accepted',
+      scores: [],
+      playerStats: [],
+      source: 'manual',
+    });
+
+    const first = planAssignments(state, { kind: 'round', roundId: 'round-5' });
+    const second = planAssignments(state, { kind: 'round', roundId: 'round-5' });
+    expect(second.skipped).toEqual(first.skipped);
+    expect(second.assignments).toEqual(first.assignments);
+    expect(second.assignments.map((assignment) => assignment.scheduledGameId)).not.toContain('game-5-1');
   });
 
   it('does not offer a closed current round as an outgoing assignment set', () => {

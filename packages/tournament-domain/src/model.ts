@@ -11,7 +11,7 @@ import type { IanaTimeZone } from './timezone.js';
 import type { TournamentTimelineEvent } from './timeline.js';
 import type { LivePublication } from './publication.js';
 
-export const directorSchemaVersion = 7;
+export const directorSchemaVersion = 8;
 
 export type {
   ArtifactClassification,
@@ -268,6 +268,8 @@ export interface BracketNodeState {
 }
 
 export interface BracketState {
+  /** Phase that owns this draw; absent on legacy documents created before phase-scoped fields. */
+  phaseId?: DirectorId;
   teamCount: number;
   bracketSize: number;
   roundCount: number;
@@ -284,6 +286,8 @@ export interface Phase {
   kind: PhaseKind;
   order: number;
   formatId: DirectorId;
+  /** Explicit competitive field for non-pool stages, normally written by advancement. */
+  teamIds?: DirectorId[];
   poolIds: DirectorId[];
   roundIds: DirectorId[];
   advancementRule: AdvancementRule | null;
@@ -327,6 +331,16 @@ export interface Round {
   closedAt: string | null;
 }
 
+export interface ScheduledGameCancellation {
+  /** Why the schedule row was cancelled; only team-drop cancellations are restorable by Restore. */
+  reasonKind: 'team-dropped' | 'manual' | 'administrative';
+  teamId?: DirectorId;
+  reason: string;
+  at: string;
+  /** Audit event that records the cancellation decision. */
+  auditId?: DirectorId;
+}
+
 export interface ScheduledGame {
   id: DirectorId;
   roundId: DirectorId;
@@ -353,6 +367,8 @@ export interface ScheduledGame {
   notes?: string;
   /** Stable key into FormatDefinition.bracket when this is a dependent bracket game. */
   bracketKey?: string;
+  /** Provenance for a cancellation, retained so later recovery cannot guess its cause. */
+  cancellation?: ScheduledGameCancellation;
 }
 
 export interface TeamGameScore {
