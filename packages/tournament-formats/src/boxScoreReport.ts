@@ -26,9 +26,16 @@ function scoreText(game: GameStatsRow): string {
 function detailKnown(team: GameTeamStatsRow | undefined): boolean {
   return Boolean(
     team &&
-      [team.superpowers, team.powers, team.gets, team.negs, team.tossupsHeard, team.bonusesHeard, team.bonusPoints].some(
-        (value) => value !== null,
-      ),
+      [
+        team.superpowers,
+        team.powers,
+        team.gets,
+        team.negs,
+        team.tossupsHeard,
+        team.bonusesHeard,
+        team.bonusPoints,
+        team.bouncebacks,
+      ].some((value) => value !== null),
   );
 }
 
@@ -61,7 +68,7 @@ function teamBox(
     ? `<div class="bonus-summary"><span>Bonuses heard: <strong>${reportEscape(team.bonusesHeard ?? '—')}</strong></span>` +
       `<span>Bonus points: <strong>${reportEscape(team.bonusPoints ?? '—')}</strong></span>` +
       `<span>PPB: <strong>${typeof team.ppb === 'number' ? team.ppb.toFixed(presentation.precision.ppb) : '—'}</strong></span>` +
-      `${presentation.applicability.bouncebacks && team.bouncebacks !== null ? `<span>Bouncebacks: <strong>${team.bouncebacks}</strong></span>` : ''}</div>`
+      `${presentation.applicability.bouncebacks && team.bouncebacks !== null ? `<span>Bounceback points: <strong>${team.bouncebacks}</strong></span>` : ''}</div>`
     : '';
 
   return (
