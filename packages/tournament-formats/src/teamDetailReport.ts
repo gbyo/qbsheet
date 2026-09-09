@@ -149,9 +149,7 @@ export function renderTeamDetailReport(snapshot: StatsSnapshot): string {
   const showStage = phases.size > 1;
   const showSuperpowers =
     snapshot.teams.some((team) => team.superpowers > 0) ||
-    snapshot.games.some((game) =>
-      (game.teamStats ?? []).some((stats) => (stats.superpowers ?? 0) > 0),
-    );
+    snapshot.games.some((game) => (game.teamStats ?? []).some((stats) => (stats.superpowers ?? 0) > 0));
   const showPacket = snapshot.games.some((game) => Boolean(game.packetName));
   const sections = snapshot.teams
     .map((row) => teamSection(snapshot, row, showStage, showSuperpowers, showPacket))
