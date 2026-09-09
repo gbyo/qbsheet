@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { completeTargetPoolMembership } from './advancementCommit';
+import { completeTargetPoolMembership } from './advancementCommitPlan';
 
 describe('complete advancement target membership', () => {
   test('makes omitted target pools explicitly empty on recommit', () => {
