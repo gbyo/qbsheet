@@ -205,6 +205,20 @@ export function RoomsView({
     }
   };
 
+  const setAdvertisedAddress = async (address: string) => {
+    if (!nativeServer) return;
+    try {
+      const next = await nativeServer.setAdvertisedAddress(address);
+      onAnnounce(next.message ?? `QBTCP pairing links will use ${address}.`);
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(
+          reason instanceof Error ? reason.message : 'The QBTCP advertised address could not be set.',
+        ),
+      );
+    }
+  };
+
   const changeView = (nextView: LogisticsView) => {
     if (nextView === view) return;
     setViewDirection(logisticsViewOrder[nextView] > logisticsViewOrder[view] ? 'forward' : 'backward');
@@ -345,11 +359,13 @@ export function RoomsView({
             qbtcpHasError={qbtcpHasError}
             pairingRooms={pairingRooms}
             invitations={invitations}
+            expiredPairingRoomIds={qbtcpStatus?.expiredPairingRoomIds ?? []}
             pairingRoomId={pairingRoomId}
             controller={controller}
             onToggle={() => void toggleServer()}
             onIssue={(roomId) => void issuePairing(roomId)}
             onCopy={(url, message) => void copyPairingLink(url, message)}
+            onSetAddress={setAdvertisedAddress}
           />
         </AdvancedSection>
       )}
@@ -1315,11 +1331,13 @@ function QbtcpNetwork({
   qbtcpHasError,
   pairingRooms,
   invitations = [],
+  expiredPairingRoomIds = [],
   pairingRoomId,
   controller,
   onToggle,
   onIssue,
   onCopy,
+  onSetAddress,
 }: {
   state: DirectorState;
   nativeServer: NativeServerState;
@@ -1329,13 +1347,25 @@ function QbtcpNetwork({
   qbtcpHasError: boolean;
   pairingRooms: DirectorState['rooms'];
   invitations: NonNullable<NativeServerState['status']>['pairingInvitations'];
+  expiredPairingRoomIds: string[];
   pairingRoomId: string | null;
   controller: DirectorController;
   onToggle: () => void;
   onIssue: (roomId: string) => void;
   onCopy: (url: string, message: string) => void;
+  onSetAddress: (address: string) => Promise<void>;
 }) {
   const status = nativeServer.status;
+  const now = useNow(1000);
+  const [manualAddress, setManualAddress] = useState('');
+  const addressOptions = (status?.addressCandidates ?? []).map((candidate) => ({
+    value: candidate.address,
+    label: `${candidate.interfaceName} · ${candidate.address}`,
+  }));
+  const chooseAddress = (address: string) => {
+    setManualAddress(address);
+    void onSetAddress(address);
+  };
   return (
     <div className="director-stack">
       {qbtcpHasError && (
@@ -1378,7 +1408,14 @@ function QbtcpNetwork({
             value:
               qbtcpRunning && status?.address
                 ? `${status.address}${status.port ? `:${status.port}` : ''}`
-                : 'Not listening',
+                : qbtcpRunning
+                  ? 'Unavailable — choose a reachable IPv4 address'
+                  : 'Not listening',
+            mono: true,
+          },
+          {
+            term: 'Listener',
+            value: qbtcpRunning ? (status?.bindAddress ?? `0.0.0.0:${status?.port ?? '—'}`) : '—',
             mono: true,
           },
           {
@@ -1388,6 +1425,47 @@ function QbtcpNetwork({
           { term: 'Protocol', value: qbtcpRunning ? (status?.protocol ?? 'QBTCP v1') : '—' },
         ]}
       />
+      {qbtcpRunning && (status?.addressSelectionRequired || !status?.address) && (
+        <Callout
+          tone="warning"
+          title={
+            status?.addressSelectionRequired ? 'Multiple local networks detected' : 'Choose a pairing address'
+          }
+        >
+          <p>
+            Director will not guess which private interface scorekeeper devices can reach. Choose the scorer
+            LAN address before sharing pairing links.
+          </p>
+          {addressOptions.length > 0 && (
+            <Field label="Advertise QBTCP on">
+              <Select
+                value={
+                  status?.address && addressOptions.some((option) => option.value === status.address)
+                    ? status.address
+                    : ''
+                }
+                options={addressOptions}
+                onChange={chooseAddress}
+                placeholder="Choose an interface…"
+              />
+            </Field>
+          )}
+          <Field label="Reachable IPv4 address" optional={addressOptions.length > 0}>
+            <TextInput
+              value={manualAddress}
+              onChange={(event) => setManualAddress(event.target.value)}
+              placeholder="192.168.1.54"
+            />
+          </Field>
+          <Button
+            variant="primary"
+            disabled={!manualAddress.trim() || manualAddress.trim() === status?.address}
+            onClick={() => void onSetAddress(manualAddress.trim())}
+          >
+            Use this address
+          </Button>
+        </Callout>
+      )}
       {nativeDirector && qbtcpRunning && (
         <Panel
           title="Room invitations"
@@ -1402,6 +1480,10 @@ function QbtcpNetwork({
             ) : (
               pairingRooms.map((room) => {
                 const invitation = invitations.find((entry) => entry.roomId === room.id);
+                const expired = !invitation && expiredPairingRoomIds.includes(room.id);
+                const remainingSeconds = invitation
+                  ? Math.max(0, Math.ceil((Date.parse(invitation.expiresAt) - now) / 1000))
+                  : null;
                 return (
                   <SummaryItem
                     key={room.id}
@@ -1409,13 +1491,17 @@ function QbtcpNetwork({
                     status={
                       <StateLabel
                         state={invitation ? 'paired' : 'waiting'}
-                        label={invitation ? 'Invitation active' : 'No invitation'}
+                        label={
+                          invitation ? 'Invitation active' : expired ? 'Invitation expired' : 'No invitation'
+                        }
                       />
                     }
                     summary={
                       invitation
-                        ? `Code ${invitation.pairingCode}`
-                        : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'
+                        ? `Code ${invitation.pairingCode} · ${formatPairingRemaining(remainingSeconds ?? 0)}`
+                        : expired
+                          ? 'The old code and link are no longer usable. Issue a fresh invitation.'
+                          : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'
                     }
                     actions={
                       <div className="director-actions">
@@ -1436,7 +1522,7 @@ function QbtcpNetwork({
                         >
                           {pairingRoomId === room.id
                             ? 'Issuing…'
-                            : invitation
+                            : invitation || expired
                               ? 'Issue new'
                               : 'Issue pairing'}
                         </Button>
@@ -1451,6 +1537,12 @@ function QbtcpNetwork({
       )}
     </div>
   );
+}
+
+function formatPairingRemaining(seconds: number): string {
+  if (seconds < 60) return `Expires in ${seconds} sec`;
+  const minutes = Math.ceil(seconds / 60);
+  return `Expires in ${minutes} min`;
 }
 
 const qbtcpStaleAfterMs = 2 * 60 * 1000;

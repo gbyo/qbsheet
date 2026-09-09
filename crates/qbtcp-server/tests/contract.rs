@@ -691,6 +691,34 @@ async fn expiry_abandons_without_deleting_recovery_and_accepts_late_review() {
 }
 
 #[tokio::test]
+async fn explicit_abandon_rejects_live_authority_but_retains_late_delivery_for_review() {
+    let (server, _) = fixture();
+    let (_, room_token) = pair(&server, "explicit-abandon").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-abandon").await;
+    server.abandon_session(&session_id).unwrap();
+
+    let result_path = format!("/qbtcp/v1/sessions/{session_id}/result");
+    let (status, _, receipt) = request(
+        &server,
+        Method::POST,
+        &result_path,
+        &[
+            (SESSION_TOKEN_HEADER, &token),
+            ("content-type", qbtcp_server::QBJ_MEDIA_TYPE),
+        ],
+        Some(serde_json::to_vec(&result_qbj(90, false)).unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(receipt["review_required"], true);
+    assert!(receipt["warnings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|warning| warning == "late-after-abandon"));
+}
+
+#[tokio::test]
 async fn advertised_capabilities_gate_requests() {
     let (_, state) = fixture();
     let config = QbtcpConfig {

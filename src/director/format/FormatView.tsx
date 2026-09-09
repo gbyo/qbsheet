@@ -21,6 +21,8 @@ import {
   EmptyState,
   Field,
   FieldGrid,
+  FormActions,
+  FormErrors,
   MenuItem,
   MultiSelect,
   NumberInput,
@@ -31,11 +33,14 @@ import {
   ReorderNotice,
   ReorderToggle,
   Select,
+  SaveState,
   StateLabel,
   SummaryItem,
   SummaryList,
   TextInput,
   useConfirm,
+  useDirtyForms,
+  useFormState,
   useReorderMode,
   type SelectOption,
 } from '../components';
@@ -79,16 +84,6 @@ export function FormatView({
   const confirmedTeams = state.teams.filter((team) => team.status === 'confirmed').length;
   const acceptedResultCount = state.games.filter((game) => game.status === 'accepted').length;
   const generation = formatGenerationAvailability(state);
-  const formatKey = [
-    format.id,
-    format.kind,
-    format.roundsPerTeam ?? '',
-    format.avoidRematches,
-    format.avoidSameOrganization,
-    format.allowByes,
-    format.name,
-  ].join('|');
-
   return (
     <Page>
       <PageHeader
@@ -109,7 +104,6 @@ export function FormatView({
       />
 
       <FormatBasics
-        key={formatKey}
         state={state}
         format={format}
         controller={controller}
@@ -233,35 +227,45 @@ function FormatBasics({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const locked = state.rounds.length > 0;
-  const [kind, setKind] = useState(format.kind);
-  const [roundsPerTeam, setRoundsPerTeam] = useState(format.roundsPerTeam?.toString() ?? '');
-  const [avoidRematches, setAvoidRematches] = useState(format.avoidRematches);
-  const [avoidSameOrganization, setAvoidSameOrganization] = useState(format.avoidSameOrganization);
-  const [allowByes, setAllowByes] = useState(format.allowByes);
-
-  const save = () => {
-    const raw = roundsPerTeam.trim();
-    const rounds = raw === '' ? null : Number(raw);
-    if (rounds !== null && (!Number.isInteger(rounds) || rounds < 1 || rounds > 99)) {
+  const form = useFormState({
+    initial: {
+      kind: format.kind,
+      roundsPerTeam: format.roundsPerTeam?.toString() ?? '',
+      avoidRematches: format.avoidRematches,
+      avoidSameOrganization: format.avoidSameOrganization,
+      allowByes: format.allowByes,
+    },
+    validate: (draft) => {
+      const raw = draft.roundsPerTeam.trim();
+      const rounds = raw === '' ? null : Number(raw);
+      return rounds === null || (Number.isInteger(rounds) && rounds >= 1 && rounds <= 99)
+        ? {}
+        : {
+            roundsPerTeam:
+              'Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.',
+          };
+    },
+    onSubmit: (draft) => {
+      const raw = draft.roundsPerTeam.trim();
+      const rounds = raw === '' ? null : Number(raw);
+      const saved = controller.updateFormat({
+        kind: draft.kind,
+        name: formatName(draft.kind),
+        roundsPerTeam: rounds,
+        avoidRematches: draft.avoidRematches,
+        avoidSameOrganization: draft.avoidSameOrganization,
+        allowByes: draft.allowByes,
+      });
       onAnnounce(
-        errorNotice('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.'),
+        saved
+          ? `${formatName(draft.kind)} settings saved.`
+          : errorNotice('Format settings were not saved; review the Director error.'),
       );
-      return;
-    }
-    const saved = controller.updateFormat({
-      kind,
-      name: formatName(kind),
-      roundsPerTeam: rounds,
-      avoidRematches,
-      avoidSameOrganization,
-      allowByes,
-    });
-    onAnnounce(
-      saved
-        ? `${formatName(kind)} settings saved.`
-        : errorNotice('Format settings were not saved; review the Director error.'),
-    );
-  };
+      return saved;
+    },
+    formId: `format-basics-${format.id}`,
+    formLabel: 'Tournament structure',
+  });
 
   const formatOptions: SelectOption<typeof format.kind>[] = [
     { value: 'round-robin', label: 'Round robin', detail: 'Everyone meets on a deterministic rotation.' },
@@ -292,63 +296,81 @@ function FormatBasics({
         />
       }
     >
-      <FieldGrid>
-        <Field
-          label="Format"
-          hint={locked ? 'Format type is locked after the first generated round.' : undefined}
-          render={({ id, labelId, describedBy }) => (
-            <Select
-              id={id}
-              ariaLabelledBy={labelId}
-              ariaDescribedBy={describedBy}
-              value={kind}
-              options={formatOptions}
-              disabled={locked || !format.editable}
-              onChange={setKind}
-            />
-          )}
-        />
-        <Field label="Rounds per team" hint="Leave blank for no fixed limit.">
-          <NumberInput
-            min={1}
-            max={99}
-            value={roundsPerTeam}
-            disabled={!format.editable}
-            onChange={(event) => setRoundsPerTeam(event.target.value)}
-          />
-        </Field>
-      </FieldGrid>
-      <CheckboxGroup
-        legend="Pairing preferences"
-        hint="Director applies these when possible; hard schedule constraints still win."
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          form.submit();
+        }}
       >
-        <Checkbox
-          checked={avoidRematches}
-          disabled={!format.editable}
-          label="Avoid rematches when possible"
-          onChange={setAvoidRematches}
-        />
-        <Checkbox
-          checked={avoidSameOrganization}
-          disabled={!format.editable}
-          label="Avoid same-school pairings when possible"
-          onChange={setAvoidSameOrganization}
-        />
-        <Checkbox
-          checked={allowByes}
-          disabled={!format.editable}
-          label="Allow explicit byes for odd fields"
-          onChange={setAllowByes}
-        />
-      </CheckboxGroup>
-      <div className="director-form-actions">
-        <span className={generationSupported ? 'director-text-meta' : 'director-text-warning'}>
-          {generationMessage}
-        </span>
-        <Button variant="primary" disabled={!format.editable} onClick={save}>
-          Save format
-        </Button>
-      </div>
+        <FieldGrid>
+          <Field
+            label="Format"
+            hint={locked ? 'Format type is locked after the first generated round.' : undefined}
+            render={({ id, labelId, describedBy }) => (
+              <Select
+                id={id}
+                ariaLabelledBy={labelId}
+                ariaDescribedBy={describedBy}
+                value={form.draft.kind}
+                options={formatOptions}
+                disabled={locked || !format.editable}
+                onChange={(kind) => form.set('kind', kind)}
+              />
+            )}
+          />
+          <Field
+            label="Rounds per team"
+            hint="Leave blank for no fixed limit."
+            error={form.errorFor('roundsPerTeam')}
+          >
+            <NumberInput
+              min={1}
+              max={99}
+              value={form.draft.roundsPerTeam}
+              invalid={Boolean(form.errorFor('roundsPerTeam'))}
+              disabled={!format.editable}
+              onChange={(event) => form.set('roundsPerTeam', event.target.value)}
+            />
+          </Field>
+        </FieldGrid>
+        <CheckboxGroup
+          legend="Pairing preferences"
+          hint="Director applies these when possible; hard schedule constraints still win."
+        >
+          <Checkbox
+            checked={form.draft.avoidRematches}
+            disabled={!format.editable}
+            label="Avoid rematches when possible"
+            onChange={(value) => form.set('avoidRematches', value)}
+          />
+          <Checkbox
+            checked={form.draft.avoidSameOrganization}
+            disabled={!format.editable}
+            label="Avoid same-school pairings when possible"
+            onChange={(value) => form.set('avoidSameOrganization', value)}
+          />
+          <Checkbox
+            checked={form.draft.allowByes}
+            disabled={!format.editable}
+            label="Allow explicit byes for odd fields"
+            onChange={(value) => form.set('allowByes', value)}
+          />
+        </CheckboxGroup>
+        <FormErrors errors={form.formErrors} />
+        <FormActions state={<SaveState state={form.saveState} />}>
+          {form.dirty && (
+            <Button variant="secondary" onClick={() => form.reset()}>
+              Discard changes
+            </Button>
+          )}
+          <span className={generationSupported ? 'director-text-meta' : 'director-text-warning'}>
+            {generationMessage}
+          </span>
+          <Button variant="primary" type="submit" disabled={!format.editable || !form.dirty}>
+            Save format
+          </Button>
+        </FormActions>
+      </form>
     </Panel>
   );
 }
@@ -773,6 +795,7 @@ function StageSequence({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const confirmAction = useConfirm();
+  const dirtyForms = useDirtyForms();
   const phases = [...state.phases].sort(
     (left, right) => left.order - right.order || left.id.localeCompare(right.id),
   );
@@ -809,12 +832,35 @@ function StageSequence({
                   variant={entry.id === state.tournament?.currentPhaseId ? 'secondary' : 'quiet'}
                   disabled={entry.archived}
                   onClick={() => {
-                    controller.selectPhase(entry.id);
-                    onAnnounce(
-                      entry.status === 'complete'
-                        ? `${entry.name} selected for review; it is complete.`
-                        : `${entry.name} selected for future configuration.`,
-                    );
+                    const select = () => {
+                      controller.selectPhase(entry.id);
+                      onAnnounce(
+                        entry.status === 'complete'
+                          ? `${entry.name} selected for review; it is complete.`
+                          : `${entry.name} selected for future configuration.`,
+                      );
+                    };
+                    if (entry.id === state.tournament?.currentPhaseId) {
+                      select();
+                      return;
+                    }
+                    const dirty = dirtyForms.filter((form) => form.dirty);
+                    if (!dirty.length) {
+                      select();
+                      return;
+                    }
+                    void confirmAction({
+                      title: 'Discard unsaved format changes?',
+                      body: `You have unsaved changes in ${dirty.map((form) => form.label).join(' and ')}.`,
+                      consequence: 'Selecting another stage will discard those drafts.',
+                      confirmLabel: 'Discard changes',
+                      cancelLabel: 'Keep editing',
+                      tone: 'warning',
+                    }).then((confirmed) => {
+                      if (!confirmed) return;
+                      dirty.forEach((form) => form.discard());
+                      select();
+                    });
                   }}
                 >
                   {entry.status === 'complete'
@@ -877,188 +923,156 @@ function PhaseConfiguration({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const rules = state.tournament?.rules;
-  const key = phaseConfigurationKey(phase);
-  const [draft, setDraft] = useState(() => phaseDraftFor(phase));
-  const [draftKey, setDraftKey] = useState(key);
-  if (
-    draftKey !== key &&
-    !draft.nameDirty &&
-    !draft.kindDirty &&
-    !draft.carryoverDirty &&
-    !draft.advancementDirty
-  ) {
-    setDraft(phaseDraftFor(phase));
-    setDraftKey(key);
-  }
-  const acceptedResults = state.games.some(
-    (game) => game.roundId && phase.roundIds.includes(game.roundId) && game.status === 'accepted',
-  );
-  const preview = phase.advancementRule && acceptedResults ? previewAdvancement(state, phase) : null;
-
-  const save = () => {
-    let advancementRule: AdvancementRule | null = null;
-    if (draft.advancementEnabled) {
+  const form = useFormState<PhaseFormValues>({
+    initial: phaseDraftFor(phase),
+    validate: (draft) => {
+      if (!draft.advancementEnabled) return {};
+      const errors: Partial<Record<keyof PhaseFormValues, string>> & { _form?: string[] } = {};
       const qualifiers = Number(draft.qualifiersPerPool);
       const wildcardCount = draft.wildcards.trim() === '' ? 0 : Number(draft.wildcards);
       if (!Number.isInteger(qualifiers) || qualifiers < 1) {
-        onAnnounce(errorNotice('Qualifiers per pool must be a positive whole number.'));
-        return;
+        errors.qualifiersPerPool = 'Qualifiers must be a positive whole number.';
       }
       if (!Number.isInteger(wildcardCount) || wildcardCount < 0) {
-        onAnnounce(errorNotice('Wildcards must be zero or a positive whole number.'));
-        return;
+        errors.wildcards = 'Wildcards must be zero or a positive whole number.';
       }
-      const tiebreakers = phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [];
-      if (!tiebreakers.length) {
-        onAnnounce(errorNotice('Configure at least one standings tiebreaker before enabling advancement.'));
-        return;
+      if (!rules?.tiebreakers.length && !phase.advancementRule?.tiebreakers.length) {
+        errors._form = ['Configure at least one standings tiebreaker before enabling advancement.'];
       }
-      advancementRule = {
-        qualifiersPerPool: qualifiers,
-        wildcards: wildcardCount,
-        tiebreakers: [...tiebreakers],
-        manualOverrideAllowed: draft.manualOverrideAllowed,
-      };
-    }
-    const updated = controller.updatePhase(phase.id, {
-      name: draft.name.trim(),
-      kind: draft.kind,
-      carryover: draft.carryover,
-      advancementRule,
-    });
-    if (!updated) {
-      onAnnounce(errorNotice('Stage changes were not saved; review the Director error.'));
-      return;
-    }
-    setDraft((current) => ({
-      ...current,
-      nameDirty: false,
-      kindDirty: false,
-      carryoverDirty: false,
-      advancementDirty: false,
-    }));
-    setDraftKey(
-      phaseConfigurationKey({
-        ...phase,
+      return errors;
+    },
+    onSubmit: (draft) => {
+      const advancementRule: AdvancementRule | null = draft.advancementEnabled
+        ? {
+            qualifiersPerPool: Number(draft.qualifiersPerPool),
+            wildcards: draft.wildcards.trim() === '' ? 0 : Number(draft.wildcards),
+            tiebreakers: [...(phase.advancementRule?.tiebreakers ?? rules?.tiebreakers ?? [])],
+            manualOverrideAllowed: draft.manualOverrideAllowed,
+          }
+        : null;
+      const updated = controller.updatePhase(phase.id, {
         name: draft.name.trim(),
         kind: draft.kind,
         carryover: draft.carryover,
         advancementRule,
-      }),
-    );
-    onAnnounce(`${draft.name.trim()} stage settings updated.`);
-  };
+      });
+      if (!updated) {
+        onAnnounce(errorNotice('Stage changes were not saved; review the Director error.'));
+        return false;
+      }
+      onAnnounce(`${draft.name.trim()} stage settings updated.`);
+      return true;
+    },
+    formId: `format-phase-${phase.id}`,
+    formLabel: `${phase.name} stage settings`,
+  });
+  const acceptedResults = state.games.some(
+    (game) => game.roundId && phase.roundIds.includes(game.roundId) && game.status === 'accepted',
+  );
+  const preview = phase.advancementRule && acceptedResults ? previewAdvancement(state, phase) : null;
 
   return (
     <Panel
       title={`Selected stage · ${phase.name}`}
       description="These settings apply only when a tournament has multiple stages."
     >
-      <FieldGrid>
-        <Field label="Stage name">
-          <TextInput
-            value={draft.name}
-            onChange={(event) =>
-              setDraft((current) => ({ ...current, name: event.target.value, nameDirty: true }))
-            }
-          />
-        </Field>
-        <Field
-          label="Stage type"
-          hint={phase.roundIds.length > 0 ? 'Locked after the first generated round.' : undefined}
-          render={({ id, describedBy }) => (
-            <Select<PhaseKind>
-              id={id}
-              ariaDescribedBy={describedBy}
-              value={draft.kind}
-              options={phaseKindOptions}
-              disabled={phase.roundIds.length > 0}
-              onChange={(kind) => setDraft((current) => ({ ...current, kind, kindDirty: true }))}
-            />
-          )}
-        />
-      </FieldGrid>
-      <Checkbox
-        checked={draft.carryover}
-        label="Carry over prior-stage results"
-        onChange={(carryover) => setDraft((current) => ({ ...current, carryover, carryoverDirty: true }))}
-      />
-      <Checkbox
-        checked={draft.advancementEnabled}
-        label="Use an advancement rule"
-        hint="Director previews the qualifiers before they are committed to the next stage."
-        onChange={(advancementEnabled) =>
-          setDraft((current) => ({ ...current, advancementEnabled, advancementDirty: true }))
-        }
-      />
-      {draft.advancementEnabled && (
-        <div className="director-inset">
-          <FieldGrid>
-            <Field label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from stage'}>
-              <NumberInput
-                min={1}
-                value={draft.qualifiersPerPool}
-                onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
-                    qualifiersPerPool: event.target.value,
-                    advancementDirty: true,
-                  }))
-                }
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          form.submit();
+        }}
+      >
+        <FieldGrid>
+          <Field label="Stage name">
+            <TextInput value={form.draft.name} onChange={(event) => form.set('name', event.target.value)} />
+          </Field>
+          <Field
+            label="Stage type"
+            hint={phase.roundIds.length > 0 ? 'Locked after the first generated round.' : undefined}
+            render={({ id, describedBy }) => (
+              <Select<PhaseKind>
+                id={id}
+                ariaDescribedBy={describedBy}
+                value={form.draft.kind}
+                options={phaseKindOptions}
+                disabled={phase.roundIds.length > 0}
+                onChange={(kind) => form.set('kind', kind)}
               />
-            </Field>
-            {phase.poolIds.length > 0 && (
-              <Field label="Best remaining teams" hint="Wildcards across pools.">
+            )}
+          />
+        </FieldGrid>
+        <Checkbox
+          checked={form.draft.carryover}
+          label="Carry over prior-stage results"
+          onChange={(carryover) => form.set('carryover', carryover)}
+        />
+        <Checkbox
+          checked={form.draft.advancementEnabled}
+          label="Use an advancement rule"
+          hint="Director previews the qualifiers before they are committed to the next stage."
+          onChange={(advancementEnabled) => form.set('advancementEnabled', advancementEnabled)}
+        />
+        {form.draft.advancementEnabled && (
+          <div className="director-inset">
+            <FieldGrid>
+              <Field label={phase.poolIds.length > 0 ? 'Qualifiers per pool' : 'Qualifiers from stage'}>
                 <NumberInput
-                  min={0}
-                  value={draft.wildcards}
-                  onChange={(event) =>
-                    setDraft((current) => ({
-                      ...current,
-                      wildcards: event.target.value,
-                      advancementDirty: true,
-                    }))
-                  }
+                  min={1}
+                  value={form.draft.qualifiersPerPool}
+                  onChange={(event) => form.set('qualifiersPerPool', event.target.value)}
                 />
               </Field>
-            )}
-          </FieldGrid>
-          <Checkbox
-            checked={draft.manualOverrideAllowed}
-            label="Allow director override for unresolved ties"
-            onChange={(manualOverrideAllowed) =>
-              setDraft((current) => ({ ...current, manualOverrideAllowed, advancementDirty: true }))
-            }
+              {phase.poolIds.length > 0 && (
+                <Field label="Best remaining teams" hint="Wildcards across pools.">
+                  <NumberInput
+                    min={0}
+                    value={form.draft.wildcards}
+                    onChange={(event) => form.set('wildcards', event.target.value)}
+                  />
+                </Field>
+              )}
+            </FieldGrid>
+            <Checkbox
+              checked={form.draft.manualOverrideAllowed}
+              label="Allow director override for unresolved ties"
+              onChange={(manualOverrideAllowed) => form.set('manualOverrideAllowed', manualOverrideAllowed)}
+            />
+          </div>
+        )}
+        {preview && (
+          <Callout
+            tone={preview.unresolved.length > 0 ? 'warning' : 'info'}
+            title={`${preview.qualifiers.length} proposed qualifier${preview.qualifiers.length === 1 ? '' : 's'}`}
+          >
+            {preview.qualifiers.map((team) => team.displayName).join(' · ')}
+          </Callout>
+        )}
+        {preview && (
+          <AdvancementCommit
+            state={state}
+            sourcePhaseId={phase.id}
+            preview={preview}
+            controller={controller}
+            onAnnounce={onAnnounce}
           />
-        </div>
-      )}
-      {preview && (
-        <Callout
-          tone={preview.unresolved.length > 0 ? 'warning' : 'info'}
-          title={`${preview.qualifiers.length} proposed qualifier${preview.qualifiers.length === 1 ? '' : 's'}`}
-        >
-          {preview.qualifiers.map((team) => team.displayName).join(' · ')}
-        </Callout>
-      )}
-      {preview && (
-        <AdvancementCommit
-          state={state}
-          sourcePhaseId={phase.id}
-          preview={preview}
-          controller={controller}
-          onAnnounce={onAnnounce}
-        />
-      )}
-      {phase.advancementRule && !acceptedResults && (
-        <p className="director-text-meta">
-          Accept at least one result in this stage to populate the advancement preview.
-        </p>
-      )}
-      <div className="director-form-actions">
-        <Button variant="primary" onClick={save}>
-          Save stage settings
-        </Button>
-      </div>
+        )}
+        {phase.advancementRule && !acceptedResults && (
+          <p className="director-text-meta">
+            Accept at least one result in this stage to populate the advancement preview.
+          </p>
+        )}
+        <FormErrors errors={form.formErrors} />
+        <FormActions state={<SaveState state={form.saveState} />}>
+          {form.dirty && (
+            <Button variant="secondary" onClick={() => form.reset()}>
+              Discard changes
+            </Button>
+          )}
+          <Button variant="primary" type="submit" disabled={!form.dirty}>
+            Save stage settings
+          </Button>
+        </FormActions>
+      </form>
     </Panel>
   );
 }
@@ -1448,90 +1462,108 @@ function PoolEditor({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const confirmAction = useConfirm();
-  const [name, setName] = useState(pool.name);
-  const [teamIds, setTeamIds] = useState(pool.teamIds);
   const editable = !locked && !pool.archived;
+  const form = useFormState({
+    initial: { name: pool.name, teamIds: pool.teamIds },
+    validate: (draft) => (draft.name.trim() ? {} : { name: 'Enter a pool name first.' }),
+    onSubmit: (draft) => {
+      if (!controller.updatePool(pool.id, { name: draft.name.trim(), teamIds: draft.teamIds })) {
+        onAnnounce(errorNotice(`${draft.name.trim()} was not saved; review the Director error.`));
+        return false;
+      }
+      onAnnounce(`${draft.name.trim()} updated.`);
+      return true;
+    },
+    formId: `format-pool-${pool.id}`,
+    formLabel: `${pool.name} pool`,
+  });
   const assignedElsewhere = new Set(
     pools
       .filter((candidate) => candidate.id !== pool.id && !candidate.archived)
       .flatMap((candidate) => candidate.teamIds),
   );
-  const save = () => {
-    if (!name.trim()) {
-      onAnnounce(errorNotice('Enter a pool name first.'));
-      return;
-    }
-    if (!controller.updatePool(pool.id, { name: name.trim(), teamIds })) {
-      onAnnounce(errorNotice(`${name.trim()} was not saved; review the Director error.`));
-      return;
-    }
-    onAnnounce(`${name.trim()} updated.`);
-  };
   return (
     <div className="director-inset">
-      <FieldGrid>
-        <Field label="Pool name">
-          <TextInput value={name} disabled={!editable} onChange={(event) => setName(event.target.value)} />
-        </Field>
-        <Field
-          label="Teams"
-          render={({ id, labelId, describedBy }) => (
-            <MultiSelect
-              id={id}
-              ariaLabelledBy={labelId}
-              ariaDescribedBy={describedBy}
-              values={teamIds}
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          form.submit();
+        }}
+      >
+        <FieldGrid>
+          <Field label="Pool name" error={form.errorFor('name')}>
+            <TextInput
+              value={form.draft.name}
               disabled={!editable}
-              options={teams.map((team) => ({
-                value: team.id,
-                label: team.displayName,
-                disabled: assignedElsewhere.has(team.id) && !teamIds.includes(team.id),
-              }))}
-              onChange={setTeamIds}
-              searchPlaceholder="Filter teams…"
+              invalid={Boolean(form.errorFor('name'))}
+              onChange={(event) => form.set('name', event.target.value)}
             />
+          </Field>
+          <Field
+            label="Teams"
+            render={({ id, labelId, describedBy }) => (
+              <MultiSelect
+                id={id}
+                ariaLabelledBy={labelId}
+                ariaDescribedBy={describedBy}
+                values={form.draft.teamIds}
+                disabled={!editable}
+                options={teams.map((team) => ({
+                  value: team.id,
+                  label: team.displayName,
+                  disabled: assignedElsewhere.has(team.id) && !form.draft.teamIds.includes(team.id),
+                }))}
+                onChange={(values) => form.set('teamIds', values)}
+                searchPlaceholder="Filter teams…"
+              />
+            )}
+          />
+        </FieldGrid>
+        <FormActions state={<SaveState state={form.saveState} />}>
+          <StateLabel
+            state={pool.archived ? 'archived' : 'active'}
+            label={pool.archived ? 'Archived' : `${form.draft.teamIds.length} teams`}
+          />
+          <ActionMenu label={`${pool.name} actions`} triggerLabel={`${pool.name} actions`}>
+            {(close) => (
+              <MenuItem
+                icon={pool.archived ? 'undo' : 'trash'}
+                tone={pool.archived ? 'default' : 'danger'}
+                onSelect={() => {
+                  close();
+                  void (async () => {
+                    if (!pool.archived) {
+                      const approved = await confirmAction({
+                        title: `Archive ${pool.name}?`,
+                        consequence:
+                          'Its games and membership remain historical, but it will not be used for future rounds.',
+                        confirmLabel: 'Archive pool',
+                        tone: 'danger',
+                      });
+                      if (!approved) return;
+                    }
+                    if (controller.setPoolArchived(pool.id, !pool.archived))
+                      onAnnounce(
+                        `${pool.name} ${pool.archived ? 'reopened' : 'archived'}; history was retained.`,
+                      );
+                    else onAnnounce(errorNotice(`${pool.name} was not changed; review the Director error.`));
+                  })();
+                }}
+              >
+                {pool.archived ? 'Reopen pool' : 'Archive pool…'}
+              </MenuItem>
+            )}
+          </ActionMenu>
+          {form.dirty && (
+            <Button variant="secondary" onClick={() => form.reset()}>
+              Discard changes
+            </Button>
           )}
-        />
-      </FieldGrid>
-      <div className="director-form-actions">
-        <StateLabel
-          state={pool.archived ? 'archived' : 'active'}
-          label={pool.archived ? 'Archived' : `${teamIds.length} teams`}
-        />
-        <ActionMenu label={`${pool.name} actions`} triggerLabel={`${pool.name} actions`}>
-          {(close) => (
-            <MenuItem
-              icon={pool.archived ? 'undo' : 'trash'}
-              tone={pool.archived ? 'default' : 'danger'}
-              onSelect={() => {
-                close();
-                void (async () => {
-                  if (!pool.archived) {
-                    const approved = await confirmAction({
-                      title: `Archive ${pool.name}?`,
-                      consequence:
-                        'Its games and membership remain historical, but it will not be used for future rounds.',
-                      confirmLabel: 'Archive pool',
-                      tone: 'danger',
-                    });
-                    if (!approved) return;
-                  }
-                  if (controller.setPoolArchived(pool.id, !pool.archived))
-                    onAnnounce(
-                      `${pool.name} ${pool.archived ? 'reopened' : 'archived'}; history was retained.`,
-                    );
-                  else onAnnounce(errorNotice(`${pool.name} was not changed; review the Director error.`));
-                })();
-              }}
-            >
-              {pool.archived ? 'Reopen pool' : 'Archive pool…'}
-            </MenuItem>
-          )}
-        </ActionMenu>
-        <Button variant="primary" disabled={!editable} onClick={save}>
-          Save pool
-        </Button>
-      </div>
+          <Button variant="primary" type="submit" disabled={!editable || !form.dirty}>
+            Save pool
+          </Button>
+        </FormActions>
+      </form>
     </div>
   );
 }
@@ -1553,7 +1585,7 @@ function formatForPhase(
   return state.formats.find((format) => format.id === phase.formatId);
 }
 
-type PhaseDraft = {
+type PhaseFormValues = {
   name: string;
   kind: PhaseKind;
   carryover: boolean;
@@ -1561,24 +1593,8 @@ type PhaseDraft = {
   qualifiersPerPool: string;
   wildcards: string;
   manualOverrideAllowed: boolean;
-  nameDirty: boolean;
-  kindDirty: boolean;
-  carryoverDirty: boolean;
-  advancementDirty: boolean;
 };
-function phaseConfigurationKey(phase: DirectorState['phases'][number]): string {
-  return [
-    phase.id,
-    phase.name,
-    phase.kind,
-    phase.carryover,
-    phase.advancementRule?.qualifiersPerPool ?? '',
-    phase.advancementRule?.wildcards ?? '',
-    phase.advancementRule?.manualOverrideAllowed ?? '',
-    phase.advancementRule?.tiebreakers.join(',') ?? '',
-  ].join('|');
-}
-function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseDraft {
+function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseFormValues {
   return {
     name: phase.name,
     kind: phase.kind,
@@ -1587,10 +1603,6 @@ function phaseDraftFor(phase: DirectorState['phases'][number]): PhaseDraft {
     qualifiersPerPool: String(phase.advancementRule?.qualifiersPerPool ?? 1),
     wildcards: String(phase.advancementRule?.wildcards ?? 0),
     manualOverrideAllowed: phase.advancementRule?.manualOverrideAllowed ?? false,
-    nameDirty: false,
-    kindDirty: false,
-    carryoverDirty: false,
-    advancementDirty: false,
   };
 }
 

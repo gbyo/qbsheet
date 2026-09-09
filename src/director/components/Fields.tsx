@@ -1,7 +1,9 @@
 import {
+  createContext,
   cloneElement,
   forwardRef,
   isValidElement,
+  useContext,
   useCallback,
   useEffect,
   useId,
@@ -271,6 +273,65 @@ export function SaveState({ state }: { state: 'clean' | 'dirty' | 'saved' | 'sav
   );
 }
 
+export interface DirtyForm {
+  id: string;
+  label: string;
+  dirty: boolean;
+  discard: () => void;
+}
+
+interface DirtyFormContextValue {
+  forms: DirtyForm[];
+  register: (form: DirtyForm) => () => void;
+  update: (id: string, form: Pick<DirtyForm, 'label' | 'dirty' | 'discard'>) => void;
+}
+
+const DirtyFormContext = createContext<DirtyFormContextValue | null>(null);
+
+/**
+ * Keeps page-level forms visible to the application shell even when their page
+ * is about to unmount. The form itself still owns its draft; this registry only
+ * gives navigation one honest place to ask whether discarding needs consent.
+ */
+export function DirtyFormProvider({ children }: { children: ReactNode }) {
+  const [forms, setForms] = useState<DirtyForm[]>([]);
+  const register = useCallback((form: DirtyForm) => {
+    setForms((current) => [...current.filter((entry) => entry.id !== form.id), form]);
+    return () => {
+      setForms((current) => current.filter((entry) => entry !== form));
+    };
+  }, []);
+  const update = useCallback((id: string, next: Pick<DirtyForm, 'label' | 'dirty' | 'discard'>) => {
+    setForms((current) => {
+      const entry = current.find((candidate) => candidate.id === id);
+      if (!entry || (entry.label === next.label && entry.dirty === next.dirty)) return current;
+      return current.map((candidate) => (candidate.id === id ? { ...candidate, ...next } : candidate));
+    });
+  }, []);
+  const dirty = forms.some((form) => form.dirty);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !dirty) return undefined;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Browsers intentionally ignore custom text, but still require a truthy
+      // returnValue to show their native leave-page warning.
+      event.returnValue = '';
+      return '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  const value = useMemo(() => ({ forms, register, update }), [forms, register, update]);
+  return <DirtyFormContext.Provider value={value}>{children}</DirtyFormContext.Provider>;
+}
+
+/** Forms currently mounted in the Director workflow. */
+export function useDirtyForms(): DirtyForm[] {
+  return useContext(DirtyFormContext)?.forms ?? [];
+}
+
 /** A validation summary above a form's fields. Focusable so errors can be announced. */
 export function FormErrors({ errors, title }: { errors: string[]; title?: string }) {
   if (!errors.length) return null;
@@ -297,10 +358,15 @@ export function useFormState<T extends object>({
   initial,
   validate,
   onSubmit,
+  formId,
+  formLabel = 'form',
 }: {
   initial: T;
   validate?: (draft: T) => Partial<Record<keyof T, string>> & { _form?: string[] };
   onSubmit: (draft: T) => boolean | void;
+  /** Register page-level forms that must be confirmed before navigation. */
+  formId?: string;
+  formLabel?: string;
 }) {
   const [draft, setDraft] = useState<T>(initial);
   const [touched, setTouched] = useState(false);
@@ -310,6 +376,8 @@ export function useFormState<T extends object>({
   // comparison of two rendered values.
   const [committed, setCommitted] = useState<T>(initial);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialKey = useMemo(() => JSON.stringify(initial), [initial]);
+  const previousInitialKey = useRef(initialKey);
 
   useEffect(
     () => () => {
@@ -319,6 +387,21 @@ export function useFormState<T extends object>({
   );
 
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(committed), [draft, committed]);
+
+  useEffect(() => {
+    if (initialKey === previousInitialKey.current) return;
+    previousInitialKey.current = initialKey;
+    // Controller updates are allowed to rebase a clean form. A dirty draft is
+    // deliberately left alone so external state cannot overwrite operator work.
+    if (JSON.stringify(draft) === JSON.stringify(committed)) {
+      // This is the one intentional state synchronization effect: `initial` is
+      // controller-owned committed state arriving from outside the form.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setCommitted(initial);
+      setDraft(initial);
+      setSaved(false);
+    }
+  }, [committed, draft, initial, initialKey]);
 
   const set = useCallback(<K extends keyof T>(key: K, value: T[K]) => {
     setSaved(false);
@@ -352,6 +435,19 @@ export function useFormState<T extends object>({
     savedTimer.current = setTimeout(() => setSaved(false), 2400);
     return true;
   }, [draft, onSubmit, validate]);
+
+  const dirtyForms = useContext(DirtyFormContext);
+  const registerDirtyForm = dirtyForms?.register;
+  const updateDirtyForm = dirtyForms?.update;
+  useEffect(() => {
+    if (!registerDirtyForm || !formId) return undefined;
+    const unregister = registerDirtyForm({ id: formId, label: formLabel, dirty, discard: () => reset() });
+    return unregister;
+  }, [dirty, formId, formLabel, registerDirtyForm, reset]);
+  useEffect(() => {
+    if (!updateDirtyForm || !formId) return;
+    updateDirtyForm(formId, { label: formLabel, dirty, discard: () => reset() });
+  }, [dirty, formId, formLabel, reset, updateDirtyForm]);
 
   const formErrors = errors._form ?? [];
   return {

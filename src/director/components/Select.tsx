@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { Icon } from './Icon';
 import { IconButton } from './Controls';
+import { normalizeSearchText } from './search';
 
 /**
  * Director's single-choice controls.
@@ -260,10 +261,10 @@ export function Select<T extends string = string>({
       const state = typeahead.current;
       state.buffer = now - state.at > 800 ? event.key : state.buffer + event.key;
       state.at = now;
-      const needle = state.buffer.toLocaleLowerCase();
+      const needle = normalizeSearchText(state.buffer);
       const match =
-        enabled.find((option) => option.label.toLocaleLowerCase().startsWith(needle)) ??
-        enabled.find((option) => option.label.toLocaleLowerCase().includes(needle));
+        enabled.find((option) => normalizeSearchText(option.label).startsWith(needle)) ??
+        enabled.find((option) => normalizeSearchText(option.label).includes(needle));
       if (match) {
         event.preventDefault();
         setActiveValue(match.value);
@@ -390,13 +391,13 @@ export function Combobox<T extends string = string>({
   const placement = usePlacement(open, wrapRef);
 
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = normalizeSearchText(query.trim());
     if (!needle) return options;
     return options.filter(
       (option) =>
-        option.label.toLocaleLowerCase().includes(needle) ||
-        option.value.toLocaleLowerCase().includes(needle) ||
-        (option.detail ?? '').toLocaleLowerCase().includes(needle),
+        normalizeSearchText(option.label).includes(needle) ||
+        normalizeSearchText(option.value).includes(needle) ||
+        normalizeSearchText(option.detail ?? '').includes(needle),
     );
   }, [options, query]);
   const enabled = useMemo(() => filtered.filter((option) => !option.disabled), [filtered]);
@@ -430,7 +431,7 @@ export function Combobox<T extends string = string>({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && open) {
       event.preventDefault();
       event.stopPropagation();
       close();
