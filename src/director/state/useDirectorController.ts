@@ -27,6 +27,7 @@ import {
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
   type TimelineEventType,
@@ -255,7 +256,8 @@ export interface MoveReleasedGameResult {
 
 export interface CommitAdvancementAssignment {
   teamId: DirectorId;
-  targetPoolId: DirectorId;
+  /** Required for a pooled target; omitted for a non-pool target phase. */
+  targetPoolId?: DirectorId;
 }
 
 export interface CommitAdvancementInput {
@@ -1904,6 +1906,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      const bracketDependency = unresolvedBracketDependencyForTeam(snapshot, teamId);
+      if (bracketDependency) {
+        setError(
+          `${bracketDependency.reason} Record a forfeit or administrative withdrawal resolution ` +
+            'for that bracket position before dropping the team.',
+        );
+        return false;
+      }
       const openRound = snapshot.rounds.find(
         (round) =>
           round.status !== 'closed' &&
@@ -3010,7 +3020,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
     (
       phaseId: DirectorId,
       changes: Partial<
-        Pick<NonNullable<DirectorState['phases'][number]>, 'name' | 'kind' | 'carryover' | 'advancementRule'>
+        Pick<
+          NonNullable<DirectorState['phases'][number]>,
+          'name' | 'kind' | 'carryover' | 'advancementRule' | 'teamIds'
+        >
       >,
     ): boolean => {
       const snapshot = stateRef.current;
@@ -3031,6 +3044,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A phase type is locked after a round has been generated.');
         return false;
       }
+      if (changes.teamIds !== undefined) {
+        if (phase.roundIds.length > 0) {
+          setError('The phase competitive field is locked after a round has been generated.');
+          return false;
+        }
+        if (phase.poolIds.length > 0) {
+          setError('Pool membership is the competitive field for this phase; edit its pools instead.');
+          return false;
+        }
+        if (new Set(changes.teamIds).size !== changes.teamIds.length) {
+          setError('A phase competitive field cannot contain the same team twice.');
+          return false;
+        }
+        if (changes.teamIds.some((teamId) => !snapshot.teams.some((team) => team.id === teamId))) {
+          setError('A phase competitive field can only contain teams in the tournament.');
+          return false;
+        }
+      }
       const advancementError = validateAdvancementRule(changes.advancementRule);
       if (advancementError) {
         setError(advancementError);
@@ -3042,6 +3073,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (changes.name !== undefined) target.name = changes.name.trim();
         if (changes.kind !== undefined) target.kind = changes.kind;
         if (changes.carryover !== undefined) target.carryover = changes.carryover;
+        if (changes.teamIds !== undefined) target.teamIds = [...changes.teamIds];
         if (changes.advancementRule !== undefined) {
           target.advancementRule = changes.advancementRule
             ? { ...changes.advancementRule, tiebreakers: [...changes.advancementRule.tiebreakers] }
@@ -3133,10 +3165,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return fail('Assign at least one team before committing advancement.');
       }
       const targetPoolIds = new Set(target.poolIds);
+      const targetIsPooled = target.poolIds.length > 0;
       const seenTeams = new Set<DirectorId>();
       for (const assignment of input.assignments) {
-        if (!targetPoolIds.has(assignment.targetPoolId)) {
+        if (targetIsPooled && (!assignment.targetPoolId || !targetPoolIds.has(assignment.targetPoolId))) {
           return fail('Every assigned team needs a playoff pool in the target stage.');
+        }
+        if (!targetIsPooled && assignment.targetPoolId !== undefined) {
+          return fail('A non-pool target stage does not accept pool assignments.');
         }
         if (seenTeams.has(assignment.teamId)) {
           return fail('Each team can only be placed in one playoff pool.');
@@ -3175,6 +3211,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!draftTarget) return;
         const byPool = new Map<DirectorId, DirectorId[]>();
         for (const assignment of input.assignments) {
+          if (!assignment.targetPoolId) continue;
           const list = byPool.get(assignment.targetPoolId) ?? [];
           list.push(assignment.teamId);
           byPool.set(assignment.targetPoolId, list);
@@ -3182,6 +3219,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         for (const [poolId, teamIds] of byPool) {
           const pool = draft.pools.find((entry) => entry.id === poolId);
           if (pool) pool.teamIds = teamIds;
+        }
+        if (target.poolIds.length === 0) {
+          draftTarget.teamIds = input.assignments.map((assignment) => assignment.teamId);
+        } else {
+          draftTarget.teamIds = undefined;
         }
         draft.audit.push({
           id: newDirectorId('audit'),
