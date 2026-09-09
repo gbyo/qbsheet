@@ -40,10 +40,7 @@ export function unresolvedReleasedRoundBlocker(state: DirectorState, roundId: Di
  * Advancement is a canonical phase transition, not a live standings preview. The source phase is
  * marked complete by the ordinary round-close path only after its competitive work is resolved.
  */
-export function advancementCommitBlocker(
-  state: DirectorState,
-  sourcePhaseId: DirectorId,
-): string | null {
+export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: DirectorId): string | null {
   const source = state.phases.find((phase) => phase.id === sourcePhaseId);
   if (!source) return null; // Let the base controller report its source/target validation error.
   if (source.status === 'complete') return null;
@@ -56,9 +53,10 @@ export function advancementCommitBlocker(
       game.status !== 'cancelled'
     );
   }).length;
-  const suffix = unresolvedGames > 0
-    ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
-    : '';
+  const suffix =
+    unresolvedGames > 0
+      ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
+      : '';
   return `Finish ${source.name} before committing advancement.${suffix}`;
 }
 
