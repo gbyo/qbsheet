@@ -1,6 +1,8 @@
 import { IGameSetup } from '../scoring/deriveGame';
 import { ProcedureAllowance, ScoreEvent } from '../scoring/ScoreEvents';
 import { procedureAllowances } from '../scoring/ProcedureExceptions';
+import { IGameDefinition } from '../game/GameDefinition';
+import { IGamePackage } from '../game/GamePackage';
 import type { IGameSessionHistory } from './GameSession';
 
 export const scorerRecoveryKey = '_yf_scorekeeper_recovery';
@@ -13,8 +15,40 @@ export interface IScorerRecoveryPayload {
   version: number;
   setup: IGameSetup;
   events: ScoreEvent[];
+  /** Stable, credential-free assignment identity. Absent only in legacy or manual files. */
+  identity?: IScorerRecoveryIdentity;
   /** Optional auxiliary action history. The event list remains authoritative. */
   history?: IGameSessionHistory;
+}
+
+/** The identity needed to prove that a recovery file belongs to the game on screen. */
+export interface IScorerRecoveryIdentity {
+  tournamentId?: string;
+  matchId?: string;
+  roundId?: string;
+  assignmentRevision?: number;
+  leftTeamId?: string;
+  rightTeamId?: string;
+  leftTeamName: string;
+  rightTeamName: string;
+}
+
+export type ScorerRecoveryRejection =
+  | 'invalid'
+  | 'team-mismatch'
+  | 'tournament-id-mismatch'
+  | 'match-id-mismatch'
+  | 'round-id-mismatch'
+  | 'team-id-mismatch';
+
+export type ScorerRecoveryInspection =
+  | { kind: 'compatible'; payload: IScorerRecoveryPayload }
+  | { kind: 'review-required'; payload: IScorerRecoveryPayload; reason: 'missing-stable-identity' }
+  | { kind: 'rejected'; reason: ScorerRecoveryRejection };
+
+export interface ReadScorerRecoveryOptions {
+  /** Trusted authenticated session recovery may retain the pre-identity fallback. */
+  allowLegacy?: boolean;
 }
 
 // Keep historical tossup reading markers parseable; they are not live scoring controls anymore.
@@ -231,50 +265,178 @@ function cloneRecoveryHistory(
   return readRecoveryHistory(history, events);
 }
 
+const recoverySecretKeys = new Set([
+  'accesstoken',
+  'token',
+  'sessiontoken',
+  'sessionid',
+  'sessioncredentials',
+  'roomtoken',
+  'pairingcode',
+  'deviceid',
+  'authorization',
+  'credentials',
+  'secret',
+]);
+
+function stripRecoverySecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((entry) => stripRecoverySecrets(entry));
+  if (typeof value !== 'object' || value === null) return value;
+  const output: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (recoverySecretKeys.has(key.replace(/[-_\s]/g, '').toLowerCase())) continue;
+    output[key] = stripRecoverySecrets(entry);
+  }
+  return output;
+}
+
+function identityText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 500 ? value : undefined;
+}
+
+function readRecoveryIdentity(value: unknown): IScorerRecoveryIdentity | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null) return null;
+  const identity = value as Partial<IScorerRecoveryIdentity>;
+  const leftTeamName = identityText(identity.leftTeamName);
+  const rightTeamName = identityText(identity.rightTeamName);
+  if (!leftTeamName || !rightTeamName) return null;
+  const result: IScorerRecoveryIdentity = { leftTeamName, rightTeamName };
+  for (const field of ['tournamentId', 'matchId', 'roundId', 'leftTeamId', 'rightTeamId'] as const) {
+    const next = identityText(identity[field]);
+    if (identity[field] !== undefined && next === undefined) return null;
+    if (next !== undefined) result[field] = next;
+  }
+  if (
+    identity.assignmentRevision !== undefined &&
+    (!Number.isInteger(identity.assignmentRevision) || Number(identity.assignmentRevision) < 1)
+  )
+    return null;
+  if (identity.assignmentRevision !== undefined) result.assignmentRevision = identity.assignmentRevision;
+  return result;
+}
+
+/** Build the recovery identity from the assignment fields already carried by the scorer. */
+export function scorerRecoveryIdentity(
+  gamePackage: IGamePackage | IGameDefinition | undefined,
+  setup: IGameSetup,
+): IScorerRecoveryIdentity {
+  const definition = gamePackage as (IGameDefinition & Partial<IGamePackage>) | undefined;
+  const qbjIdentity = definition?.qbjIdentity;
+  return {
+    leftTeamName: setup.left.name,
+    rightTeamName: setup.right.name,
+    ...((qbjIdentity?.tournamentId ?? definition?.tournament.key)
+      ? { tournamentId: qbjIdentity?.tournamentId ?? definition?.tournament.key }
+      : {}),
+    ...((qbjIdentity?.matchId ?? definition?.scheduledMatchId)
+      ? { matchId: qbjIdentity?.matchId ?? definition?.scheduledMatchId }
+      : {}),
+    ...(qbjIdentity?.roundId ? { roundId: qbjIdentity.roundId } : {}),
+    ...(definition?.round.assignmentRevision !== undefined
+      ? { assignmentRevision: definition.round.assignmentRevision }
+      : {}),
+    ...(qbjIdentity?.teamIds?.left ? { leftTeamId: qbjIdentity.teamIds.left } : {}),
+    ...(qbjIdentity?.teamIds?.right ? { rightTeamId: qbjIdentity.teamIds.right } : {}),
+  };
+}
+
 /** Add an exact, credential-free recovery layer to an otherwise ordinary QBJ match. */
 export function attachScorerRecovery(
   qbj: object,
   setup: IGameSetup,
   events: ScoreEvent[],
   history?: IGameSessionHistory,
+  identity?: IScorerRecoveryIdentity,
 ): object {
-  const recoveryHistory = cloneRecoveryHistory(history, events);
+  const safeSetup = stripRecoverySecrets(setup) as IGameSetup;
+  const safeEvents = stripRecoverySecrets(events) as ScoreEvent[];
+  const recoveryHistory = cloneRecoveryHistory(history, safeEvents);
+  const recoveryIdentity = readRecoveryIdentity(identity);
   return {
-    ...qbj,
+    ...(stripRecoverySecrets(qbj) as object),
     [scorerRecoveryKey]: {
       version: scorerRecoveryVersion,
-      setup,
-      events,
+      setup: safeSetup,
+      events: safeEvents,
+      ...(recoveryIdentity ? { identity: recoveryIdentity } : {}),
       ...(recoveryHistory ? { history: recoveryHistory } : {}),
     },
   };
 }
 
-/** Read only backups created by this scorer, and only when they belong to the game on screen. */
-export function readScorerRecovery(
+function expectedIdentity(value: IScorerRecoveryIdentity | IGameSetup): IScorerRecoveryIdentity {
+  if ('leftTeamName' in value) return value;
+  return {
+    leftTeamName: value.left.name,
+    rightTeamName: value.right.name,
+  };
+}
+
+/** Inspect a recovery file without silently upgrading an unprovable legacy match to safe status. */
+export function inspectScorerRecovery(
   value: unknown,
-  expected: { left: { name: string }; right: { name: string } },
-): IScorerRecoveryPayload | null {
-  if (typeof value !== 'object' || value === null) return null;
+  expectedValue: IScorerRecoveryIdentity | IGameSetup,
+): ScorerRecoveryInspection {
+  const expected = expectedIdentity(expectedValue);
+  if (typeof value !== 'object' || value === null) return { kind: 'rejected', reason: 'invalid' };
   const payload = (value as Record<string, unknown>)[scorerRecoveryKey] as
     Partial<IScorerRecoveryPayload> | undefined;
-  if (!payload) return null;
+  if (!payload) return { kind: 'rejected', reason: 'invalid' };
   const version = payload.version;
   if (
     (version !== scorerRecoveryVersion && version !== legacyScorerRecoveryVersion) ||
     !Array.isArray(payload.events)
   )
-    return null;
-  if (!payload.events.every(validEvent)) return null;
-  if (!validSetup(payload.setup)) return null;
-  if (payload.setup.left.name !== expected.left.name || payload.setup.right.name !== expected.right.name)
-    return null;
+    return { kind: 'rejected', reason: 'invalid' };
+  if (!payload.events.every(validEvent) || !validSetup(payload.setup))
+    return { kind: 'rejected', reason: 'invalid' };
+  const identity = readRecoveryIdentity(payload.identity);
+  if (identity === null) return { kind: 'rejected', reason: 'invalid' };
+  if (
+    payload.setup.left.name !== expected.leftTeamName ||
+    payload.setup.right.name !== expected.rightTeamName
+  )
+    return { kind: 'rejected', reason: 'team-mismatch' };
+
+  if (identity) {
+    if (expected.tournamentId && identity.tournamentId && expected.tournamentId !== identity.tournamentId)
+      return { kind: 'rejected', reason: 'tournament-id-mismatch' };
+    if (expected.matchId && identity.matchId && expected.matchId !== identity.matchId)
+      return { kind: 'rejected', reason: 'match-id-mismatch' };
+    if (expected.roundId && identity.roundId && expected.roundId !== identity.roundId)
+      return { kind: 'rejected', reason: 'round-id-mismatch' };
+    if (expected.leftTeamId && identity.leftTeamId && expected.leftTeamId !== identity.leftTeamId)
+      return { kind: 'rejected', reason: 'team-id-mismatch' };
+    if (expected.rightTeamId && identity.rightTeamId && expected.rightTeamId !== identity.rightTeamId)
+      return { kind: 'rejected', reason: 'team-id-mismatch' };
+  }
+
   const history =
     version === scorerRecoveryVersion ? readRecoveryHistory(payload.history, payload.events) : undefined;
-  return {
+  const recovered: IScorerRecoveryPayload = {
     version,
     setup: payload.setup,
     events: payload.events,
+    ...(identity ? { identity } : {}),
     ...(history ? { history } : {}),
   };
+
+  // A scheduled match id is the proof that separates a rematch from the first meeting.
+  if (!identity || !expected.matchId || !identity.matchId) {
+    return { kind: 'review-required', payload: recovered, reason: 'missing-stable-identity' };
+  }
+  return { kind: 'compatible', payload: recovered };
+}
+
+/** Read only backups created by this scorer, and only when they belong to the game on screen. */
+export function readScorerRecovery(
+  value: unknown,
+  expected: IScorerRecoveryIdentity | IGameSetup,
+  options: ReadScorerRecoveryOptions = {},
+): IScorerRecoveryPayload | null {
+  const inspected = inspectScorerRecovery(value, expected);
+  if (inspected.kind === 'compatible') return inspected.payload;
+  if (inspected.kind === 'review-required' && options.allowLegacy) return inspected.payload;
+  return null;
 }
