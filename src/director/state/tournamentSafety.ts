@@ -111,7 +111,6 @@ export function advancementCorrectionBlocker(state: DirectorState, gameId: Direc
   const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
   const source = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
   if (!source) return null;
-
   const advancement = [...state.audit].reverse().find((entry) => {
     if (entry.type !== 'advancement-committed' || !entry.details || typeof entry.details !== 'object') {
       return false;
@@ -126,6 +125,26 @@ export function advancementCorrectionBlocker(state: DirectorState, gameId: Direc
     `${source.name} already has committed advancement${target ? ` into ${target.name}` : ''}. ` +
     'Restore the recovery point from before advancement, correct this result, then recommit advancement before downstream play.'
   );
+}
+
+/**
+ * Assignments serialize a rules snapshot. Once an unresolved round is prepared or released, a
+ * tournament-wide rules edit would make Director disagree with files/devices that may already have
+ * that assignment. Freeze the rules until that round is resolved; future rounds can then adopt the
+ * new rules before they are prepared.
+ */
+export function assignmentRuleChangeBlocker(state: DirectorState): string | null {
+  const blockingRound = state.rounds.find(
+    (round) =>
+      (round.status === 'prepared' || round.status === 'released') &&
+      state.scheduledGames.some(
+        (game) =>
+          game.roundId === round.id && !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
+      ),
+  );
+  return blockingRound
+    ? `${blockingRound.name} already has scorer assignments in circulation. Finish or cancel its unresolved games before changing tournament rules.`
+    : null;
 }
 
 export function scheduledGameIdForSubmission(
