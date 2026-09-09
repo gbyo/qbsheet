@@ -7,7 +7,7 @@ import type { DirectorId, DirectorState } from '../domain';
  */
 export function releasedRoundResultBlocker(state: DirectorState, scheduledGameId: DirectorId): string | null {
   const scheduled = state.scheduledGames.find((game) => game.id === scheduledGameId);
-  if (!scheduled) return null; // Preserve the base controller's more specific unknown-game error.
+  if (!scheduled) return null;
   const round = state.rounds.find((entry) => entry.id === scheduled.roundId);
   if (!round) return 'That scheduled game is not attached to a tournament round.';
   if (round.status === 'released') return null;
@@ -42,7 +42,7 @@ export function unresolvedReleasedRoundBlocker(state: DirectorState, roundId: Di
  */
 export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: DirectorId): string | null {
   const source = state.phases.find((phase) => phase.id === sourcePhaseId);
-  if (!source) return null; // Let the base controller report its source/target validation error.
+  if (!source) return null;
   if (source.status === 'complete') return null;
   const unresolvedGames = state.scheduledGames.filter((game) => {
     const round = state.rounds.find((entry) => entry.id === game.roundId);
@@ -69,7 +69,39 @@ export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: Di
   return `Finish ${source.name} before committing advancement.${suffix}`;
 }
 
-/** Resolve the scheduled target of a staged submission without changing any review state. */
+/**
+ * The synchronous legacy commit cannot represent an empty target pool. Refuse a call that would
+ * omit an already-populated target pool; the advancement UI uses the checkpoint-backed complete
+ * commit path that explicitly writes every target pool, including empty ones.
+ */
+export function partialAdvancementCommitBlocker(
+  state: DirectorState,
+  targetPhaseId: DirectorId,
+  assignments: readonly { teamId: DirectorId; targetPoolId?: DirectorId }[],
+): string | null {
+  const target = state.phases.find((phase) => phase.id === targetPhaseId);
+  if (!target) return null;
+  const assignedPoolIds = new Set(
+    assignments
+      .map((assignment) => assignment.targetPoolId)
+      .filter((poolId): poolId is DirectorId => poolId !== undefined),
+  );
+  const assignedTeamIds = new Set(assignments.map((assignment) => assignment.teamId));
+  // This path rewrites only the pools named in the commit, so an omitted pool keeps its previous
+  // membership. The corruption that makes dangerous is a team left in a second pool of the same
+  // stage. An omitted pool that holds none of the teams being committed cannot duplicate anyone,
+  // so an incremental override commit stays available.
+  const stalePool = target.poolIds
+    .map((poolId) => state.pools.find((pool) => pool.id === poolId))
+    .find(
+      (pool) =>
+        pool && !assignedPoolIds.has(pool.id) && pool.teamIds.some((teamId) => assignedTeamIds.has(teamId)),
+    );
+  return stalePool
+    ? `Recommitting advancement would leave teams in ${stalePool.name} as well. Use the complete advancement commit path so every target pool is replaced atomically.`
+    : null;
+}
+
 export function scheduledGameIdForSubmission(
   state: DirectorState,
   submissionId: DirectorId,

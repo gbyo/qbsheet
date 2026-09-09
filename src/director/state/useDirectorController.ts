@@ -6,6 +6,7 @@ import {
 } from './useDirectorControllerBase';
 import {
   advancementCommitBlocker,
+  partialAdvancementCommitBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
   unresolvedReleasedRoundBlocker,
@@ -13,13 +14,7 @@ import {
 
 export * from './useDirectorControllerBase';
 
-/**
- * Tournament-day safety boundary around the base Director controller.
- *
- * Keep lifecycle invariants here when they must protect several mutation paths at once. The base
- * controller remains the implementation of the mutations; this layer only refuses transitions
- * that would create competitively impossible state.
- */
+/** Tournament-day invariant boundary around the base Director controller. */
 export function useDirectorController(
   repository?: Parameters<typeof useBaseDirectorController>[0],
 ): DirectorController {
@@ -99,10 +94,19 @@ export function useDirectorController(
         return base.startRound(roundId);
       },
       commitAdvancement(input) {
-        const blocker = advancementCommitBlocker(base.state, input.sourcePhaseId);
-        if (blocker) {
-          raise(blocker);
-          return { committed: false, message: blocker, assigned: 0, overridden: [] };
+        const readinessBlocker = advancementCommitBlocker(base.state, input.sourcePhaseId);
+        if (readinessBlocker) {
+          raise(readinessBlocker);
+          return { committed: false, message: readinessBlocker, assigned: 0, overridden: [] };
+        }
+        const partialBlocker = partialAdvancementCommitBlocker(
+          base.state,
+          input.targetPhaseId,
+          input.assignments,
+        );
+        if (partialBlocker) {
+          raise(partialBlocker);
+          return { committed: false, message: partialBlocker, assigned: 0, overridden: [] };
         }
         allow();
         return base.commitAdvancement(input);
