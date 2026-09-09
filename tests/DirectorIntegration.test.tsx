@@ -10,6 +10,7 @@ import {
   generateDirectorRound,
   generateRoundRobinRound,
   orderDayItems,
+  phaseCanComplete,
   packetUseConflicts,
   previewAdvancement,
   recommendTournamentPlan,
@@ -1041,6 +1042,116 @@ describe('Director integration hardening', () => {
     });
   });
 
+  test('Finish and recovery Close share blockers for unresolved scheduled work', async () => {
+    for (const status of ['released', 'live', 'submitted'] as const) {
+      const { hook } = await directorWithSetup();
+      act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+      const round = hook.result.current.state.rounds[0]!;
+      await act(async () => {
+        expect((await hook.result.current.startRound(round.id)).ok).toBe(true);
+      });
+      await waitForDurable(hook);
+
+      if (status !== 'released') {
+        const imported = structuredClone(hook.result.current.state);
+        const scheduled = imported.scheduledGames.find((game) => game.roundId === round.id && !game.bye)!;
+        scheduled.status = status;
+        if (status === 'submitted') {
+          const gameId = 'pending-round-close-game';
+          imported.games.push({
+            id: gameId,
+            scheduledGameId: scheduled.id,
+            roundId: round.id,
+            packetId: scheduled.packetId,
+            status: 'submitted',
+            scores: [score(scheduled.leftTeamId, 20), score(scheduled.rightTeamId!, 10)],
+            playerStats: [],
+            source: 'qbtcp',
+            detailedStats: 'unknown',
+          });
+          imported.submissions.push({
+            id: 'pending-round-close-submission',
+            gameId,
+            receivedAt: '2026-09-09T12:00:00.000Z',
+            fingerprint: 'pending-round-close',
+            status: 'review',
+            rawSubmission: { source: 'qbtcp' },
+          });
+        }
+        act(() => expect(hook.result.current.importSnapshot(imported)).toBe(true));
+      }
+
+      let finished: ReturnType<typeof hook.result.current.finishRound> | undefined;
+      let closed = true;
+      act(() => {
+        finished = hook.result.current.finishRound(round.id);
+        closed = hook.result.current.closeRound(round.id);
+      });
+      expect(finished?.finished).toBe(false);
+      expect(finished?.reason).toMatch(/resolve every competitive game|awaiting review/i);
+      expect(closed).toBe(false);
+      expect(hook.result.current.state.rounds.find((entry) => entry.id === round.id)?.status).toBe(
+        'released',
+      );
+      hook.unmount();
+    }
+  });
+
+  test('a round closes when games are accepted, cancelled, or byes, but not with resumable QBTCP work', async () => {
+    const { hook } = await directorWithSetup(3);
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    const round = hook.result.current.state.rounds[0]!;
+    await act(async () => {
+      expect((await hook.result.current.startRound(round.id)).ok).toBe(true);
+    });
+    const game = hook.result.current.state.scheduledGames.find((entry) => !entry.bye)!;
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: game.id,
+          scores: [score(game.leftTeamId, 100), score(game.rightTeamId!, 50)],
+        }),
+      ).toBe(true);
+    });
+    await waitForDurable(hook);
+    const withSession = structuredClone(hook.result.current.state);
+    withSession.qbtcpSessions.push({
+      roomId: game.roomId!,
+      sessionId: 'round-close-session',
+      matchId: game.id,
+      deviceId: 'device-1',
+      state: 'abandoned',
+      resumable: true,
+      resultReceived: false,
+      lastSeenAt: '2026-09-09T12:00:00.000Z',
+      progress: null,
+      helpRequestId: null,
+    });
+    act(() => expect(hook.result.current.importSnapshot(withSession)).toBe(true));
+    await waitForDurable(hook);
+    expect(hook.result.current.closeRound(round.id)).toBe(false);
+    expect(hook.result.current.state.rounds.find((entry) => entry.id === round.id)?.status).toBe('released');
+
+    const settled = structuredClone(hook.result.current.state);
+    const settledSession = settled.qbtcpSessions[0]!;
+    settledSession.resumable = false;
+    settledSession.state = 'abandoned';
+    act(() => expect(hook.result.current.importSnapshot(settled)).toBe(true));
+    act(() => expect(hook.result.current.closeRound(round.id)).toBe(true));
+    await waitFor(() =>
+      expect(hook.result.current.state.rounds.find((entry) => entry.id === round.id)?.status).toBe('closed'),
+    );
+  });
+
+  test('phase completion ignores a falsely closed round with unresolved work', async () => {
+    const { hook } = await directorWithSetup();
+    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    const imported = structuredClone(hook.result.current.state);
+    const round = imported.rounds[0]!;
+    round.status = 'closed';
+    expect(phaseCanComplete(imported, round.phaseId)).toBe(false);
+  });
+
   test('round orchestration: assigned rooms are enforced, delivered count is honest', async () => {
     const { hook } = await directorWithSetup(4);
     act(() => {
@@ -1991,6 +2102,13 @@ describe('Director integration hardening', () => {
       'cancelled',
     );
 
+    expect(hook.result.current.closeRound(round.id)).toBe(false);
+    const repaired = structuredClone(hook.result.current.state);
+    repaired.games.find((game) => game.id === 'late-cancellation-game')!.status = 'rejected';
+    repaired.submissions.find((submission) => submission.id === 'late-cancellation-submission')!.status =
+      'rejected';
+    await waitForDurable(hook);
+    act(() => expect(hook.result.current.importSnapshot(repaired)).toBe(true));
     act(() => {
       expect(hook.result.current.prepareRound(round.id)).toBe(true);
       expect(hook.result.current.releaseRound(round.id)).toBe(true);

@@ -14,6 +14,7 @@ import { canonicalSection, groupForSection, labelForSection, type SectionId } fr
 import {
   useDirectorController,
   type DocumentTransitionCheck,
+  type DirectorDocumentTransition,
   type NewTournamentInput,
 } from '../state/useDirectorController';
 import { OverviewView } from '../overview/OverviewView';
@@ -100,7 +101,7 @@ function DirectorAppContent() {
     (input: AnnounceInput) => setAnnouncement(toDirectorNotice(input)),
     [setAnnouncement],
   );
-  const transfers = useTransfers(state, controller, announce, !loading && !controller.recovering);
+  const transfers = useTransfers(state, controller, announce, !loading && !controller.documentTransition);
   // The one shared native QBTCP snapshot: Overview preflight, Rooms, and the
   // top-bar now-strip all read this same state, and Rooms writes through to it.
   const nativeServer = useNativeServerStatus({
@@ -180,12 +181,8 @@ function DirectorAppContent() {
     saveOperatorProfile(profile);
   }, []);
 
-  if (controller.recovering)
-    return (
-      <div className="director-loading" role="status">
-        Saving tournament recovery…
-      </div>
-    );
+  if (controller.documentTransition)
+    return <DocumentTransitionLoading transition={controller.documentTransition} />;
   if (loading) return <div className="director-loading">Opening local tournament storage…</div>;
   if (!state.tournament)
     return (
@@ -510,6 +507,20 @@ function DirectorAppContent() {
         />
       )}
     </>
+  );
+}
+
+export function DocumentTransitionLoading({ transition }: { transition: DirectorDocumentTransition }) {
+  const message =
+    transition.kind === 'switching'
+      ? 'Opening tournament…'
+      : transition.kind === 'restoring-checkpoint'
+        ? 'Restoring recovery point…'
+        : 'Applying recovery edit…';
+  return (
+    <div className="director-loading" role="status">
+      {message}
+    </div>
   );
 }
 
