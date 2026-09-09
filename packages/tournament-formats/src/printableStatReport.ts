@@ -1,5 +1,6 @@
 import { buildPrintableStatReportBundle as buildBoxScoreStatReportBundle } from './boxScoreReport.js';
 import { renderPlayerDetailReport } from './playerDetailReport.js';
+import { renderRoundReport } from './roundReport.js';
 import type { StatReportPage, StatsSnapshot } from './stats.js';
 import { renderTeamDetailReport } from './teamDetailReport.js';
 
@@ -15,6 +16,9 @@ export function buildExtendedStatReportBundle(snapshot: StatsSnapshot): StatRepo
     }
     if (page.name === 'teamdetail.html') {
       return { name: page.name, content: renderTeamDetailReport(snapshot) };
+    }
+    if (page.name === 'rounds.html') {
+      return { name: page.name, content: renderRoundReport(snapshot) };
     }
     return page;
   });
