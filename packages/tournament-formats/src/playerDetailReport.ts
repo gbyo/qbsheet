@@ -108,7 +108,9 @@ function playerSection(
 /** Player Detail is driven by actual player-game rows, never the team's schedule. */
 export function renderPlayerDetailReport(snapshot: StatsSnapshot): string {
   const showSuperpowers = snapshot.players.some((player) => player.superpowers > 0);
-  const phases = new Set(snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)));
+  const phases = new Set(
+    snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)),
+  );
   const showStage = phases.size > 1;
   const sections = snapshot.players
     .map((row) => playerSection(snapshot, row, showSuperpowers, showStage))

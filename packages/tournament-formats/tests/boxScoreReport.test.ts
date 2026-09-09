@@ -116,7 +116,9 @@ const playerRows: StatsSnapshot['players'] = [
   },
 ];
 
-function detailedTeam(overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsRow, 'teamId' | 'teamName' | 'points'>): GameTeamStatsRow {
+function detailedTeam(
+  overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsRow, 'teamId' | 'teamName' | 'points'>,
+): GameTeamStatsRow {
   return {
     superpowers: 0,
     powers: 0,
@@ -131,7 +133,10 @@ function detailedTeam(overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsR
   };
 }
 
-function detailedPlayer(overrides: Partial<GamePlayerStatsRow> & Pick<GamePlayerStatsRow, 'playerId' | 'playerName' | 'teamId' | 'teamName'>): GamePlayerStatsRow {
+function detailedPlayer(
+  overrides: Partial<GamePlayerStatsRow> &
+    Pick<GamePlayerStatsRow, 'playerId' | 'playerName' | 'teamId' | 'teamName'>,
+): GamePlayerStatsRow {
   return {
     tossupsHeard: 20,
     superpowers: 0,
@@ -259,7 +264,9 @@ describe('printable game box scores', () => {
   });
 
   test('does not turn roster membership into a player appearance', () => {
-    const games = buildPrintableStatReportBundle(snapshot()).find((page) => page.name === 'games.html')!.content;
+    const games = buildPrintableStatReportBundle(snapshot()).find(
+      (page) => page.name === 'games.html',
+    )!.content;
     expect(games).not.toContain('Bench Player');
   });
 
