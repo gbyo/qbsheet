@@ -2,11 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { buildExtendedStatReportBundle } from '../src/printableStatReport';
 import type { StatsSnapshot } from '../src/stats';
 
-function team(
-  rank: number,
-  teamId: string,
-  teamName: string,
-): StatsSnapshot['teams'][number] {
+function team(rank: number, teamId: string, teamName: string): StatsSnapshot['teams'][number] {
   return {
     rank,
     teamId,
