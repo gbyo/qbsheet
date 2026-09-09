@@ -316,7 +316,7 @@ export interface DirectorController {
   archiveTournament(tournamentId?: DirectorId): Promise<boolean>;
   reopenTournament(tournamentId?: DirectorId): Promise<boolean>;
   setTournamentStatus(status: TournamentStatus): boolean;
-  createTournament(input: NewTournamentInput): void;
+  createTournament(input: NewTournamentInput): boolean;
   updateTournament(
     changes: Partial<
       Pick<
@@ -1271,12 +1271,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const createTournament = useCallback(
-    (input: NewTournamentInput) => {
+    (input: NewTournamentInput): boolean => {
       const now = isoNow();
       const tournamentId = newDirectorId('tournament');
       const formatId = newDirectorId('format');
       const phaseId = newDirectorId('phase');
-      commit((draft) => {
+      return commit((draft) => {
         const fresh = emptyDirectorState();
         Object.assign(draft, fresh);
         draft.tournament = {
