@@ -5,6 +5,8 @@ import {
   latestRound,
   orderDayItems,
   releasedGameRoomMoveBlocker,
+  roundCloseBlockers,
+  roundScheduleIsValid,
   roomIsAssignable,
   timeZoneLabel,
   timelineEventTypeLabel,
@@ -1081,10 +1083,13 @@ function RoundRecoveryDialog({
               variant="secondary"
               onClick={() => {
                 const closed = controller.closeRound(round.id);
+                const blockers = !roundScheduleIsValid(state, round.id)
+                  ? ['This round contains an invalid matchup or round membership and cannot be closed.']
+                  : roundCloseBlockers(state, round.id);
                 onAnnounce(
                   closed
                     ? `${round.name} closed.`
-                    : errorNotice(`${round.name} could not close; resolve every game first.`),
+                    : errorNotice(blockers[0] ?? `${round.name} could not close; resolve every game first.`),
                 );
               }}
             >
