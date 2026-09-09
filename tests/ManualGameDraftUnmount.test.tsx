@@ -65,7 +65,7 @@ describe('manual game draft persistence', () => {
   test('keeps warning on save failure and clears it after a later successful save', () => {
     vi.useFakeTimers();
     const initial = emptyInput();
-    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
       throw new Error('storage unavailable');
     });
     const hook = renderHook(() => useManualGameDraft('qbsheet.test.manual-draft-retry', initial));
