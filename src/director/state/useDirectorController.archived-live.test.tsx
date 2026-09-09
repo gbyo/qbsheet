@@ -10,6 +10,7 @@ const localServerMocks = vi.hoisted(() => ({
   stop: vi.fn(async () => undefined),
   clear: vi.fn(async () => undefined),
   publish: vi.fn(async () => ({ revision: 1, publicUrl: 'http://127.0.0.1:8790' })),
+  status: vi.fn(async () => ({ running: false, address: '127.0.0.1', port: 8790 })),
   origin: vi.fn(() => 'http://127.0.0.1:8790'),
 }));
 
@@ -26,6 +27,7 @@ vi.mock('../live/localServer', () => ({
   stopLocalLiveServer: localServerMocks.stop,
   clearLocalLive: localServerMocks.clear,
   publishLocalLive: localServerMocks.publish,
+  readLocalLiveServerStatus: localServerMocks.status,
   localLiveOrigin: localServerMocks.origin,
 }));
 
@@ -86,6 +88,21 @@ function withPendingLocalLive(state: DirectorState): DirectorState {
   return state;
 }
 
+class FailingOpenRepository extends MemoryDirectorRepository {
+  override async openTournament(_id: string): Promise<DirectorState> {
+    throw new Error('target document is unreadable');
+  }
+}
+
+async function repositoryWithLocalSwitchTarget(repository: FailingOpenRepository, live: boolean) {
+  const current = stateWithStatus('complete');
+  if (live) withLocalLive(current);
+  await repository.save(current);
+  const target = stateWithStatus('complete');
+  target.tournament!.id = 'target-tournament';
+  await repository.saveDocument!(target, false);
+}
+
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -143,6 +160,64 @@ describe('archived tournament Live side-effect guard', () => {
     expect(hook.result.current.state.live?.outbox).toMatchObject([
       { id: 'pending-live-item', state: 'pending' },
     ]);
+    hook.unmount();
+  });
+
+  test('restores a running outgoing Local Live service when a switch fails', async () => {
+    const repository = new FailingOpenRepository();
+    await repositoryWithLocalSwitchTarget(repository, true);
+    localServerMocks.status.mockResolvedValue({ running: true, address: '127.0.0.1', port: 8790 });
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await act(async () =>
+      expect(await hook.result.current.switchTournament('target-tournament')).toBe(false),
+    );
+
+    expect(hook.result.current.state.tournament?.id).not.toBe('target-tournament');
+    expect(localServerMocks.clear).toHaveBeenCalledWith(false);
+    expect(localServerMocks.stop).toHaveBeenCalled();
+    expect(localServerMocks.start.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(localServerMocks.publish).toHaveBeenCalled();
+    expect(hook.result.current.error).toMatch(/selected tournament could not be opened/i);
+    expect(hook.result.current.error).not.toMatch(/rollback failed/i);
+    hook.unmount();
+  });
+
+  test('surfaces a Local Live rollback failure without replacing the outgoing tournament', async () => {
+    const repository = new FailingOpenRepository();
+    await repositoryWithLocalSwitchTarget(repository, true);
+    localServerMocks.status.mockResolvedValue({ running: true, address: '127.0.0.1', port: 8790 });
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    localServerMocks.start.mockRejectedValueOnce(new Error('local port is unavailable'));
+
+    await act(async () =>
+      expect(await hook.result.current.switchTournament('target-tournament')).toBe(false),
+    );
+
+    expect(hook.result.current.state.tournament?.id).not.toBe('target-tournament');
+    expect(String(hook.result.current.error)).toMatch(
+      /Local Live rollback failed.*local port is unavailable/i,
+    );
+    hook.unmount();
+  });
+
+  test('does not touch Local Live when a failed switch has no enabled local publication', async () => {
+    const repository = new FailingOpenRepository();
+    await repositoryWithLocalSwitchTarget(repository, false);
+
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    await act(async () =>
+      expect(await hook.result.current.switchTournament('target-tournament')).toBe(false),
+    );
+
+    expect(localServerMocks.status).not.toHaveBeenCalled();
+    expect(localServerMocks.clear).not.toHaveBeenCalled();
+    expect(localServerMocks.stop).not.toHaveBeenCalled();
+    expect(hook.result.current.state.tournament?.id).not.toBe('target-tournament');
     hook.unmount();
   });
 });

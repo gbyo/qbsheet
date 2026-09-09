@@ -53,6 +53,10 @@ export async function startLocalLiveServer(): Promise<LocalLiveServerStatus> {
   return status;
 }
 
+export async function readLocalLiveServerStatus(): Promise<LocalLiveServerStatus> {
+  return statusFrom(await bridge().invoke('director_live_server_status'));
+}
+
 export async function publishLocalLive(snapshot: QbliveSnapshot): Promise<LocalLiveServerStatus> {
   const status = statusFrom(await bridge().invoke('director_publish_local_live', { snapshot }));
   localLiveOrigin(status);

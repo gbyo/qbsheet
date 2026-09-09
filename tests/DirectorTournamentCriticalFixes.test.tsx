@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  defaultRules,
+  emptyDirectorState,
   formatDistance,
   formatGenerationAvailability,
   roomIsAssignable,
@@ -333,8 +335,125 @@ describe('Director tournament-critical regressions', () => {
     act(() => {
       expect(hook.result.current.releaseRound(secondRound.id)).toBe(false);
     });
-    expect(hook.result.current.error).toMatch(/available|room|released/i);
+    expect(hook.result.current.error).toMatch(/available|room|released|unresolved/i);
     await waitFor(() => expect(hook.result.current.saving).toBe(false));
+    hook.unmount();
+  });
+
+  test('discards a delayed QBTCP snapshot from the old document across New Tournament', async () => {
+    const repository = new MemoryDirectorRepository();
+    const initial = emptyDirectorState();
+    initial.tournament = {
+      id: 'tournament-a',
+      name: 'Tournament A',
+      date: '2026-09-09',
+      venue: 'Test hall',
+      organizer: 'QBSheet',
+      status: 'running',
+      timeZone: 'UTC',
+      rules: structuredClone(defaultRules),
+      formatId: null,
+      currentPhaseId: null,
+      currentPacketId: null,
+      currentRoundId: null,
+      createdAt: '2026-09-09T10:00:00.000Z',
+      updatedAt: '2026-09-09T10:00:00.000Z',
+    };
+    await repository.save(initial);
+
+    let resolveSnapshot!: (value: unknown) => void;
+    const delayedSnapshot = new Promise<unknown>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: { invoke: vi.fn(async () => delayedSnapshot) },
+    });
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+
+    let sync!: Promise<void>;
+    await act(async () => {
+      sync = hook.result.current.syncQbtcp();
+      await Promise.resolve();
+    });
+    act(() => {
+      expect(
+        hook.result.current.createTournament({
+          name: 'Tournament B',
+          date: '2026-09-10',
+          venue: 'New hall',
+          organizer: 'QBSheet',
+        }),
+      ).toBe(true);
+    });
+    await waitFor(() => expect(hook.result.current.state.tournament?.name).toBe('Tournament B'));
+
+    resolveSnapshot({
+      tournamentId: 'tournament-a',
+      results: [
+        {
+          id: 'stale-result',
+          sessionId: 'stale-session',
+          fingerprint: 'stale-fingerprint',
+          reviewRequired: true,
+          warnings: [],
+        },
+      ],
+      progress: [
+        {
+          sessionId: 'stale-session',
+          roomId: 'stale-room',
+          sequence: 7,
+          matchState: { type: 'Match', tossups_read: 7, match_teams: [{ points: 20 }, { points: 10 }] },
+          receivedAt: '2026-09-09T10:05:00.000Z',
+        },
+      ],
+      presence: [
+        {
+          roomId: 'stale-room',
+          roomName: 'Stale room',
+          deviceId: 'stale-device',
+          sessionId: 'stale-session',
+          update: { ready: true },
+          observedAt: '2026-09-09T10:05:00.000Z',
+        },
+      ],
+      sessions: [
+        {
+          sessionId: 'stale-session',
+          roomId: 'stale-room',
+          status: 'open',
+          resumable: true,
+          resultReceived: false,
+          updatedAt: '2026-09-09T10:05:00.000Z',
+        },
+      ],
+      help: [
+        {
+          id: 'stale-help',
+          roomId: 'stale-room',
+          roomName: 'Stale room',
+          category: 'technical',
+          message: 'Stale help request',
+          status: 'open',
+          createdAt: '2026-09-09T10:05:00.000Z',
+          updatedAt: '2026-09-09T10:05:00.000Z',
+          deviceId: 'stale-device',
+        },
+      ],
+      rosterAmendments: [{ sessionId: 'stale-session', amendment: { playerName: 'Stale player' } }],
+    });
+    await act(async () => sync);
+
+    expect(hook.result.current.state.tournament?.name).toBe('Tournament B');
+    expect(hook.result.current.state.qbtcpSessions).toEqual([]);
+    expect(hook.result.current.state.qbtcpHelpRequests).toEqual([]);
+    expect(hook.result.current.state.qbtcpRosterAmendments).toEqual([]);
+    expect(hook.result.current.state.submissions).toEqual([]);
+    expect(hook.result.current.qbtcpHealth).toEqual({ lastSuccessfulAt: null, error: null });
+    expect((await repository.load()).tournament?.name).toBe('Tournament B');
+    expect((await repository.load()).qbtcpSessions).toEqual([]);
     hook.unmount();
   });
 

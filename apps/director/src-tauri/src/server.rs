@@ -241,7 +241,7 @@ impl ServerRuntime {
     }
 
     #[cfg(test)]
-    async fn start_on_port(
+    pub(crate) async fn start_on_port(
         &self,
         document: Option<Value>,
         requested_port: u16,
