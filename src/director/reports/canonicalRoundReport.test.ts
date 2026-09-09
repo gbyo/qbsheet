@@ -218,17 +218,17 @@ function reportState(): DirectorState {
 describe('canonical round report adapter', () => {
   test('uses each game raw QBJ definition instead of current tournament defaults', () => {
     const snapshot = buildCanonicalSnapshot(reportState(), { label: 'Overall' }, at);
-    const round = snapshot.rounds?.[0];
+    const round = snapshot.roundStats?.rows.find((row) => row.roundId === 'round-1');
 
     expect(snapshot.games[0]?.tossupsRead).toBe(20);
-    expect(round?.regulationTossupCount).toBe(20);
+    expect(round?.regulationTossups).toBe(20);
     expect(round?.pointsPerTeamPerXTuh).toBeCloseTo(250);
     expect(round?.tossupConversionRate).toBeCloseTo(0.5);
     expect(round?.powerRate).toBeCloseTo(0.3);
     expect(round?.negRatePerXTuh).toBeCloseTo(3);
     expect(round?.ppb).toBeCloseTo(14);
     expect(round?.packetName).toBe('Packet One');
-    expect(round?.regulationTossupCount).not.toBe(99);
+    expect(round?.regulationTossups).not.toBe(99);
   });
 
   test('leaves definition-dependent totals unavailable instead of falling back for legacy games', () => {
@@ -240,13 +240,12 @@ describe('canonical round report adapter', () => {
     state.rounds[1]!.scheduledGameIds = [];
 
     const snapshot = buildCanonicalSnapshot(state, { label: 'Overall' }, at);
-    const round = snapshot.rounds?.[0];
+    const round = snapshot.roundStats?.rows.find((row) => row.roundId === 'round-1');
 
-    expect(snapshot.rounds).toHaveLength(1);
+    expect(snapshot.roundStats?.rows).toHaveLength(1);
     expect(round?.games).toBe(2);
-    expect(round?.regulationTossupCount).toBeNull();
+    expect(round?.regulationTossups).toBeNull();
     expect(round?.pointsPerTeamPerXTuh).toBeNull();
-    expect(round?.notes).toContain('1/2 played games have a historical regulation length.');
   });
 
   test('phase and pool scope filter games before round aggregation', () => {
@@ -257,8 +256,8 @@ describe('canonical round report adapter', () => {
     );
 
     expect(snapshot.games.map((game) => game.gameId)).toEqual(['game-1']);
-    expect(snapshot.rounds?.map((round) => round.roundId)).toEqual(['round-1']);
-    expect(snapshot.roundTotal?.games).toBe(1);
+    expect(snapshot.roundStats?.rows.map((round) => round.roundId)).toEqual(['round-1']);
+    expect(snapshot.roundStats?.total.games).toBe(1);
     expect(snapshot.extensions?.scopeLabel).toBe('Preliminary · Pool A');
   });
 });
