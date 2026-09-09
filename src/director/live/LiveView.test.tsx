@@ -75,6 +75,37 @@ test('Connect stays tied to the unresolved claim beyond 1.5 seconds and cannot s
   expect(screen.getByRole('button', { name: 'Connect and test' })).toBeEnabled();
 });
 
+test('setup failure never announces that Live setup completed', async () => {
+  const enable = vi.fn(async () => {
+    throw new Error('The Director commit was rejected.');
+  });
+  const onAnnounce = vi.fn();
+  const actions: LiveViewActions = {
+    enable,
+    disable: vi.fn(),
+    updateSettings: vi.fn(),
+    publishAnnouncement: vi.fn(),
+    withdrawAnnouncement: vi.fn(),
+    finalize: vi.fn(),
+    unpublish: vi.fn(),
+    destroy: vi.fn(),
+  };
+  render(<LiveView state={stateWithTournament()} actions={actions} onAnnounce={onAnnounce} />);
+
+  fireEvent.change(screen.getByPlaceholderText('https://…'), {
+    target: { value: 'https://backend.example' },
+  });
+  fireEvent.change(document.querySelector('input[type="password"]')!, {
+    target: { value: 'one-time-token' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Connect and test' }));
+
+  await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Director commit was rejected'));
+  expect(onAnnounce).toHaveBeenCalledTimes(1);
+  expect(onAnnounce).toHaveBeenCalledWith('Connecting to the QBSheet Live backend.');
+  expect(onAnnounce).not.toHaveBeenCalledWith(expect.stringContaining('setup completed'));
+});
+
 test('backend choices are native radios in one group with keyboard support', () => {
   const actions: LiveViewActions = {
     enable: vi.fn(),
