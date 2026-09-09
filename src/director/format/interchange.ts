@@ -27,6 +27,7 @@ import {
   latestRound,
   newDirectorId,
   normalizeTimeZone,
+  roomDefaultEquipmentIds,
   timelineEventTypes,
   type DirectorState,
   type FinalPlacement,
@@ -531,7 +532,11 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       notes: room.notes,
       ...(room.moderatorId ? { moderatorId: room.moderatorId } : {}),
       ...(room.scorekeeperId ? { scorekeeperId: room.scorekeeperId } : {}),
-      ...(room.equipmentId ? { equipmentIds: [room.equipmentId] } : {}),
+      // The interchange format has always allowed several resources per room; Director now keeps
+      // several too, so this stops truncating to the first one.
+      ...(roomDefaultEquipmentIds(room).length > 0
+        ? { equipmentIds: roomDefaultEquipmentIds(room) }
+        : {}),
       available: room.available,
     })),
     staff: state.staff.map((member) => ({
@@ -745,7 +750,10 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     status: room.available === false ? 'offline' : 'available',
     moderatorId: room.moderatorId ?? null,
     scorekeeperId: room.scorekeeperId ?? null,
+    // The legacy single field keeps the first resource so an older Director build still reads
+    // something sensible; the full list is what this build uses.
     equipmentId: room.equipmentIds?.[0] ?? null,
+    defaultEquipmentIds: [...new Set(room.equipmentIds ?? [])],
     available: room.available !== false,
   }));
   state.staff = data.staff.map((member) => ({

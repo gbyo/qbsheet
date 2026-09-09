@@ -2,6 +2,8 @@ export * from './advancement';
 export * from './field';
 export * from './lifecycle';
 export * from './model';
+export * from './operations';
+export * from './operationsPlanner';
 export * from './planning';
 export * from './roster';
 export * from './scheduling';

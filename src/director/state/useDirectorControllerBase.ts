@@ -23,7 +23,10 @@ import {
   advancementBasisToken,
   roundCloseBlockers,
   roomAssignmentConflicts,
+  planRoundOperations,
+  repairScope,
   roomAssignmentIsValid,
+  roomDefaultEquipmentIds,
   roomHasUnresolvedWork,
   qbtcpSessionHasUnresolvedWork,
   resolveDirectorBracket,
@@ -47,6 +50,8 @@ import {
   type DirectorId,
   type DirectorState,
   type AdvancementRule,
+  type OperationalAssignmentKind,
+  type PlanRoundOptions,
   type FormatKind,
   type TournamentPlanRecommendation,
   type DetailedStatsStatus,
@@ -65,6 +70,17 @@ import {
   type TournamentStatus,
 } from '../domain';
 import { advancementCommitBlocker, releasedRoundResultBlocker } from './tournamentSafety';
+import {
+  applyAssignmentChanges,
+  applyAssignmentPin,
+  applyDutyChange,
+  applyRoundPlan,
+  applyRoundPlans,
+  assignmentChangeBlocker,
+  dutyChangeBlocker,
+  type AssignmentChanges,
+  type AssignmentSlot,
+} from './operationsActions';
 import {
   createDirectorRepository,
   normalizeDirectorState,
@@ -460,6 +476,8 @@ export interface DirectorController {
       moderatorId?: DirectorId | null;
       scorekeeperId?: DirectorId | null;
       equipmentId?: DirectorId | null;
+      /** Default equipment for the room. Supersedes the single legacy `equipmentId`. */
+      defaultEquipmentIds?: DirectorId[];
     },
   ): boolean;
   addStaff(input: NewStaffInput): boolean;
@@ -472,6 +490,20 @@ export interface DirectorController {
     equipmentId: DirectorId,
     changes: Partial<Pick<DirectorState['equipment'][number], 'name' | 'kind' | 'available' | 'notes'>>,
   ): boolean;
+  /** Set one game's operational room, staff, or equipment. An explicit choice is pinned. */
+  setGameAssignment(scheduledGameId: DirectorId, changes: AssignmentChanges): boolean;
+  /** Turn one slot's pin on or off without changing what is assigned. */
+  setAssignmentPin(scheduledGameId: DirectorId, slot: AssignmentSlot, pinned: boolean): boolean;
+  /** Replace a round's runner or HQ roster. */
+  setRoundDuty(
+    roundId: DirectorId,
+    kind: Exclude<OperationalAssignmentKind, 'room'>,
+    staffIds: readonly DirectorId[],
+  ): boolean;
+  /** Auto-fill one planned or prepared round's operations. Returns false and sets the error if it cannot. */
+  prepareRoundOperations(roundId: DirectorId, options?: PlanRoundOptions): boolean;
+  /** Re-plan every planned/prepared round from the given one onward, preserving pins. */
+  repairOperations(fromRoundId?: DirectorId, options?: PlanRoundOptions): boolean;
   addPacket(
     name: string,
     source?: 'manual' | 'qbj' | 'imported',
@@ -2825,6 +2857,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           moderatorId: null,
           scorekeeperId: null,
           equipmentId: null,
+          defaultEquipmentIds: [],
           available: true,
         });
         draft.audit.push({
@@ -2848,6 +2881,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         moderatorId?: DirectorId | null;
         scorekeeperId?: DirectorId | null;
         equipmentId?: DirectorId | null;
+        defaultEquipmentIds?: DirectorId[];
       },
     ): boolean => {
       const current = stateRef.current.rooms.find((entry) => entry.id === roomId);
@@ -2878,7 +2912,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
           (changes.directions.trim() || undefined) !== current.directions) ||
         (changes.moderatorId !== undefined && changes.moderatorId !== current.moderatorId) ||
         (changes.scorekeeperId !== undefined && changes.scorekeeperId !== current.scorekeeperId) ||
-        (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId);
+        (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId) ||
+        (changes.defaultEquipmentIds !== undefined &&
+          changes.defaultEquipmentIds.join('\u001f') !==
+            roomDefaultEquipmentIds(current).join('\u001f'));
       if (assignmentVisibleChange) {
         const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'room', id: roomId });
         if (assignmentBlocker) {
@@ -2898,6 +2935,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
         if (changes.directions !== undefined) room.directions = changes.directions.trim() || undefined;
         if (changes.notes !== undefined) room.notes = changes.notes.trim() || undefined;
+        if (changes.defaultEquipmentIds !== undefined) {
+          const unique = [...new Set(changes.defaultEquipmentIds)];
+          room.defaultEquipmentIds = unique;
+          // The single legacy field keeps the first resource so an older build reading this
+          // document still sees a sensible default rather than nothing.
+          room.equipmentId = unique[0] ?? null;
+        }
         // Availability controls future assignment. Do not overwrite a live scorer, open help
         // request, or finished room; only mirror the explicit choice for an otherwise idle room.
         if (changes.available === true && room.status === 'offline') room.status = 'available';
@@ -3076,6 +3120,135 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'room-changed',
           summary: `Updated ${item.name}.`,
           entityId: equipmentId,
+        });
+      });
+    },
+    [commit],
+  );
+
+  /* ---------------------------------------------------------------------- */
+  /* Operational assignments                                                  */
+  /* ---------------------------------------------------------------------- */
+
+  const setGameAssignment = useCallback(
+    (scheduledGameId: DirectorId, changes: AssignmentChanges): boolean => {
+      const blocker = assignmentChangeBlocker(stateRef.current, scheduledGameId, changes);
+      if (blocker) {
+        setError(blocker);
+        return false;
+      }
+      const game = stateRef.current.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      const round = stateRef.current.rounds.find((entry) => entry.id === game?.roundId);
+      return commit((draft) => {
+        applyAssignmentChanges(draft, scheduledGameId, changes);
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-prepared',
+          summary: `Updated the operational assignment for ${round?.name ?? 'a round'}.`,
+          entityId: scheduledGameId,
+          details: { ...changes },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const setAssignmentPin = useCallback(
+    (scheduledGameId: DirectorId, slot: AssignmentSlot, pinned: boolean): boolean => {
+      const game = stateRef.current.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      if (!game) {
+        setError('That scheduled game is no longer in the tournament workspace.');
+        return false;
+      }
+      const round = stateRef.current.rounds.find((entry) => entry.id === game.roundId);
+      if (round?.status === 'closed') {
+        setError('This round is closed; its assignments are historical.');
+        return false;
+      }
+      return commit((draft) => {
+        applyAssignmentPin(draft, scheduledGameId, slot, pinned);
+      });
+    },
+    [commit],
+  );
+
+  const setRoundDuty = useCallback(
+    (
+      roundId: DirectorId,
+      kind: Exclude<OperationalAssignmentKind, 'room'>,
+      staffIds: readonly DirectorId[],
+    ): boolean => {
+      const blocker = dutyChangeBlocker(stateRef.current, roundId, kind, staffIds);
+      if (blocker) {
+        setError(blocker);
+        return false;
+      }
+      const round = stateRef.current.rounds.find((entry) => entry.id === roundId);
+      return commit((draft) => {
+        applyDutyChange(draft, roundId, kind, staffIds);
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-prepared',
+          summary:
+            staffIds.length === 0
+              ? `Cleared ${kind === 'hq' ? 'HQ' : 'runner'} duty for ${round?.name ?? 'a round'}.`
+              : `Set ${staffIds.length} staff on ${kind === 'hq' ? 'HQ' : 'runner'} duty for ${round?.name ?? 'a round'}.`,
+          entityId: roundId,
+        });
+      });
+    },
+    [commit],
+  );
+
+  const prepareRoundOperations = useCallback(
+    (roundId: DirectorId, options: PlanRoundOptions = {}): boolean => {
+      const plan = planRoundOperations(stateRef.current, roundId, options);
+      if (!plan.planned) {
+        setError(plan.reason ?? 'This round cannot be prepared automatically.');
+        return false;
+      }
+      if (plan.changeCount === 0) {
+        // Not an error: a round that is already correct is the normal outcome of running Prepare
+        // twice, and reporting it as a failure would make the button feel broken.
+        return true;
+      }
+      const round = stateRef.current.rounds.find((entry) => entry.id === roundId);
+      return commit((draft) => {
+        const changed = applyRoundPlan(draft, plan);
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-prepared',
+          summary: `Prepared operations for ${round?.name ?? 'a round'}: ${changed} assignment(s) filled.`,
+          entityId: roundId,
+          details: { unresolved: plan.unresolved.length },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const repairOperations = useCallback(
+    (fromRoundId?: DirectorId, options: PlanRoundOptions = {}): boolean => {
+      const scope = repairScope(stateRef.current, fromRoundId);
+      if (scope.length === 0) {
+        setError('There is no planned or prepared round to repair.');
+        return false;
+      }
+      return commit((draft) => {
+        const result = applyRoundPlans(draft, scope, options);
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'assignment-prepared',
+          summary: `Repaired operations across ${scope.length} round(s): ${result.changed} assignment(s) changed.`,
+          details: { rounds: scope, unresolved: result.unresolved.length },
         });
       });
     },
@@ -7113,6 +7286,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
     updateStaff,
     addEquipment,
     updateEquipment,
+    setGameAssignment,
+    setAssignmentPin,
+    setRoundDuty,
+    prepareRoundOperations,
+    repairOperations,
     addPacket,
     addPackets,
     updatePacket,

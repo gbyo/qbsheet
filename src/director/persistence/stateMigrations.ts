@@ -9,8 +9,10 @@ import {
   normalizeTimeZone,
   normalizeTimelineEvents,
   rosterAmendmentId,
+  type DirectorId,
   type DirectorState,
   type GameRecord,
+  type OperationalAssignment,
   type LiveBackendDescriptor,
   type FinalPlacement,
   type Packet,
@@ -69,6 +71,8 @@ export function migrateDirectorState(
       current = migrateV6ToV7(current);
     } else if (currentVersion === 7) {
       current = migrateV7ToV8(current);
+    } else if (currentVersion === 8) {
+      current = migrateV8ToV9(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -155,6 +159,82 @@ function migrateV6ToV7(value: Record<string, unknown>): Record<string, unknown> 
 /** v8 records cancellation provenance so Restore can repair only drop-induced schedule changes. */
 function migrateV7ToV8(value: Record<string, unknown>): Record<string, unknown> {
   return structuredClone(value);
+}
+
+/**
+ * v9 separates what a room *is* from how it is *being used*.
+ *
+ * Before v9 a `Room` record carried the moderator, scorekeeper, and single equipment resource for
+ * the whole tournament, so a moderator could not change rooms between rounds without editing the
+ * room itself. v9 adds round-scoped `OperationalAssignment` records and multi-resource equipment.
+ *
+ * Migration is deliberately conservative:
+ *
+ *  - The legacy room fields are kept and become *defaults*. Nothing reads them as the sole
+ *    operational truth any more, but they still round-trip and still seed new assignments, so a
+ *    document written by this build stays readable to a director who has not upgraded a laptop.
+ *  - Assignments are materialized only for rounds that are not closed, and only for games that
+ *    actually have a room. Closed rounds are history: writing plausible-looking assignments into
+ *    them would invent operational facts nobody recorded.
+ *  - The room is pinned, because the schedule row named it explicitly. Staff and equipment are
+ *    *not* pinned, because they were inherited from room defaults rather than chosen per round —
+ *    pinning them would freeze every legacy tournament out of auto-repair on upgrade.
+ *
+ * A tournament that never used rooms migrates to zero assignments and keeps working unchanged.
+ */
+function migrateV8ToV9(value: Record<string, unknown>): Record<string, unknown> {
+  const next = structuredClone(value);
+  const rooms = arrayOfRecords(next.rooms, 'rooms');
+  next.rooms = rooms.map((room) => {
+    const existing = Array.isArray(room.defaultEquipmentIds)
+      ? room.defaultEquipmentIds.filter((id): id is string => typeof id === 'string')
+      : null;
+    const legacy = typeof room.equipmentId === 'string' && room.equipmentId ? [room.equipmentId] : [];
+    return { ...room, defaultEquipmentIds: existing && existing.length > 0 ? existing : legacy };
+  });
+
+  const roomsById = new Map(
+    rooms.flatMap((room) => (typeof room.id === 'string' ? [[room.id, room] as const] : [])),
+  );
+  const closedRoundIds = new Set(
+    arrayOfRecords(next.rounds, 'rounds')
+      .filter((round) => round.status === 'closed')
+      .flatMap((round) => (typeof round.id === 'string' ? [round.id] : [])),
+  );
+
+  const existingAssignments = Array.isArray(next.operationalAssignments)
+    ? arrayOfRecords(next.operationalAssignments, 'operationalAssignments')
+    : [];
+  const covered = new Set(
+    existingAssignments.flatMap((entry) =>
+      typeof entry.scheduledGameId === 'string' ? [entry.scheduledGameId] : [],
+    ),
+  );
+
+  const materialized: Array<Record<string, unknown>> = [];
+  for (const game of arrayOfRecords(next.scheduledGames, 'scheduledGames')) {
+    const gameId = typeof game.id === 'string' ? game.id : null;
+    const roundId = typeof game.roundId === 'string' ? game.roundId : null;
+    const roomId = typeof game.roomId === 'string' ? game.roomId : null;
+    if (!gameId || !roundId || !roomId) continue;
+    if (game.bye === true || game.status === 'cancelled') continue;
+    if (closedRoundIds.has(roundId) || covered.has(gameId)) continue;
+    const room = roomsById.get(roomId);
+    const equipmentId = room && typeof room.equipmentId === 'string' ? room.equipmentId : null;
+    materialized.push({
+      id: `assignment-migrated-${gameId}`,
+      roundId,
+      kind: 'room',
+      scheduledGameId: gameId,
+      roomId,
+      moderatorId: room && typeof room.moderatorId === 'string' ? room.moderatorId : null,
+      scorekeeperId: room && typeof room.scorekeeperId === 'string' ? room.scorekeeperId : null,
+      equipmentIds: equipmentId ? [equipmentId] : [],
+      pinned: { room: true },
+    });
+  }
+  next.operationalAssignments = [...existingAssignments, ...materialized];
+  return next;
 }
 
 function readVersion(value: Record<string, unknown>): number {
@@ -253,12 +333,14 @@ function completeState(value: Record<string, unknown>): DirectorState {
     qbtcpSessions: arrayOrEmpty(candidate.qbtcpSessions, 'qbtcpSessions'),
     qbtcpHelpRequests: arrayOrEmpty(candidate.qbtcpHelpRequests, 'qbtcpHelpRequests'),
     qbtcpRosterAmendments: normalizeRosterAmendments(candidate.qbtcpRosterAmendments),
+    operationalAssignments: normalizeOperationalAssignments(candidate.operationalAssignments),
     timeline: normalizeTimelineEvents(candidate.timeline),
     live: normalizeLivePublication(candidate.live),
     transfers: normalizeTransferState(candidate.transfers),
   };
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
   state.packets = canonicalizePacketReferences(state);
+  state.operationalAssignments = pruneOperationalAssignments(state);
   // Densify the shared day sequence on every load: duplicates and gaps from
   // hand-edited archives or older writers repair deterministically, and
   // already-dense orders pass through untouched.
@@ -639,6 +721,74 @@ function effectivePacketIdByGame(state: DirectorState, game: GameRecord): string
   if (game.packetId) return game.packetId;
   const scheduled = state.scheduledGames.find((candidate) => candidate.id === game.scheduledGameId);
   return scheduled?.packetId ?? state.rounds.find((round) => round.id === game.roundId)?.packetId ?? null;
+}
+
+/**
+ * Accept only well-formed assignment records.
+ *
+ * A hand-edited archive or an older writer can carry partial records; a malformed one is dropped
+ * rather than repaired, because the effective-assignment fallback already produces a correct
+ * result from the schedule and room defaults when no record exists.
+ */
+function normalizeOperationalAssignments(value: unknown): OperationalAssignment[] {
+  if (value === undefined || value === null) return [];
+  return arrayOfRecords(value, 'operationalAssignments').flatMap((entry) => {
+    const id = typeof entry.id === 'string' ? entry.id : null;
+    const roundId = typeof entry.roundId === 'string' ? entry.roundId : null;
+    const kind = entry.kind === 'hq' ? 'hq' : entry.kind === 'runner' ? 'runner' : 'room';
+    if (!id || !roundId) return [];
+    const ids = (raw: unknown): DirectorId[] =>
+      Array.isArray(raw) ? [...new Set(raw.filter((item): item is string => typeof item === 'string'))] : [];
+    const pins = asRecord(entry.pinned);
+    const assignment: OperationalAssignment = {
+      id,
+      roundId,
+      kind,
+      scheduledGameId: typeof entry.scheduledGameId === 'string' ? entry.scheduledGameId : null,
+      roomId: typeof entry.roomId === 'string' ? entry.roomId : null,
+      moderatorId: typeof entry.moderatorId === 'string' ? entry.moderatorId : null,
+      scorekeeperId: typeof entry.scorekeeperId === 'string' ? entry.scorekeeperId : null,
+      staffIds: ids(entry.staffIds),
+      equipmentIds: ids(entry.equipmentIds),
+    };
+    if (pins) {
+      assignment.pinned = {
+        ...(pins.room === true ? { room: true } : {}),
+        ...(pins.moderator === true ? { moderator: true } : {}),
+        ...(pins.scorekeeper === true ? { scorekeeper: true } : {}),
+        ...(Array.isArray(pins.equipmentIds) ? { equipmentIds: ids(pins.equipmentIds) } : {}),
+        ...(Array.isArray(pins.staffIds) ? { staffIds: ids(pins.staffIds) } : {}),
+      };
+    }
+    if (typeof entry.notes === 'string' && entry.notes) assignment.notes = entry.notes;
+    return [assignment];
+  });
+}
+
+/**
+ * Drop assignments whose round or game no longer exists, and collapse duplicates.
+ *
+ * A cancelled or regenerated schedule leaves assignment records pointing at nothing. They are not
+ * history — an assignment describes a plan, not a result — so removing them is safe, and leaving
+ * them would let a stale record shadow the correct inherited assignment.
+ */
+function pruneOperationalAssignments(state: DirectorState): OperationalAssignment[] {
+  const roundIds = new Set(state.rounds.map((round) => round.id));
+  const gamesById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  const seenGames = new Set<DirectorId>();
+  const seenIds = new Set<DirectorId>();
+  return state.operationalAssignments.filter((assignment) => {
+    if (seenIds.has(assignment.id) || !roundIds.has(assignment.roundId)) return false;
+    if (assignment.kind === 'room') {
+      const game = assignment.scheduledGameId ? gamesById.get(assignment.scheduledGameId) : undefined;
+      if (!game || game.roundId !== assignment.roundId) return false;
+      if (game.bye || game.status === 'cancelled') return false;
+      if (seenGames.has(game.id)) return false;
+      seenGames.add(game.id);
+    }
+    seenIds.add(assignment.id);
+    return true;
+  });
 }
 
 function arrayOrEmpty<T>(value: unknown, label: string): T[] {
