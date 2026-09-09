@@ -33,13 +33,11 @@ If games in the same row use incompatible regulation X values, per-X metrics are
 
 ## Historical scoring definitions
 
-The report DTO carries a per-game `RoundStatDefinition`. The canonical Director adapter resolves the strongest historical evidence it currently has before deriving round statistics:
+The report DTO carries a per-game `RoundStatDefinition`. The canonical Director adapter resolves historical evidence before deriving round statistics. Today the strongest supported source is the exact scoring rules and tossup counts retained in the accepted game's raw QBJ; normalized per-game fields already carried by the canonical report DTO take precedence when they exist.
 
-1. normalized per-game report facts when available;
-2. exact scoring rules and tossup counts retained in the accepted game's raw QBJ;
-3. for pre-#671 legacy records only, the tournament rule object as an explicitly tagged `legacy-tournament` fallback.
+If an older accepted game has no provable per-game scoring definition, definition-dependent fields stay unknown. The adapter deliberately does **not** fall back to `tournament.rules`, because those are current defaults and may have changed after the game was issued or accepted. This is the compatibility seam for #671: a future pinned/corrected or stable legacy-inferred game definition can be supplied at this boundary without changing the formulas or renderer.
 
-The renderer never opens raw QBJ and never reads current tournament rules. The legacy fallback is intentionally labeled as such so #671 can replace it with a persisted issued/corrected game definition without changing the formulas or report renderer. A new default must not be mistaken for historical proof.
+The renderer never opens raw QBJ and never reads current tournament rules.
 
 ## Stage and packet context
 
