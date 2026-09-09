@@ -116,7 +116,9 @@ const playerRows: StatsSnapshot['players'] = [
   },
 ];
 
-function detailedTeam(overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsRow, 'teamId' | 'teamName' | 'points'>): GameTeamStatsRow {
+function detailedTeam(
+  overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsRow, 'teamId' | 'teamName' | 'points'>,
+): GameTeamStatsRow {
   return {
     superpowers: 0,
     powers: 0,
@@ -131,7 +133,10 @@ function detailedTeam(overrides: Partial<GameTeamStatsRow> & Pick<GameTeamStatsR
   };
 }
 
-function detailedPlayer(overrides: Partial<GamePlayerStatsRow> & Pick<GamePlayerStatsRow, 'playerId' | 'playerName' | 'teamId' | 'teamName'>): GamePlayerStatsRow {
+function detailedPlayer(
+  overrides: Partial<GamePlayerStatsRow> &
+    Pick<GamePlayerStatsRow, 'playerId' | 'playerName' | 'teamId' | 'teamName'>,
+): GamePlayerStatsRow {
   return {
     tossupsHeard: 20,
     superpowers: 0,
