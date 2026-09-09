@@ -10,11 +10,12 @@
  *
  * That ordering decides how aggressive it should be. A dialog that appears every time anybody
  * closes a tab is a dialog rooms learn to dismiss, and a room that dismisses this one by habit is a
- * room that dismisses it on the day it mattered. So it appears for three things and nothing else:
+ * room that dismisses it on the day it mattered. So it appears for four things and nothing else:
  *
  *   1. A game still being scored.
  *   2. A device that could not save, whatever else is true.
- *   3. A finished game whose backup has not been handed over.
+ *   3. A hand-entered setup that has not been saved locally yet.
+ *   4. A finished game whose backup has not been handed over.
  *
  * And it stops appearing the moment none of those hold — a finished game, saved, downloaded and
  * acknowledged, is a tab somebody is entitled to close without being asked about it.
@@ -38,20 +39,20 @@ export interface ILeaveWarningState {
   localSaveFailed: boolean;
   /** A finished game whose QBJ has not been downloaded and acknowledged. */
   handoffOutstanding: boolean;
-  /** The hand-entered game setup has unsaved fields. */
-  setupDirty?: boolean;
+  /** The hand-entered game setup has fields that are not safely persisted yet. */
+  setupUnsaved?: boolean;
 }
 
 export function shouldWarnBeforeLeaving(state: ILeaveWarningState): boolean {
   return (
-    state.gameInProgress || state.localSaveFailed || state.handoffOutstanding || state.setupDirty === true
+    state.gameInProgress || state.localSaveFailed || state.handoffOutstanding || state.setupUnsaved === true
   );
 }
 
 export default function useLeaveWarning(state: ILeaveWarningState): void {
-  const { gameInProgress, localSaveFailed, handoffOutstanding, setupDirty = false } = state;
+  const { gameInProgress, localSaveFailed, handoffOutstanding, setupUnsaved = false } = state;
   useEffect(() => {
-    if (!shouldWarnBeforeLeaving({ gameInProgress, localSaveFailed, handoffOutstanding, setupDirty })) {
+    if (!shouldWarnBeforeLeaving({ gameInProgress, localSaveFailed, handoffOutstanding, setupUnsaved })) {
       return undefined;
     }
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -62,5 +63,5 @@ export default function useLeaveWarning(state: ILeaveWarningState): void {
     };
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [gameInProgress, localSaveFailed, handoffOutstanding, setupDirty]);
+  }, [gameInProgress, localSaveFailed, handoffOutstanding, setupUnsaved]);
 }
