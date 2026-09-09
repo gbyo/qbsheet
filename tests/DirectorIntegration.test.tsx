@@ -10,6 +10,7 @@ import {
   generateDirectorRound,
   generateRoundRobinRound,
   orderDayItems,
+  packetReuseBlocker,
   packetUseConflicts,
   previewAdvancement,
   recommendTournamentPlan,
@@ -97,6 +98,79 @@ function scheduledForGame(
     assignmentRevision: 1,
     ...overrides,
   };
+}
+
+function packetReuseFixture(): DirectorState {
+  const state = emptyDirectorState();
+  state.packets = [
+    {
+      id: 'packet-shared',
+      name: 'Shared packet',
+      source: 'manual',
+      assignedRoundIds: ['round-1', 'round-2'],
+      assignedGameIds: ['scheduled-round-1', 'scheduled-round-2'],
+      usedGameIds: [],
+      replacementForPacketId: null,
+      tiebreaker: false,
+    },
+  ];
+  state.rounds = [
+    {
+      id: 'round-1',
+      phaseId: 'phase-1',
+      name: 'Round 1',
+      number: 1,
+      revision: 1,
+      status: 'planned',
+      packetId: 'packet-shared',
+      scheduledGameIds: ['scheduled-round-1'],
+      scheduledStart: null,
+      releasedAt: null,
+      startedAt: null,
+      closedAt: null,
+    },
+    {
+      id: 'round-2',
+      phaseId: 'phase-1',
+      name: 'Round 2',
+      number: 2,
+      revision: 1,
+      status: 'planned',
+      packetId: 'packet-shared',
+      scheduledGameIds: ['scheduled-round-2'],
+      scheduledStart: null,
+      releasedAt: null,
+      startedAt: null,
+      closedAt: null,
+    },
+  ];
+  state.scheduledGames = [
+    {
+      id: 'scheduled-round-1',
+      roundId: 'round-1',
+      poolId: null,
+      roomId: null,
+      packetId: null,
+      leftTeamId: 'team-a',
+      rightTeamId: 'team-b',
+      bye: false,
+      status: 'scheduled',
+      assignmentRevision: 1,
+    },
+    {
+      id: 'scheduled-round-2',
+      roundId: 'round-2',
+      poolId: null,
+      roomId: null,
+      packetId: null,
+      leftTeamId: 'team-c',
+      rightTeamId: 'team-d',
+      bye: false,
+      status: 'scheduled',
+      assignmentRevision: 1,
+    },
+  ];
+  return state;
 }
 
 function team(id: string, status: DirectorState['teams'][number]['status'] = 'confirmed') {
@@ -2865,6 +2939,131 @@ describe('Director integration hardening', () => {
     const conflicts = packetUseConflicts(hook.result.current.state);
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]?.gameIds).toHaveLength(2);
+  });
+
+  test('packet reuse allows one round-level packet to be shared by every same-round game', () => {
+    const state = packetReuseFixture();
+    state.rounds = [state.rounds[0]!];
+    state.scheduledGames = state.scheduledGames.filter((game) => game.roundId === 'round-1');
+    state.packets[0]!.assignedRoundIds = ['round-1'];
+    state.packets[0]!.assignedGameIds = ['scheduled-round-1'];
+    state.scheduledGames.push({
+      ...state.scheduledGames[0]!,
+      id: 'scheduled-round-1b',
+      leftTeamId: 'team-c',
+      rightTeamId: 'team-d',
+    });
+    state.rounds[0]!.scheduledGameIds.push('scheduled-round-1b');
+
+    expect(packetReuseBlocker(state, 'round-1')).toBeNull();
+    expect(packetUseConflicts(state)).toHaveLength(0);
+  });
+
+  test('packet reuse blocks the same packet in a distinct round after exposure', () => {
+    const state = packetReuseFixture();
+    state.rounds[0]!.status = 'released';
+    state.scheduledGames[0]!.status = 'released';
+
+    const blocker = packetReuseBlocker(state, 'round-2');
+    expect(blocker).toMatch(/Shared packet.*Round 1/);
+  });
+
+  test('packet reuse blocks a direct game override from a prior round', () => {
+    const state = packetReuseFixture();
+    state.rounds.forEach((round) => (round.packetId = null));
+    state.scheduledGames[0]!.packetId = 'packet-shared';
+    state.rounds[0]!.status = 'released';
+    state.scheduledGames[0]!.status = 'released';
+    state.scheduledGames[1]!.packetId = 'packet-shared';
+
+    expect(packetReuseBlocker(state, 'round-2')).toMatch(/packet-shared.*Round 1/);
+  });
+
+  test('packet reuse includes historical accepted game references', () => {
+    const state = packetReuseFixture();
+    state.rounds[0]!.packetId = null;
+    state.scheduledGames[0]!.packetId = null;
+    state.scheduledGames[0]!.status = 'scheduled';
+    state.games.push({
+      id: 'accepted-round-1',
+      scheduledGameId: 'scheduled-round-1',
+      roundId: 'round-1',
+      packetId: 'packet-shared',
+      status: 'accepted',
+      scores: [],
+      playerStats: [],
+      source: 'manual',
+      acceptedAt: '2026-09-01T12:00:00.000Z',
+    });
+
+    expect(packetReuseBlocker(state, 'round-2')).toMatch(/Shared packet.*Round 1/);
+  });
+
+  test('packet reuse allows a packet to move while both assignments remain unexposed', () => {
+    const state = packetReuseFixture();
+    expect(packetReuseBlocker(state, 'round-2')).toBeNull();
+    state.rounds[0]!.packetId = null;
+    state.scheduledGames[0]!.packetId = null;
+    expect(packetReuseBlocker(state, 'round-1')).toBeNull();
+  });
+
+  test('start and low-level release both recheck packet reuse', async () => {
+    const { hook } = await directorWithSetup(2);
+    act(() => hook.result.current.generateSchedule({ roundName: 'Round 1' }));
+    const firstRound = hook.result.current.state.rounds[0];
+    if (!firstRound) throw new Error('test setup did not generate Round 1');
+    await act(async () => {
+      expect((await hook.result.current.startRound(firstRound.id)).ok).toBe(true);
+    });
+    const firstGame = hook.result.current.state.scheduledGames.find(
+      (game) => game.roundId === firstRound.id && !game.bye,
+    );
+    if (!firstGame) throw new Error('test setup did not generate a competitive game');
+    act(() => {
+      expect(
+        hook.result.current.addManualResult({
+          scheduledGameId: firstGame.id,
+          scores: [score(firstGame.leftTeamId, 20), score(firstGame.rightTeamId!, 10)],
+        }),
+      ).toBe(true);
+    });
+    act(() => hook.result.current.generateSchedule({ roundName: 'Round 2', packetId: firstRound.packetId }));
+    const secondRound = hook.result.current.state.rounds.find((round) => round.id !== firstRound.id);
+    if (!secondRound) throw new Error('test setup did not generate Round 2');
+    expect(packetReuseBlocker(hook.result.current.state, secondRound.id)).toMatch(/Round 1/);
+
+    let started = true;
+    await act(async () => {
+      started = (await hook.result.current.startRound(secondRound.id)).ok;
+    });
+    expect(started).toBe(false);
+    expect(hook.result.current.error).toMatch(/Shared|Packet|Round 1/);
+
+    const prepared = structuredClone(hook.result.current.state);
+    const preparedRound = prepared.rounds.find((round) => round.id === secondRound.id);
+    if (!preparedRound) throw new Error('test setup lost Round 2');
+    preparedRound.status = 'prepared';
+    const preparedRoomId = prepared.rooms[0]?.id;
+    if (!preparedRoomId) throw new Error('test setup did not create a room');
+    const preparedRoom = prepared.rooms.find((room) => room.id === preparedRoomId);
+    if (!preparedRoom) throw new Error('test setup lost the room');
+    preparedRoom.status = 'available';
+    preparedRoom.available = true;
+    for (const game of prepared.scheduledGames.filter(
+      (game) => game.roundId === secondRound.id && !game.bye,
+    )) {
+      game.roomId = preparedRoomId;
+    }
+    act(() => expect(hook.result.current.importSnapshot(prepared)).toBe(true));
+    let released = true;
+    act(() => {
+      released = hook.result.current.releaseRound(secondRound.id);
+    });
+    expect(released).toBe(false);
+    expect(hook.result.current.error).toMatch(/Shared|Packet|Round 1/);
+    expect(hook.result.current.state.rounds.find((round) => round.id === secondRound.id)?.status).toBe(
+      'prepared',
+    );
   });
 
   test('packet-use validation reports direct use in a different round from a round packet', () => {
