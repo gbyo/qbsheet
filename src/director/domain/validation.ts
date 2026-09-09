@@ -195,7 +195,7 @@ export function runPreflight(
   if (format) {
     const availability = formatGenerationAvailability(state);
     const tournamentClosed = state.tournament.status === 'complete' || state.tournament.status === 'archived';
-    if (!availability.supported && !tournamentClosed) {
+    if (!availability.supported && !availability.terminal && !tournamentClosed) {
       issues.push({
         id: 'format-generation-unavailable',
         severity: 'blocker',
