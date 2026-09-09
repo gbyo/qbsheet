@@ -168,7 +168,7 @@ function teamProblems(input: IManualGameInput): string[] {
 
   if (left === '') problems.push('Enter a name for the left team.');
   if (right === '') problems.push('Enter a name for the right team.');
-  if (left !== '' && right !== '' && left.toLocaleLowerCase() === right.toLocaleLowerCase()) {
+  if (left !== '' && right !== '' && left.toLowerCase() === right.toLowerCase()) {
     problems.push('Team names must be different.');
   }
   if (left.length > playerNameMaxLength) problems.push('The left team name is too long.');
