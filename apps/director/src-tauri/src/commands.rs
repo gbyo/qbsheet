@@ -374,6 +374,16 @@ pub fn director_issue_qbtcp_pairing(
 }
 
 #[tauri::command]
+pub fn director_set_qbtcp_advertised_address(
+    address: String,
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerStatus, CommandError> {
+    server
+        .set_advertised_address(&address)
+        .map_err(CommandError::server)
+}
+
+#[tauri::command]
 pub async fn director_start_qbtcp_server(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,

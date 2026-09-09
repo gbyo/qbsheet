@@ -63,6 +63,7 @@ pub fn run() {
             commands::director_qbtcp_live_rooms,
             commands::director_resolve_qbtcp_help,
             commands::director_issue_qbtcp_pairing,
+            commands::director_set_qbtcp_advertised_address,
             commands::director_store_live_credential,
             commands::director_probe_live_credential_store,
             commands::director_read_live_credential,

@@ -3119,6 +3119,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "thiserror 2.0.20",
+ "time",
  "tokio",
  "tower",
  "windows-sys 0.59.0",
