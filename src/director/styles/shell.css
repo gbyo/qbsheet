@@ -328,8 +328,11 @@
 }
 
 /* ------------------------------------------------------------- Global search
-   A command/entity navigator. It has no relationship to the list filters on the
-   pages — typing here does not narrow the Teams table underneath. */
+   A command navigator over pages, settings, and entities. It has no
+   relationship to the list filters on the pages — typing here does not narrow
+   the Teams table underneath. The list is a `cmdk` command list, so the active
+   result follows `[data-selected]` (keyboard and pointer both) rather than a
+   hover rule plus a hand-kept `.is-active`. */
 
 .director-search-wrap {
   position: relative;
@@ -426,9 +429,24 @@
   font-size: var(--director-text-meta);
 }
 
-.director-search-result:hover,
-.director-search-result.is-active {
+.director-search-result[data-selected='true'] {
   background: var(--director-surface-hover);
+}
+
+.director-search-result {
+  cursor: pointer;
+}
+
+/* Which of the three kinds a run of results is: Pages, Settings, Tournament.
+   cmdk hides a group whose every result scored zero, so a heading only ever
+   sits over results it actually names. */
+.director-search-results [cmdk-group-heading] {
+  padding: var(--director-space-2) var(--director-space-3) var(--director-space-1);
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-weight: var(--director-weight-semibold);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .director-search-result .director-badge {

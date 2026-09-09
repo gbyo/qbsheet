@@ -5,7 +5,6 @@ import { Callout } from '../components/Status';
 import { Dialog } from '../components/Dialog';
 import { ConfirmProvider, useConfirm } from '../components/Dialog';
 import { DirtyFormProvider, FormActions, useDirtyForms } from '../components/Fields';
-import { normalizeSearchText } from '../components/search';
 import { FilePicker } from '../components/FilePicker';
 import { SummaryItem, SummaryList } from '../components/Layout';
 import { ActionMenu, MenuItem } from '../components/Menu';
@@ -50,7 +49,8 @@ import {
   saveOperatorProfile,
   type OperatorProfile,
 } from '../operator/operatorProfile';
-import type { DirectorNavigationTarget, EntityType } from './navigationTarget';
+import type { DirectorNavigationTarget } from './navigationTarget';
+import { pageSearchTargets, revealSettingsTarget, settingsSearchTargets } from './searchTargets';
 import {
   DirectorShell,
   GlobalSearch,
@@ -187,7 +187,8 @@ function DirectorAppContent() {
     await action();
   }, [blockedTransition, retryPersistence, setBlockedTransition]);
 
-  const searchResults = useMemo(() => searchTournament(state, search), [search, state]);
+  // The index does not depend on the query: `cmdk` ranks it per keystroke.
+  const searchIndex = useMemo(() => buildSearchIndex(state), [state]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
@@ -417,19 +418,38 @@ function DirectorAppContent() {
           <GlobalSearch
             value={search}
             onChange={setSearch}
-            results={searchResults}
+            results={searchIndex}
             inputRef={searchRef}
             onSelect={(result) => {
-              const full = searchResults.find(
-                (entry) => entry.id === result.id && entry.section === result.section,
-              );
+              setSearch('');
+              /*
+               * A page result is a destination and nothing more — handing it an
+               * entity target would make the arriving view hunt for a `page:teams`
+               * entity and mark nothing. A settings result names the sub-section
+               * Settings switches to, then focuses its own panel or field.
+               */
+              if (result.kind === 'page') {
+                navigate(result.section, null);
+                return;
+              }
+              if (result.kind === 'setting') {
+                navigate('settings', {
+                  section: 'settings',
+                  entityType: 'setting',
+                  entityId: result.settingsEntityId ?? 'tournament',
+                });
+                revealSettingsTarget({
+                  panelId: result.settingsPanelId,
+                  fieldLabel: result.settingsFieldLabel,
+                });
+                return;
+              }
               navigate(result.section, {
                 section: result.section,
-                entityType: full?.entityType,
+                entityType: result.entityType,
                 entityId: result.id,
-                parentId: full?.parentId,
+                parentId: result.parentId,
               });
-              setSearch('');
             }}
           />
         }
@@ -1007,89 +1027,116 @@ function StartScreen({
 
 /* ------------------------------------------------------------ Global search */
 
-type SearchResult = SearchResultView & { entityType?: EntityType; parentId?: string };
+type SearchResult = SearchResultView;
 
 /**
- * Entity search across the tournament.
+ * Everything global search can reach: pages, settings, and the tournament's own entities.
+ *
+ * # Why this is an index rather than a query
+ *
+ * It used to take the query and return substring matches, which meant the query
+ * decided what existed. Ranking is `cmdk`'s now — it scores the whole index per
+ * keystroke, best match first — so this builds the candidates once per state
+ * change and never sees the query at all. A typo, a middle-of-the-word match, or
+ * "tz" for the timezone setting all work as a result, none of which a substring
+ * scan could do.
+ *
+ * `keywords` carries what an entry is findable by but does not show: a game's
+ * raw id, a team's organization, a round's status. Those were part of the old
+ * substring corpus, and dropping them would have quietly narrowed search while
+ * the visible result list looked the same.
  *
  * Results carry the destination *and* its `Plan / Run / Review` group, so the
- * result list reads in the same terms as the sidebar. The deep-link targets are
- * unchanged: every result still resolves to a specific team, player, room,
- * packet, round, game, or submission.
+ * list reads in the same terms as the sidebar. The deep-link targets are
+ * unchanged: every entity result still resolves to a specific team, player,
+ * room, packet, round, game, or submission.
  */
-function searchTournament(
-  state: ReturnType<typeof useDirectorController>['state'],
-  query: string,
-): SearchResult[] {
-  const needle = normalizeSearchText(query.trim());
-  if (!needle) return [];
+function buildSearchIndex(state: ReturnType<typeof useDirectorController>['state']): SearchResult[] {
   const results: SearchResult[] = [];
-  const matches = (values: unknown[]) =>
-    values.some((value) => normalizeSearchText(String(value ?? '')).includes(needle));
   const push = (result: Omit<SearchResult, 'group'>) =>
-    results.push({ ...result, group: groupForSection(result.section) });
+    results.push({ kind: 'entity', ...result, group: groupForSection(result.section) });
+
+  for (const page of pageSearchTargets) {
+    push({
+      id: `page:${page.section}`,
+      kind: 'page',
+      section: page.section,
+      label: page.label,
+      detail: page.detail,
+      keywords: page.keywords,
+    });
+  }
+  for (const setting of settingsSearchTargets) {
+    push({
+      id: `setting:${setting.id}`,
+      kind: 'setting',
+      section: 'settings',
+      label: setting.label,
+      detail: setting.detail,
+      keywords: setting.keywords,
+      entityType: 'setting',
+      settingsEntityId: setting.entityId,
+      settingsPanelId: setting.panelId,
+      settingsFieldLabel: setting.fieldLabel,
+    });
+  }
 
   for (const team of state.teams) {
     const organization = team.organizationId
       ? state.organizations.find((entry) => entry.id === team.organizationId)?.name
       : undefined;
-    if (matches([team.displayName, team.teamLetter, team.status, organization])) {
-      push({
-        id: team.id,
-        section: 'teams',
-        label: team.displayName,
-        detail: [organization, team.teamLetter && `Team ${team.teamLetter}`, team.status]
-          .filter(Boolean)
-          .join(' · '),
-        entityType: 'team',
-      });
-    }
+    push({
+      id: team.id,
+      section: 'teams',
+      label: team.displayName,
+      detail: [organization, team.teamLetter && `Team ${team.teamLetter}`, team.status]
+        .filter(Boolean)
+        .join(' · '),
+      keywords: terms([team.teamLetter, team.status, organization, 'team']),
+      entityType: 'team',
+    });
   }
   for (const player of state.players) {
     const team = state.teams.find((entry) => entry.id === player.teamId);
-    if (matches([player.name, team?.displayName, player.rosterNumber])) {
-      push({
-        id: player.id,
-        section: 'teams',
-        label: player.name,
-        detail: team?.displayName ?? 'Roster player',
-        entityType: 'player',
-        parentId: player.teamId,
-      });
-    }
+    push({
+      id: player.id,
+      section: 'teams',
+      label: player.name,
+      detail: team?.displayName ?? 'Roster player',
+      keywords: terms([team?.displayName, player.rosterNumber, 'player', 'roster']),
+      entityType: 'player',
+      parentId: player.teamId,
+    });
   }
   for (const room of state.rooms) {
-    if (matches([room.name, room.building, room.floor, room.status])) {
-      push({
-        id: room.id,
-        section: 'rooms',
-        label: room.name,
-        detail: [room.building, room.status].filter(Boolean).join(' · '),
-        entityType: 'room',
-      });
-    }
+    push({
+      id: room.id,
+      section: 'rooms',
+      label: room.name,
+      detail: [room.building, room.status].filter(Boolean).join(' · '),
+      keywords: terms([room.building, room.floor, room.status, 'room']),
+      entityType: 'room',
+    });
   }
   for (const packet of state.packets) {
-    if (matches([packet.name, packet.source])) {
-      push({
-        id: packet.id,
-        section: 'packets',
-        label: packet.name,
-        detail: `${packet.source} packet`,
-        entityType: 'packet',
-      });
-    }
+    push({
+      id: packet.id,
+      section: 'packets',
+      label: packet.name,
+      detail: `${packet.source} packet`,
+      keywords: terms([packet.source, 'packet']),
+      entityType: 'packet',
+    });
   }
   for (const round of state.rounds) {
-    if (matches([round.name, round.number, round.status])) {
-      push({
-        id: round.id,
-        section: 'schedule',
-        label: round.name,
-        detail: `Round ${round.number} · ${humanRoundStatus(round.status)}`,
-        entityType: 'round',
-      });
-    }
+    push({
+      id: round.id,
+      section: 'schedule',
+      label: round.name,
+      detail: `Round ${round.number} · ${humanRoundStatus(round.status)}`,
+      keywords: terms([round.number, round.status, humanRoundStatus(round.status), 'round']),
+      entityType: 'round',
+    });
   }
   for (const game of state.scheduledGames) {
     const left = state.teams.find((team) => team.id === game.leftTeamId)?.displayName;
@@ -1097,29 +1144,39 @@ function searchTournament(
       ? state.teams.find((team) => team.id === game.rightTeamId)?.displayName
       : 'Bye';
     const round = state.rounds.find((entry) => entry.id === game.roundId);
-    if (matches([game.id, left, right, round?.name, game.status])) {
-      push({
-        id: game.id,
-        section: 'results',
-        label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
-        detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
-        entityType: 'game',
-      });
-    }
+    push({
+      id: game.id,
+      section: 'results',
+      label: `${left ?? 'Unknown'} · ${right ?? 'Unknown'}`,
+      detail: `${round?.name ?? 'Scheduled game'} · ${game.status}`,
+      // The raw id is how a diagnostic link into a specific game is followed;
+      // the row itself stopped printing it, so only search carries it.
+      keywords: terms([game.id, round?.name, game.status, 'game']),
+      entityType: 'game',
+    });
   }
   for (const submission of state.submissions) {
     const game = state.games.find((entry) => entry.id === submission.gameId);
-    if (matches([submission.id, submission.transportResultId, submission.status, game?.scheduledGameId])) {
-      push({
-        id: submission.id,
-        section: 'results',
-        label: `Result ${submission.transportResultId ?? submission.id}`,
-        detail: submission.status,
-        entityType: 'submission',
-      });
-    }
+    push({
+      id: submission.id,
+      section: 'results',
+      label: `Result ${submission.transportResultId ?? submission.id}`,
+      detail: submission.status,
+      keywords: terms([submission.id, submission.transportResultId, game?.scheduledGameId, 'result']),
+      entityType: 'submission',
+    });
   }
-  return results.slice(0, 12);
+  return results;
+}
+
+/** Search terms, minus the blanks and the duplicates of the visible text. */
+function terms(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const text = String(value ?? '').trim();
+    if (text) seen.add(text);
+  }
+  return [...seen];
 }
 
 export { labelForSection };

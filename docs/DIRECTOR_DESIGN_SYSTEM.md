@@ -211,19 +211,43 @@ day, Results, Transfers), **Review** (Standings, Exports, QBSheet Live), then
 sidebar, in Help, and in search results.
 
 Navigation label, page `<h1>`, and search results all read the destination's
-name from `labelForSection`. They cannot drift apart.
+name from `labelForSection`. They cannot drift apart — global search indexes the
+destinations by reading the same sidebar list, so a new or renamed destination is
+searchable without a second edit.
+
+### Global search indexes three kinds
+
+Pages, settings, and entities, in one `cmdk`-ranked list grouped under `Pages`,
+`Settings`, and `Tournament`, with the group that answers the query first.
+
+| Kind    | Source                                        | Selecting it                                   |
+| ------- | --------------------------------------------- | ---------------------------------------------- |
+| Page    | `visibleNavigation`, plus search synonyms     | Goes to the destination. No entity target.     |
+| Setting | `settingsSearchTargets` — panels _and_ fields | Opens Settings at its sub-section, focuses it. |
+| Entity  | The tournament's own state                    | Opens the thing itself, unchanged.             |
+
+An individual setting is findable by the word an operator types for it —
+"timezone", "question set", "end date" — and lands with that field focused, from
+`revealSettingsTarget`. A settings entry names its panel and its field's visible
+label; it does not carry a second id to keep in step with the form.
+
+Search terms that are not on screen — a game's raw id, a team's organization, "tz"
+for the timezone — go in `keywords`. Ranking is cmdk's `defaultFilter` with a
+score floor and a twelve-result cap applied in `rankSearchResults`: a subsequence
+scorer will otherwise match `standings` against "Venue · Settings · Tournament
+details" and bury the one right answer.
 
 Legacy `tournament` deep links resolve to Tournament day via
 `canonicalSection`. Stored navigation targets must keep resolving.
 
 ### Where global things live
 
-| Home                              | Owns                                              |
-| --------------------------------- | ------------------------------------------------- |
-| Tournament switcher (sidebar top) | switching tournaments; New, Open, Details, Manage |
-| Operator (sidebar bottom)         | operator identity, Settings, Help                 |
-| Settings (a destination)          | everything editable                               |
-| Top bar                           | global search, and the operational "now" strip    |
+| Home                              | Owns                                                                        |
+| --------------------------------- | --------------------------------------------------------------------------- |
+| Tournament switcher (sidebar top) | switching tournaments; New, Open, Details, Manage                           |
+| Operator (sidebar bottom)         | operator identity, Settings, Help                                           |
+| Settings (a destination)          | everything editable                                                         |
+| Top bar                           | global search — pages, settings, entities — and the operational "now" strip |
 
 Global search is a command/entity navigator. It **never** filters a page —
 page-local filtering is `SearchField` on the page.
