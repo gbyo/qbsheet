@@ -107,6 +107,9 @@ export function phaseCanComplete(state: DirectorState, phaseId: DirectorId): boo
   if (!phase.roundIds.every((id) => state.rounds.find((round) => round.id === id)?.status === 'closed')) {
     return false;
   }
+  // A historical/imported document may already contain a falsely closed round. Do not let that
+  // lifecycle flag complete its phase while the round still has operational work underneath it.
+  if (phase.roundIds.some((id) => roundCloseBlockers(state, id).length > 0)) return false;
   const format = state.formats.find((entry) => entry.id === phase.formatId);
   if (format?.kind === 'single-elimination') {
     return resolveDirectorBracket(state, format.id)?.complete === true;
@@ -1542,6 +1545,115 @@ export function scheduledGameHasUnresolvedWork(state: DirectorState, game: Sched
   return state.qbtcpSessions.some(
     (session) => session.matchId === game.id && qbtcpSessionHasUnresolvedWork(state, session),
   );
+}
+
+/**
+ * Return the authoritative operational blockers for closing a round.
+ *
+ * This deliberately examines more than the scheduled-game status. A result record or review
+ * submission can remain active underneath a stale scheduled row, and a paired/live/resumable
+ * scorer can still contradict a proposed closed state even after a result row was edited. Both
+ * ordinary Finish and the advanced recovery Close action use this predicate through the
+ * controller.
+ */
+export function roundCloseBlockers(state: DirectorState, roundId: DirectorId): string[] {
+  const round = state.rounds.find((entry) => entry.id === roundId);
+  if (!round) return ['That round is no longer in the tournament workspace.'];
+
+  const games = state.scheduledGames.filter((game) => game.roundId === roundId);
+  const nonByeGames = games.filter((game) => !game.bye);
+  const blockers: string[] = [];
+  const add = (message: string) => {
+    if (!blockers.includes(message)) blockers.push(message);
+  };
+
+  const statusLabels: Record<Exclude<ScheduledGame['status'], 'accepted' | 'cancelled'>, string> = {
+    scheduled: 'scheduled',
+    released: 'released',
+    live: 'live',
+    submitted: 'submitted',
+  };
+  const unresolvedByStatus = new Map<string, number>();
+  for (const game of nonByeGames) {
+    if (game.status === 'accepted') {
+      const canonical = state.games.some(
+        (record) =>
+          record.scheduledGameId === game.id && (record.status === 'accepted' || record.status === 'forfeit'),
+      );
+      if (!canonical) add(`${round.name} has a game marked accepted without a canonical result.`);
+      continue;
+    }
+    if (game.status === 'cancelled') continue;
+    const label = statusLabels[game.status];
+    unresolvedByStatus.set(label, (unresolvedByStatus.get(label) ?? 0) + 1);
+  }
+  if (unresolvedByStatus.size > 0) {
+    const summary = [...unresolvedByStatus.entries()]
+      .map(([label, count]) => `${count} ${label} game${count === 1 ? '' : 's'}`)
+      .join(' and ');
+    add(`${round.name} still has ${summary}; resolve every competitive game before closing it.`);
+  }
+
+  const roundGameIds = new Set(nonByeGames.map((game) => game.id));
+  const roundRecords = state.games.filter((record) => roundGameIds.has(record.scheduledGameId));
+  const activeRecords = roundRecords.filter(
+    (record) => record.status === 'live' || record.status === 'submitted',
+  );
+  if (activeRecords.length > 0) {
+    add(
+      `${round.name} still has ${activeRecords.length} active result record${activeRecords.length === 1 ? '' : 's'}; review or resolve it before closing the round.`,
+    );
+  }
+
+  const roundRecordIds = new Set(roundRecords.map((record) => record.id));
+  const pendingSubmissions = state.submissions.filter(
+    (submission) =>
+      roundRecordIds.has(submission.gameId) &&
+      (submission.status === 'received' || submission.status === 'review'),
+  );
+  if (pendingSubmissions.length > 0) {
+    add(
+      `${round.name} still has ${pendingSubmissions.length} result${pendingSubmissions.length === 1 ? '' : 's'} awaiting review; resolve it before closing the round.`,
+    );
+  }
+
+  const roundRoomIds = new Set(nonByeGames.map((game) => game.roomId).filter(Boolean));
+  const unresolvedSessions = state.qbtcpSessions.filter((session) => {
+    const matchedGame = session.matchId ? nonByeGames.find((game) => game.id === session.matchId) : undefined;
+    const belongsToRound = Boolean(matchedGame) || (!session.matchId && roundRoomIds.has(session.roomId));
+    if (!belongsToRound) return false;
+    return (
+      session.state === 'paired' ||
+      session.state === 'assigned' ||
+      session.state === 'live' ||
+      (session.state === 'abandoned' && session.resumable === true)
+    );
+  });
+  if (unresolvedSessions.length > 0) {
+    add(
+      `${round.name} still has ${unresolvedSessions.length} active or resumable QBTCP session${unresolvedSessions.length === 1 ? '' : 's'}; finish or resolve it before closing the round.`,
+    );
+  }
+
+  const resolvedBracket = state.tournament?.formatId
+    ? resolveDirectorBracket(state, state.tournament.formatId)
+    : null;
+  const cancelledBracketGame = games.find((game) => {
+    if (!game.bracketKey || game.status !== 'cancelled') return false;
+    // A legacy cancelled row may be followed by an explicit replacement. It is safe only after
+    // the authoritative resolver has a decisive outcome for that bracket key.
+    return !resolvedBracket?.games.some(
+      (resolved) =>
+        resolved.key === game.bracketKey && resolved.winnerTeamId !== null && resolved.loserTeamId !== null,
+    );
+  });
+  if (cancelledBracketGame) {
+    add(
+      'This elimination round contains a cancelled game without a bracket outcome. Generate a replacement or record an explicit forfeit/administrative resolution before closing it.',
+    );
+  }
+
+  return blockers;
 }
 
 export function qbtcpSessionHasUnresolvedWork(
