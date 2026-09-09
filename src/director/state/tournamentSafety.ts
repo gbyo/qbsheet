@@ -21,20 +21,14 @@ export function releasedRoundResultBlocker(state: DirectorState, scheduledGameId
  * Normal tournament operation has one released round with unresolved play at a time. Checking
  * scheduled-game state instead of room occupancy also protects manual and roomless tournaments.
  */
-export function unresolvedReleasedRoundBlocker(
-  state: DirectorState,
-  roundId: DirectorId,
-): string | null {
+export function unresolvedReleasedRoundBlocker(state: DirectorState, roundId: DirectorId): string | null {
   const blockingRound = state.rounds.find(
     (round) =>
       round.id !== roundId &&
       round.status === 'released' &&
       state.scheduledGames.some(
         (game) =>
-          game.roundId === round.id &&
-          !game.bye &&
-          game.status !== 'accepted' &&
-          game.status !== 'cancelled',
+          game.roundId === round.id && !game.bye && game.status !== 'accepted' && game.status !== 'cancelled',
       ),
   );
   return blockingRound
