@@ -1709,6 +1709,7 @@ describe('Director integration hardening', () => {
 
     const availability = formatGenerationAvailability(hook.result.current.state);
     expect(availability.supported).toBe(false);
+    expect(availability).toMatchObject({ terminal: false, reason: 'invalid-state' });
     expect(availability.message).toMatch(/every confirmed team/i);
     expect(
       runPreflight(hook.result.current.state).some((issue) => issue.id === 'format-generation-unavailable'),
@@ -2411,7 +2412,14 @@ describe('Director integration hardening', () => {
       generated: false,
       conflicts: ['This format has reached its configured limit of 2 rounds per team.'],
     });
-    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({
+      supported: false,
+      terminal: true,
+      reason: 'configured-limit-reached',
+    });
+    expect(
+      runPreflight(hook.result.current.state).some((issue) => issue.id === 'format-generation-unavailable'),
+    ).toBe(false);
 
     act(() => {
       updated = hook.result.current.updateFormat({ roundsPerTeam: 0 });
@@ -2419,6 +2427,67 @@ describe('Director integration hardening', () => {
     expect(updated).toBe(false);
     expect(hook.result.current.state.formats[0]?.roundsPerTeam).toBe(2);
     expect(hook.result.current.error).toMatch(/whole number from 1 to 99/i);
+  });
+
+  test.each([
+    { teamCount: 4, expectedRounds: 3, expectedGames: 6 },
+    { teamCount: 5, expectedRounds: 5, expectedGames: 10 },
+  ])(
+    'single round robin stops after one complete cycle for $teamCount teams',
+    async ({ teamCount, expectedRounds, expectedGames }) => {
+      const { hook } = await directorWithSetup(teamCount);
+      for (let index = 0; index < expectedRounds; index += 1) {
+        let result: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+        act(() => {
+          result = hook.result.current.generateSchedule({ seed: index + 1 });
+        });
+        expect(result?.generated).toBe(true);
+      }
+
+      const pairs = hook.result.current.state.scheduledGames
+        .filter((game) => !game.bye && game.rightTeamId)
+        .map((game) => [game.leftTeamId, game.rightTeamId].sort().join('|'));
+      expect(pairs).toHaveLength(expectedGames);
+      expect(new Set(pairs).size).toBe(expectedGames);
+
+      let extraRound: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+      act(() => {
+        extraRound = hook.result.current.generateSchedule({ seed: 99 });
+      });
+      expect(extraRound).toEqual({
+        generated: false,
+        conflicts: [
+          'This single round robin is complete; every active team has played every other team once.',
+        ],
+      });
+      expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({
+        supported: false,
+        terminal: true,
+        reason: 'format-complete',
+      });
+    },
+  );
+
+  test('an explicitly extended single round robin repeats complete cycles', async () => {
+    const { hook } = await directorWithSetup(4);
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 6 })).toBe(true);
+    });
+
+    for (let index = 0; index < 6; index += 1) {
+      let result: ReturnType<typeof hook.result.current.generateSchedule> | undefined;
+      act(() => {
+        result = hook.result.current.generateSchedule({ seed: 11 });
+      });
+      expect(result?.generated).toBe(true);
+    }
+    const pairingsByRound = hook.result.current.state.rounds.map((round) =>
+      hook.result.current.state.scheduledGames
+        .filter((game) => game.roundId === round.id && !game.bye)
+        .map((game) => [game.leftTeamId, game.rightTeamId].sort().join('|'))
+        .sort(),
+    );
+    expect(pairingsByRound.slice(3)).toEqual(pairingsByRound.slice(0, 3));
   });
 
   test('double round robin repeats its first rotation once and then stops', async () => {
@@ -3390,6 +3459,9 @@ describe('Director integration hardening', () => {
 
   test('start and low-level release both recheck packet reuse', async () => {
     const { hook } = await directorWithSetup(2);
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+    });
     act(() => hook.result.current.generateSchedule({ roundName: 'Round 1' }));
     const firstRound = hook.result.current.state.rounds[0];
     if (!firstRound) throw new Error('test setup did not generate Round 1');

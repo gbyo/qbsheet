@@ -205,7 +205,10 @@ describe('Director tournament-critical regressions', () => {
 
   test('QBTCP applies matching progress, remains idempotent, rejects older progress, and protects an occupied room', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
     const round = hook.result.current.state.rounds[0];
     const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -337,7 +340,10 @@ describe('Director tournament-critical regressions', () => {
 
   test('a resumable abandoned session cannot free an unresolved room, but cancellation releases it', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true);
+    });
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -391,11 +397,12 @@ describe('Director tournament-critical regressions', () => {
 
   test('a paired session keeps its released game room-reserved until that game is resolved', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() =>
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
       expect(
         hook.result.current.generateSchedule({ roundName: 'Round 1', deliveryMode: 'manual' }).generated,
-      ).toBe(true),
-    );
+      ).toBe(true);
+    });
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
