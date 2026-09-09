@@ -1421,7 +1421,6 @@ kbd,
   margin-bottom: var(--director-space-2);
 }
 
-
 /* Smooth shared selection state for segmented peer views. */
 .director-segmented {
   position: relative;

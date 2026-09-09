@@ -246,11 +246,7 @@ export function RoomsView({
         ]}
       />
 
-      <div
-        key={view}
-        className="director-logistics-view"
-        data-direction={viewDirection ?? undefined}
-      >
+      <div key={view} className="director-logistics-view" data-direction={viewDirection ?? undefined}>
         {view === 'rooms' && (
           <RoomsLogisticsView
             state={state}

@@ -68,7 +68,6 @@ function openAddStaff(): void {
   fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
 }
 
-
 describe('logistics view motion', () => {
   test('tracks forward and backward direction without changing pressed-button semantics', () => {
     renderRooms();
