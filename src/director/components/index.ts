@@ -81,6 +81,8 @@ export {
   TextArea,
   TextInput,
   TimeField,
+  DirtyFormProvider,
+  useDirtyForms,
   useFormState,
 } from './Fields';
 export { FilterBar, SearchField, TabPanel, Tabs, Toolbar, useFilterState, useTextFilter } from './Filters';
