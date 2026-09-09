@@ -22,6 +22,7 @@ import {
   roomHasUnresolvedWork,
   resolveDirectorBracket,
   roomIsAssignable,
+  resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -3796,6 +3797,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Every game must have an accepted result or be cancelled before the round closes.');
         return false;
       }
+      const invalidCanonical = snapshot.scheduledGames
+        .filter((game) => game.roundId === roundId && !game.bye)
+        .map((game) => {
+          const result = canonicalAcceptedGame(snapshot, game.id);
+          return result
+            ? resultDecisionIssue(snapshot, game, result.scores, { forfeitedTeamId: result.forfeitedTeamId })
+            : null;
+        })
+        .find((issue) => issue !== null);
+      if (invalidCanonical) {
+        setError(invalidCanonical.message);
+        return false;
+      }
       return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
         if (!target || target.status !== 'released') return;
@@ -4498,6 +4512,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         const correctedScore = correctedScores.find((entry) => entry.teamId === adjustment.teamId);
         if (!correctedScore) return false;
         correctedScore.score += adjustment.delta;
+        const scheduled = snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
+        const decisionIssue = scheduled ? resultDecisionIssue(snapshot, scheduled, correctedScores) : null;
+        if (decisionIssue) {
+          setError(decisionIssue.message);
+          return false;
+        }
         const correctionIssue = planBracketCorrection(snapshot, game.id, correctedScores).issue;
         if (correctionIssue) {
           setError(correctionIssue);
@@ -6254,6 +6274,8 @@ function validateResultForScheduledGame(
     const invalidCountField = invalidTeamGameScoreCountField(score);
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
+  const decisionIssue = resultDecisionIssue(state, scheduled, scores);
+  if (decisionIssue) return decisionIssue.message;
   if (!Array.isArray(playerStats)) return 'Detailed player statistics must be an array when supplied.';
   const playerIds = new Set<string>();
   for (const stat of playerStats) {
@@ -6365,6 +6387,7 @@ function applyAcceptedResultCorrection(
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
   if (!scheduled || scheduled.bye || canonicalAcceptedGame(state, scheduled.id)?.id !== gameId)
     return undefined;
+  if (resultDecisionIssue(state, scheduled, scores)) return undefined;
   const bracketPlan = planBracketCorrection(state, gameId, scores);
   if (bracketPlan.issue) return undefined;
   const previous = structuredClone(game);
