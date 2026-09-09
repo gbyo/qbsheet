@@ -212,7 +212,9 @@ export function buildReportPresentation({
         pointValues,
       };
     });
-  const tossupCounts = [...new Set(definitions.map((definition) => definition.tossupCount).filter((count) => count > 0))];
+  const tossupCounts = [
+    ...new Set(definitions.map((definition) => definition.tossupCount).filter((count) => count > 0)),
+  ];
   const mixedAnswerValues = answerColumns.some((column) => column.pointValues.length > 1);
   const mixedDenominators = tossupCounts.length > 1;
   const mixedDefinitionNote =
@@ -259,9 +261,27 @@ export function semanticAnswerCounts(row: {
   };
 }
 
-export function answerCount(row: { answerCounts?: ReportAnswerCounts }, key: ReportAnswerKey): number | null {
-  const value = row.answerCounts?.[key];
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+export function answerCount(
+  row: {
+    answerCounts?: ReportAnswerCounts;
+    superpowers?: number | null;
+    powers?: number | null;
+    gets?: number | null;
+    negs?: number | null;
+  },
+  key: ReportAnswerKey,
+): number | null {
+  const dynamic = row.answerCounts?.[key];
+  if (typeof dynamic === 'number' && Number.isFinite(dynamic)) return dynamic;
+  const legacy =
+    key === 'superpower'
+      ? row.superpowers
+      : key === 'power'
+        ? row.powers
+        : key === 'get'
+          ? row.gets
+          : row.negs;
+  return typeof legacy === 'number' && Number.isFinite(legacy) ? legacy : null;
 }
 
 export function pointsPerX(pptuh: number | null | undefined, tossups: number | null | undefined): number | null {
@@ -279,25 +299,51 @@ export function reportPercent(value: number | null | undefined, digits = 1): str
   return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : reportUnknown;
 }
 
-export function reportPresentationOf(snapshot: StatsSnapshot): ReportPresentation {
-  return (
-    snapshot.presentation ?? {
-      metadata: {
-        tournamentName: snapshot.tournament.name,
-        scopeLabel: typeof snapshot.extensions?.scopeLabel === 'string' ? snapshot.extensions.scopeLabel : 'Overall',
-        generatedAt: snapshot.generatedAt,
-      },
-      options: { ...defaultReportOptions, pages: [...reportPageOrder] },
-      answerColumns: [
-        { key: 'power', label: 'Power', shortLabel: 'Power', role: 'positive', pointValue: null, pointValues: [] },
-        { key: 'get', label: 'Get', shortLabel: 'Get', role: 'positive', pointValue: null, pointValues: [] },
-        { key: 'neg', label: 'Neg', shortLabel: 'Neg', role: 'negative', pointValue: null, pointValues: [] },
-      ],
-      pointsNormalization: null,
-      applicability: { bonuses: true, bouncebacks: false, lightning: false, overtime: false, packet: false, stage: false },
-      precision: { percentage: 1, ppg: 1, rate: 2, ppb: 2 },
-    }
+function legacyPresentation(snapshot: StatsSnapshot): ReportPresentation {
+  const hasSuperpowers =
+    snapshot.teams.some((row) => row.superpowers > 0) ||
+    snapshot.players.some((row) => row.superpowers > 0) ||
+    snapshot.games.some(
+      (game) =>
+        (game.teamStats ?? []).some((row) => (row.superpowers ?? 0) > 0) ||
+        (game.playerStats ?? []).some((row) => (row.superpowers ?? 0) > 0),
+    );
+  const phaseIds = new Set(
+    snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)),
   );
+  const answerColumns: ReportAnswerColumn[] = [
+    ...(hasSuperpowers
+      ? [{ key: 'superpower' as const, label: 'Superpower', shortLabel: 'Super', role: 'positive' as const, pointValue: null, pointValues: [] }]
+      : []),
+    { key: 'power', label: 'Power', shortLabel: 'Power', role: 'positive', pointValue: null, pointValues: [] },
+    { key: 'get', label: 'Get', shortLabel: 'Get', role: 'positive', pointValue: null, pointValues: [] },
+    { key: 'neg', label: 'Neg', shortLabel: 'Neg', role: 'negative', pointValue: null, pointValues: [] },
+  ];
+  return {
+    metadata: {
+      tournamentName: snapshot.tournament.name,
+      scopeLabel: typeof snapshot.extensions?.scopeLabel === 'string' ? snapshot.extensions.scopeLabel : 'Overall',
+      generatedAt: snapshot.generatedAt,
+    },
+    options: { ...defaultReportOptions, pages: [...reportPageOrder] },
+    answerColumns,
+    pointsNormalization: null,
+    applicability: {
+      bonuses: true,
+      bouncebacks: snapshot.games.some((game) =>
+        (game.teamStats ?? []).some((row) => typeof row.bouncebacks === 'number' && row.bouncebacks > 0),
+      ),
+      lightning: false,
+      overtime: snapshot.games.some((game) => typeof game.overtimeTossupsRead === 'number'),
+      packet: snapshot.games.some((game) => Boolean(game.packetName)),
+      stage: phaseIds.size > 1,
+    },
+    precision: { percentage: 1, ppg: 1, rate: 2, ppb: 2 },
+  };
+}
+
+export function reportPresentationOf(snapshot: StatsSnapshot): ReportPresentation {
+  return snapshot.presentation ?? legacyPresentation(snapshot);
 }
 
 declare module './stats.js' {
