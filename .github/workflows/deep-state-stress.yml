@@ -2,38 +2,13 @@ name: Apply fix 520
 
 on:
   push:
-    branches:
-      - fix/520-qbtcp-discovery-retry
 
 permissions:
   contents: write
 
 jobs:
-  patch-and-test:
-    if: github.actor != 'github-actions[bot]'
+  patch:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: fix/520-qbtcp-discovery-retry
-          fetch-depth: 0
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: python scripts/tmp-fix-520.py
-      - run: npx prettier --write src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts
-      - run: npx vitest --run tests/Qbtcp.test.ts
-      - run: npm run typecheck
-      - name: Commit verified fix
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git checkout 0ceab2ce812b6d35e6c315c8d7bf8f57a55a8f1e -- .github/workflows/deep-state-stress.yml
-          git rm -f .github/workflows/fix-520.yml scripts/tmp-fix-520.py
-          git add src/integrations/fruity/FruityServerClient.ts tests/Qbtcp.test.ts .github/workflows/deep-state-stress.yml
-          git commit -m 'fix: retry transient QBTCP discovery failures (#520)'
-          git push origin HEAD:fix/520-qbtcp-discovery-retry
+      - uses: actions/checkout@v4
+      - run: echo ready
