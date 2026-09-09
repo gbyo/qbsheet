@@ -2914,8 +2914,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         (changes.scorekeeperId !== undefined && changes.scorekeeperId !== current.scorekeeperId) ||
         (changes.equipmentId !== undefined && changes.equipmentId !== current.equipmentId) ||
         (changes.defaultEquipmentIds !== undefined &&
-          changes.defaultEquipmentIds.join('\u001f') !==
-            roomDefaultEquipmentIds(current).join('\u001f'));
+          changes.defaultEquipmentIds.join('\u001f') !== roomDefaultEquipmentIds(current).join('\u001f'));
       if (assignmentVisibleChange) {
         const assignmentBlocker = assignmentEditBlocker(stateRef.current, { kind: 'room', id: roomId });
         if (assignmentBlocker) {

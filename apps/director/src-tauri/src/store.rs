@@ -2112,7 +2112,9 @@ fn add_column_if_missing(
         |row| row.get(0),
     )?;
     if present == 0 {
-        transaction.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))?;
+        transaction.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+        ))?;
     }
     Ok(())
 }

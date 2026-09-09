@@ -534,9 +534,7 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       ...(room.scorekeeperId ? { scorekeeperId: room.scorekeeperId } : {}),
       // The interchange format has always allowed several resources per room; Director now keeps
       // several too, so this stops truncating to the first one.
-      ...(roomDefaultEquipmentIds(room).length > 0
-        ? { equipmentIds: roomDefaultEquipmentIds(room) }
-        : {}),
+      ...(roomDefaultEquipmentIds(room).length > 0 ? { equipmentIds: roomDefaultEquipmentIds(room) } : {}),
       available: room.available,
     })),
     staff: state.staff.map((member) => ({

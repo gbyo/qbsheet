@@ -281,9 +281,7 @@ export function OperationalRoomSummary({
           {!matchup && <span> · No game {context.roundName ? `in ${context.roundName}` : 'assigned'}</span>}
           {view.moderator && <span> · {view.moderator.name} · Moderator</span>}
           {view.scorekeeper && <span> · {view.scorekeeper.name} · Scorekeeper</span>}
-          {view.equipment.length > 0 && (
-            <span> · {view.equipment.map((item) => item.name).join(', ')}</span>
-          )}
+          {view.equipment.length > 0 && <span> · {view.equipment.map((item) => item.name).join(', ')}</span>}
           {connection && <span> · {connection}</span>}
           {nextMatchup && view.nextRound && (
             <span>
@@ -508,11 +506,7 @@ export function OperationalEquipmentSummary({
         <StateLabel
           state={view.blockers.length > 0 ? 'blocked' : equipment.available ? 'available' : 'offline'}
           label={
-            view.blockers.length > 0
-              ? 'Needs a decision'
-              : equipment.available
-                ? 'Available'
-                : 'Unavailable'
+            view.blockers.length > 0 ? 'Needs a decision' : equipment.available ? 'Available' : 'Unavailable'
           }
         />
       }
@@ -542,9 +536,7 @@ export function OperationalEquipmentSummary({
                   if (controller.updateEquipment(equipment.id, { available: true })) {
                     onAnnounce(`${equipment.name} marked available for future assignment.`);
                   } else {
-                    onAnnounce(
-                      errorNotice(`${equipment.name} was not changed; review the Director error.`),
-                    );
+                    onAnnounce(errorNotice(`${equipment.name} was not changed; review the Director error.`));
                   }
                 }}
               >
@@ -599,9 +591,8 @@ export function DutyPanel({
           const options = eligible(role);
           if (options.length === 0) return null;
           const assigned =
-            state.operationalAssignments.find(
-              (entry) => entry.roundId === roundId && entry.kind === kind,
-            )?.staffIds ?? [];
+            state.operationalAssignments.find((entry) => entry.roundId === roundId && entry.kind === kind)
+              ?.staffIds ?? [];
           return (
             <Field key={kind} label={label} optional>
               <MultiSelect
@@ -665,8 +656,8 @@ export function PrepareOperationsPanel({
     if (!roundId || context.repairable) return null;
     return (
       <Callout tone="info" title={`${context.roundName ?? 'This round'} is already under way`}>
-        Released and closed rounds are changed through the explicit recovery actions on Tournament
-        day, so a moved game cannot split scorer state.
+        Released and closed rounds are changed through the explicit recovery actions on Tournament day, so a
+        moved game cannot split scorer state.
       </Callout>
     );
   }
@@ -960,9 +951,7 @@ export function ResourceImpactDialog({
         `${impact.resourceName} marked unavailable and ${impact.repairable.length} future assignment(s) reassigned.`,
       );
     } else {
-      onAnnounce(
-        errorNotice(`${impact.resourceName} was marked unavailable, but the repair did not run.`),
-      );
+      onAnnounce(errorNotice(`${impact.resourceName} was marked unavailable, but the repair did not run.`));
     }
     onClose();
   };
@@ -1008,8 +997,8 @@ export function ResourceImpactDialog({
       </Callout>
       {impact.lockedRoundIds.length > 0 && (
         <p>
-          {impact.lockedRoundIds.length} round(s) are already released or in progress. Those
-          assignments are left alone — change them with the recovery actions on Tournament day.
+          {impact.lockedRoundIds.length} round(s) are already released or in progress. Those assignments are
+          left alone — change them with the recovery actions on Tournament day.
         </p>
       )}
     </Dialog>

@@ -103,11 +103,7 @@ export function assignmentChangeBlocker(
   if (changes.moderatorId !== undefined && moderatorBlocker) return moderatorBlocker;
   const scorekeeperBlocker = roleBlocker(changes.scorekeeperId, 'scorekeeper');
   if (changes.scorekeeperId !== undefined && scorekeeperBlocker) return scorekeeperBlocker;
-  if (
-    changes.moderatorId &&
-    changes.scorekeeperId &&
-    changes.moderatorId === changes.scorekeeperId
-  ) {
+  if (changes.moderatorId && changes.scorekeeperId && changes.moderatorId === changes.scorekeeperId) {
     return 'One person cannot moderate and score the same game.';
   }
 
@@ -336,6 +332,9 @@ export function applyRoundPlans(
 export function roundHasMovableGames(state: DirectorState, roundId: DirectorId): boolean {
   return state.scheduledGames.some(
     (game) =>
-      game.roundId === roundId && !game.bye && game.status !== 'cancelled' && gameIsAutoRepairable(state, game),
+      game.roundId === roundId &&
+      !game.bye &&
+      game.status !== 'cancelled' &&
+      gameIsAutoRepairable(state, game),
   );
 }

@@ -50,14 +50,7 @@ import {
  * most urgent state that applies rather than the most recent event to touch the room.
  */
 export type OperationalReadiness =
-  | 'blocked'
-  | 'help'
-  | 'offline'
-  | 'awaiting-result'
-  | 'playing'
-  | 'connected'
-  | 'assigned'
-  | 'ready';
+  'blocked' | 'help' | 'offline' | 'awaiting-result' | 'playing' | 'connected' | 'assigned' | 'ready';
 
 const readinessRank: Record<OperationalReadiness, number> = {
   blocked: 0,
@@ -355,7 +348,7 @@ export function storedAssignmentForGame(
   scheduledGameId: DirectorId,
 ): OperationalAssignment | null {
   return (
-    state.operationalAssignments.find(
+    (state.operationalAssignments ?? []).find(
       (entry) => entry.kind === 'room' && entry.scheduledGameId === scheduledGameId,
     ) ?? null
   );
@@ -368,10 +361,7 @@ export function storedAssignmentForGame(
  * written before assignment records looks like, and what a director who never opens Operations
  * keeps looking like.
  */
-export function effectiveAssignmentForGame(
-  state: DirectorState,
-  game: ScheduledGame,
-): EffectiveAssignment {
+export function effectiveAssignmentForGame(state: DirectorState, game: ScheduledGame): EffectiveAssignment {
   const stored = storedAssignmentForGame(state, game.id);
   if (stored) {
     // The schedule row stays authoritative for *where* a released game is: recovery moves write
@@ -404,7 +394,7 @@ export function roundAssignments(state: DirectorState, roundId: DirectorId): Eff
 
 /** Non-room duties (runner, HQ) recorded for a round. */
 export function roundDutyAssignments(state: DirectorState, roundId: DirectorId): OperationalAssignment[] {
-  return state.operationalAssignments.filter(
+  return (state.operationalAssignments ?? []).filter(
     (entry) => entry.roundId === roundId && entry.kind !== 'room',
   );
 }
@@ -502,9 +492,7 @@ export function deriveOperationalRoom(
   const game = scopedRound
     ? gameInRound(scopedRound)
     : (unresolvedGameInRoom(state, roomId) ?? gameInRound(currentOperationsRound(state)));
-  const round = game
-    ? (state.rounds.find((entry) => entry.id === game.roundId) ?? scopedRound)
-    : scopedRound;
+  const round = game ? (state.rounds.find((entry) => entry.id === game.roundId) ?? scopedRound) : scopedRound;
 
   const assignment = game ? effectiveAssignmentForGame(state, game) : null;
   const moderator = assignment?.moderatorId
@@ -538,9 +526,7 @@ export function deriveOperationalRoom(
       }))
       .filter((entry) => entry.index > referenceIndex)
       .sort((left, right) => left.index - right.index)[0]?.game ?? null;
-  const nextRound = nextGame
-    ? (state.rounds.find((entry) => entry.id === nextGame.roundId) ?? null)
-    : null;
+  const nextRound = nextGame ? (state.rounds.find((entry) => entry.id === nextGame.roundId) ?? null) : null;
 
   const hasUnresolvedWork = roomHasUnresolvedWork(state, roomId);
   const assignable = room.available && !hasUnresolvedWork;
@@ -830,9 +816,7 @@ export function deriveOperationalStaff(
     }
     for (const duty of roundDutyAssignments(state, round.id)) {
       if (!(duty.staffIds ?? []).includes(staffId)) continue;
-      duties.push(
-        dutyForAssignment(state, round, fromRecord(duty), duty.kind === 'hq' ? 'hq' : 'runner'),
-      );
+      duties.push(dutyForAssignment(state, round, fromRecord(duty), duty.kind === 'hq' ? 'hq' : 'runner'));
     }
   }
 
@@ -845,8 +829,7 @@ export function deriveOperationalStaff(
       .filter((duty) => indexOf(duty) > currentIndex)
       .sort((left, right) => indexOf(left) - indexOf(right))[0] ?? null;
 
-  const session =
-    state.qbtcpSessions.find((entry) => staffForSession(state, entry)?.id === staffId) ?? null;
+  const session = state.qbtcpSessions.find((entry) => staffForSession(state, entry)?.id === staffId) ?? null;
 
   const blockers: OperationalIssue[] = [];
   const warnings: OperationalIssue[] = [];
@@ -955,8 +938,9 @@ export function deriveOperationalEquipment(
   const indexOf = (use: EquipmentUseView) => roundOrder.findIndex((entry) => entry.id === use.round.id);
   const current = uses.find((use) => indexOf(use) === currentIndex) ?? null;
   const next =
-    uses.filter((use) => indexOf(use) > currentIndex).sort((left, right) => indexOf(left) - indexOf(right))[0] ??
-    null;
+    uses
+      .filter((use) => indexOf(use) > currentIndex)
+      .sort((left, right) => indexOf(left) - indexOf(right))[0] ?? null;
 
   const blockers: OperationalIssue[] = [];
   const target: OperationalTarget = { entityType: 'equipment', entityId: equipment.id };
@@ -1072,8 +1056,7 @@ export function deriveRoundOperations(state: DirectorState, roundId?: DirectorId
   const gamesWithRooms = assignments.filter((assignment) => Boolean(assignment.roomId)).length;
   const staffPositionsRequired = games.length * 2;
   const staffPositionsFilled = assignments.reduce(
-    (total, assignment) =>
-      total + (assignment.moderatorId ? 1 : 0) + (assignment.scorekeeperId ? 1 : 0),
+    (total, assignment) => total + (assignment.moderatorId ? 1 : 0) + (assignment.scorekeeperId ? 1 : 0),
     0,
   );
   const scorekeepersExpected = assignments.filter((assignment) => Boolean(assignment.scorekeeperId)).length;

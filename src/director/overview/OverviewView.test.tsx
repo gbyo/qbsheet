@@ -65,6 +65,7 @@ test('teams that have not played are left out of a leaderboard that has real res
 
 test('next-round readiness uses canonical operations data and deep-links its first bottleneck', () => {
   const state = tournamentState();
+  state.rounds[0]!.dayOrder = 1;
   state.teams.push(
     team('team-a', 'Aiken'),
     team('team-b', 'Lakeside'),

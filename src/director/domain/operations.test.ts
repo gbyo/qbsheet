@@ -76,7 +76,9 @@ export function operationsFixture(): DirectorState {
     game('game-2b', 'round-2', 'team-2', 'team-4', null),
   ];
   state.operationalAssignments = [
-    assignment('assignment-1a', 'round-1', 'game-1a', 'room-201', 'staff-alice', 'staff-bob', ['equipment-1']),
+    assignment('assignment-1a', 'round-1', 'game-1a', 'room-201', 'staff-alice', 'staff-bob', [
+      'equipment-1',
+    ]),
     assignment('assignment-1b', 'round-1', 'game-1b', 'room-202', 'staff-cara', 'staff-dan', ['equipment-2']),
   ];
   return state;
@@ -357,9 +359,7 @@ describe('QBTCP staff identity', () => {
     state.qbtcpSessions = [session({ roomId: 'room-201', staffId: 'staff-dan' })];
     const view = deriveOperationalRoom(state, 'room-201');
     const warning = view?.warnings.find((issue) => issue.id === 'scorer-mismatch-room-201');
-    expect(warning?.message).toBe(
-      'Dan Lee is connected to Room 201, but Bob Smith is assigned to score it.',
-    );
+    expect(warning?.message).toBe('Dan Lee is connected to Room 201, but Bob Smith is assigned to score it.');
     expect(view?.readiness).toBe('connected');
   });
 

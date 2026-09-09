@@ -594,7 +594,9 @@ export function resourceUnavailabilityImpact(
         ? state.scheduledGames.find((entry) => entry.id === assignment.scheduledGameId)
         : undefined;
       if (!game) continue;
-      const room = assignment.roomId ? state.rooms.find((entry) => entry.id === assignment.roomId) : undefined;
+      const room = assignment.roomId
+        ? state.rooms.find((entry) => entry.id === assignment.roomId)
+        : undefined;
       const locked = !repairableRound || !gameIsAutoRepairable(state, game);
       const record = (slot: AffectedAssignment['slot']) => {
         affected.push({

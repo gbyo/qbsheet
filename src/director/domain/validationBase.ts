@@ -570,9 +570,7 @@ export function roomDefaultConflicts(
   state: DirectorState,
   reported: readonly PreflightIssue[] = [],
 ): PreflightIssue[] {
-  const alreadyReported = new Set(
-    reported.flatMap((issue) => (issue.entity ? [issue.entity.entityId] : [])),
-  );
+  const alreadyReported = new Set(reported.flatMap((issue) => (issue.entity ? [issue.entity.entityId] : [])));
   const issues: PreflightIssue[] = [];
   const seen = new Set<string>();
   const push = (issue: PreflightIssue) => {
