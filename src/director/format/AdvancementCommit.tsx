@@ -82,15 +82,15 @@ export function AdvancementCommit({
     return ids;
   }, [preview.wildcards, cutoffDecisions]);
   const proposal = useMemo(() => {
-    const next: Record<string, string> = {};
+    const next: Record<string, string | undefined> = {};
     selectedTeams.forEach((team, index) => {
       const pool = targetPools.length > 0 ? targetPools[index % targetPools.length] : undefined;
-      if (pool) next[team.id] = moves[team.id] ?? pool.id;
+      next[team.id] = pool ? (moves[team.id] ?? pool.id) : undefined;
     });
     return next;
   }, [selectedTeams, targetPools, moves]);
 
-  if (targets.length === 0 || !target || targetPools.length === 0) return null;
+  if (targets.length === 0 || !target) return null;
 
   const previewQualifierIds = new Set(preview.qualifiers.map((team) => team.id));
   const movedOutside = selectedTeams
@@ -186,27 +186,41 @@ export function AdvancementCommit({
         </div>
       ))}
       <div className="director-stack director-stack-tight">
-        {targetPools.map((pool) => (
-          <div className="director-inset" key={pool.id}>
-            <h4>{pool.name}</h4>
+        {targetPools.length > 0 ? (
+          targetPools.map((pool) => (
+            <div className="director-inset" key={pool.id}>
+              <h4>{pool.name}</h4>
+              <ul className="director-compact-list">
+                {(byPool.get(pool.id) ?? []).map((team, index) => (
+                  <li key={team.id}>
+                    <span>
+                      {index + 1}. {team.displayName}
+                      {wildcardIds.has(team.id) ? ' (wildcard)' : ''}
+                    </span>
+                    <Select
+                      ariaLabel={`Place ${team.displayName} in`}
+                      value={proposal[team.id] ?? pool.id}
+                      options={targetPools.map((option) => ({ value: option.id, label: option.name }))}
+                      onChange={(value) => setMoves((current) => ({ ...current, [team.id]: value }))}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        ) : (
+          <div className="director-inset">
+            <h4>{target.name} field</h4>
             <ul className="director-compact-list">
-              {(byPool.get(pool.id) ?? []).map((team, index) => (
+              {preview.qualifiers.map((team, index) => (
                 <li key={team.id}>
-                  <span>
-                    {index + 1}. {team.displayName}
-                    {wildcardIds.has(team.id) ? ' (wildcard)' : ''}
-                  </span>
-                  <Select
-                    ariaLabel={`Place ${team.displayName} in`}
-                    value={proposal[team.id] ?? pool.id}
-                    options={targetPools.map((option) => ({ value: option.id, label: option.name }))}
-                    onChange={(value) => setMoves((current) => ({ ...current, [team.id]: value }))}
-                  />
+                  {index + 1}. {team.displayName}
+                  {wildcardIds.has(team.id) ? ' (wildcard)' : ''}
                 </li>
               ))}
             </ul>
           </div>
-        ))}
+        )}
       </div>
       {(needsReason || reason !== '') && (
         <Field

@@ -67,6 +67,8 @@ export function migrateDirectorState(
       current = migrateV5ToV6(current);
     } else if (currentVersion === 6) {
       current = migrateV6ToV7(current);
+    } else if (currentVersion === 7) {
+      current = migrateV7ToV8(current);
     } else {
       throw new Error(`No Director migration exists for schema v${currentVersion}.`);
     }
@@ -148,6 +150,11 @@ function migrateV6ToV7(value: Record<string, unknown>): Record<string, unknown> 
   next.rounds = ordered.rounds;
   next.timeline = ordered.timeline;
   return next;
+}
+
+/** v8 records cancellation provenance so Restore can repair only drop-induced schedule changes. */
+function migrateV7ToV8(value: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(value);
 }
 
 function readVersion(value: Record<string, unknown>): number {
@@ -301,10 +308,28 @@ function normalizeRounds(value: unknown): DirectorState['rounds'] {
 }
 
 function normalizeScheduledGames(value: unknown): DirectorState['scheduledGames'] {
-  return arrayOrEmpty<DirectorState['scheduledGames'][number]>(value, 'scheduledGames').map((game) => ({
-    ...game,
-    scheduledStart: typeof game.scheduledStart === 'string' ? game.scheduledStart : null,
-  }));
+  return arrayOrEmpty<DirectorState['scheduledGames'][number]>(value, 'scheduledGames').map((game) => {
+    const cancellation = asRecord(game.cancellation);
+    const reasonKind = cancellation?.reasonKind;
+    return {
+      ...game,
+      scheduledStart: typeof game.scheduledStart === 'string' ? game.scheduledStart : null,
+      ...(cancellation &&
+      (reasonKind === 'team-dropped' || reasonKind === 'manual' || reasonKind === 'administrative') &&
+      typeof cancellation.reason === 'string' &&
+      typeof cancellation.at === 'string'
+        ? {
+            cancellation: {
+              reasonKind,
+              reason: cancellation.reason,
+              at: cancellation.at,
+              ...(typeof cancellation.teamId === 'string' ? { teamId: cancellation.teamId } : {}),
+              ...(typeof cancellation.auditId === 'string' ? { auditId: cancellation.auditId } : {}),
+            },
+          }
+        : {}),
+    };
+  });
 }
 
 function normalizeTournament(value: unknown): DirectorState['tournament'] {

@@ -19,6 +19,7 @@ test('a waitlisted roster is not offered a plan, and applying one keeps editable
     hook.result.current.createTournament({ name: 'Waitlist only', date: '', venue: '', organizer: '' });
     for (let index = 1; index <= 10; index++) hook.result.current.addTeam({ displayName: `Team ${index}` });
   });
+  await waitFor(() => expect(hook.result.current.canLeaveCurrentDocument().ok).toBe(true));
   // Waitlist status arrives through imports rather than the add form, so round-trip the document.
   const waitlisted = JSON.parse(hook.result.current.exportSnapshot()) as DirectorState;
   waitlisted.teams.forEach((team) => {
@@ -63,6 +64,7 @@ test('a mixed field plans and schedules confirmed teams without waitlisted membe
     hook.result.current.createTournament({ name: 'Mixed field', date: '', venue: '', organizer: '' });
     for (let index = 1; index <= 20; index++) hook.result.current.addTeam({ displayName: `Team ${index}` });
   });
+  await waitFor(() => expect(hook.result.current.canLeaveCurrentDocument().ok).toBe(true));
   const mixed = JSON.parse(hook.result.current.exportSnapshot()) as DirectorState;
   mixed.teams.slice(-2).forEach((team) => {
     team.status = 'waitlist';

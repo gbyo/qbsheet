@@ -55,6 +55,7 @@ function game(
   id: string,
   left: { team: string; score: number; superpowers: number },
   right: { team: string; score: number; superpowers: number },
+  overrides: Partial<GameRecord> = {},
 ): GameRecord {
   return {
     id,
@@ -99,6 +100,7 @@ function game(
       },
     ],
     source: 'manual',
+    ...overrides,
   };
 }
 
@@ -189,5 +191,63 @@ describe('superpower aggregation', () => {
     expect(
       playerPoints({ superpowers: 2, powers: 1, gets: 2, negs: 0, bonusPoints: 0 }, state.tournament?.rules),
     ).toBe(75);
+  });
+});
+
+describe('canonical competitive semantics', () => {
+  test('forfeit outcome wins head-to-head even when the stored score is tied', () => {
+    const state = statsState();
+    state.games = [
+      game(
+        'forfeit',
+        { team: 'a', score: 0, superpowers: 0 },
+        { team: 'b', score: 0, superpowers: 0 },
+        { status: 'forfeit', forfeitedTeamId: 'b' },
+      ),
+    ];
+
+    const standings = deriveTeamStandings(state, undefined, { tiebreakers: ['head-to-head'] });
+    expect(standings).toMatchObject([
+      { teamId: 'a', wins: 1, losses: 0, ties: 0, headToHead: 1 },
+      { teamId: 'b', wins: 0, losses: 1, ties: 0, headToHead: 0 },
+    ]);
+  });
+
+  test('known zero detail stays comparable while unknown detail is skipped before later criteria', () => {
+    const state = statsState();
+    state.teams.push({
+      id: 'c',
+      organizationId: null,
+      displayName: 'Cedar',
+      teamLetter: 'A',
+      seed: null,
+      status: 'confirmed',
+      createdAt: '',
+      updatedAt: '',
+    });
+    state.games = [
+      game('known', { team: 'a', score: 100, superpowers: 0 }, { team: 'c', score: 0, superpowers: 0 }),
+      game(
+        'unknown',
+        { team: 'b', score: 200, superpowers: 0 },
+        { team: 'c', score: 0, superpowers: 0 },
+        { detailedStats: 'unknown' },
+      ),
+    ];
+    for (const score of state.games[0]!.scores) score.powers = 0;
+    for (const score of state.games[1]!.scores) score.powers = 0;
+
+    const standings = deriveTeamStandings(state, undefined, {
+      tiebreakers: ['record', 'powers', 'points'],
+    });
+    expect(standings.slice(0, 2).map((standing) => standing.teamId)).toEqual(['b', 'a']);
+    expect(standings.find((standing) => standing.teamId === 'a')).toMatchObject({
+      powers: 0,
+      powersKnown: true,
+    });
+    expect(standings.find((standing) => standing.teamId === 'b')).toMatchObject({
+      powers: 0,
+      powersKnown: false,
+    });
   });
 });
