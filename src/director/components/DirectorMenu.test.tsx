@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
 import { DirectorMenu, getFloatingMenuPosition } from './DirectorMenu';
-import { MenuItem, MenuNote, MenuSectionLabel } from './Menu';
+import { ActionMenu, MenuItem, MenuNote, MenuSectionLabel } from './Menu';
 
 function Harness({
   items = ['Alpha', 'Bravo', 'Charlie'],
@@ -75,6 +75,24 @@ function search() {
 }
 
 describe('DirectorMenu', () => {
+  test('an ActionMenu trigger advertises and controls its listbox popup', () => {
+    render(
+      <ActionMenu label="Test actions">
+        <MenuItem onSelect={() => {}}>Alpha</MenuItem>
+      </ActionMenu>,
+    );
+
+    const trigger = screen.getByRole('button', { name: 'Test actions' });
+    expect(trigger).toHaveAttribute('aria-haspopup', 'listbox');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(trigger);
+
+    const listbox = screen.getByRole('listbox', { name: 'Test actions' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', listbox.id);
+  });
+
   test('positions a bottom menu and clamps its end edge to the viewport', () => {
     expect(
       getFloatingMenuPosition(

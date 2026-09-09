@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Command, useCommandState } from 'cmdk';
 import { DirectorMenu } from './DirectorMenu';
 import { Icon, type IconName } from './Icon';
@@ -56,7 +56,7 @@ export function ActionMenu({
 }) {
   const [open, setOpen] = useState(false);
   const openerRef = useRef<HTMLElement | null>(null);
-  const menuId = useId();
+  const [listboxId, setListboxId] = useState<string>();
   const close = useCallback(() => setOpen(false), []);
 
   /*
@@ -82,9 +82,9 @@ export function ActionMenu({
 
   const commonTriggerProps = {
     // The popover is a filter field over a listbox, not a menu — see `DirectorMenu`.
-    'aria-haspopup': 'dialog' as const,
+    'aria-haspopup': 'listbox' as const,
     'aria-expanded': open,
-    'aria-controls': open ? menuId : undefined,
+    'aria-controls': open ? listboxId : undefined,
     disabled,
     onClick: (event: React.MouseEvent<HTMLElement>) => {
       openerRef.current = event.currentTarget;
@@ -115,7 +115,7 @@ export function ActionMenu({
       {open && (
         <DirectorMenu
           label={label}
-          id={menuId}
+          onListboxId={setListboxId}
           className="director-menu"
           align={align}
           placement={placement}
