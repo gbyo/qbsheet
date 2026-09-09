@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { type DirectorState, type TeamGameScore } from '../src/director/domain';
 import { MemoryDirectorRepository, type DirectorRepository } from '../src/director/persistence';
-import { useDirectorController } from '../src/director/state/useDirectorController';
+import { useDirectorController, type DirectorController } from '../src/director/state/useDirectorController';
 
 const at = '2026-09-05T12:00:00.000Z';
 type TwoTeamScheduledGame = DirectorState['scheduledGames'][number] & { rightTeamId: string };
@@ -44,10 +44,23 @@ async function controllerForTwoTeams() {
   return { hook, scheduled: scheduled as TwoTeamScheduledGame };
 }
 
+function releaseRoundForResults(hook: { result: { current: DirectorController } }, roundId: string): void {
+  act(() => {
+    expect(hook.result.current.prepareRound(roundId)).toBe(true);
+  });
+  act(() => {
+    expect(hook.result.current.releaseRound(roundId)).toBe(true);
+  });
+}
+
 function stagedTie(state: DirectorState, scheduledGameId: string): DirectorState {
   const next = structuredClone(state);
   const scheduled = next.scheduledGames.find((game) => game.id === scheduledGameId);
   if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup produced no scheduled opponent');
+  const round = next.rounds.find((entry) => entry.id === scheduled.roundId);
+  if (!round) throw new Error('test setup produced no scheduled round');
+  round.status = 'released';
+  round.releasedAt = at;
   next.games.push({
     id: 'imported-tied-game',
     scheduledGameId,
@@ -78,6 +91,7 @@ describe('winner-required result decisions', () => {
 
   test('manual tied final is rejected without creating a game or submission', async () => {
     const { hook, scheduled } = await controllerForTwoTeams();
+    releaseRoundForResults(hook, scheduled.roundId);
     const before = structuredClone(hook.result.current.state);
 
     act(() => {
@@ -120,6 +134,7 @@ describe('winner-required result decisions', () => {
     act(() =>
       expect(hook.result.current.updateRules({ overtime: false, overtimeBonuses: false })).toBe(true),
     );
+    releaseRoundForResults(hook, scheduled.roundId);
     act(() => {
       expect(
         hook.result.current.addManualResult({
@@ -135,6 +150,7 @@ describe('winner-required result decisions', () => {
 
   test('correcting a decisive winner-required result to a tie is rejected atomically', async () => {
     const { hook, scheduled } = await controllerForTwoTeams();
+    releaseRoundForResults(hook, scheduled.roundId);
     act(() => {
       expect(
         hook.result.current.addManualResult({
