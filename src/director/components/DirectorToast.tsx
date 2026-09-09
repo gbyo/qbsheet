@@ -1,11 +1,7 @@
 import { Icon, type IconName } from './Icon';
 import { IconButton } from './Controls';
 import { labelForSection } from '../app/navigation';
-import {
-  toDirectorNotice,
-  type AnnounceInput,
-  type DirectorNoticeAction,
-} from '../notices';
+import { toDirectorNotice, type AnnounceInput, type DirectorNoticeAction } from '../notices';
 
 const toneIcons: Record<string, IconName> = {
   success: 'check',

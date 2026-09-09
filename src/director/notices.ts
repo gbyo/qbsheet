@@ -62,9 +62,7 @@ function inferredErrorAction(message: string): DirectorNoticeAction | undefined 
 /** An operation failure: error treatment, `role="alert"`, never a success/check icon. */
 export function errorNotice(message: string, action?: DirectorNoticeAction): DirectorNotice {
   const resolvedAction = action ?? inferredErrorAction(message);
-  return resolvedAction
-    ? { message, tone: 'error', action: resolvedAction }
-    : { message, tone: 'error' };
+  return resolvedAction ? { message, tone: 'error', action: resolvedAction } : { message, tone: 'error' };
 }
 
 /** Neutral state worth stating without celebrating or alarming. */
