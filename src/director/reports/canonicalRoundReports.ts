@@ -4,7 +4,7 @@ import {
   type RoundStatDefinition,
   type StatsSnapshot,
 } from '@qbsheet/tournament-formats';
-import type { DirectorState, GameRecord, TournamentRules } from '../domain';
+import type { DirectorState, GameRecord } from '../domain';
 import {
   buildCanonicalSnapshot,
   overallReportScope,
@@ -40,7 +40,9 @@ function parseRawQbj(value: unknown): UnknownRecord | null {
 function qbjObjects(value: unknown): UnknownRecord[] {
   const root = parseRawQbj(value);
   if (!root) return [];
-  const objects = Array.isArray(root.objects) ? root.objects.map(record).filter((entry): entry is UnknownRecord => entry !== null) : [];
+  const objects = Array.isArray(root.objects)
+    ? root.objects.map(record).filter((entry): entry is UnknownRecord => entry !== null)
+    : [];
   if (objects.length > 0) return objects;
   // A few external tools emit a match-only QBJ object rather than a document
   // wrapper. Accept it as source evidence without making renderers know that.
@@ -122,38 +124,24 @@ function qbjRoundDefinition(game: GameRecord): RoundStatDefinition | null {
 }
 
 /**
- * Legacy Director records created before #671 do not yet persist a per-game
- * definition reference. Keep the fallback explicit and stable in the report
- * DTO instead of pretending current tournament defaults are historical proof.
- * When #671 lands, this fallback can be replaced by the pinned game definition
- * without changing any round-stat formulas or HTML.
+ * A historical definition that cannot be proven stays unknown.
+ *
+ * In particular, this function never consults `state.tournament.rules`: those
+ * are defaults for future/unissued games and issue #686 explicitly forbids
+ * reinterpreting an accepted game with whatever defaults happen to be current
+ * at report-generation time. #671 can later supply a pinned/corrected or stable
+ * legacy-inferred definition at this one adapter boundary.
  */
-function legacyTournamentDefinition(rules: TournamentRules | undefined): RoundStatDefinition {
-  if (!rules) {
-    return {
-      regulationTossups: null,
-      regulationLengthFixed: null,
-      overtimeEnabled: null,
-      powers: null,
-      superpowers: null,
-      bonuses: null,
-      maximumBonusScore: null,
-      source: 'unknown',
-    };
-  }
+function unknownHistoricalDefinition(): RoundStatDefinition {
   return {
-    regulationTossups: rules.tossupCount > 0 ? rules.tossupCount : null,
-    regulationLengthFixed:
-      !rules.timed &&
-      (rules.maximumTossupCount === null || rules.maximumTossupCount === rules.tossupCount),
-    overtimeEnabled: rules.overtime,
-    powers: rules.powerValue !== null,
-    superpowers: rules.superpowerValue !== null,
-    bonuses: rules.useBonuses,
-    maximumBonusScore: rules.useBonuses
-      ? (rules.maximumBonusScore ?? rules.bonusValue * rules.bonusParts)
-      : null,
-    source: 'legacy-tournament',
+    regulationTossups: null,
+    regulationLengthFixed: null,
+    overtimeEnabled: null,
+    powers: null,
+    superpowers: null,
+    bonuses: null,
+    maximumBonusScore: null,
+    source: 'unknown',
   };
 }
 
@@ -169,11 +157,11 @@ function enrichGame(
     return {
       ...game,
       ...(phaseName ? { phaseName } : {}),
-      roundStatDefinition: legacyTournamentDefinition(state.tournament?.rules),
+      roundStatDefinition: unknownHistoricalDefinition(),
     };
   }
   const match = qbjMatchFacts(source);
-  const definition = qbjRoundDefinition(source) ?? legacyTournamentDefinition(state.tournament?.rules);
+  const definition = qbjRoundDefinition(source) ?? unknownHistoricalDefinition();
   return {
     ...game,
     ...(phaseName ? { phaseName } : {}),
