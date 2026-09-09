@@ -173,6 +173,7 @@ describe('creating a staff member', () => {
 describe('room operations visibility', () => {
   test('Available means ready for assignment, not merely marked available', () => {
     const state = tournamentState();
+    state.teams.push(team('team-a', 'Alpha'), team('team-b', 'Beta'));
     state.rooms.push(
       {
         id: 'room-ready',
@@ -186,12 +187,18 @@ describe('room operations visibility', () => {
       {
         id: 'room-live',
         name: 'Live room',
-        status: 'live',
+        // The persisted status deliberately disagrees with reality here. Occupancy is derived
+        // from the game and the scorer session, so a stale `status` cannot make a free room look
+        // busy, and the actual live game below is what makes this room unassignable.
+        status: 'available',
         moderatorId: null,
         scorekeeperId: null,
         equipmentId: null,
         available: true,
       },
+    );
+    state.scheduledGames.push(
+      scheduledGame('game-live', 'team-a', 'team-b', { roomId: 'room-live', status: 'live' }),
     );
 
     renderRooms(controllerWith(), state);
@@ -252,8 +259,9 @@ describe('room operations visibility', () => {
     // What a director scanning the list needs: the room, what it is doing now,
     // whether it can take the next round, and that it has asked for help.
     expect(screen.getByText(/Alpha vs Beta/)).toBeInTheDocument();
-    expect(screen.getByText(/Waiting for current work/)).toBeInTheDocument();
+    // Readiness is derived, and an open help request outranks everything else the room is doing.
     expect(screen.getByText('Needs help')).toBeInTheDocument();
+    expect(screen.getByText(/Morgan · Connected/)).toBeInTheDocument();
 
     // The connection telemetry is still there, one disclosure away, rather than
     // permanently occupying the row.

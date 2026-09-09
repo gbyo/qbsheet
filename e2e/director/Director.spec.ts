@@ -153,7 +153,7 @@ test('Director layout keeps dialog, table, status, and narrow-window contracts',
   expect(tableContract.lastCellPadding).toBeGreaterThanOrEqual(14);
   expect(['auto', '0px']).toContain(tableContract.minWidth);
 
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   await page.getByRole('button', { name: 'Add room' }).click();
   const roomForm = page.getByRole('dialog');
   await expect(roomForm.locator('.director-dialog-body')).toBeVisible();
@@ -222,7 +222,7 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByText('Northview A', { exact: true })).toBeVisible();
   await expect(page.getByText('Riverside A', { exact: true })).toBeVisible();
 
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   await page.getByRole('button', { name: 'Add room' }).click();
   await page.getByLabel('Room name').fill('Room 101');
   await submitDialog('Add room').click();
@@ -643,7 +643,7 @@ test('Director opens every indexed search entity at its exact operational target
   const footerButton = (name: string) =>
     page.getByRole('dialog').locator('.director-dialog-footer').getByRole('button', { name });
 
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   await page.getByRole('button', { name: 'Add room' }).click();
   await page.getByLabel('Room name').fill('Room 101');
   await footerButton('Add room').click();
@@ -796,7 +796,7 @@ test('Director keeps unavailable resources out of new room assignments', async (
    * panels stacked under the room table, and all three use the same dialog to
    * create and edit.
    */
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   await view(/^Staff/).click();
   await page.getByRole('button', { name: 'Add staff' }).click();
   await page.getByRole('dialog').getByLabel('Name').fill('Moderator One');
@@ -872,7 +872,7 @@ test('Director configures a pool format before generating its first round', asyn
     await footerButton('Add team').click();
   }
 
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   for (const room of ['Room 101', 'Room 102']) {
     await page.getByRole('button', { name: 'Add room' }).click();
     await page.getByLabel('Room name').fill(room);
@@ -960,7 +960,7 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await page.getByLabel('Packet name').fill('Morning packet');
   await footerButton('Add packet').click();
 
-  await goToSection(page, 'Rooms');
+  await goToSection(page, 'Operations');
   const roomNames = Array.from({ length: 5 }, (_, index) => `Main room ${index + 1}`);
   for (const roomName of roomNames) {
     await page.getByRole('button', { name: 'Add room' }).click();
