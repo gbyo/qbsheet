@@ -53,6 +53,39 @@ test('team filtering matches unaccented team, organization, and player searches 
   expect(state.players[0]!.name).toBe('José García');
 });
 
+test('Schools & clubs exposes a real list and the current organization selection', () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  const state = directorFixture();
+  state.organizations = [
+    { id: 'org-northview', name: 'Northview', shortName: '', notes: '' },
+    { id: 'org-riverside', name: 'Riverside', shortName: '', notes: '', archived: true },
+  ];
+  const controller = {
+    updateOrganization: vi.fn(() => true),
+    setOrganizationArchived: vi.fn(() => true),
+    addOrganization: vi.fn(() => true),
+  } as unknown as DirectorController;
+
+  render(<TeamsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Schools & clubs' }));
+
+  const dialog = screen.getByRole('dialog');
+  const list = within(dialog).getByRole('list', { name: 'Schools and clubs' });
+  const items = within(list).getAllByRole('listitem');
+  expect(items).toHaveLength(2);
+
+  const northview = within(items[0]).getByRole('button', { name: 'Northview' });
+  const riverside = within(items[1]).getByRole('button', { name: /Riverside/ });
+  expect(northview).toHaveAttribute('aria-current', 'true');
+  expect(riverside).not.toHaveAttribute('aria-current');
+
+  fireEvent.click(riverside);
+  expect(northview).not.toHaveAttribute('aria-current');
+  expect(riverside).toHaveAttribute('aria-current', 'true');
+});
+
 test('navigation opens a team repeatedly and pasted names preserve pending removals and unsaved drafts', async () => {
   HTMLDialogElement.prototype.showModal = function () {
     this.open = true;

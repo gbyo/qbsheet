@@ -856,23 +856,28 @@ function SchoolsDialog({
       <div className="director-organization-workspace">
         <div className="director-organization-list" role="list" aria-label="Schools and clubs">
           {state.organizations.length ? (
-            state.organizations.map((organization) => (
-              <button
-                key={organization.id}
-                type="button"
-                className="director-organization-list-item"
-                data-selected={organization.id === selectedId || undefined}
-                onClick={() => setSelectedId(organization.id)}
-              >
-                <strong>{organization.name}</strong>
-                {organization.archived && <StateLabel state="archived" label="Archived" />}
-              </button>
-            ))
+            state.organizations.map((organization) => {
+              const isSelected = organization.id === selectedId;
+              return (
+                <div key={organization.id} role="listitem">
+                  <button
+                    type="button"
+                    className="director-organization-list-item"
+                    data-selected={isSelected || undefined}
+                    aria-current={isSelected ? 'true' : undefined}
+                    onClick={() => setSelectedId(organization.id)}
+                  >
+                    <strong>{organization.name}</strong>
+                    {organization.archived && <StateLabel state="archived" label="Archived" />}
+                  </button>
+                </div>
+              );
+            })
           ) : (
             <p className="director-empty-copy">No schools or clubs yet.</p>
           )}
         </div>
-        <div>
+        <div className="director-organization-editor-pane">
           {selected ? (
             <OrganizationEditor
               key={selected.id}

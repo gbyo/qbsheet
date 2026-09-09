@@ -27,8 +27,114 @@
   text-align: right;
 }
 
+/* ---------------------------------------------------- Schools & clubs
+ *
+ * This dialog is a master/detail editor, not a collection of action chips.
+ * The organization list owns a stable navigation column while the selected
+ * organization's fields remain in the flexible pane beside it. */
+
+.director-organization-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr);
+  gap: var(--director-space-5);
+  align-items: start;
+  min-width: 0;
+}
+
+.director-organization-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  max-height: min(54vh, 480px);
+  padding-right: var(--director-space-5);
+  overflow-y: auto;
+  border-right: 1px solid var(--director-border-subtle);
+  scrollbar-gutter: stable;
+}
+
+.director-organization-list > [role='listitem'] {
+  min-width: 0;
+}
+
+.director-organization-list-item {
+  display: flex;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: var(--director-target-min);
+  padding: var(--director-space-2) var(--director-space-3);
+  color: var(--director-ink);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: var(--director-radius-sm);
+}
+
+.director-organization-list-item > strong {
+  flex: 1;
+  min-width: 0;
+  line-height: var(--director-leading-snug);
+  overflow-wrap: anywhere;
+}
+
+.director-organization-list-item .director-state,
+.director-organization-list-item .director-badge {
+  flex: none;
+}
+
+.director-organization-list-item:hover:not([data-selected='true']) {
+  background: var(--director-surface-hover);
+}
+
+.director-organization-list-item:focus-visible {
+  outline: var(--director-focus-outline);
+  outline-offset: var(--director-focus-offset);
+}
+
+.director-organization-list-item[data-selected='true'],
+.director-organization-list-item[aria-current='true'] {
+  color: var(--director-ink-strong);
+  background: var(--director-surface-selected);
+  box-shadow: inset 3px 0 0 var(--director-accent);
+}
+
+.director-organization-list-item[data-selected='true'] > strong,
+.director-organization-list-item[aria-current='true'] > strong {
+  font-weight: var(--director-weight-semibold);
+}
+
+.director-organization-editor-pane {
+  min-width: 0;
+}
+
+/* `OrganizationEditor` is a form, so the shared adjacent DialogSection rule
+ * cannot draw the separator before the sibling create-new section. Keep that
+ * secondary action visibly part of the same pane without turning it into a card. */
+.director-organization-editor-pane > .director-dialog-section {
+  padding-top: var(--director-space-5);
+  margin-top: var(--director-space-5);
+  border-top: 1px solid var(--director-border-subtle);
+}
+
 @media (max-width: 900px) {
   .director-roster-entry-row {
     grid-template-columns: 24px minmax(0, 1fr) auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .director-organization-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--director-space-4);
+  }
+
+  .director-organization-list {
+    max-height: 220px;
+    padding-right: 0;
+    padding-bottom: var(--director-space-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--director-border-subtle);
   }
 }
