@@ -52,16 +52,21 @@ function gameRows(
   games: readonly GameStatsRow[],
   presentation: ReportPresentation,
 ): string {
+  const gamesIncluded = presentation.options.pages.includes('games');
   return games
     .map((game) => {
       const stats = teamGameStats(game, row.teamId);
       const opponent = opponentFor(game, row.teamId);
+      const score = reportEscape(scoreText(game));
+      const scoreCell = gamesIncluded
+        ? `<a href="games.html#${reportGameAnchor(game)}">${score}</a>`
+        : score;
       return (
         `<tr><td>${reportEscape(game.roundName ?? game.roundId ?? 'Game')}</td>` +
         `${presentation.applicability.stage ? `<td>${reportEscape(game.phaseId ?? '—')}</td>` : ''}` +
         `<td><a href="teamdetail.html#${teamAnchorFor(snapshot, opponent.id)}">${reportEscape(opponent.name)}</a></td>` +
         `<td>${reportEscape(resultFor(game, row.teamId))}</td>` +
-        `<td class="num"><a href="games.html#${reportGameAnchor(game)}">${reportEscape(scoreText(game))}</a></td>` +
+        `<td class="num">${scoreCell}</td>` +
         `${stats ? reportAnswerCells(stats, presentation) : presentation.answerColumns.map(() => reportNumberCell(null)).join('')}` +
         `${reportNumberCell(stats?.tossupsHeard ?? null)}` +
         `${presentation.applicability.bonuses ? `${reportNumberCell(stats?.bonusesHeard ?? null)}${reportNumberCell(stats?.bonusPoints ?? null)}${reportNumberCell(stats?.ppb ?? null, presentation.precision.ppb)}` : ''}` +
@@ -87,17 +92,23 @@ function rosterTable(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
   const roster = snapshot.players.filter((player) => player.teamId === row.teamId);
   if (roster.length === 0) return '<p class="meta">No player statistics.</p>';
   const showGrade = roster.some((player) => typeof player.schoolYear === 'number');
+  const playerDetailIncluded = presentation.options.pages.includes('playerDetail');
   const body = roster
-    .map(
-      (player) =>
-        `<tr><td><a href="playerdetail.html#${reportPlayerAnchor(player)}">${reportEscape(player.playerName)}</a></td>` +
+    .map((player) => {
+      const name = reportEscape(player.playerName);
+      const playerCell = playerDetailIncluded
+        ? `<a href="playerdetail.html#${reportPlayerAnchor(player)}">${name}</a>`
+        : name;
+      return (
+        `<tr><td>${playerCell}</td>` +
         `${showGrade ? `<td class="num">${reportEscape(player.schoolYear ?? '—')}</td>` : ''}` +
         `<td class="num">${player.gamesPlayed}</td>${reportNumberCell(player.tossupsHeard)}` +
         `${reportAnswerCells(player, presentation)}` +
         `${reportNumberCell(player.points)}<td class="num">${reportEscape(reportPointsMetricValue(player, presentation))}</td>` +
         `${reportNumberCell(player.pptuh, presentation.precision.rate)}` +
-        `${presentation.applicability.bonuses ? reportNumberCell(player.bonusPoints) : ''}</tr>`,
-    )
+        `${presentation.applicability.bonuses ? reportNumberCell(player.bonusPoints) : ''}</tr>`
+      );
+    })
     .join('');
   return (
     `<div class="table-wrap"><table><thead><tr><th scope="col">Player</th>` +
