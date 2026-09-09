@@ -1420,3 +1420,41 @@ kbd,
 .director-checklist-search {
   margin-bottom: var(--director-space-2);
 }
+
+/* Smooth shared selection state for segmented peer views. */
+.director-segmented {
+  position: relative;
+  isolation: isolate;
+}
+
+.director-segmented-indicator {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  z-index: 0;
+  pointer-events: none;
+  background: var(--director-surface);
+  border-radius: var(--director-radius-sm);
+  box-shadow: var(--director-shadow-sm);
+  transition:
+    left 150ms var(--director-ease),
+    width 150ms var(--director-ease);
+}
+
+.director-segmented button {
+  position: relative;
+  z-index: 1;
+  transition: color var(--director-duration-fast) var(--director-ease);
+}
+
+.director-segmented button[aria-pressed='true'],
+.director-segmented button[aria-selected='true'] {
+  background: transparent;
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .director-segmented-indicator {
+    transition: none;
+  }
+}

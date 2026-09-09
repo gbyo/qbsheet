@@ -68,6 +68,21 @@ function openAddStaff(): void {
   fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
 }
 
+describe('logistics view motion', () => {
+  test('tracks forward and backward direction without changing pressed-button semantics', () => {
+    renderRooms();
+    expect(document.querySelector('.director-logistics-view')).not.toHaveAttribute('data-direction');
+
+    showView(/^Equipment/);
+    expect(document.querySelector('.director-logistics-view')).toHaveAttribute('data-direction', 'forward');
+    expect(screen.getByRole('button', { name: /^Equipment/ })).toHaveAttribute('aria-pressed', 'true');
+
+    showView(/^Staff/);
+    expect(document.querySelector('.director-logistics-view')).toHaveAttribute('data-direction', 'backward');
+    expect(screen.getByRole('button', { name: /^Staff/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+});
+
 describe('the three add forms are independent', () => {
   test('each entity type has its own form with its own fields', () => {
     renderRooms();
