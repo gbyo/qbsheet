@@ -43,11 +43,21 @@ jobs:
                   print(line[10:] if line.startswith('          ') else line)
           PY
           bash /tmp/apply-fix.sh
-      - name: Format changed TypeScript
-        shell: bash
-        run: |
-          FILES=$(git ls-files --modified --others --exclude-standard | grep -E '\.(ts|tsx)$' || true)
-          if [ -n "$FILES" ]; then npx prettier --write $FILES; fi
+          python <<'PY'
+          from pathlib import Path
+          path = Path('tests/DirectorDocumentTransitions.test.tsx')
+          text = path.read_text()
+          text = text.replace(
+              "async function setup() {\n  const repository = new FailingRepository();",
+              "let setupSequence = 0;\n\nasync function setup() {\n  const suffix = ++setupSequence;\n  const repository = new FailingRepository();",
+              1,
+          )
+          text = text.replace("first.tournament!.id = 'tournament-first';", "first.tournament!.id = `tournament-first-${suffix}`;", 1)
+          text = text.replace("second.tournament!.id = 'tournament-second';", "second.tournament!.id = `tournament-second-${suffix}`;", 1)
+          text = text.replace("expect(hook.result.current.state.tournament?.id).toBe('tournament-first');", "expect(hook.result.current.state.tournament?.id).toMatch(/^tournament-first-/);", 1)
+          path.write_text(text)
+          PY
+      - run: npx prettier --write src/director/state/useDirectorController.ts tests/DirectorDocumentTransitions.test.tsx
       - run: npx vitest --run tests/DirectorDocumentTransitions.test.tsx
       - run: npm run typecheck
       - name: Commit verified fix
