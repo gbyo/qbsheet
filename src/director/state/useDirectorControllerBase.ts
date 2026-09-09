@@ -21,6 +21,7 @@ import {
   tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  advancementBasisToken,
   roundCloseBlockers,
   roomAssignmentConflicts,
   roomAssignmentIsValid,
@@ -62,6 +63,7 @@ import {
   type TeamGameScore,
   type TournamentStatus,
 } from '../domain';
+import { advancementCommitBlocker } from './tournamentSafety';
 import {
   createDirectorRepository,
   normalizeDirectorState,
@@ -290,6 +292,8 @@ export interface CommitAdvancementInput {
   assignments: CommitAdvancementAssignment[];
   /** Required when any assigned team is not a preview qualifier. */
   reason?: string;
+  /** Optional token from the preview used by the UI; mismatches reject stale assignments. */
+  previewBasisToken?: string;
 }
 
 export interface CommitAdvancementResult {
@@ -3773,6 +3777,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (input.assignments.length === 0) {
         return fail('Assign at least one team before committing advancement.');
       }
+      const readinessBlocker = advancementCommitBlocker(snapshot, source.id);
+      if (readinessBlocker) return fail(readinessBlocker);
       const targetPoolIds = new Set(target.poolIds);
       const targetIsPooled = target.poolIds.length > 0;
       const seenTeams = new Set<DirectorId>();
@@ -3793,6 +3799,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
       }
       const preview = previewAdvancement(snapshot, source);
+      if (
+        input.previewBasisToken !== undefined &&
+        input.previewBasisToken !== advancementBasisToken(snapshot, source)
+      ) {
+        return fail(
+          'The source standings changed since this advancement preview. Refresh and review the assignments.',
+        );
+      }
       const qualifierIds = new Set(preview.qualifiers.map((team) => team.id));
       const overridden = input.assignments
         .map((assignment) => assignment.teamId)
@@ -3818,20 +3832,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
       commit((draft) => {
         const draftTarget = draft.phases.find((entry) => entry.id === input.targetPhaseId);
         if (!draftTarget) return;
-        const byPool = new Map<DirectorId, DirectorId[]>();
-        for (const assignment of input.assignments) {
-          if (!assignment.targetPoolId) continue;
-          const list = byPool.get(assignment.targetPoolId) ?? [];
-          list.push(assignment.teamId);
-          byPool.set(assignment.targetPoolId, list);
-        }
-        for (const [poolId, teamIds] of byPool) {
-          const pool = draft.pools.find((entry) => entry.id === poolId);
-          if (pool) pool.teamIds = teamIds;
-        }
         if (target.poolIds.length === 0) {
           draftTarget.teamIds = input.assignments.map((assignment) => assignment.teamId);
         } else {
+          const byPool = new Map(target.poolIds.map((poolId) => [poolId, [] as DirectorId[]]));
+          for (const assignment of input.assignments) {
+            if (assignment.targetPoolId) byPool.get(assignment.targetPoolId)?.push(assignment.teamId);
+          }
+          for (const [poolId, teamIds] of byPool) {
+            const pool = draft.pools.find((entry) => entry.id === poolId);
+            if (pool) pool.teamIds = teamIds;
+          }
           draftTarget.teamIds = undefined;
         }
         draft.audit.push({

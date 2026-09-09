@@ -69,34 +69,6 @@ export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: Di
   return `Finish ${source.name} before committing advancement.${suffix}`;
 }
 
-export function partialAdvancementCommitBlocker(
-  state: DirectorState,
-  targetPhaseId: DirectorId,
-  assignments: readonly { teamId: DirectorId; targetPoolId?: DirectorId }[],
-): string | null {
-  const target = state.phases.find((phase) => phase.id === targetPhaseId);
-  if (!target) return null;
-  const assignedPoolIds = new Set(
-    assignments
-      .map((assignment) => assignment.targetPoolId)
-      .filter((poolId): poolId is DirectorId => poolId !== undefined),
-  );
-  const assignedTeamIds = new Set(assignments.map((assignment) => assignment.teamId));
-  // This path rewrites only the pools named in the commit, so an omitted pool keeps its previous
-  // membership. The corruption that makes dangerous is a team left in a second pool of the same
-  // stage. An omitted pool that holds none of the teams being committed cannot duplicate anyone,
-  // so an incremental override commit stays available.
-  const stalePool = target.poolIds
-    .map((poolId) => state.pools.find((pool) => pool.id === poolId))
-    .find(
-      (pool) =>
-        pool && !assignedPoolIds.has(pool.id) && pool.teamIds.some((teamId) => assignedTeamIds.has(teamId)),
-    );
-  return stalePool
-    ? `Recommitting advancement would leave teams in ${stalePool.name} as well. Use the complete advancement commit path so every target pool is replaced atomically.`
-    : null;
-}
-
 /**
  * A result correction after advancement has been materialized changes the competitive basis under
  * downstream membership. Until advancement has an explicit stale/reconcile state, refuse that
