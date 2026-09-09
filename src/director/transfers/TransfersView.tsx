@@ -121,7 +121,7 @@ export function TransfersView({
             </>
           }
         >
-          {transfers.notice.resultCount} completed QSheet game{transfers.notice.resultCount === 1 ? '' : 's'}{' '}
+          {transfers.notice.resultCount} completed QBSheet game{transfers.notice.resultCount === 1 ? '' : 's'}{' '}
           found
           {transfers.notice.assignmentCount > 0
             ? ` · ${transfers.notice.assignmentCount} assignment file${transfers.notice.assignmentCount === 1 ? '' : 's'}`
@@ -275,7 +275,13 @@ function ArtifactItem({
       title={<strong>{artifact.fileName}</strong>}
       status={
         <StateLabel
-          state={decisionLabel === 'Accepted in Results' ? 'accepted' : decisionLabel ? 'neutral' : classificationState(artifact)}
+          state={
+            decisionLabel === 'Accepted in Results'
+              ? 'accepted'
+              : decisionLabel
+                ? 'neutral'
+                : classificationState(artifact)
+          }
           label={decisionLabel ?? classificationLabel(artifact)}
         />
       }
