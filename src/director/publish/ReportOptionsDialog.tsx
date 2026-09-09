@@ -34,10 +34,9 @@ export function ReportOptionsDialog({
       size="lg"
       onClose={onClose}
       onSubmit={() => onSave(draft)}
-      submitLabel="Save report options"
       submitDisabled={draft.pages.length === 0}
       footer={
-        <>
+        <div className="director-dialog-footer">
           <Button
             variant="quiet"
             onClick={() => setDraft({ ...defaultReportOptions, pages: [...defaultReportOptions.pages] })}
@@ -45,16 +44,20 @@ export function ReportOptionsDialog({
             Reset defaults
           </Button>
           <div className="director-actions">
-            <Button variant="secondary" onClick={onClose}>Cancel</Button>
+            <Button variant="secondary" onClick={onClose}>
+              Cancel
+            </Button>
             <Button variant="primary" disabled={draft.pages.length === 0} onClick={() => onSave(draft)}>
               Save report options
             </Button>
           </div>
-        </>
+        </div>
       }
     >
       <DialogSection title="Pages">
-        <p className="director-text-meta">At least one report page is required. The index page is always included.</p>
+        <p className="director-text-meta">
+          At least one report page is required. The index page is always included.
+        </p>
         {reportPageOrder.map((page) => (
           <Checkbox
             key={page}
@@ -65,7 +68,9 @@ export function ReportOptionsDialog({
         ))}
       </DialogSection>
       <DialogSection title="Scoring columns">
-        <p className="director-text-meta">Rank, team/player identity, record, games played, and core scoring counts stay visible.</p>
+        <p className="director-text-meta">
+          Rank, team/player identity, record, games played, and core scoring counts stay visible.
+        </p>
         <Segmented<ReportPointsMetric>
           value={draft.pointsMetric}
           ariaLabel="Points display"
@@ -90,19 +95,19 @@ export function ReportOptionsDialog({
         <Checkbox
           checked={draft.showClassifications}
           label="Reporting classifications when used"
-          onChange={(showClassifications) => setDraft((current) => ({ ...current, showClassifications }))}
+          onChange={(showClassifications) => setDraft((current) => ({ ...current, showClassifications }))
         />
       </DialogSection>
       <DialogSection title="Context columns">
         <Checkbox
           checked={draft.showPacket}
           label="Packet when known"
-          onChange={(showPacket) => setDraft((current) => ({ ...current, showPacket }))}
+          onChange={(showPacket) => setDraft((current) => ({ ...current, showPacket }))
         />
         <Checkbox
           checked={draft.showStage}
           label="Stage when multiple stages are present"
-          onChange={(showStage) => setDraft((current) => ({ ...current, showStage }))}
+          onChange={(showStage) => setDraft((current) => ({ ...current, showStage }))
         />
       </DialogSection>
     </Dialog>
