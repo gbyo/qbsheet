@@ -1,6 +1,7 @@
 import { buildPrintableStatReportBundle as buildBoxScoreStatReportBundle } from './boxScoreReport.js';
 import { renderPlayerDetailReport } from './playerDetailReport.js';
 import type { StatReportPage, StatsSnapshot } from './stats.js';
+import { renderTeamDetailReport } from './teamDetailReport.js';
 
 /**
  * Compose the progressively upgraded printable report pages while keeping a
@@ -8,9 +9,13 @@ import type { StatReportPage, StatsSnapshot } from './stats.js';
  * canonical snapshot DTO.
  */
 export function buildExtendedStatReportBundle(snapshot: StatsSnapshot): StatReportPage[] {
-  return buildBoxScoreStatReportBundle(snapshot).map((page) =>
-    page.name === 'playerdetail.html'
-      ? { name: page.name, content: renderPlayerDetailReport(snapshot) }
-      : page,
-  );
+  return buildBoxScoreStatReportBundle(snapshot).map((page) => {
+    if (page.name === 'playerdetail.html') {
+      return { name: page.name, content: renderPlayerDetailReport(snapshot) };
+    }
+    if (page.name === 'teamdetail.html') {
+      return { name: page.name, content: renderTeamDetailReport(snapshot) };
+    }
+    return page;
+  });
 }
