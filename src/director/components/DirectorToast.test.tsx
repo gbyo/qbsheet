@@ -3,6 +3,9 @@ import { describe, expect, test, vi } from 'vitest';
 import { DirectorToast } from './DirectorToast';
 import { errorNotice, infoNotice, toDirectorNotice, warningNotice } from '../notices';
 
+const unresolvedGameMessage =
+  'Cannot drop Aiken while Round 2 is unresolved. Accept the result, record a forfeit, or cancel/replay it through recovery first.';
+
 describe('DirectorToast tones', () => {
   test('a plain string keeps the success treatment with status semantics', () => {
     render(<DirectorToast announcement="Checkpoint created." />);
@@ -47,6 +50,34 @@ describe('DirectorToast tones', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Dismiss notification' }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
+
+  test('an actionable recovery error shows an arrow and delegates its destination', () => {
+    const onAction = vi.fn();
+    const notice = errorNotice(unresolvedGameMessage);
+    render(<DirectorToast announcement={notice} onAction={onAction} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to unresolved games' }));
+    expect(onAction).toHaveBeenCalledWith({
+      label: 'Go to unresolved games',
+      section: 'results',
+      resultsView: 'games',
+    });
+  });
+
+  test('the default actionable recovery arrow uses the canonical Results navigation control', () => {
+    const onNavigate = vi.fn();
+    render(
+      <>
+        <button type="button" className="director-nav-link" title="Results" onClick={onNavigate}>
+          Results
+        </button>
+        <DirectorToast announcement={errorNotice(unresolvedGameMessage)} />
+      </>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Go to unresolved games' }));
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('toDirectorNotice', () => {
@@ -57,5 +88,33 @@ describe('toDirectorNotice', () => {
   test('toned notices pass through unchanged', () => {
     const notice = errorNotice('Failed.');
     expect(toDirectorNotice(notice)).toBe(notice);
+  });
+
+  test('known unresolved-game recovery guidance gets a Results games action', () => {
+    expect(errorNotice(unresolvedGameMessage)).toEqual({
+      message: unresolvedGameMessage,
+      tone: 'error',
+      action: {
+        label: 'Go to unresolved games',
+        section: 'results',
+        resultsView: 'games',
+      },
+    });
+  });
+
+  test('callers can attach an explicit destination to other errors', () => {
+    expect(
+      errorNotice('A room needs attention.', {
+        label: 'Go to Rooms',
+        section: 'rooms',
+      }),
+    ).toEqual({
+      message: 'A room needs attention.',
+      tone: 'error',
+      action: {
+        label: 'Go to Rooms',
+        section: 'rooms',
+      },
+    });
   });
 });
