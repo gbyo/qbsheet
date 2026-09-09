@@ -38,6 +38,7 @@ async function controllerForTwoTeams() {
   });
   await waitFor(() => expect(hook.result.current.saving).toBe(false));
   act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+  await waitFor(() => expect(hook.result.current.canLeaveCurrentDocument().ok).toBe(true));
   const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
   if (!scheduled || !scheduled.rightTeamId) throw new Error('test setup produced no two-team game');
   return { hook, scheduled: scheduled as TwoTeamScheduledGame };

@@ -27,6 +27,8 @@ import {
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -175,6 +177,9 @@ export interface ImportedTeamInput {
   }>;
 }
 
+export type BulkImportResult =
+  { ok: true; inserted: number; skipped: number } | { ok: false; inserted: 0; skipped: 0 };
+
 export interface NewRoomInput {
   name: string;
   building?: string;
@@ -303,12 +308,24 @@ export interface DirectorPersistenceHealth {
   error: string | null;
 }
 
+export type DocumentTransitionCheck =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: 'unsaved';
+      revision: number;
+      durableRevision: number;
+      error: string | null;
+    };
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
   saving: boolean;
   error: string | null;
   persistence: DirectorPersistenceHealth;
+  /** Whether the current in-memory document may be replaced or left safely. */
+  canLeaveCurrentDocument(): DocumentTransitionCheck;
   retryPersistence(): Promise<boolean>;
   writerStatus: 'native' | 'held' | 'checking' | 'blocked' | 'unavailable';
   repositoryKind: DirectorRepository['kind'];
@@ -332,7 +349,7 @@ export interface DirectorController {
   setOrganizationArchived(organizationId: DirectorId, archived: boolean): boolean;
   mergeOrganizations(sourceOrganizationId: DirectorId, targetOrganizationId: DirectorId): boolean;
   addTeam(input: NewTeamInput): boolean;
-  addImportedTeams(teams: ImportedTeamInput[]): { inserted: number; skipped: number };
+  addImportedTeams(teams: ImportedTeamInput[]): BulkImportResult;
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
@@ -385,7 +402,7 @@ export interface DirectorController {
       tiebreaker?: boolean;
       notes?: string;
     }>,
-  ): { inserted: number; skipped: number };
+  ): BulkImportResult;
   updatePacket(
     packetId: DirectorId,
     changes: Partial<Pick<DirectorState['packets'][number], 'name' | 'tiebreaker' | 'notes'>>,
@@ -880,6 +897,31 @@ export function useDirectorController(repository = createDirectorRepository()): 
     return false;
   }, []);
 
+  const canLeaveCurrentDocument = useCallback((): DocumentTransitionCheck => {
+    const revision = stateRevisionRef.current;
+    const durableRevision = durableRevisionRef.current;
+    if (revision <= durableRevision) return { ok: true };
+    return {
+      ok: false,
+      reason: 'unsaved',
+      revision,
+      durableRevision,
+      error: persistence.error ?? error,
+    };
+  }, [error, persistence.error]);
+
+  const ensureDocumentTransitionAllowed = useCallback(
+    (operation: string): boolean => {
+      const check = canLeaveCurrentDocument();
+      if (check.ok) return true;
+      setError(
+        `Cannot ${operation}: the latest tournament changes are still only in memory. Retry the save or export a recovery archive first.`,
+      );
+      return false;
+    },
+    [canLeaveCurrentDocument],
+  );
+
   const refreshCheckpoints = useCallback(async () => {
     const tournamentId = stateRef.current.tournament?.id;
     const entries =
@@ -1128,6 +1170,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const switchTournament = useCallback(
     async (tournamentId: DirectorId): Promise<boolean> => {
       if (stateRef.current.tournament?.id === tournamentId) return true;
+      if (!ensureDocumentTransitionAllowed('switch tournaments')) return false;
       const open = repositoryRef.current.openTournament;
       if (!open) {
         setError('This storage backend does not support multiple tournaments.');
@@ -1148,7 +1191,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           await clearLocalLive(false).catch(() => undefined);
           await stopLocalLiveServer().catch(() => undefined);
         }
-        const loaded = await open(tournamentId);
+        const loaded = await repositoryRef.current.openTournament!(tournamentId);
         const previousTournamentId = stateRef.current.tournament?.id;
         writerEpochRef.current += 1;
         if (previousTournamentId) {
@@ -1187,7 +1230,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setRecovering(false);
       }
     },
-    [refreshTournaments, settleWriterReady],
+    [ensureDocumentTransitionAllowed, refreshTournaments, settleWriterReady],
   );
 
   const updateCatalogTournamentStatus = useCallback(
@@ -1274,6 +1317,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const createTournament = useCallback(
     (input: NewTournamentInput): boolean => {
+      if (!ensureDocumentTransitionAllowed('create a new tournament')) return false;
       const now = isoNow();
       const tournamentId = newDirectorId('tournament');
       const formatId = newDirectorId('format');
@@ -1330,7 +1374,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         });
       });
     },
-    [commit],
+    [commit, ensureDocumentTransitionAllowed],
   );
 
   const updateTournament = useCallback(
@@ -1649,11 +1693,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
   );
 
   const addImportedTeams = useCallback(
-    (inputs: ImportedTeamInput[]): { inserted: number; skipped: number } => {
-      if (inputs.length === 0) return { inserted: 0, skipped: 0 };
+    (inputs: ImportedTeamInput[]): BulkImportResult => {
+      if (inputs.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const teamIds = new Set(draft.teams.map((team) => team.id));
         const teamNames = new Set(draft.teams.map((team) => team.displayName.toLocaleLowerCase()));
         const playerIds = new Set(draft.players.map((player) => player.id));
@@ -1741,7 +1785,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -2553,10 +2597,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         tiebreaker?: boolean;
         notes?: string;
       }>,
-    ): { inserted: number; skipped: number } => {
+    ): BulkImportResult => {
+      if (packets.length === 0) return { ok: true, inserted: 0, skipped: 0 };
       let inserted = 0;
       let skipped = 0;
-      commit((draft) => {
+      const committed = commit((draft) => {
         const now = isoNow();
         const existingNames = new Set(draft.packets.map((packet) => packet.name.trim().toLocaleLowerCase()));
         for (const input of packets) {
@@ -2593,7 +2638,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           inserted += 1;
         }
       });
-      return { inserted, skipped };
+      return committed ? { ok: true, inserted, skipped } : { ok: false, inserted: 0, skipped: 0 };
     },
     [commit],
   );
@@ -4155,6 +4200,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('An accepting operator is required.');
         return false;
       }
+      if (submission.warnings?.includes(ingestWarnings.invalidStatisticCount)) {
+        setError('This result contains an invalid statistic count and cannot be accepted.');
+        return false;
+      }
       const game = snapshot.games.find((entry) => entry.id === submission.gameId);
       const scheduled = game
         ? snapshot.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
@@ -4702,6 +4751,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const restoreCheckpoint = useCallback(
     async (checkpointId: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
+      if (!ensureDocumentTransitionAllowed('restore a recovery point')) return false;
       if (!ensureWriter()) return false;
       if (!repositoryRef.current.restoreCheckpoint) {
         setError('This storage backend does not support recovery points.');
@@ -4781,19 +4831,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setRecovering(false);
       }
     },
-    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
+    [
+      assertWriteAuthority,
+      captureWriteAuthority,
+      ensureDocumentTransitionAllowed,
+      ensureWriter,
+      refreshCheckpoints,
+      refreshTournaments,
+    ],
   );
 
   const editTournamentSnapshot = useCallback(
     async (value: DirectorState, reason: string): Promise<boolean> => {
       if (documentTransitionRef.current) return false;
-      if (!ensureWriter()) return false;
       const before = structuredClone(stateRef.current);
       const startingRevision = stateRevisionRef.current;
       if (!before.tournament || value.tournament?.id !== before.tournament.id) {
         setError('Structural edits must belong to the open tournament.');
         return false;
       }
+      if (!ensureWriter()) return false;
       documentTransitionRef.current = true;
       documentEpochRef.current += 1;
       setRecovering(true);
@@ -5263,6 +5320,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The Director archive is not valid.');
         return false;
       }
+      if (!ensureDocumentTransitionAllowed('open or import a tournament')) return false;
       if (
         next.tournament &&
         (stateRef.current.tournament?.id === next.tournament.id ||
@@ -5315,7 +5373,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       void persist(next, revision).catch(() => undefined);
       return true;
     },
-    [ensureWriter, persist, settleWriterReady, tournaments],
+    [ensureDocumentTransitionAllowed, ensureWriter, persist, settleWriterReady, tournaments],
   );
 
   // -------------------------------------------------------------------------
@@ -5945,6 +6003,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     saving,
     error,
     persistence,
+    canLeaveCurrentDocument,
     retryPersistence,
     writerStatus,
     repositoryKind,
@@ -6202,14 +6261,6 @@ function validateResultForScheduledGame(
   ) {
     return 'A result must contain exactly the two teams assigned to the scheduled game.';
   }
-  const countFields: Array<keyof Omit<TeamGameScore, 'teamId' | 'score'>> = [
-    'powers',
-    'gets',
-    'negs',
-    'bonuses',
-    'bonusPoints',
-    'bouncebacks',
-  ];
   for (const score of scores) {
     if (!score || typeof score !== 'object') {
       return 'Each result score must be a team score object.';
@@ -6220,11 +6271,8 @@ function validateResultForScheduledGame(
     if (!state.teams.some((team) => team.id === score.teamId)) {
       return 'A result references a team that is not in this tournament.';
     }
-    for (const field of countFields) {
-      if (!Number.isInteger(score[field]) || !Number.isFinite(score[field]) || score[field] < 0) {
-        return `${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidTeamGameScoreCountField(score);
+    if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
   }
   const decisionIssue = resultDecisionIssue(state, scheduled, scores);
   if (decisionIssue) return decisionIssue.message;
@@ -6238,17 +6286,8 @@ function validateResultForScheduledGame(
     const player = state.players.find((candidate) => candidate.id === stat.playerId);
     if (!player || player.teamId !== stat.teamId)
       return 'Player statistics must reference the player roster for that team.';
-    const playerFields: Array<keyof Omit<PlayerGameStat, 'playerId' | 'teamId' | 'tossupsHeard'>> = [
-      'powers',
-      'gets',
-      'negs',
-      'bonusPoints',
-    ];
-    for (const field of playerFields) {
-      if (!Number.isInteger(stat[field]) || !Number.isFinite(stat[field]) || stat[field] < 0) {
-        return `Player ${field} must be a finite non-negative whole number.`;
-      }
-    }
+    const invalidCountField = invalidPlayerGameStatCountField(stat);
+    if (invalidCountField) return `Player ${invalidCountField} must be a finite non-negative whole number.`;
     if (
       stat.tossupsHeard !== null &&
       (!Number.isInteger(stat.tossupsHeard) || !Number.isFinite(stat.tossupsHeard) || stat.tossupsHeard < 0)
