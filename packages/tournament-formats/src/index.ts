@@ -8,3 +8,4 @@ export * from './sqbs';
 export * from './yft';
 export * from './stats';
 export * from './reportDetail';
+export * from './standingsReport';
