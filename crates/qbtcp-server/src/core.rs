@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
 #[derive(Clone, Serialize)]
 pub struct DiscoveryDocument {
@@ -38,6 +39,10 @@ pub struct PairingInvitation {
     pub room_id: String,
     pub room_name: String,
     pub code: String,
+    /// Wall-clock timestamps are presentation metadata only. The runtime ticket below remains
+    /// authoritative for accepting or refusing the code.
+    pub issued_at: String,
+    pub expires_at: String,
     pub expires_in: Duration,
 }
 
@@ -288,6 +293,8 @@ impl QbtcpServer {
             code = pairing_code();
             code_hash = digest_secret(&code);
         }
+        let issued_at = OffsetDateTime::now_utc();
+        let expires_at = issued_at + self.config.pairing_code_ttl;
         runtime.pairings.insert(
             code_hash,
             PairingTicket {
@@ -299,6 +306,12 @@ impl QbtcpServer {
             room_id: room.id,
             room_name: room.name,
             code,
+            issued_at: issued_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
+            expires_at: expires_at
+                .format(&Rfc3339)
+                .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
             expires_in: self.config.pairing_code_ttl,
         })
     }
