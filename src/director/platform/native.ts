@@ -9,6 +9,7 @@ export interface NativeServerStatus {
   expiredPairingRoomIds?: string[];
   protocol?: string;
   pairedRooms?: number;
+  restartRecoveryRoomIds?: string[];
   pairingInvitations?: NativeRoomPairingInvitation[];
   pairingCode?: string;
   pairingUrl?: string;
@@ -184,6 +185,9 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
       : {}),
     ...(typeof value.protocol === 'string' ? { protocol: value.protocol } : {}),
     ...(typeof value.pairedRooms === 'number' ? { pairedRooms: value.pairedRooms } : {}),
+    ...(Array.isArray(value.restartRecoveryRoomIds)
+      ? { restartRecoveryRoomIds: value.restartRecoveryRoomIds.filter((roomId): roomId is string => typeof roomId === 'string') }
+      : {}),
     ...(Array.isArray(invitations)
       ? {
           pairingInvitations: invitations.filter(

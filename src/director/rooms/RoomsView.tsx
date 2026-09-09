@@ -1404,6 +1404,14 @@ function QbtcpNetwork({
           The server is running, but Director has not ingested its first snapshot yet.
         </Callout>
       )}
+      {qbtcpRunning && (status?.restartRecoveryRoomIds?.length ?? 0) > 0 && (
+        <Callout tone="warning" title="QBTCP restarted — re-pair live rooms">
+          Previous room and session credentials were revoked when the server restarted. Fresh invitations are
+          ready below for {status?.restartRecoveryRoomIds?.length} live room
+          {status?.restartRecoveryRoomIds?.length === 1 ? '' : 's'}; re-pair each scorer to its unchanged
+          assignment before it resumes. Scoresheets remain on the scorer devices.
+        </Callout>
+      )}
       <div className="director-actions">
         {nativeDirector ? (
           <Button

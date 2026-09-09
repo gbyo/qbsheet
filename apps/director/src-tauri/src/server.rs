@@ -90,6 +90,9 @@ pub struct ServerStatus {
     pub expired_pairing_room_ids: Vec<String>,
     pub protocol: Option<String>,
     pub paired_rooms: usize,
+    /// Live rooms recovered from the tournament mirror after this runtime was recreated. Their
+    /// old bearer credentials are deliberately not restored; use the fresh room invitations.
+    pub restart_recovery_room_ids: Vec<String>,
     pub pairing_invitations: Vec<RoomPairingInvitation>,
     /// Backward-compatible fields. They are populated only when exactly one room has an
     /// invitation; a multi-room server never exposes an ambiguous global code or URL.
@@ -280,6 +283,7 @@ impl ServerRuntime {
             Some(store) => DirectorQbtcpState::from_document_with_store(document.as_ref(), store),
             None => DirectorQbtcpState::from_document(document.as_ref()),
         });
+        let restart_recovery_room_ids = restart_recovery_rooms(document.as_ref());
         let config = QbtcpConfig {
             name: state.tournament_name(),
             allowed_origins: ALLOWED_SCORE_SHEET_ORIGINS
@@ -335,6 +339,7 @@ impl ServerRuntime {
             expired_pairing_room_ids: Vec::new(),
             protocol: Some("QBTCP v1".to_owned()),
             paired_rooms: state.paired_room_count(),
+            restart_recovery_room_ids,
             pairing_invitations,
             pairing_code,
             pairing_url,
@@ -519,6 +524,29 @@ impl ServerRuntime {
             .resolve_help(help_id.trim())
             .map_err(|error| ServerError::Operation(format!("{error:?}")))
     }
+}
+
+fn restart_recovery_rooms(document: Option<&Value>) -> Vec<String> {
+    let Some(sessions) = document
+        .and_then(|value| value.get("qbtcpSessions"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut rooms = sessions
+        .iter()
+        .filter(|session| {
+            !matches!(
+                session.get("state").and_then(Value::as_str),
+                Some("abandoned") | Some("final-received")
+            )
+        })
+        .filter_map(|session| session.get("roomId").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    rooms.sort();
+    rooms.dedup();
+    rooms
 }
 
 impl Drop for ServerRuntime {
@@ -2101,6 +2129,23 @@ fn percent_encode(value: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn restart_recovery_lists_only_unresolved_session_rooms_once() {
+        let document = json!({
+            "qbtcpSessions": [
+                {"roomId": "room-2", "state": "open"},
+                {"roomId": "room-1", "state": "assigned"},
+                {"roomId": "room-2", "state": "open"},
+                {"roomId": "room-3", "state": "abandoned"},
+                {"roomId": "room-4", "state": "final-received"}
+            ]
+        });
+        assert_eq!(
+            restart_recovery_rooms(Some(&document)),
+            vec!["room-1", "room-2"]
+        );
+    }
 
     #[test]
     fn document_rooms_are_converted_without_exposing_credentials() {
