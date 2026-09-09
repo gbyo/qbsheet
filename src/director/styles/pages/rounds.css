@@ -2,9 +2,10 @@
  * Tournament day.
  *
  * `SummaryList` is shared with lists that live inside panels, where its default
- * panel inset and subtle bottom rules are appropriate. Tournament Day is an
- * open sequence instead, so keep the shared row structure but give these rows
- * standalone rhythm and separators from the Director token system.
+ * panel inset, hover/selection fills, and subtle bottom rules are appropriate.
+ * Tournament Day is an open sequence instead, so keep the shared row structure
+ * but give these rows standalone rhythm and separators from the Director token
+ * system.
  */
 
 .director-day-sequence {
@@ -13,11 +14,22 @@
 }
 
 .director-day-sequence > .director-list-item {
+  align-items: flex-start;
   padding: var(--director-space-4) var(--director-space-1);
+  background: transparent;
   border-top: 1px solid var(--director-border);
   border-bottom: 0;
 }
 
 .director-day-sequence > .director-list-item:first-child {
   border-top: 0;
+}
+
+/* A round's active state is already communicated by its StateLabel. These rows
+ * are not selection controls, so the shared list hover/selected fills only turn
+ * active rounds into large blue slabs and make an open day sequence read like a
+ * panel list. Keep the row surface neutral and let status carry the state. */
+.director-day-sequence > .director-list-item:hover,
+.director-day-sequence > .director-list-item[data-selected='true'] {
+  background: transparent;
 }
