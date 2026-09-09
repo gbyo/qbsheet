@@ -102,6 +102,7 @@ import {
   applyRoundPlans,
   assignmentChangeBlocker,
   dutyChangeBlocker,
+  reconcileSessionStaffIdentity,
   type AssignmentChanges,
   type AssignmentSlot,
 } from './operationsActions';
@@ -5923,6 +5924,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       changed = applyNativeHelp(next, snapshot.help) || changed;
       changed = applyNativeRosterAmendments(next, snapshot.rosterAmendments) || changed;
       changed = applyNativeResults(next, snapshot) || changed;
+      changed = reconcileSessionStaffIdentity(next) || changed;
       changed = expireQbtcpSessions(next) || changed;
       if (!changed) return;
       // QBTCP observations are authoritative Director mutations too. Finish them through the same

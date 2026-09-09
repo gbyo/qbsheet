@@ -19,6 +19,7 @@ import {
   planToAssignments,
   roomDefaultEquipmentIds,
   roundIsAutoRepairable,
+  staffForSession,
   type DirectorId,
   type DirectorState,
   type OperationalAssignment,
@@ -357,4 +358,47 @@ export function roundHasMovableGames(state: DirectorState, roundId: DirectorId):
       game.status !== 'cancelled' &&
       gameIsAutoRepairable(state, game),
   );
+}
+
+/**
+ * Join scorer sessions to Director's staff roster.
+ *
+ * QBTCP knows a device and an operator's typed name; Director knows who is assigned to score the
+ * room. Neither alone can answer "is the right person in this room?", so this reconciles them
+ * after every snapshot, in one place rather than in each of the four ingestion paths.
+ *
+ * Two rules keep this from doing damage:
+ *
+ *  - `expectedStaffId` is Director's belief, taken from the room's operational assignment. It is
+ *    rewritten freely, because reassigning a scorekeeper should change who the room expects.
+ *  - `staffId` is a claim about who is actually there. It is only set from an operator name that
+ *    matches exactly one staff member, and it is never overwritten once set — an operator who
+ *    renames themselves mid-session must not silently become somebody else. An unmatched or
+ *    ambiguous name leaves the session ad hoc, which the operations layer reports as an unknown
+ *    scorer rather than as the wrong one.
+ */
+export function reconcileSessionStaffIdentity(state: DirectorState): boolean {
+  let changed = false;
+  for (const session of state.qbtcpSessions) {
+    const game = state.scheduledGames.find(
+      (entry) =>
+        (session.matchId && entry.id === session.matchId) ||
+        (!session.matchId &&
+          entry.roomId === session.roomId &&
+          !entry.bye &&
+          !['accepted', 'cancelled'].includes(entry.status)),
+    );
+    const expected = game ? (effectiveAssignmentForGame(state, game).scorekeeperId ?? undefined) : undefined;
+    if (session.expectedStaffId !== expected) {
+      session.expectedStaffId = expected;
+      changed = true;
+    }
+    if (session.staffId) continue;
+    const resolved = staffForSession(state, session);
+    if (resolved) {
+      session.staffId = resolved.id;
+      changed = true;
+    }
+  }
+  return changed;
 }
