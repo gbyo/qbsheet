@@ -7,6 +7,7 @@ import {
   type TournamentRules,
 } from './model.js';
 import { gameDetailedCountsKnown, gameOutcomeForTeam } from './canonicalStats.js';
+import { resultDecisionIssue } from './results.js';
 
 export interface TeamStanding {
   teamId: DirectorId;
@@ -115,6 +116,11 @@ export function acceptedGameRecords(
       return options.phaseId === undefined && options.poolId === undefined && options.gameIds === undefined;
     }
     if (scheduled.status === 'cancelled') return false;
+    if (resultDecisionIssue(state, scheduled, game.scores, { forfeitedTeamId: game.forfeitedTeamId })) {
+      // Invalid legacy/imported records remain in the document and audit history, but must not
+      // feed standings or any public projection until a decisive result is accepted.
+      return false;
+    }
     if (scheduled.bye || scheduled.leftTeamId === scheduled.rightTeamId) return false;
     const round = roundById.get(scheduled.roundId) ?? roundById.get(game.roundId);
     if (options.phaseId && round && round.phaseId !== options.phaseId) return false;
