@@ -1,5 +1,45 @@
 /*
  * Results.
  *
- * Built entirely from the shared queue, table, dialog, and status surfaces.
+ * Results is built from shared controls and queue surfaces; this file only
+ * composes those primitives for the destination. Keep visual values in the
+ * Director token system rather than reintroducing one-off spacing or colours.
  */
+
+/* The view switcher and round filter are one control row. The previous Results
+ * migration left this class without any styles, so the controls fell back to
+ * unrelated block flow and no longer matched the Director page rhythm. */
+.director-results-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-3);
+  align-items: flex-end;
+  justify-content: space-between;
+  padding-bottom: var(--director-space-3);
+  border-bottom: 1px solid var(--director-border-subtle);
+}
+
+.director-results-toolbar > .director-field {
+  margin-left: auto;
+}
+
+/* Secondary queue controls, such as Show settled games, should read as actions
+ * for the list below rather than an unstyled block between two surfaces. */
+.director-view-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* Results queues are list bodies that need an edge. SummaryList supplies the
+ * row rhythm and subtle internal separators; Results supplies the containing
+ * surface so those separators do not float directly on the page background. */
+.director-results-toolbar ~ .director-list,
+.director-results-toolbar ~ .director-stack > .director-list {
+  overflow: hidden;
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+}
