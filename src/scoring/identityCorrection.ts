@@ -73,7 +73,7 @@ export type IdentityCorrection =
     };
 
 function sameName(first: string, second: string): boolean {
-  return first.trim().toLocaleLowerCase() === second.trim().toLocaleLowerCase();
+  return first.trim().toLowerCase() === second.trim().toLowerCase();
 }
 
 /** Re-key every player id that belonged to one team name onto another. */
