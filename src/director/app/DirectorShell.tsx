@@ -5,7 +5,8 @@ import { Icon } from '../components/Icon';
 import { Badge } from '../components/Status';
 import { DirectorMenu } from '../components/DirectorMenu';
 import { MenuItem, MenuNote, MenuSectionLabel, MenuSeparator } from '../components/Menu';
-import { isNativeDirector, openNativeTournamentFile } from '../platform/native';
+import { isNativeDirector } from '../platform/native';
+import { pickDirectorFiles } from '../components/filePickerContract';
 import { useConfirm } from '../components/Dialog';
 import { modifierKeyLabel, shortcutAriaLabel } from '../components/platform';
 import {
@@ -17,7 +18,7 @@ import {
 } from './navigation';
 import { TOURNAMENT_FILE_ACCEPT } from './openTournament';
 import type { DirectorNavigationTarget } from './navigationTarget';
-import type { PickedFile } from '../components/FilePicker';
+import type { PickedFile } from '../components/filePickerContract';
 
 /**
  * The Director shell: sidebar, top bar, and the frame around a page.
@@ -80,6 +81,7 @@ export function DirectorShell({
   onSwitchTournament,
   onNewTournament,
   onOpenFile,
+  onOpenFileError,
   onManageTournaments,
   onArchiveTournament,
   canArchive,
@@ -101,6 +103,7 @@ export function DirectorShell({
   onSwitchTournament: (id: string, name: string) => void;
   onNewTournament: () => void;
   onOpenFile: (file: PickedFile) => void;
+  onOpenFileError: (message: string) => void;
   onManageTournaments: () => void;
   onArchiveTournament: () => void;
   canArchive: boolean;
@@ -255,6 +258,10 @@ export function DirectorShell({
                 onFile={(file) => {
                   closeMenu();
                   onOpenFile(file);
+                }}
+                onError={(message) => {
+                  closeMenu();
+                  onOpenFileError(message);
                 }}
               />
               <MenuItem
@@ -415,9 +422,19 @@ export function DirectorShell({
  * calls the desktop file dialog in the Tauri build and the browser's file input
  * otherwise; the operator sees the same entry either way.
  */
-function ShellFileMenuItem({ onFile }: { onFile: (file: PickedFile) => void }) {
+function ShellFileMenuItem({
+  onFile,
+  onError,
+}: {
+  onFile: (file: PickedFile) => void;
+  onError: (message: string) => void;
+}) {
   const inputRef = useRef<HTMLInputElement>(null);
   const native = isNativeDirector();
+  const onPick = (files: PickedFile[]) => {
+    const file = files[0];
+    if (file) onFile(file);
+  };
   return (
     <>
       <button
@@ -429,14 +446,7 @@ function ShellFileMenuItem({ onFile }: { onFile: (file: PickedFile) => void }) {
             inputRef.current?.click();
             return;
           }
-          void openNativeTournamentFile().then((selected) => {
-            if (!selected) return;
-            const binary = atob(selected.contentBase64);
-            onFile({
-              fileName: selected.fileName,
-              bytes: Uint8Array.from(binary, (character) => character.charCodeAt(0)),
-            });
-          });
+          void pickDirectorFiles({ native: true, onPick, onError });
         }}
       >
         <span className="director-menu-item-icon" aria-hidden="true">
@@ -455,9 +465,7 @@ function ShellFileMenuItem({ onFile }: { onFile: (file: PickedFile) => void }) {
           const file = event.currentTarget.files?.[0];
           event.currentTarget.value = '';
           if (!file) return;
-          void file.arrayBuffer().then((buffer) => {
-            onFile({ fileName: file.name, bytes: new Uint8Array(buffer) });
-          });
+          void pickDirectorFiles({ native: false, files: [file], onPick, onError });
         }}
       />
     </>

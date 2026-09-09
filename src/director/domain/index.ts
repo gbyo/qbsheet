@@ -1,4 +1,5 @@
 export * from './advancement';
+export * from './field';
 export * from './model';
 export * from './planning';
 export * from './roster';

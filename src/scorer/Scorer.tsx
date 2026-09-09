@@ -105,7 +105,7 @@ import {
 } from '../scoring/gameCorrection';
 import { correctPlayerName, correctTeamName } from '../scoring/identityCorrection';
 import canApplyScoreEvent from '../scoring/canApplyScoreEvent';
-import { attachScorerRecovery } from './ScorerRecovery';
+import { attachScorerRecovery, IScorerRecoveryIdentity } from './ScorerRecovery';
 import useRoomClock from './useRoomClock';
 import usePlayerSeating from './usePlayerSeating';
 import { orderBySeating, PlayerSeating, reseatLineup } from './PlayerSeating';
@@ -253,6 +253,8 @@ export interface IScorerProps {
   onRecoverySnapshot?: (backup: IQbsheetBackup) => void;
   /** Round number and the rest of the non-scoring metadata for the exported match. */
   qbjMeta?: IQbjMatchMeta;
+  /** Stable assignment identity used by the manual QBJ recovery guard. */
+  recoveryIdentity: IScorerRecoveryIdentity;
   /**
    * The tournament's own player ids, keyed by team and player name.
    *
@@ -686,6 +688,7 @@ export default function Scorer(props: IScorerProps) {
     onProgress,
     onRecoverySnapshot,
     qbjMeta,
+    recoveryIdentity,
     qbjPlayerIds,
     onRequestControl,
     controlRequest: suppliedControlRequest,
@@ -1115,8 +1118,14 @@ export default function Scorer(props: IScorerProps) {
   }, [qbjMeta, operatorName, moderatorName]);
   const qbj = useMemo(
     () =>
-      attachScorerRecovery(toQbjMatch(format, game, meta), setup, recoveryEventList, getRecoveryHistory()),
-    [format, game, getRecoveryHistory, meta, recoveryEventList, setup],
+      attachScorerRecovery(
+        toQbjMatch(format, game, meta),
+        setup,
+        recoveryEventList,
+        getRecoveryHistory(),
+        recoveryIdentity,
+      ),
+    [format, game, getRecoveryHistory, meta, recoveryEventList, recoveryIdentity, setup],
   );
   const spreadsheetTsv = useMemo(() => {
     if (!gamePackage) return undefined;
@@ -3663,7 +3672,9 @@ export default function Scorer(props: IScorerProps) {
       )}
       {dialog === 'recovery' && (
         <RecoveryDialog
-          expectedTeams={setup}
+          expectedIdentity={recoveryIdentity}
+          tournamentName={tournamentName}
+          roundName={roundName}
           onRestore={(restoredEvents) => {
             if (submitting) return;
             events.restore(restoredEvents);
