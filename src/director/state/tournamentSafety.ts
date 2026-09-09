@@ -1,4 +1,10 @@
-import type { DirectorId, DirectorState } from '../domain';
+import {
+  formatDistance,
+  phaseCanComplete,
+  phaseCompetitiveField,
+  type DirectorId,
+  type DirectorState,
+} from '../domain';
 
 /**
  * Canonical result settlement belongs to a released round. Planning and preparation may create
@@ -43,7 +49,6 @@ export function unresolvedReleasedRoundBlocker(state: DirectorState, roundId: Di
 export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: DirectorId): string | null {
   const source = state.phases.find((phase) => phase.id === sourcePhaseId);
   if (!source) return null;
-  if (source.status === 'complete') return null;
   const unresolvedGames = state.scheduledGames.filter((game) => {
     const round = state.rounds.find((entry) => entry.id === game.roundId);
     return (
@@ -53,20 +58,91 @@ export function advancementCommitBlocker(state: DirectorState, sourcePhaseId: Di
       game.status !== 'cancelled'
     );
   }).length;
-  // The basis is final once every round that actually carries play is closed and no competitive
-  // game is outstanding. A later-phase plan may still hold empty placeholder rounds; those carry no
-  // result and cannot change the standings, so they must not block a settled advancement.
-  const playedRounds = state.rounds.filter(
-    (round) =>
-      round.phaseId === sourcePhaseId && state.scheduledGames.some((game) => game.roundId === round.id),
+  const field =
+    Array.isArray(source.poolIds) && Array.isArray(source.roundIds)
+      ? phaseCompetitiveField(state, sourcePhaseId)
+      : { issues: ['The source phase has incomplete structure.'] };
+  const structureValid = phaseStructureIsValid(state, sourcePhaseId);
+  const placeholderRoundIds = new Set(
+    (Array.isArray(source.roundIds) ? source.roundIds : [])
+      .map((roundId) => state.rounds.find((round) => round.id === roundId))
+      .filter((round): round is NonNullable<typeof round> =>
+        Boolean(
+          round &&
+          round.status === 'planned' &&
+          Array.isArray(round.scheduledGameIds) &&
+          round.scheduledGameIds.length === 0,
+        ),
+      )
+      .map((round) => round.id),
   );
-  const openPlayedRounds = playedRounds.filter((round) => round.status !== 'closed');
-  if (unresolvedGames === 0 && openPlayedRounds.length === 0 && playedRounds.length > 0) return null;
+  const completionState =
+    placeholderRoundIds.size === 0
+      ? state
+      : {
+          ...state,
+          phases: state.phases.map((phase) =>
+            phase.id === sourcePhaseId
+              ? { ...phase, roundIds: phase.roundIds.filter((roundId) => !placeholderRoundIds.has(roundId)) }
+              : phase,
+          ),
+          rounds: state.rounds.filter((round) => !placeholderRoundIds.has(round.id)),
+        };
+  const distance = formatDistance(completionState, sourcePhaseId);
+  let phaseComplete = false;
+  try {
+    phaseComplete =
+      structureValid && field.issues.length === 0 && phaseCanComplete(completionState, sourcePhaseId);
+  } catch {
+    // A malformed persisted bracket must fail closed rather than turn a safety check into a crash.
+    phaseComplete = false;
+  }
+  if (unresolvedGames === 0 && phaseComplete) return null;
   const suffix =
     unresolvedGames > 0
       ? ` ${unresolvedGames} game${unresolvedGames === 1 ? '' : 's'} remain unresolved.`
       : '';
-  return `Finish ${source.name} before committing advancement.${suffix}`;
+  const distanceSuffix =
+    distance.requiredRounds !== null && !distance.exhausted
+      ? ` ${source.name} requires ${distance.requiredRounds} rounds, but only ${distance.generatedRounds} have been generated.`
+      : '';
+  const structureSuffix =
+    field.issues.length > 0
+      ? ` ${field.issues[0]}`
+      : structureValid
+        ? ''
+        : ' The source phase has incomplete structure.';
+  return `Finish ${source.name} before committing advancement.${distanceSuffix}${structureSuffix}${suffix}`;
+}
+
+function phaseStructureIsValid(state: DirectorState, phaseId: DirectorId): boolean {
+  const phase = state.phases.find((entry) => entry.id === phaseId);
+  if (!phase || !Array.isArray(phase.roundIds)) return false;
+  const phaseRoundIds = new Set(phase.roundIds);
+  if (phaseRoundIds.size !== phase.roundIds.length || phaseRoundIds.size === 0) return false;
+
+  const phaseRounds = state.rounds.filter((round) => round.phaseId === phaseId);
+  if (phaseRounds.some((round) => !phaseRoundIds.has(round.id))) return false;
+  if (
+    phase.roundIds.some((roundId) => {
+      const round = state.rounds.find((entry) => entry.id === roundId);
+      return !round || round.phaseId !== phaseId;
+    })
+  )
+    return false;
+
+  const scheduledById = new Map(state.scheduledGames.map((game) => [game.id, game]));
+  for (const round of phaseRounds) {
+    if (!Array.isArray(round.scheduledGameIds)) return false;
+    for (const scheduledGameId of round.scheduledGameIds) {
+      if (scheduledById.get(scheduledGameId)?.roundId !== round.id) return false;
+    }
+  }
+  return state.scheduledGames.every((game) => {
+    if (!phaseRoundIds.has(game.roundId)) return true;
+    const round = state.rounds.find((entry) => entry.id === game.roundId);
+    return Boolean(round?.scheduledGameIds.includes(game.id));
+  });
 }
 
 /**

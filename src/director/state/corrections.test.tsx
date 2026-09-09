@@ -46,6 +46,35 @@ async function controllerFor(state: DirectorState) {
   return { hook, repository };
 }
 
+function committedAdvancementState(): DirectorState {
+  const state = forfeitState();
+  state.phases.push({ id: 'playoffs', name: 'Playoffs' } as DirectorState['phases'][number]);
+  state.audit.push({
+    id: 'advancement-audit',
+    at: '2026-09-05T12:01:00.000Z',
+    actor: 'Director',
+    type: 'advancement-committed',
+    entityId: 'playoffs',
+    summary: 'Committed advancement.',
+    details: { sourcePhaseId: 'phase-1' },
+  });
+  state.scheduledGames.push(
+    scheduledGame('downstream-game', 'team-a', 'team-b', {
+      roundId: 'downstream-round',
+      status: 'scheduled',
+    }),
+  );
+  state.rounds.push({
+    ...state.rounds[0]!,
+    id: 'downstream-round',
+    phaseId: 'playoffs',
+    name: 'Playoffs Round 1',
+    scheduledGameIds: ['downstream-game'],
+    status: 'planned',
+  });
+  return state;
+}
+
 describe('administrative result corrections', () => {
   test.each([
     ['reopen', { kind: 'reopen' as const }],
@@ -103,6 +132,70 @@ describe('administrative result corrections', () => {
       'superseded',
     );
   });
+
+  test.each(['reopen', 'switch-forfeit', 'score replacement'] as const)(
+    'correctForfeit rejects %s atomically after advancement',
+    async (kind) => {
+      const state = committedAdvancementState();
+      const { hook } = await controllerFor(state);
+      const before = structuredClone(hook.result.current.state);
+      const replacement =
+        kind === 'reopen'
+          ? { kind: 'reopen' as const }
+          : kind === 'switch-forfeit'
+            ? { kind: 'forfeit' as const, forfeitedTeamId: 'team-b' }
+            : { kind: 'scores' as const, scores: [score('team-a', 250), score('team-b', 200)] };
+
+      act(() => {
+        expect(
+          hook.result.current.correctForfeit('scheduled-1', replacement, 'The original result was wrong.'),
+        ).toBe(false);
+      });
+      expect(hook.result.current.state).toEqual(before);
+      expect(hook.result.current.error).toMatch(/committed advancement/i);
+    },
+  );
+
+  test.each(['accepted result', 'protest score adjustment'] as const)(
+    '%s correction has the same advancement dependency guard and is atomic',
+    async (path) => {
+      const state = committedAdvancementState();
+      const game = state.games[0]!;
+      game.status = 'accepted';
+      delete game.forfeitedTeamId;
+      game.scores = [score('team-a', 100), score('team-b', 90)];
+      if (path === 'protest score adjustment') {
+        state.protests.push({
+          id: 'protest-1',
+          gameId: game.id,
+          category: 'other',
+          description: 'Correction path test',
+          status: 'open',
+          createdAt: '2026-09-05T12:00:00.000Z',
+          updatedAt: '2026-09-05T12:00:00.000Z',
+        });
+      }
+      const { hook } = await controllerFor(state);
+      const before = structuredClone(hook.result.current.state);
+
+      act(() => {
+        const saved =
+          path === 'accepted result'
+            ? hook.result.current.editAcceptedResult(
+                game.id,
+                [score('team-a', 250), score('team-b', 200)],
+                'The score was entered incorrectly.',
+              )
+            : hook.result.current.ruleProtest('protest-1', 'Awarded the disputed points.', {
+                teamId: 'team-a',
+                delta: 10,
+              });
+        expect(saved).toBe(false);
+      });
+      expect(hook.result.current.state).toEqual(before);
+      expect(hook.result.current.error).toMatch(/committed advancement/i);
+    },
+  );
 
   test('blocks a correction that would rewrite an active downstream bracket game', async () => {
     const state = forfeitState();
