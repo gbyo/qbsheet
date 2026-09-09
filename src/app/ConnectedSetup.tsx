@@ -11,7 +11,7 @@
  * presses its button, which is the gesture the browser needs before it permits a local-network request.
  * Pairing codes remain in memory only until the exchange consumes them.
  */
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import BrandLogo from '../BrandLogo';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import { IControlConnection, exchangePairingCode, openControl } from './ControlPairing';
@@ -87,6 +87,15 @@ export default function ConnectedSetup(
   const [roomId, setRoomId] = useState('');
   const [scanning, setScanning] = useState(false);
   const [portableInput, setPortableInput] = useState<IManualGameInput | null>(null);
+  // Async pairing work can outlive this screen when the user presses Back. Results from a screen that
+  // no longer exists must not adopt a room or otherwise mutate the abandoned flow.
+  const activeRef = useRef(true);
+  useEffect(
+    () => () => {
+      activeRef.current = false;
+    },
+    [],
+  );
   // Mirrors of the identity-bearing inputs. An async connect/pair result is applied only when the
   // input it was started from still matches, so a response for address/code A can never advance
   // UI that is now displaying B.
@@ -132,7 +141,7 @@ export default function ConnectedSetup(
     setUnreachable(false);
     try {
       const opened = await openControl(requestedAddress);
-      if (addressRef.current !== requestedAddress) return;
+      if (!activeRef.current || addressRef.current !== requestedAddress) return;
       if (!opened.ok) {
         setUnreachable(opened.unreachable);
         setError(opened.error);
@@ -140,10 +149,10 @@ export default function ConnectedSetup(
       }
       askForCode(opened.value);
     } catch {
-      if (addressRef.current !== requestedAddress) return;
+      if (!activeRef.current || addressRef.current !== requestedAddress) return;
       setError('Tournament control could not be reached. Check the connection and try again.');
     } finally {
-      setBusy(false);
+      if (activeRef.current) setBusy(false);
     }
   };
 
@@ -161,17 +170,27 @@ export default function ConnectedSetup(
         requestedRoomId,
         existingDeviceId,
       );
-      if (codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId) return;
+      if (
+        !activeRef.current ||
+        codeRef.current !== requestedCode ||
+        roomIdRef.current !== requestedRoomId
+      )
+        return;
       if (!paired.ok) {
         setError(paired.error);
         return;
       }
       adoptRoom(paired.value);
     } catch {
-      if (codeRef.current !== requestedCode || roomIdRef.current !== requestedRoomId) return;
+      if (
+        !activeRef.current ||
+        codeRef.current !== requestedCode ||
+        roomIdRef.current !== requestedRoomId
+      )
+        return;
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
-      setBusy(false);
+      if (activeRef.current) setBusy(false);
     }
   };
 
@@ -182,6 +201,7 @@ export default function ConnectedSetup(
     setUnreachable(false);
     try {
       const opened = await openControl(stage.intent.server);
+      if (!activeRef.current) return;
       if (!opened.ok) {
         setUnreachable(opened.unreachable);
         setError(opened.error);
@@ -193,6 +213,7 @@ export default function ConnectedSetup(
         stage.intent.roomId,
         existingDeviceId,
       );
+      if (!activeRef.current) return;
       if (!paired.ok) {
         setError(paired.error);
         askForCode(opened.value, stage.intent.roomId ?? '');
@@ -200,9 +221,10 @@ export default function ConnectedSetup(
       }
       adoptRoom(paired.value);
     } catch {
+      if (!activeRef.current) return;
       setError('This room could not be paired. Check the connection and try again.');
     } finally {
-      setBusy(false);
+      if (activeRef.current) setBusy(false);
     }
   };
 
