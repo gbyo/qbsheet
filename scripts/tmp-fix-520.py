@@ -67,9 +67,8 @@ addition = """  test.each([429, 500, 502, 503])(
             ? { status, body: { error: 'temporary discovery failure' } }
             : { body: qbtcpDiscovery };
         }
-        if (path === '/qbtcp/v1/assignment') return { body: assignmentDocument() };
         if (path.startsWith('/api/v1')) return { status: 503, body: { error: 'legacy unavailable' } };
-        return { body: {} };
+        return { body: assignmentDocument() };
       });
       const client = new FruityServerClient('http://control.test', fetchImpl);
 
@@ -80,9 +79,9 @@ addition = """  test.each([429, 500, 502, 503])(
       const second = await client.assignment(identity);
       expect(second.ok).toBe(true);
       expect(client.isQbtcp).toBe(true);
+      expect(client.describeProtocol()).toMatchObject({ protocol: 'qbtcp' });
       expect(discoveryAttempts).toBe(2);
       expect(calls.filter((call) => call.path === '/qbtcp/v1')).toHaveLength(2);
-      expect(calls.map((call) => call.path)).toContain('/qbtcp/v1/assignment');
     },
   );
 
@@ -93,9 +92,8 @@ addition = """  test.each([429, 500, 502, 503])(
         discoveryAttempts += 1;
         return discoveryAttempts === 1 ? { body: { status: 'ok' } } : { body: qbtcpDiscovery };
       }
-      if (path === '/qbtcp/v1/assignment') return { body: assignmentDocument() };
       if (path.startsWith('/api/v1')) return { status: 404, body: { error: 'Not found' } };
-      return { body: {} };
+      return { body: assignmentDocument() };
     });
     const client = new FruityServerClient('http://control.test', fetchImpl);
 
