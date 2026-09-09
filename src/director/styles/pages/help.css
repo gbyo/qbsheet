@@ -53,7 +53,7 @@
 }
 
 .director-help-shortcuts kbd + kbd {
-  margin-left: 4px;
+  margin-left: var(--director-space-1);
 }
 
 .director-help-footnote {
