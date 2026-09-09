@@ -20,7 +20,7 @@ export function reportEscape(value: unknown): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
+    .replace(/\"/g, '&quot;')
     .replace(/'/g, '&#39;');
 }
 
@@ -34,13 +34,13 @@ export function reportSlug(value: string): string {
   );
 }
 
-/** Keep these formulas identical to the original bundle's existing anchors. */
-export function reportTeamAnchor(row: Pick<TeamStatsRow, 'rank' | 'teamId'>): string {
-  return `team-${row.rank}-${reportSlug(row.teamId)}`;
+/** Entity anchors are stable ID-only URLs: rank/display changes never break links. */
+export function reportTeamAnchor(row: Pick<TeamStatsRow, 'teamId'>): string {
+  return `team-${reportSlug(row.teamId)}`;
 }
 
-export function reportPlayerAnchor(row: Pick<PlayerStatsRow, 'rank' | 'playerId'>): string {
-  return `player-${row.rank}-${reportSlug(row.playerId)}`;
+export function reportPlayerAnchor(row: Pick<PlayerStatsRow, 'playerId'>): string {
+  return `player-${reportSlug(row.playerId)}`;
 }
 
 /** Game anchors are ID-based so rematches and duplicate display names cannot collide. */
