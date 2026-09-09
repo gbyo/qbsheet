@@ -1,0 +1,238 @@
+name: Apply fix 517
+
+on:
+  push:
+    branches: [fix/517-archived-tournaments-readonly]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/517-archived-tournaments-readonly
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply archived read-only invariant and tests
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          controller = Path('src/director/state/useDirectorController.ts')
+          text = controller.read_text()
+          old_sig = """  const commit = useCallback(
+    (mutator: (draft: DirectorState) => void): boolean => {
+"""
+          new_sig = """  const commit = useCallback(
+    (
+      mutator: (draft: DirectorState) => void,
+      options: { allowArchived?: boolean } = {},
+    ): boolean => {
+"""
+          if text.count(old_sig) != 1:
+              raise SystemExit('commit signature did not match')
+          text = text.replace(old_sig,new_sig,1)
+          guard_anchor = """      if (documentTransitionRef.current) {
+        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        return false;
+      }
+      if (!ensureWriter()) return false;
+"""
+          guard_replacement = """      if (documentTransitionRef.current) {
+        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        return false;
+      }
+      if (stateRef.current.tournament?.status === 'archived' && !options.allowArchived) {
+        setError('This tournament is archived and read-only. Reopen it as a draft before making changes.');
+        return false;
+      }
+      if (!ensureWriter()) return false;
+"""
+          if text.count(guard_anchor) != 1:
+              raise SystemExit('commit guard insertion point did not match')
+          text = text.replace(guard_anchor,guard_replacement,1)
+
+          start = text.index('  const setTournamentStatus = useCallback(')
+          end = text.index('  const refreshTournaments = useCallback', start)
+          block = text[start:end]
+          if block.count('return commit((draft) => {') != 1:
+              raise SystemExit('setTournamentStatus commit call did not match')
+          block = block.replace('return commit((draft) => {', 'return commit(\n        (draft) => {', 1)
+          tail = """      });
+    },
+    [commit],
+  );
+
+"""
+          tail_replacement = """        },
+        { allowArchived: current.status === 'archived' && status === 'draft' },
+      );
+    },
+    [commit],
+  );
+
+"""
+          if block.count(tail) != 1:
+              raise SystemExit('setTournamentStatus commit tail did not match')
+          block = block.replace(tail,tail_replacement,1)
+          text = text[:start] + block + text[end:]
+
+          # Whole-document recovery/edit operations should not bypass archive immutability.
+          restore = """  const restoreCheckpoint = useCallback(
+    async (checkpointId: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
+"""
+          restore_new = """  const restoreCheckpoint = useCallback(
+    async (checkpointId: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (stateRef.current.tournament?.status === 'archived') {
+        setError('This tournament is archived and read-only. Reopen it as a draft before restoring a recovery point.');
+        return false;
+      }
+      if (!ensureWriter()) return false;
+"""
+          if text.count(restore) != 1:
+              raise SystemExit('restore archive guard insertion point did not match')
+          text = text.replace(restore,restore_new,1)
+          edit = """  const editTournamentSnapshot = useCallback(
+    async (value: DirectorState, reason: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (!ensureWriter()) return false;
+"""
+          edit_new = """  const editTournamentSnapshot = useCallback(
+    async (value: DirectorState, reason: string): Promise<boolean> => {
+      if (documentTransitionRef.current) return false;
+      if (stateRef.current.tournament?.status === 'archived') {
+        setError('This tournament is archived and read-only. Reopen it as a draft before editing its snapshot.');
+        return false;
+      }
+      if (!ensureWriter()) return false;
+"""
+          if text.count(edit) != 1:
+              raise SystemExit('snapshot edit archive guard insertion point did not match')
+          text = text.replace(edit,edit_new,1)
+          sync = """  const syncQbtcp = useCallback(() => {
+    // The app polls every second. Do not allow a slow local-network read to overlap the next poll:
+"""
+          sync_new = """  const syncQbtcp = useCallback(() => {
+    // Archived documents are historical snapshots. Do not let background scorer telemetry mutate them.
+    if (stateRef.current.tournament?.status === 'archived') return Promise.resolve();
+    // The app polls every second. Do not allow a slow local-network read to overlap the next poll:
+"""
+          if text.count(sync) != 1:
+              raise SystemExit('QBTCP sync archive guard insertion point did not match')
+          text = text.replace(sync,sync_new,1)
+          controller.write_text(text)
+
+          app = Path('src/director/app/DirectorApp.tsx')
+          text = app.read_text()
+          banner_anchor = """            {(controller.writerStatus === 'blocked' || controller.writerStatus === 'unavailable') && (
+              <Callout tone=\"warning\" title=\"Read-only Director tab\" role=\"alert\">
+"""
+          banner = """            {tournament.status === 'archived' && (
+              <Callout
+                tone=\"info\"
+                title=\"Archived tournament · read only\"
+                actions={
+                  <Button
+                    variant=\"secondary\"
+                    onClick={() =>
+                      void controller.reopenTournament().then((reopened) => {
+                        if (reopened) announce(`${tournament.name} reopened as a draft.`);
+                        else announce(errorNotice('The archived tournament could not be reopened.'));
+                      })
+                    }
+                  >
+                    Reopen as draft
+                  </Button>
+                }
+              >
+                Historical tournament data is protected from edits. Reopen the tournament as a draft before making changes.
+              </Callout>
+            )}
+"""
+          if text.count(banner_anchor) != 1:
+              raise SystemExit('Director archived banner insertion point did not match')
+          app.write_text(text.replace(banner_anchor,banner + banner_anchor,1))
+          PY
+          cat > tests/DirectorArchivedReadonly.test.tsx <<'EOF'
+          import { act, renderHook, waitFor } from '@testing-library/react';
+          import { describe, expect, test } from 'vitest';
+          import { MemoryDirectorRepository } from '../src/director/persistence';
+          import { useDirectorController } from '../src/director/state/useDirectorController';
+          import { directorFixture } from '../src/director/transfers/testFixtures';
+
+          async function archivedDirector() {
+            const repository = new MemoryDirectorRepository();
+            const state = directorFixture();
+            state.tournament!.status = 'archived';
+            await repository.save(state);
+            const hook = renderHook(() => useDirectorController(repository));
+            await waitFor(() => expect(hook.result.current.loading).toBe(false));
+            return { hook, repository };
+          }
+
+          describe('archived Director documents', () => {
+            test('ordinary commit-backed edits are centrally rejected', async () => {
+              const { hook } = await archivedDirector();
+              const beforeVenue = hook.result.current.state.tournament!.venue;
+              const roomCount = hook.result.current.state.rooms.length;
+
+              act(() => {
+                expect(hook.result.current.updateTournament({ venue: 'Changed history' })).toBe(false);
+                expect(hook.result.current.addRoom({ name: 'Historical mutation' })).toBe(false);
+              });
+
+              expect(hook.result.current.state.tournament!.status).toBe('archived');
+              expect(hook.result.current.state.tournament!.venue).toBe(beforeVenue);
+              expect(hook.result.current.state.rooms).toHaveLength(roomCount);
+              expect(hook.result.current.error).toMatch(/archived and read-only/i);
+            });
+
+            test('explicit reopen is audited and restores ordinary editability', async () => {
+              const { hook } = await archivedDirector();
+              let reopened = false;
+              await act(async () => {
+                reopened = await hook.result.current.reopenTournament();
+              });
+              expect(reopened).toBe(true);
+              expect(hook.result.current.state.tournament!.status).toBe('draft');
+              expect(
+                hook.result.current.state.audit.some(
+                  (entry) =>
+                    entry.type === 'tournament-updated' &&
+                    entry.details?.from === 'archived' &&
+                    entry.details?.to === 'draft',
+                ),
+              ).toBe(true);
+
+              act(() => {
+                expect(hook.result.current.updateTournament({ venue: 'Editable again' })).toBe(true);
+              });
+              expect(hook.result.current.state.tournament!.venue).toBe('Editable again');
+            });
+          });
+          EOF
+      - run: npx prettier --write src/director/state/useDirectorController.ts src/director/app/DirectorApp.tsx tests/DirectorArchivedReadonly.test.tsx
+      - run: npx vitest --run tests/DirectorArchivedReadonly.test.tsx
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-517.yml
+          git add src/director/state/useDirectorController.ts src/director/app/DirectorApp.tsx tests/DirectorArchivedReadonly.test.tsx
+          git commit -m 'fix: make archived tournaments read-only (#517)'
+          git push origin HEAD:fix/517-archived-tournaments-readonly
