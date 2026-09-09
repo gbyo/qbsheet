@@ -41,6 +41,45 @@ export interface GamePlayerStatsRow {
   points: number | null;
 }
 
+export interface RoundStatsCoverage {
+  playedGames: number;
+  detailGames: number;
+  tossupsReadGames: number;
+  regulationGames: number;
+  bonusGames: number;
+}
+
+/**
+ * A report-safe canonical round aggregate. Every nullable metric carries the
+ * strict knownness decision made by the tournament-domain derivation; HTML
+ * renderers only format these values and never recalculate competitive stats.
+ */
+export interface RoundStatsRow {
+  roundId: string;
+  roundName: string;
+  phaseId?: string;
+  phaseName?: string;
+  packetName: string | null;
+  games: number;
+  teams: number;
+  playedGames: number;
+  regulationTossupCount: number | null;
+  tossupsRead: number | null;
+  pointsPerTeamPerXTuh: number | null;
+  superpowerRate: number | null;
+  powerRate: number | null;
+  tossupConversionRate: number | null;
+  negRatePerXTuh: number | null;
+  ppb: number | null;
+  bonusConversionRate: number | null;
+  superpowerApplicable: boolean | null;
+  powerApplicable: boolean | null;
+  negApplicable: boolean | null;
+  bonusApplicable: boolean | null;
+  coverage: RoundStatsCoverage;
+  notes: string[];
+}
+
 /**
  * Extend the existing public game row without breaking version-1 snapshot
  * consumers. Older snapshots simply omit these optional fields; richer
@@ -59,6 +98,13 @@ declare module './stats.js' {
     overtimeTossupsRead?: number | null;
     teamStats?: GameTeamStatsRow[];
     playerStats?: GamePlayerStatsRow[];
+  }
+
+  interface StatsSnapshot {
+    /** Canonical round aggregates in the snapshot's already-filtered scope. */
+    rounds?: RoundStatsRow[];
+    /** Overall aggregate recomputed from every game in scope, never averaged from round rows. */
+    roundTotal?: RoundStatsRow | null;
   }
 }
 
