@@ -119,6 +119,7 @@ export function ActionMenu({
           className="director-menu"
           align={align}
           placement={placement}
+          floating
           openerRef={openerRef}
           onClose={close}
           searchPlaceholder={searchPlaceholder}

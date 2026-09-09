@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { describe, expect, test, vi } from 'vitest';
-import { DirectorMenu } from './DirectorMenu';
+import { DirectorMenu, getFloatingMenuPosition } from './DirectorMenu';
 import { MenuItem, MenuNote, MenuSectionLabel } from './Menu';
 
 function Harness({
@@ -28,7 +28,7 @@ function Harness({
         Open
       </button>
       {open && (
-        <DirectorMenu label="Test menu" openerRef={openerRef} onClose={() => setOpen(false)}>
+        <DirectorMenu label="Test menu" floating openerRef={openerRef} onClose={() => setOpen(false)}>
           <MenuSectionLabel>Letters</MenuSectionLabel>
           {items.map((item) => (
             <MenuItem key={item} onSelect={() => onSelect?.(item)}>
@@ -75,6 +75,42 @@ function search() {
 }
 
 describe('DirectorMenu', () => {
+  test('positions a bottom menu and clamps its end edge to the viewport', () => {
+    expect(
+      getFloatingMenuPosition(
+        { left: 280, right: 320, top: 80, bottom: 100 } as DOMRect,
+        { width: 220, height: 180 },
+        'end',
+        'bottom',
+        { width: 400, height: 600 },
+      ),
+    ).toEqual({ left: 100, top: 104, placement: 'bottom' });
+  });
+
+  test('flips above when the preferred side does not have enough room', () => {
+    expect(
+      getFloatingMenuPosition(
+        { left: 40, right: 80, top: 500, bottom: 520 } as DOMRect,
+        { width: 220, height: 180 },
+        'start',
+        'bottom',
+        { width: 500, height: 600 },
+      ),
+    ).toEqual({ left: 40, top: 316, placement: 'top' });
+  });
+
+  test('a portaled menu is outside an overflow container while its trigger remains in it', () => {
+    render(
+      <div style={{ overflow: 'hidden' }}>
+        <Harness />
+      </div>,
+    );
+    open();
+
+    const menu = screen.getByRole('listbox', { name: 'Test menu' });
+    expect(menu.parentElement?.parentElement).toBe(document.body);
+  });
+
   test('opens onto the filter field with every entry offered', () => {
     render(<Harness />);
     open();
