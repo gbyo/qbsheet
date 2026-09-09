@@ -21,9 +21,9 @@ function declarations(file: string, css: string): StyleDeclaration[] {
   const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, (comment) => '\n'.repeat(comment.split('\n').length - 1));
   return [...withoutComments.matchAll(/([\w-]+)\s*:\s*([^;{}]+);/g)].map((match) => ({
     file,
-    line: withoutComments.slice(0, match.index).split('\n').length,
-    property: match[1],
-    value: match[2].trim(),
+    line: withoutComments.slice(0, match.index ?? 0).split('\n').length,
+    property: match[1] ?? '',
+    value: (match[2] ?? '').trim(),
   }));
 }
 
@@ -66,8 +66,8 @@ describe('Director page stylesheet contract', () => {
     const violations = pageStyles().flatMap(({ file, css }) => {
       const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
       return [...withoutComments.matchAll(/([^{}]*\.director-icon-button[^{}]*)\{([^}]*)\}/g)]
-        .filter(([, , body]) => /\b(?:width|height|font-size)\s*:/.test(body))
-        .map((match) => `${file}: ${match[1].trim()}`);
+        .filter((match) => /\b(?:width|height|font-size)\s*:/.test(match[2] ?? ''))
+        .map((match) => `${file}: ${(match[1] ?? '.director-icon-button').trim()}`);
     });
 
     expect(violations).toEqual([]);
