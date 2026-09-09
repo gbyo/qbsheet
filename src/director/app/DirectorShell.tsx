@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Command } from 'cmdk';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Command, defaultFilter } from 'cmdk';
 import BrandLogo from '../../BrandLogo';
 import { IconButton } from '../components/Controls';
 import { Icon } from '../components/Icon';
@@ -18,7 +18,8 @@ import {
   type SectionId,
 } from './navigation';
 import { TOURNAMENT_FILE_ACCEPT } from './openTournament';
-import type { DirectorNavigationTarget } from './navigationTarget';
+import type { DirectorNavigationTarget, EntityType } from './navigationTarget';
+import { revealSettingsTarget } from './searchTargets';
 import type { PickedFile } from '../components/filePickerContract';
 
 /**
@@ -153,16 +154,9 @@ export function DirectorShell({
     panelId: 'settings-tournament' | 'settings-operator',
   ) => {
     navigate('settings', { section: 'settings', entityType: 'setting', entityId });
-    window.setTimeout(() => {
-      const panel = document.getElementById(panelId);
-      if (!panel) return;
-      panel.scrollIntoView({ block: 'start', behavior: 'auto' });
-      panel
-        .querySelector<HTMLElement>(
-          'input:not(:disabled), textarea:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])',
-        )
-        ?.focus({ preventScroll: true });
-    }, 0);
+    // The same arrival global search performs, from the same helper: land on the
+    // panel with focus inside it rather than at the top of Settings.
+    revealSettingsTarget({ panelId });
   };
 
   const archiveCurrent = () => {
@@ -517,21 +511,68 @@ function SectionLink({
 
 /* ============================================================ Global search */
 
+export type SearchResultKind = 'page' | 'setting' | 'entity';
+
 export interface SearchResultView {
   id: string;
   section: SectionId;
   label: string;
   detail: string;
   group: string | null;
+  /** What selecting it does: go to a destination, open a setting, or open a thing. */
+  kind?: SearchResultKind;
+  /** Terms it is findable by that the visible text does not contain. */
+  keywords?: string[];
+  entityType?: EntityType;
+  parentId?: string;
+  /** Settings only: the sub-section the Settings view switches to. */
+  settingsEntityId?: string;
+  /** Settings only: the panel to scroll to. */
+  settingsPanelId?: string;
+  /** Settings only: the field to focus, by its visible label. */
+  settingsFieldLabel?: string;
 }
 
 /**
- * Global search: a command/entity navigator.
+ * Global search: a command navigator over pages, settings, and entities.
  *
  * It finds a thing and goes to it. It does **not** filter any page — the value
  * used to be threaded into the Teams view, so typing here to navigate also
  * narrowed the Teams table under the results popover. Local filtering now lives
  * on the pages, in `SearchField`.
+ *
+ * # Why cmdk owns the list
+ *
+ * The results were a hand-rolled combobox over substring matches: a highlight
+ * index kept in step with the query by hand, and a corpus that held only the
+ * tournament's entities. Two things came out of that. Typing "timezone" or
+ * "recovery" or "standings" — a setting, a settings panel, a destination — found
+ * nothing, so the answer to a missed query was to go and learn the sidebar
+ * instead. And a near miss was a miss: "northvew" matched no team.
+ *
+ * `cmdk` supplies the fuzzy scorer, the arrow travel, Home/End, Enter, and the
+ * active-descendant announcement. What is kept here is the shape the design
+ * system commits to: the top bar owns global search, so this stays an inline
+ * field with a popover under it rather than becoming a modal palette.
+ *
+ * # Why the ranking is done here rather than by cmdk's own filter
+ *
+ * A subsequence scorer matches far more than it should on a long query: every
+ * one of `standings`'s letters can be found scattered through "Venue · Settings
+ * · Tournament details", so a query that has one excellent answer came back with
+ * a dozen. Scores separate them — the real match scores ~0.99 and that tail
+ * ~0.012 — but cmdk's `filter` sees one item at a time and cannot know it is
+ * looking at a tail.
+ *
+ * So the scoring is cmdk's `defaultFilter` and the *judgement* is here: drop
+ * anything under a floor, take the best twelve, and order the groups by their
+ * own best match. `shouldFilter={false}` then tells cmdk the list it is given is
+ * the list to show, in the order given. Twelve is what the hand-rolled version
+ * capped at; the floor sits below a typo (`northvew` for Northview scores ~0.17)
+ * and above scattered noise (~0.01).
+ *
+ * Escape is two-stage, as it is in the menus: it clears a query in flight, and
+ * gives the field up only once there is nothing to clear.
  */
 export function GlobalSearch({
   value,
@@ -542,28 +583,12 @@ export function GlobalSearch({
 }: {
   value: string;
   onChange: (value: string) => void;
+  /** The whole index. Ranking and filtering are cmdk's, not the caller's. */
   results: SearchResultView[];
   onSelect: (result: SearchResultView) => void;
   inputRef: React.MutableRefObject<HTMLInputElement | null>;
 }) {
-  /*
-   * The highlighted result is keyed to the query it belongs to, so a new
-   * keystroke starts with nothing highlighted without an effect resetting state
-   * after the fact — one render per keystroke rather than two, and no window in
-   * which the highlight points at a result from the previous query.
-   */
-  const [highlight, setHighlight] = useState<{ query: string; index: number }>({
-    query: '',
-    index: -1,
-  });
   const open = value.trim().length > 0;
-  const activeIndex = highlight.query === value ? highlight.index : -1;
-  const active = results.length > 0 ? Math.min(activeIndex, results.length - 1) : -1;
-  const setActiveIndex = (next: number | ((current: number) => number)) =>
-    setHighlight({
-      query: value,
-      index: typeof next === 'function' ? next(activeIndex) : next,
-    });
 
   useEffect(() => {
     const focusSearch = (event: KeyboardEvent) => {
@@ -577,88 +602,120 @@ export function GlobalSearch({
     return () => window.removeEventListener('keydown', focusSearch);
   }, [inputRef]);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      if (value.trim()) onChange('');
-      else inputRef.current?.blur();
-      return;
-    }
-    if (!open || !results.length) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      const delta = event.key === 'ArrowDown' ? 1 : -1;
-      setActiveIndex((current) => {
-        const next = current + delta;
-        return next < 0 ? results.length - 1 : next >= results.length ? 0 : next;
-      });
-      return;
-    }
-    if (event.key === 'Enter' && active >= 0) {
-      event.preventDefault();
-      const result = results[active];
-      if (result) onSelect(result);
-    }
-  };
+  const groups = useMemo(() => rankSearchResults(results, value), [results, value]);
 
   return (
-    <div className="director-search-wrap">
+    <Command
+      className="director-search-wrap"
+      /* Names the field: cmdk renders this as its visually hidden label. */
+      label="Search the tournament"
+      shouldFilter={false}
+      loop
+    >
       <div className="director-search">
         <Icon name="search" size={16} />
-        <label className="visually-hidden" htmlFor="director-global-search">
-          Search the tournament
-        </label>
-        <input
-          id="director-global-search"
+        {/* No `id` or `type`: cmdk sets both itself, and its own id is what the
+            list and the active-descendant announcement are wired to. */}
+        <Command.Input
           ref={inputRef}
-          type="search"
-          placeholder="Search teams, rooms, rounds, games"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={onKeyDown}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={open}
-          aria-controls={open && results.length ? 'director-search-results' : undefined}
-          aria-activedescendant={active >= 0 ? `director-search-result-${active}` : undefined}
+          onValueChange={onChange}
+          placeholder="Search pages, settings, teams, rooms, rounds, games"
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            if (value.trim()) onChange('');
+            else inputRef.current?.blur();
+          }}
         />
         <kbd aria-label={shortcutAriaLabel('k')}>{modifierKeyLabel()} K</kbd>
       </div>
       {open &&
-        (results.length > 0 ? (
-          <div
-            id="director-search-results"
-            className="director-search-results"
-            role="listbox"
-            aria-label="Search results"
-          >
-            {results.map((result, index) => (
-              <button
-                type="button"
-                className={`director-search-result ${index === active ? 'is-active' : ''}`.trim()}
-                key={`${result.section}-${result.id}`}
-                id={`director-search-result-${index}`}
-                role="option"
-                aria-selected={index === active}
-                onClick={() => onSelect(result)}
-              >
-                <span>
-                  <strong>{result.label}</strong>
-                  <small>{result.detail}</small>
-                </span>
-                <Badge
-                  tone="neutral"
-                  label={`${result.group ? `${result.group} · ` : ''}${labelForSection(result.section)}`}
-                />
-              </button>
+        (groups.length > 0 ? (
+          <Command.List className="director-search-results" label="Search results">
+            {groups.map(({ heading, kind, results: found }) => (
+              <Command.Group key={kind} heading={heading}>
+                {found.map((result) => (
+                  <Command.Item
+                    key={`${result.section}-${result.id}`}
+                    className="director-search-result"
+                    onSelect={() => onSelect(result)}
+                  >
+                    <span>
+                      <strong>{result.label}</strong>
+                      <small>{result.detail}</small>
+                    </span>
+                    <Badge
+                      tone="neutral"
+                      label={`${result.group ? `${result.group} · ` : ''}${labelForSection(result.section)}`}
+                    />
+                  </Command.Item>
+                ))}
+              </Command.Group>
             ))}
-          </div>
+          </Command.List>
         ) : (
           <div className="director-search-results director-search-empty" role="status">
-            No matching teams, players, rooms, packets, rounds, or games.
+            Nothing matches “{value.trim()}”. Pages, settings, teams, players, rooms, packets, rounds, games,
+            and results are all searchable.
           </div>
         ))}
-    </div>
+    </Command>
+  );
+}
+
+/** Below this, a match is a scorer artefact rather than something anyone typed for. */
+const minimumSearchScore = 0.05;
+
+/** The most results the popover will offer, best first. */
+const maximumSearchResults = 12;
+
+const searchGroupOrder: { heading: string; kind: SearchResultKind }[] = [
+  { heading: 'Pages', kind: 'page' },
+  { heading: 'Settings', kind: 'setting' },
+  { heading: 'Tournament', kind: 'entity' },
+];
+
+export interface SearchResultGroup {
+  heading: string;
+  kind: SearchResultKind;
+  results: SearchResultView[];
+}
+
+/**
+ * Score the index against the query and return the groups worth showing.
+ *
+ * Exported for its own test: the ranking is the part with judgement in it, and
+ * driving it through the shell to check that "standings" does not offer Venue
+ * would be testing it through three other components.
+ */
+export function rankSearchResults(results: SearchResultView[], query: string): SearchResultGroup[] {
+  const needle = query.trim();
+  if (!needle) return [];
+  const scored = results
+    .map((result) => ({
+      result,
+      score: defaultFilter(`${result.label} ${result.detail}`, needle, result.keywords),
+    }))
+    .filter((entry) => entry.score >= minimumSearchScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maximumSearchResults);
+  return (
+    searchGroupOrder
+      .map(({ heading, kind }) => ({
+        heading,
+        kind,
+        results: scored.filter((entry) => (entry.result.kind ?? 'entity') === kind),
+      }))
+      // A group is placed by its own best match, so the kind that answers the
+      // query leads — searching a team name does not put Pages above it.
+      .filter((group) => group.results.length > 0)
+      .sort((a, b) => (b.results[0]?.score ?? 0) - (a.results[0]?.score ?? 0))
+      .map((group) => ({
+        heading: group.heading,
+        kind: group.kind,
+        results: group.results.map((entry) => entry.result),
+      }))
   );
 }
 

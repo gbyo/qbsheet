@@ -508,10 +508,19 @@ test('Director supports keyboard search, inline edits, and audited result review
     .getByRole('button', { name: 'Add team' })
     .click();
 
-  const search = page.getByPlaceholder('Search teams, rooms, rounds, games');
+  const search = page.getByPlaceholder('Search pages, settings, teams, rooms, rounds, games');
   await search.fill('Northview');
+  /*
+   * The best match is selected as soon as there is a query, so Enter runs the
+   * obvious answer without a preparatory keystroke — arrow travel moves *off*
+   * it rather than into it, and announces wherever it lands.
+   */
+  const firstResult = page.getByRole('option').first();
+  await expect(firstResult).toHaveAttribute('aria-selected', 'true');
   await search.press('ArrowDown');
-  await expect(search).toHaveAttribute('aria-activedescendant', 'director-search-result-0');
+  await expect(search).toHaveAttribute('aria-activedescendant', /.+/);
+  await search.press('ArrowUp');
+  await expect(firstResult).toHaveAttribute('aria-selected', 'true');
   await search.press('Enter');
   await expect(search).toHaveValue('');
   await expect(page.getByRole('heading', { level: 1, name: 'Teams' })).toBeVisible();
@@ -634,7 +643,7 @@ test('Director opens every indexed search entity at its exact operational target
   await page.getByLabel('Packet name').fill('Set A');
   await footerButton('Add packet').click();
 
-  const search = page.getByPlaceholder('Search teams, rooms, rounds, games');
+  const search = page.getByPlaceholder('Search pages, settings, teams, rooms, rounds, games');
   const select = async (query: string, resultText: string | RegExp) => {
     await search.fill(query);
     const result = page.getByRole('option').filter({ hasText: resultText }).first();
@@ -692,6 +701,29 @@ test('Director opens every indexed search entity at its exact operational target
   await select(gameId ?? '', /Northview A.*Riverside A/);
   const selectedGame = page.locator(`[data-director-navigation-id="${gameId}"]`);
   await expect(selectedGame).toBeFocused();
+
+  /*
+   * Destinations and settings are in the same index as the entities. An operator
+   * who types "timezone" is not asked to know first that it lives in Settings,
+   * behind the General sub-section, in the Tournament details panel — and a
+   * mistyped query still lands, which a substring match could never do.
+   */
+  await select('standings', /^Standings/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Standings' })).toBeVisible();
+
+  await select('timezone', /^Tournament timezone/);
+  await expect(page.getByRole('heading', { level: 1, name: 'Settings' })).toBeVisible();
+  // The zone field is a Combobox, so arriving on it opens its list — the label
+  // names both the input and the popover, hence the explicit role.
+  await expect(page.getByRole('combobox', { name: 'Tournament timezone' })).toBeFocused();
+
+  /*
+   * `^Recovery` and not `Recovery`: the Settings *page* describes itself as
+   * holding "storage, recovery, and audit history", so a loose text filter
+   * would pick the page over the panel the query is actually reaching for.
+   */
+  await select('recovry', /^Recovery/);
+  await expect(page.getByRole('button', { name: 'Create recovery point' })).toBeFocused();
 });
 
 test('Director Help has one entry, owns focus, and restores the exact invoker', async ({ page }) => {
@@ -739,7 +771,7 @@ test('Director Help has one entry, owns focus, and restores the exact invoker', 
   await expect(operator).toBeFocused();
 
   await page.keyboard.press('Control+k');
-  await expect(page.getByPlaceholder('Search teams, rooms, rounds, games')).toBeFocused();
+  await expect(page.getByPlaceholder('Search pages, settings, teams, rooms, rounds, games')).toBeFocused();
 });
 
 test('Director keeps unavailable resources out of new room assignments', async ({ page }) => {
