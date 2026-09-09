@@ -4819,7 +4819,6 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('Structural edits must belong to the open tournament.');
         return false;
       }
-      if (!ensureDocumentTransitionAllowed('replace the tournament document')) return false;
       if (!ensureWriter()) return false;
       documentTransitionRef.current = true;
       documentEpochRef.current += 1;
@@ -4873,14 +4872,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setRecovering(false);
       }
     },
-    [
-      assertWriteAuthority,
-      captureWriteAuthority,
-      ensureDocumentTransitionAllowed,
-      ensureWriter,
-      refreshCheckpoints,
-      refreshTournaments,
-    ],
+    [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
   );
 
   const setRoundPacket = useCallback(
