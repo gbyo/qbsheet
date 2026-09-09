@@ -11,6 +11,7 @@ function advancementState(
     id: 'prelims',
     name: 'Preliminary phase',
     status,
+    roundIds: ['round-1'],
   } as DirectorState['phases'][number]);
   state.rounds.push({ id: 'round-1', phaseId: 'prelims' } as DirectorState['rounds'][number]);
   state.scheduledGames.push({
@@ -37,5 +38,12 @@ describe('advancement readiness safety', () => {
 
   test('allows advancement only after the source phase is complete', () => {
     expect(advancementCommitBlocker(advancementState('complete'), 'prelims')).toBeNull();
+  });
+
+  test('allows advancement once the source phase is competitively complete', () => {
+    // Closing every source round settles the competitive basis even before the phase status flips.
+    const state = advancementState('active');
+    state.rounds[0]!.status = 'closed';
+    expect(advancementCommitBlocker(state, 'prelims')).toBeNull();
   });
 });
