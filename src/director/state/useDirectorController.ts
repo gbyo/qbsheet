@@ -17,6 +17,7 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  planTeamRestore,
   tournamentCompletionBlockers,
   plannedEliminationGameForTeam,
   previewAdvancement,
@@ -301,6 +302,16 @@ export interface SetFinalPlacementResult {
   message: string;
 }
 
+export type AdministrativeResultReplacement =
+  | { kind: 'reopen' }
+  | { kind: 'forfeit'; forfeitedTeamId: DirectorId }
+  | {
+      kind: 'scores';
+      scores: TeamGameScore[];
+      playerStats?: PlayerGameStat[];
+      detailedStats?: DetailedStatsStatus;
+    };
+
 export interface FinishRoundResult {
   finished: boolean;
   roundId: DirectorId;
@@ -515,6 +526,16 @@ export interface DirectorController {
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
   rejectSubmission(submissionId: DirectorId, reason?: string): boolean;
   editAcceptedResult(gameId: DirectorId, scores: TeamGameScore[], note?: string): boolean;
+  correctAdministrativeResult(
+    scheduledGameId: DirectorId,
+    replacement: AdministrativeResultReplacement,
+    reason: string,
+  ): boolean;
+  correctForfeit(
+    scheduledGameId: DirectorId,
+    replacement: AdministrativeResultReplacement,
+    reason: string,
+  ): boolean;
   addProtest(
     gameId: DirectorId,
     description: string,
@@ -2200,11 +2221,31 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(`Team “${current.displayName}” already exists.`);
         return false;
       }
+      const restorePlan = planTeamRestore(snapshot, teamId);
       return commit((draft) => {
         const team = draft.teams.find((entry) => entry.id === teamId);
         if (!team) return;
         team.status = 'confirmed';
         team.updatedAt = isoNow();
+        for (const scheduledGameId of restorePlan.safeGameIds) {
+          const scheduled = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+          if (!scheduled) continue;
+          const round = draft.rounds.find((entry) => entry.id === scheduled.roundId);
+          scheduled.status = round?.status === 'released' ? 'released' : 'scheduled';
+          delete scheduled.cancellation;
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: team.updatedAt,
+          actor: 'Director',
+          type: 'schedule-repaired',
+          summary: `${team.displayName} restored; ${restorePlan.safeGameIds.length} drop-cancelled game(s) reopened.`,
+          entityId: teamId,
+          details: {
+            restoredScheduledGameIds: restorePlan.safeGameIds,
+            reviewRequired: restorePlan.review,
+          },
+        });
         draft.audit.push({
           id: newDirectorId('audit'),
           at: team.updatedAt,
@@ -4247,8 +4288,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
           if (room?.status === 'finished') room.status = room.available ? 'available' : 'offline';
           if (room?.status === 'live') markRoomAvailableIfIdle(draft, room.id);
           const now = isoNow();
+          const auditId = newDirectorId('audit');
+          target.cancellation = {
+            reasonKind: 'manual',
+            reason: normalizedReason,
+            at: now,
+            auditId,
+          };
           draft.audit.push({
-            id: newDirectorId('audit'),
+            id: auditId,
             at: now,
             actor: 'Director',
             type: 'schedule-cancelled',
@@ -4783,6 +4831,161 @@ export function useDirectorController(repository = createDirectorRepository()): 
     },
     [commit],
   );
+
+  const correctAdministrativeResult = useCallback(
+    (scheduledGameId: DirectorId, replacement: AdministrativeResultReplacement, reason: string): boolean => {
+      const snapshot = stateRef.current;
+      const scheduled = snapshot.scheduledGames.find((game) => game.id === scheduledGameId);
+      const current = scheduled ? canonicalAcceptedGame(snapshot, scheduled.id) : undefined;
+      const normalizedReason = reason.trim();
+      if (!scheduled || !current || current.status !== 'forfeit') {
+        setError('Only the current canonical administrative forfeit can be corrected.');
+        return false;
+      }
+      if (!normalizedReason) {
+        setError('A correction reason is required for an administrative forfeit.');
+        return false;
+      }
+      if (
+        replacement.kind === 'forfeit' &&
+        ![scheduled.leftTeamId, scheduled.rightTeamId].includes(replacement.forfeitedTeamId)
+      ) {
+        setError('The replacement forfeiting team must be one of the teams assigned to this game.');
+        return false;
+      }
+      const playerStats = replacement.kind === 'scores' ? (replacement.playerStats ?? []) : [];
+      if (replacement.kind === 'scores') {
+        const validationError = validateResultForScheduledGame(
+          snapshot,
+          scheduled,
+          replacement.scores,
+          playerStats,
+        );
+        if (validationError) {
+          setError(validationError);
+          return false;
+        }
+        const detailedStatsError = validateDetailedStats(replacement.detailedStats, playerStats);
+        if (detailedStatsError) {
+          setError(detailedStatsError);
+          return false;
+        }
+      }
+      const correctionPlan = planAdministrativeResultCorrection(snapshot, scheduledGameId, replacement);
+      if (correctionPlan.issue) {
+        setError(correctionPlan.issue);
+        return false;
+      }
+      return commit((draft) => {
+        const targetScheduled = draft.scheduledGames.find((game) => game.id === scheduledGameId);
+        const previous = targetScheduled ? canonicalAcceptedGame(draft, scheduledGameId) : undefined;
+        if (!targetScheduled || !previous || previous.status !== 'forfeit') return;
+        const now = isoNow();
+        const replacementSubmissionId =
+          replacement.kind === 'reopen' ? undefined : newDirectorId('submission');
+        const previousSubmissions = draft.submissions.filter(
+          (submission) => submission.gameId === previous.id && submission.status === 'accepted',
+        );
+        for (const submission of previousSubmissions) {
+          submission.status = 'superseded';
+          if (replacementSubmissionId) submission.supersededBySubmissionId = replacementSubmissionId;
+        }
+        previous.status = 'rejected';
+        previous.note = [previous.note, `Superseded by administrative correction: ${normalizedReason}`]
+          .filter(Boolean)
+          .join(' · ');
+
+        for (const update of correctionPlan.updates) {
+          const dependent = draft.scheduledGames.find((game) => game.id === update.scheduledGameId);
+          if (!dependent) continue;
+          dependent.leftTeamId = update.leftTeamId;
+          dependent.rightTeamId = update.rightTeamId;
+          dependent.assignmentRevision += 1;
+          const dependentRound = draft.rounds.find((round) => round.id === dependent.roundId);
+          if (dependentRound) dependentRound.revision += 1;
+        }
+
+        if (replacement.kind === 'reopen') {
+          targetScheduled.status =
+            draft.rounds.find((round) => round.id === targetScheduled.roundId)?.status === 'released'
+              ? 'released'
+              : 'scheduled';
+          for (const session of draft.qbtcpSessions.filter((entry) => entry.matchId === targetScheduled.id)) {
+            session.state = 'abandoned';
+            session.resumable = false;
+            session.resultReceived = false;
+            session.progress = null;
+          }
+        } else {
+          const scores =
+            replacement.kind === 'forfeit'
+              ? [zeroGameScore(targetScheduled.leftTeamId), zeroGameScore(targetScheduled.rightTeamId!)]
+              : structuredClone(replacement.scores);
+          const replacementGameId = newDirectorId('game-record');
+          const replacementGame: GameRecord = {
+            id: replacementGameId,
+            scheduledGameId: targetScheduled.id,
+            roundId: targetScheduled.roundId,
+            packetId: effectivePacketId(draft, targetScheduled),
+            status: replacement.kind === 'forfeit' ? 'forfeit' : 'accepted',
+            ...(replacement.kind === 'forfeit' ? { forfeitedTeamId: replacement.forfeitedTeamId } : {}),
+            scores,
+            playerStats: structuredClone(playerStats),
+            source: 'manual',
+            detailedStats:
+              replacement.kind === 'forfeit'
+                ? 'unknown'
+                : (replacement.detailedStats ?? (playerStats.length > 0 ? 'incomplete' : 'unknown')),
+            finishedAt: now,
+            acceptedAt: now,
+            note: normalizedReason,
+          };
+          draft.games.push(replacementGame);
+          targetScheduled.status = 'accepted';
+          markPacketUsed(draft, targetScheduled.id, replacementGame.packetId);
+          markRoomFinished(draft, targetScheduled.roomId);
+          draft.submissions.push({
+            id: replacementSubmissionId!,
+            gameId: replacementGameId,
+            receivedAt: now,
+            fingerprint: fingerprintForScores(scores),
+            status: 'accepted',
+            rawSubmission: {
+              source: 'manual',
+              correction: replacement.kind,
+              correctedFrom: previous.id,
+              ...(replacement.kind === 'forfeit'
+                ? { forfeitedTeamId: replacement.forfeitedTeamId }
+                : { scores: structuredClone(scores) }),
+              reason: normalizedReason,
+            },
+            acceptedBy: operatorDisplayName(loadOperatorProfile()),
+            acceptedAt: now,
+            supersedesSubmissionId: previousSubmissions.at(-1)?.id,
+          });
+        }
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: now,
+          actor: 'Director',
+          type: 'result-edited',
+          summary: `Corrected the administrative result for ${scheduledGameId}.`,
+          entityId: previous.id,
+          details: {
+            scheduledGameId,
+            correctionKind: replacement.kind,
+            reason: normalizedReason,
+            supersededGameId: previous.id,
+            replacementSubmissionId,
+            reconciledDependentGameIds: correctionPlan.updates.map((update) => update.scheduledGameId),
+          },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const correctForfeit = correctAdministrativeResult;
 
   const addProtest = useCallback(
     (
@@ -6461,6 +6664,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
     acceptSubmission,
     rejectSubmission,
     editAcceptedResult,
+    correctAdministrativeResult,
+    correctForfeit,
     addProtest,
     ruleProtest,
     syncQbtcp,
@@ -6839,6 +7044,118 @@ interface BracketCorrectionUpdate {
 interface BracketCorrectionPlan {
   updates: BracketCorrectionUpdate[];
   issue?: string;
+}
+
+function planAdministrativeResultCorrection(
+  state: DirectorState,
+  scheduledGameId: DirectorId,
+  replacement: AdministrativeResultReplacement,
+): BracketCorrectionPlan {
+  const scheduled = state.scheduledGames.find((entry) => entry.id === scheduledGameId);
+  const current = scheduled ? canonicalAcceptedGame(state, scheduledGameId) : undefined;
+  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+  const phase = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
+  const format = phase ? state.formats.find((entry) => entry.id === phase.formatId) : undefined;
+  if (!current || !scheduled || !format || format.kind !== 'single-elimination' || !scheduled.bracketKey) {
+    return { updates: [] };
+  }
+
+  const previousOutcome = outcomeForGame(current, scheduled);
+  const corrected = structuredClone(state);
+  const correctedGame = corrected.games.find((entry) => entry.id === current.id);
+  const correctedScheduled = corrected.scheduledGames.find((entry) => entry.id === scheduledGameId);
+  if (!correctedGame || !correctedScheduled) return { updates: [] };
+  if (replacement.kind === 'reopen') {
+    correctedGame.status = 'rejected';
+    correctedScheduled.status = 'scheduled';
+  } else if (replacement.kind === 'forfeit') {
+    correctedGame.status = 'forfeit';
+    correctedGame.forfeitedTeamId = replacement.forfeitedTeamId;
+    correctedGame.scores = [
+      zeroGameScore(correctedScheduled.leftTeamId),
+      zeroGameScore(correctedScheduled.rightTeamId!),
+    ];
+  } else {
+    correctedGame.status = 'accepted';
+    delete correctedGame.forfeitedTeamId;
+    correctedGame.scores = structuredClone(replacement.scores);
+  }
+  const correctedOutcome =
+    replacement.kind === 'reopen'
+      ? { winnerTeamId: null, loserTeamId: null }
+      : outcomeForGame(correctedGame, correctedScheduled);
+  if (
+    previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
+    previousOutcome.loserTeamId === correctedOutcome.loserTeamId
+  ) {
+    return { updates: [] };
+  }
+  const after = resolveDirectorBracket(corrected, format.id);
+  if (!after || !format.bracket) return { updates: [] };
+  return bracketCorrectionUpdates(state, format.bracket, scheduled.bracketKey, after, scheduledGameId);
+}
+
+function bracketCorrectionUpdates(
+  state: DirectorState,
+  bracket: NonNullable<DirectorState['formats'][number]['bracket']>,
+  sourceKey: string,
+  after: NonNullable<ReturnType<typeof resolveDirectorBracket>>,
+  sourceScheduledGameId: DirectorId,
+): BracketCorrectionPlan {
+  const updates: BracketCorrectionUpdate[] = [];
+  for (const key of dependentBracketKeys(bracket, sourceKey)) {
+    const expected = after.games.find((candidate) => candidate.key === key);
+    const dependents = state.scheduledGames.filter((candidate) => candidate.bracketKey === key);
+    for (const dependent of dependents) {
+      if (
+        expected?.ready &&
+        dependent.leftTeamId === expected.slotA.teamId &&
+        dependent.rightTeamId === expected.slotB.teamId
+      ) {
+        continue;
+      }
+      if (!expected?.ready) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} is no longer resolvable.`,
+        };
+      }
+      const hasUnresolvedRecord = state.games.some(
+        (candidate) =>
+          candidate.scheduledGameId === dependent.id &&
+          candidate.status !== 'rejected' &&
+          candidate.status !== 'cancelled',
+      );
+      if (dependent.status !== 'scheduled' || hasUnresolvedRecord) {
+        return {
+          updates: [],
+          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} has already been released or has a result.`,
+        };
+      }
+      updates.push({
+        scheduledGameId: dependent.id,
+        leftTeamId: expected.slotA.teamId as DirectorId,
+        rightTeamId: expected.slotB.teamId as DirectorId,
+      });
+    }
+  }
+  return { updates };
+}
+
+function outcomeForGame(
+  game: Pick<GameRecord, 'status' | 'scores' | 'forfeitedTeamId'>,
+  scheduled: Pick<ScheduledGame, 'leftTeamId' | 'rightTeamId'>,
+): { winnerTeamId: DirectorId | null; loserTeamId: DirectorId | null } {
+  if (
+    game.status === 'forfeit' &&
+    game.forfeitedTeamId &&
+    [scheduled.leftTeamId, scheduled.rightTeamId].includes(game.forfeitedTeamId)
+  ) {
+    const winnerTeamId =
+      game.forfeitedTeamId === scheduled.leftTeamId ? scheduled.rightTeamId : scheduled.leftTeamId;
+    return { winnerTeamId, loserTeamId: game.forfeitedTeamId };
+  }
+  return winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
 }
 
 function planBracketCorrection(
