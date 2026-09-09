@@ -266,7 +266,11 @@ describe('OverviewView attention-first layout', () => {
     const { onNavigate } = renderOverview(state);
 
     fireEvent.click(attentionAction('Room 1 references a missing moderator.'));
-    expect(onNavigate).toHaveBeenCalledWith('rooms', undefined);
+    expect(onNavigate).toHaveBeenCalledWith('rooms', {
+      section: 'rooms',
+      entityType: 'room',
+      entityId: 'room-1',
+    });
   });
 
   test('complete released round offers a one-action finish', () => {

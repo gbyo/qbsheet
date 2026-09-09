@@ -2418,7 +2418,7 @@ describe('Director integration hardening', () => {
       released = await Promise.resolve(hook.result.current.releaseRound(roundId));
     });
     expect(released).toBe(false);
-    expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
+    expect(hook.result.current.error).toMatch(/unavailable for Room/i);
 
     act(() => {
       expect(hook.result.current.updateStaff(staffId, { available: true })).toBe(true);
@@ -2428,7 +2428,7 @@ describe('Director integration hardening', () => {
       released = await Promise.resolve(hook.result.current.releaseRound(roundId));
     });
     expect(released).toBe(false);
-    expect(hook.result.current.error).toMatch(/unavailable but assigned/i);
+    expect(hook.result.current.error).toMatch(/unavailable but assigned to Room/i);
 
     act(() => {
       expect(hook.result.current.updateEquipment(equipmentId, { available: true })).toBe(true);
@@ -2493,14 +2493,18 @@ describe('Director integration hardening', () => {
       hook.result.current.updateRoom(room.id, { available: false });
     });
 
-    expect(runPreflight(hook.result.current.state)).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          id: 'games-with-unavailable-rooms',
-          severity: 'blocker',
-        }),
-      ]),
+    // The blocker names the room and deep-links to the game that has to move, rather than
+    // reporting a count the director then has to go hunting through.
+    const issue = runPreflight(hook.result.current.state).find((entry) =>
+      entry.id.startsWith('game-room-unusable-'),
     );
+    expect(issue).toMatchObject({
+      severity: 'blocker',
+      area: 'rooms',
+      message: `${room.name} is unavailable but hosts a game in ${round.name}.`,
+      action: 'Reassign room',
+      entity: { entityType: 'game', parentId: round.id },
+    });
   });
 
   test('room availability toggles restore the schedulable idle status', async () => {

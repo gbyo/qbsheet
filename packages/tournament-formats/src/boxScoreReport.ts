@@ -119,7 +119,11 @@ function groupedGames(snapshot: StatsSnapshot): Array<{ id: string; name: string
   const groups = new Map<string, { id: string; name: string; games: GameStatsRow[] }>();
   for (const game of snapshot.games) {
     const id = game.roundId ?? game.gameId;
-    const group = groups.get(id) ?? { id, name: game.roundName ?? game.roundId ?? 'Games', games: [] };
+    const group = groups.get(id) ?? {
+      id,
+      name: game.roundName ?? game.roundId ?? 'Games',
+      games: [],
+    };
     group.games.push(game);
     groups.set(id, group);
   }

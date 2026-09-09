@@ -1,23 +1,31 @@
 /*
  * Tournament day.
  *
- * `SummaryList` is shared with lists that live inside panels, where its default
- * panel inset and subtle bottom rules are appropriate. Tournament Day is an
- * open sequence instead, so keep the shared row structure but give these rows
- * standalone rhythm and separators from the Director token system.
+ * Rounds and day events are first-class operational objects, so this page uses
+ * the same surface grammar as the rest of Director: one tokenized card per
+ * object. `SummaryItem` still supplies the shared title/summary/action layout;
+ * this stylesheet only gives the day sequence its page-specific card surface.
  */
 
 .director-day-sequence {
+  gap: var(--director-space-3);
   padding: 0;
   margin: 0;
 }
 
 .director-day-sequence > .director-list-item {
-  padding: var(--director-space-4) var(--director-space-1);
-  border-top: 1px solid var(--director-border);
-  border-bottom: 0;
+  align-items: flex-start;
+  padding: var(--director-panel-inset);
+  background: var(--director-surface);
+  border: 1px solid var(--director-border);
+  border-radius: var(--director-radius);
+  box-shadow: var(--director-shadow-sm);
 }
 
-.director-day-sequence > .director-list-item:first-child {
-  border-top: 0;
+/* Tournament Day cards are not selectable rows. Round state already has a
+ * dedicated StateLabel, so inherited list hover/selection fills must not turn
+ * a whole card into a second status indicator. */
+.director-day-sequence > .director-list-item:hover,
+.director-day-sequence > .director-list-item[data-selected='true'] {
+  background: var(--director-surface);
 }

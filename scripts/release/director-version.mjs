@@ -4,10 +4,10 @@
  *
  * # Why this exists
  *
- * Director's version is written down five times. `tauri.conf.json` is the copy that matters once the
+ * Director's version is written down four times. `tauri.conf.json` is the copy that matters once the
  * application is installed — it names the installers, it is what the About window shows, and it is
  * what the updater compares against the version a running Director reports — but `package.json`,
- * `Cargo.toml`, and the two lockfiles that record the package each carry their own. Nothing in an
+ * `Cargo.toml`, and the workspace lockfile that records the package each carry their own. Nothing in an
  * ordinary build checks that they agree, because nothing in an ordinary build reads more than one.
  *
  * A release reads all of them at once, and a disagreement there is not cosmetic:
@@ -112,13 +112,6 @@ export const SOURCES = [
     path: 'apps/director/src-tauri/Cargo.toml',
     what: 'the native crate',
     read: (text) => cargoVersion(text),
-  },
-  {
-    // npm writes the top-level `version` and `packages[""].version` from the same source, so
-    // reading one of them is reading both.
-    path: 'apps/director/package-lock.json',
-    what: "the standalone lockfile's record of the package",
-    read: (text) => json(text).packages?.['']?.version ?? json(text).version,
   },
   {
     path: 'package-lock.json',
