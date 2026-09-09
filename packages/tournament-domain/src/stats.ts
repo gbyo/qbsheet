@@ -293,8 +293,22 @@ function rankStandings(
   games: GameRecord[],
   rules?: TournamentRules,
 ): TeamStanding[] {
-  const order = rules?.tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
-  let groups: TeamStanding[][] = [standings];
+  return rankTeamStandings(standings, games, rules?.tiebreakers);
+}
+
+/**
+ * Rank an arbitrary candidate subset with the canonical progressive tie-break cascade.
+ *
+ * This is also used by cross-pool advancement: every later criterion receives only the group
+ * that remained tied after the earlier criteria, just as ordinary standings do.
+ */
+export function rankTeamStandings(
+  standings: readonly TeamStanding[],
+  games: readonly GameRecord[],
+  tiebreakers?: TournamentRules['tiebreakers'],
+): TeamStanding[] {
+  const order = tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
+  let groups: TeamStanding[][] = [[...standings]];
   for (const key of order) {
     groups = groups.flatMap((group) => {
       if (group.length < 2) return [group];

@@ -6,10 +6,11 @@ import {
   type Team,
   type TournamentRules,
 } from './model';
-import { activeTournamentTeams } from './field';
+import { activePhaseTeams, phaseCompetitiveField } from './field';
 import {
   acceptedGameRecords,
   deriveTeamStandings,
+  rankTeamStandings,
   tiebreakerIsComparable,
   teamTiebreakerValue,
   type DirectorStandingsOptions,
@@ -54,10 +55,10 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
   const remaining = poolStandings.flatMap((entry) =>
     entry.standings.filter((standing) => !qualifiedIds.has(standing.teamId)),
   );
-  const phaseWideGames = phaseGames(state, phase, null);
-  const rankedRemaining = [...remaining].sort((left, right) =>
-    compareWildcardStandings(left, right, remaining, phaseWideGames, tiebreakers),
-  );
+  // Omitting poolId is the canonical selector's phase-wide scope. `null` deliberately means
+  // unpooled games and would silently discard ordinary pooled preliminary results.
+  const phaseWideGames = phaseGames(state, phase);
+  const rankedRemaining = rankTeamStandings(remaining, phaseWideGames, tiebreakers);
   const wildcardStandings = wildcardCount > 0 ? rankedRemaining.slice(0, Math.max(0, wildcardCount)) : [];
   if (wildcardStandings.length > 0 && wildcardStandings.length < rankedRemaining.length) {
     const cutoffTies = unresolvedCutoffTeams(
@@ -106,31 +107,16 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
  * canonical standings use, so wildcard selection never disagrees with pool
  * rankings about what "best remaining" means.
  */
-function compareWildcardStandings(
-  left: TeamStanding,
-  right: TeamStanding,
-  group: readonly TeamStanding[],
-  games: readonly GameRecord[],
-  configuredTiebreakers: TournamentRules['tiebreakers'] | undefined,
-): number {
-  const order = configuredTiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
-  for (const key of order) {
-    if (!tiebreakerIsComparable(key, group, games)) continue;
-    const difference = criterionValue(right, key, group, games) - criterionValue(left, key, group, games);
-    if (difference !== 0) return difference;
-  }
-  return left.teamId.localeCompare(right.teamId);
-}
-
 export function standingsForAdvancement(state: DirectorState, phase: Phase): TeamStanding[] {
   return standingsByPool(state, phase).flatMap((entry) => entry.standings);
 }
 
-function phaseGames(state: DirectorState, phase: Phase, poolId: DirectorId | null): GameRecord[] {
+function phaseGames(state: DirectorState, phase: Phase, poolId?: DirectorId | null): GameRecord[] {
   const options: DirectorStandingsOptions = {
     phaseId: phase.id,
-    poolId,
-    teamIds: poolId ? state.pools.find((pool) => pool.id === poolId)?.teamIds : undefined,
+    ...(poolId === undefined || poolId === null
+      ? {}
+      : { poolId, teamIds: state.pools.find((pool) => pool.id === poolId)?.teamIds }),
     includeDroppedTeams: true,
   };
   return acceptedGameRecords(state, options);
@@ -142,7 +128,7 @@ function standingsByPool(
 ): Array<{ poolId: DirectorId | null; standings: TeamStanding[] }> {
   const tiebreakers = phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers;
   if (phase.poolIds.length === 0) {
-    const teamIds = activeTournamentTeams(state).map((team) => team.id);
+    const teamIds = phaseCompetitiveField(state, phase.id).teams.map((team) => team.id);
     return [
       {
         poolId: null,
@@ -158,7 +144,7 @@ function standingsByPool(
   return phase.poolIds.map((poolId) => {
     const pool = state.pools.find((entry) => entry.id === poolId);
     const teamIds = (pool?.teamIds ?? []).filter((teamId) =>
-      activeTournamentTeams(state).some((team) => team.id === teamId),
+      activePhaseTeams(state, phase.id).some((team) => team.id === teamId),
     );
     return {
       poolId,

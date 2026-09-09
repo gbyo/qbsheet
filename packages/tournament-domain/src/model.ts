@@ -268,6 +268,8 @@ export interface BracketNodeState {
 }
 
 export interface BracketState {
+  /** Phase that owns this draw; absent on legacy documents created before phase-scoped fields. */
+  phaseId?: DirectorId;
   teamCount: number;
   bracketSize: number;
   roundCount: number;
@@ -284,6 +286,8 @@ export interface Phase {
   kind: PhaseKind;
   order: number;
   formatId: DirectorId;
+  /** Explicit competitive field for non-pool stages, normally written by advancement. */
+  teamIds?: DirectorId[];
   poolIds: DirectorId[];
   roundIds: DirectorId[];
   advancementRule: AdvancementRule | null;

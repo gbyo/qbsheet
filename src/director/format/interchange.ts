@@ -47,6 +47,7 @@ import { scoringRulesObject } from '../transfers/assignment';
  */
 export const directorStateArchiveExtension = 'qbsheet:director-state' as const;
 export const directorOrganizationShortNameExtension = 'qbsheet:director-short-name' as const;
+export const directorPhaseTeamIdsExtension = 'qbsheet:phase-team-ids' as const;
 
 export interface DirectorImportReport {
   ok: boolean;
@@ -411,17 +412,23 @@ export function toInterchange(state: DirectorState): DirectorTournament {
   if (!tournament) {
     throw new Error('Create or open a tournament before exporting it.');
   }
-  const phases = state.phases.map((phase) => ({
-    id: phase.id,
-    name: phase.name,
-    kind: phase.kind,
-    order: phase.order,
-    poolIds: phase.poolIds,
-    roundIds: phase.roundIds,
-    ...(phase.advancementRule ? { advancement: jsonObject(phase.advancementRule) } : {}),
-    carryovers: { enabled: phase.carryover },
-    ...(phase.archived ? { extensions: { archived: true } } : {}),
-  }));
+  const phases = state.phases.map((phase) => {
+    const extensions = {
+      ...(phase.archived ? { archived: true } : {}),
+      ...(phase.teamIds !== undefined ? { [directorPhaseTeamIdsExtension]: [...phase.teamIds] } : {}),
+    };
+    return {
+      id: phase.id,
+      name: phase.name,
+      kind: phase.kind,
+      order: phase.order,
+      poolIds: phase.poolIds,
+      roundIds: phase.roundIds,
+      ...(phase.advancementRule ? { advancement: jsonObject(phase.advancementRule) } : {}),
+      carryovers: { enabled: phase.carryover },
+      ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
+    };
+  });
   const rounds = state.rounds.map((round) => ({
     id: round.id,
     name: round.name,
@@ -775,6 +782,13 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     formatId,
     poolIds: phase.poolIds ?? [],
     roundIds: phase.roundIds ?? [],
+    ...(Array.isArray(phase.extensions?.[directorPhaseTeamIdsExtension])
+      ? {
+          teamIds: phase.extensions[directorPhaseTeamIdsExtension].filter(
+            (teamId): teamId is string => typeof teamId === 'string' && teamId !== '',
+          ),
+        }
+      : {}),
     advancementRule: phase.advancement
       ? {
           qualifiersPerPool: number(phase.advancement.qualifiersPerPool) ?? 1,

@@ -1,6 +1,7 @@
 import {
   isoNow,
   plannedEliminationGameForTeam,
+  unresolvedBracketDependencyForTeam,
   newDirectorId,
   unresolvedScheduledGameForTeam,
   type DirectorId,
@@ -42,6 +43,13 @@ export async function dropTeamFlexibly(
       plannedElimination.id,
       'A planned elimination game needs an explicit bracket resolution before a team can be dropped.',
     );
+    return false;
+  }
+  const bracketDependency = unresolvedBracketDependencyForTeam(next, teamId);
+  if (bracketDependency) {
+    // Re-run through the controller guard so the operator receives the same explicit recovery
+    // instruction as a direct drop attempt; no snapshot is mutated.
+    controller.dropTeam(teamId, reason);
     return false;
   }
 

@@ -414,7 +414,7 @@ export function useTransfers(
             ? stateRef.current.rounds.find((entry) => entry.id === selection.roundId)
             : undefined;
         const message =
-          round && report.ok && report.failures.length === 0
+          round && report.ok && report.failures.length === 0 && report.skipped.length === 0
             ? `${round.name} copied to ${location.label} — eject normally.`
             : report.message;
         setStatus(message);
@@ -518,6 +518,7 @@ export function useTransfers(
             byteLength: new TextEncoder().encode(assignment.text).byteLength,
           })),
           failures: plan.failures,
+          skipped: plan.skipped,
           warnings: plan.warnings,
           rootPath: 'downloads',
           message: '',

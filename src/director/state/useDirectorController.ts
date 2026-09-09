@@ -25,11 +25,14 @@ import {
   resolveDirectorBracket,
   roomIsAssignable,
   packetReuseBlocker,
+  packetRetirementImpact,
+  retiredPacketBlocker,
   resultDecisionIssue,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
   unresolvedScheduledGameForTeam,
+  unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
   type TimelineEventType,
@@ -258,7 +261,8 @@ export interface MoveReleasedGameResult {
 
 export interface CommitAdvancementAssignment {
   teamId: DirectorId;
-  targetPoolId: DirectorId;
+  /** Required for a pooled target; omitted for a non-pool target phase. */
+  targetPoolId?: DirectorId;
 }
 
 export interface CommitAdvancementInput {
@@ -564,7 +568,7 @@ export interface LiveActions {
 function applyRoundRelease(draft: DirectorState, roundId: DirectorId): string | null {
   const round = draft.rounds.find((entry) => entry.id === roundId);
   if (!round || round.status !== 'prepared') return null;
-  if (packetReuseBlocker(draft, roundId)) return null;
+  if (retiredPacketBlocker(draft, roundId) || packetReuseBlocker(draft, roundId)) return null;
   round.status = 'released';
   round.releasedAt = isoNow();
   const phase = draft.phases.find((entry) => entry.id === round.phaseId);
@@ -1935,6 +1939,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         );
         return false;
       }
+      const bracketDependency = unresolvedBracketDependencyForTeam(snapshot, teamId);
+      if (bracketDependency) {
+        setError(
+          `${bracketDependency.reason} Record a forfeit or administrative withdrawal resolution ` +
+            'for that bracket position before dropping the team.',
+        );
+        return false;
+      }
       const openRound = snapshot.rounds.find(
         (round) =>
           round.status !== 'closed' &&
@@ -2731,10 +2743,55 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (current.retired === retired) return true;
+      const impact = retired ? packetRetirementImpact(snapshot, packetId) : null;
       return commit((draft) => {
         const packet = draft.packets.find((entry) => entry.id === packetId);
         if (!packet) return;
         packet.retired = retired || undefined;
+        const clearedFutureRoundIds = new Set<DirectorId>();
+        const clearedFutureGameIds = new Set<DirectorId>();
+        if (impact) {
+          const historicalGameIds = new Set(impact.historicalGameIds);
+          const futureGameIds = new Set(impact.futureGameIds);
+          const futureRoundIds = new Set(impact.futureRoundIds);
+          for (const round of draft.rounds) {
+            if (!futureRoundIds.has(round.id) || round.status === 'released' || round.status === 'closed')
+              continue;
+            if (round.packetId === packetId) {
+              round.packetId = null;
+              round.revision += 1;
+              clearedFutureRoundIds.add(round.id);
+              for (const game of draft.scheduledGames.filter((entry) => entry.roundId === round.id)) {
+                if (historicalGameIds.has(game.id)) {
+                  if (game.packetId !== packetId) {
+                    game.packetId = packetId;
+                    game.assignmentRevision += 1;
+                  }
+                } else if (game.packetId === packetId) {
+                  game.packetId = null;
+                  game.assignmentRevision += 1;
+                  clearedFutureGameIds.add(game.id);
+                }
+              }
+            }
+            if (round.status === 'prepared') round.status = 'planned';
+          }
+          for (const game of draft.scheduledGames) {
+            if (futureGameIds.has(game.id) && game.packetId === packetId) {
+              game.packetId = null;
+              game.assignmentRevision += 1;
+              clearedFutureGameIds.add(game.id);
+              const round = draft.rounds.find((entry) => entry.id === game.roundId);
+              if (round?.status === 'prepared') round.status = 'planned';
+            }
+          }
+          packet.assignedRoundIds = packet.assignedRoundIds.filter((id) => !futureRoundIds.has(id));
+          const recordToScheduled = new Map(draft.games.map((game) => [game.id, game.scheduledGameId]));
+          packet.assignedGameIds = packet.assignedGameIds.filter((id) => {
+            const scheduledId = recordToScheduled.get(id) ?? id;
+            return !futureGameIds.has(scheduledId);
+          });
+        }
         if (retired && draft.tournament?.currentPacketId === packetId) {
           const replacement = draft.packets.find((entry) => entry.id !== packetId && entry.retired !== true);
           draft.tournament.currentPacketId = replacement?.id ?? null;
@@ -2747,7 +2804,19 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'packet-changed',
           summary: `${retired ? 'Retired' : 'Restored'} ${packet.name}.`,
           entityId: packetId,
-          details: { retired, retainsHistory: true },
+          details: {
+            retired,
+            retainsHistory: true,
+            ...(impact
+              ? {
+                  historicalGameIds: impact.historicalGameIds,
+                  futureRoundIds: impact.futureRoundIds,
+                  futureGameIds: [...clearedFutureGameIds],
+                  releasedUnresolvedGameIds: impact.releasedUnresolvedGameIds,
+                  clearedFutureRoundIds: [...clearedFutureRoundIds],
+                }
+              : {}),
+          },
         });
       });
     },
@@ -3041,7 +3110,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
     (
       phaseId: DirectorId,
       changes: Partial<
-        Pick<NonNullable<DirectorState['phases'][number]>, 'name' | 'kind' | 'carryover' | 'advancementRule'>
+        Pick<
+          NonNullable<DirectorState['phases'][number]>,
+          'name' | 'kind' | 'carryover' | 'advancementRule' | 'teamIds'
+        >
       >,
     ): boolean => {
       const snapshot = stateRef.current;
@@ -3062,6 +3134,24 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('A phase type is locked after a round has been generated.');
         return false;
       }
+      if (changes.teamIds !== undefined) {
+        if (phase.roundIds.length > 0) {
+          setError('The phase competitive field is locked after a round has been generated.');
+          return false;
+        }
+        if (phase.poolIds.length > 0) {
+          setError('Pool membership is the competitive field for this phase; edit its pools instead.');
+          return false;
+        }
+        if (new Set(changes.teamIds).size !== changes.teamIds.length) {
+          setError('A phase competitive field cannot contain the same team twice.');
+          return false;
+        }
+        if (changes.teamIds.some((teamId) => !snapshot.teams.some((team) => team.id === teamId))) {
+          setError('A phase competitive field can only contain teams in the tournament.');
+          return false;
+        }
+      }
       const advancementError = validateAdvancementRule(changes.advancementRule);
       if (advancementError) {
         setError(advancementError);
@@ -3073,6 +3163,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (changes.name !== undefined) target.name = changes.name.trim();
         if (changes.kind !== undefined) target.kind = changes.kind;
         if (changes.carryover !== undefined) target.carryover = changes.carryover;
+        if (changes.teamIds !== undefined) target.teamIds = [...changes.teamIds];
         if (changes.advancementRule !== undefined) {
           target.advancementRule = changes.advancementRule
             ? { ...changes.advancementRule, tiebreakers: [...changes.advancementRule.tiebreakers] }
@@ -3164,10 +3255,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return fail('Assign at least one team before committing advancement.');
       }
       const targetPoolIds = new Set(target.poolIds);
+      const targetIsPooled = target.poolIds.length > 0;
       const seenTeams = new Set<DirectorId>();
       for (const assignment of input.assignments) {
-        if (!targetPoolIds.has(assignment.targetPoolId)) {
+        if (targetIsPooled && (!assignment.targetPoolId || !targetPoolIds.has(assignment.targetPoolId))) {
           return fail('Every assigned team needs a playoff pool in the target stage.');
+        }
+        if (!targetIsPooled && assignment.targetPoolId !== undefined) {
+          return fail('A non-pool target stage does not accept pool assignments.');
         }
         if (seenTeams.has(assignment.teamId)) {
           return fail('Each team can only be placed in one playoff pool.');
@@ -3206,6 +3301,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
         if (!draftTarget) return;
         const byPool = new Map<DirectorId, DirectorId[]>();
         for (const assignment of input.assignments) {
+          if (!assignment.targetPoolId) continue;
           const list = byPool.get(assignment.targetPoolId) ?? [];
           list.push(assignment.teamId);
           byPool.set(assignment.targetPoolId, list);
@@ -3213,6 +3309,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         for (const [poolId, teamIds] of byPool) {
           const pool = draft.pools.find((entry) => entry.id === poolId);
           if (pool) pool.teamIds = teamIds;
+        }
+        if (target.poolIds.length === 0) {
+          draftTarget.teamIds = input.assignments.map((assignment) => assignment.teamId);
+        } else {
+          draftTarget.teamIds = undefined;
         }
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -3734,9 +3835,20 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(packetBlocker);
         return false;
       }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) {
+        setError(retiredBlocker);
+        return false;
+      }
       return commit((draft) => {
         const target = draft.rounds.find((entry) => entry.id === roundId);
-        if (!target || target.status !== 'planned' || packetReuseBlocker(draft, roundId)) return;
+        if (
+          !target ||
+          target.status !== 'planned' ||
+          retiredPacketBlocker(draft, roundId) ||
+          packetReuseBlocker(draft, roundId)
+        )
+          return;
         target.status = 'prepared';
         draft.audit.push({
           id: newDirectorId('audit'),
@@ -3789,6 +3901,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const packetBlocker = packetReuseBlocker(snapshot, roundId);
       if (packetBlocker) {
         setError(packetBlocker);
+        return false;
+      }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) {
+        setError(retiredBlocker);
         return false;
       }
       return commit((draft) => {
@@ -5116,6 +5233,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (games.length === 0 || !roundScheduleIsValid(snapshot, roundId)) {
         return fail(round.name, `${round.name} cannot start until every matchup is valid.`);
       }
+      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
+      if (retiredBlocker) return fail(round.name, retiredBlocker);
       const packetBlocker = packetReuseBlocker(snapshot, roundId);
       if (packetBlocker) return fail(round.name, packetBlocker);
       const teamName = (teamId: DirectorId | null): string =>
@@ -5232,6 +5351,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       const latestPacketBlocker = packetReuseBlocker(latest, roundId);
       if (latestPacketBlocker) return fail(latestRound.name, latestPacketBlocker);
+      const latestRetiredBlocker = retiredPacketBlocker(latest, roundId);
+      if (latestRetiredBlocker) return fail(latestRound.name, latestRetiredBlocker);
       if (latestRoomsInPlay) {
         const latestRoomIds = latestActiveGames.map((game) => game.roomId);
         const duplicateLatestRoom = latestRoomIds.find(
