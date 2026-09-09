@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import { Button } from './Controls';
 import { Checkbox } from './Choice';
 import type { SelectOption } from './Select';
+import { normalizeSearchText } from './search';
 
 /**
  * Searchable multi-selection.
@@ -100,12 +101,12 @@ export function MultiSelect<T extends string = string>({
 
   const selected = useMemo(() => new Set(values), [values]);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = normalizeSearchText(query.trim());
     if (!needle) return options;
     return options.filter(
       (option) =>
-        option.label.toLocaleLowerCase().includes(needle) ||
-        (option.detail ?? '').toLocaleLowerCase().includes(needle),
+        normalizeSearchText(option.label).includes(needle) ||
+        normalizeSearchText(option.detail ?? '').includes(needle),
     );
   }, [options, query]);
 
@@ -283,9 +284,9 @@ export function Checklist<T extends string = string>({
   const [query, setQuery] = useState('');
   const selected = useMemo(() => new Set(values), [values]);
   const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
+    const needle = normalizeSearchText(query.trim());
     if (!needle) return options;
-    return options.filter((option) => option.label.toLocaleLowerCase().includes(needle));
+    return options.filter((option) => normalizeSearchText(option.label).includes(needle));
   }, [options, query]);
   const showSearch = options.length >= searchThreshold;
 
