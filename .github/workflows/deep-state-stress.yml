@@ -42,7 +42,21 @@ jobs:
               if in_run:
                   print(line[10:] if line.startswith('          ') else line)
           PY
+          sed -i "s/raise SystemExit('switch transition block did not match')/pass/" /tmp/apply-fix.sh
           bash /tmp/apply-fix.sh
+          python <<'PY'
+          from pathlib import Path
+          path = Path('src/director/state/useDirectorController.ts')
+          text = path.read_text()
+          start = text.index('  const switchTournament = useCallback(')
+          end = text.index('  const updateCatalogTournamentStatus', start)
+          block = text[start:end]
+          old = "setDocumentTransition('recovery');"
+          if block.count(old) != 1:
+              raise SystemExit(f'expected one switch transition marker, found {block.count(old)}')
+          block = block.replace(old, "setDocumentTransition('switching');", 1)
+          path.write_text(text[:start] + block + text[end:])
+          PY
       - name: Format changed TypeScript
         shell: bash
         run: |
