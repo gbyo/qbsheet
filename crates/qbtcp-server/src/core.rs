@@ -1,6 +1,6 @@
 use crate::model::*;
 use crate::state::QbtcpState;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -188,6 +188,60 @@ struct SessionAuth {
     session_id: String,
 }
 
+const RUNTIME_CREDENTIAL_SNAPSHOT_VERSION: u32 = 1;
+
+/// Device-local authority that a native host may encrypt and retain across process restarts.
+///
+/// This value contains bearer-equivalent material and must never be placed in a tournament
+/// document, export, log, or public diagnostic. The core exposes it only so a native host can use
+/// its platform credential store; the protocol itself never serializes this type.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RuntimeCredentialSnapshot {
+    version: u32,
+    tournament_id: String,
+    room_tokens: Vec<PersistedRoomToken>,
+    sessions: Vec<PersistedSession>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PersistedRoomToken {
+    token_hash: [u8; 32],
+    room_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PersistedSessionCredential {
+    token: String,
+    device_id: String,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct PersistedSession {
+    session_id: String,
+    room_id: String,
+    match_id: String,
+    round_number: u32,
+    left_team: Option<String>,
+    right_team: Option<String>,
+    round_revision: Option<u64>,
+    assignment_revision: Option<u64>,
+    assignment_fingerprint: String,
+    status: SessionStatus,
+    updated_at: String,
+    credentials: Vec<PersistedSessionCredential>,
+    writer_device: Option<String>,
+    latest_progress_sequence: Option<u64>,
+    final_fingerprint: Option<String>,
+    final_result_id: Option<String>,
+    roster_amendments: Vec<RosterAmendment>,
+}
+
+/// Persistence boundary supplied by a native host. Implementations must encrypt the snapshot and
+/// scope it to the local installation; errors fail the mutating protocol request closed.
+pub trait RuntimeCredentialPersistence: Send + Sync {
+    fn persist(&self, snapshot: &RuntimeCredentialSnapshot) -> Result<(), String>;
+}
+
 /// QBTCP's protocol/core implementation.
 ///
 /// `QbtcpServer` is intentionally generic over state only at construction time. The HTTP handlers
@@ -197,6 +251,7 @@ pub struct QbtcpServer {
     pub(crate) state: Arc<dyn QbtcpState>,
     pub(crate) config: QbtcpConfig,
     runtime: Mutex<RuntimeState>,
+    credential_persistence: Option<Arc<dyn RuntimeCredentialPersistence>>,
     started_at: Instant,
 }
 
@@ -210,8 +265,60 @@ impl QbtcpServer {
             state,
             config,
             runtime: Mutex::new(RuntimeState::default()),
+            credential_persistence: None,
             started_at: Instant::now(),
         })
+    }
+
+    /// Construct a server from authority loaded by a native secure-storage implementation.
+    pub fn new_with_credentials<S>(
+        state: Arc<S>,
+        config: QbtcpConfig,
+        snapshot: Option<RuntimeCredentialSnapshot>,
+        persistence: Arc<dyn RuntimeCredentialPersistence>,
+    ) -> Result<Self, ConfigError>
+    where
+        S: QbtcpState + 'static,
+    {
+        config.validate()?;
+        let tournament_id = state
+            .tournament()
+            .ok()
+            .map(|tournament| tournament.id)
+            .unwrap_or_default();
+        let runtime = snapshot
+            .filter(|snapshot| {
+                snapshot.version == RUNTIME_CREDENTIAL_SNAPSHOT_VERSION
+                    && snapshot.tournament_id == tournament_id
+            })
+            .map(|snapshot| runtime_from_snapshot(snapshot, &config))
+            .unwrap_or_default();
+        let server = Self {
+            state,
+            config,
+            runtime: Mutex::new(runtime),
+            credential_persistence: Some(persistence),
+            started_at: Instant::now(),
+        };
+        server.reconcile_runtime();
+        Ok(server)
+    }
+
+    /// Return the sensitive runtime authority for native secure persistence.
+    pub fn credential_snapshot(&self) -> Result<RuntimeCredentialSnapshot, QbtcpError> {
+        let tournament_id = self.tournament_info()?.id;
+        let runtime = self.lock_runtime()?;
+        Ok(snapshot_from_runtime(&runtime, tournament_id))
+    }
+
+    fn persist_credentials(&self) -> Result<(), QbtcpError> {
+        let Some(persistence) = self.credential_persistence.as_ref() else {
+            return Ok(());
+        };
+        let snapshot = self.credential_snapshot()?;
+        persistence
+            .persist(&snapshot)
+            .map_err(|_| QbtcpError::Internal)
     }
 
     pub fn config(&self) -> &QbtcpConfig {
@@ -380,12 +487,15 @@ impl QbtcpServer {
                 room_id: room.id.clone(),
             },
         );
-        Ok(PairingResponse {
+        let response = PairingResponse {
             room_id: room.id,
             room_name: room.name,
             room_description: room.description,
             token,
-        })
+        };
+        drop(runtime);
+        self.persist_credentials()?;
+        Ok(response)
     }
 
     pub fn assignment(&self, room_token: Option<&str>) -> Result<Option<Value>, QbtcpError> {
@@ -574,6 +684,7 @@ impl QbtcpServer {
         if let Some(event) = opened_event {
             let _ = self.state.record_session_event(event);
         }
+        self.persist_credentials()?;
         Ok(OpenSessionResponse {
             session_id,
             token,
@@ -637,6 +748,7 @@ impl QbtcpServer {
         let _ = self.state.record_session_event(SessionEvent::WriterTaken {
             session_id: session_id.clone(),
         });
+        self.persist_credentials()?;
         Ok(OpenSessionResponse {
             session_id,
             token,
@@ -780,6 +892,10 @@ impl QbtcpServer {
             session.last_activity = now;
             session.expires_at = Some(now + self.config.session_idle_timeout);
         }
+        drop(runtime);
+        if accepted {
+            self.persist_credentials()?;
+        }
         Ok(ProgressResponse { accepted, sequence })
     }
 
@@ -862,6 +978,7 @@ impl QbtcpServer {
             let _ = self.state.clear_presence(&room_id, Some(&device_id));
         }
         let _ = self.state.record_session_event(event);
+        self.persist_credentials()?;
 
         Ok(ResultReceipt {
             accepted: true,
@@ -945,6 +1062,8 @@ impl QbtcpServer {
             session.roster_amendments.push(amendment.clone());
         }
         session.updated_at = now_iso();
+        drop(runtime);
+        self.persist_credentials()?;
         Ok(amendment)
     }
 
@@ -1116,6 +1235,7 @@ impl QbtcpServer {
                 session_id: session_id.to_owned(),
                 room_id,
             });
+            self.persist_credentials()?;
         }
         Ok(())
     }
@@ -1391,6 +1511,170 @@ impl QbtcpServer {
             let _ = self.state.record_session_event(event);
         }
     }
+}
+
+fn snapshot_from_runtime(
+    runtime: &RuntimeState,
+    tournament_id: String,
+) -> RuntimeCredentialSnapshot {
+    let mut room_tokens = runtime
+        .room_tokens
+        .iter()
+        .map(|(token_hash, record)| PersistedRoomToken {
+            token_hash: *token_hash,
+            room_id: record.room_id.clone(),
+        })
+        .collect::<Vec<_>>();
+    room_tokens.sort_by(|left, right| {
+        left.room_id
+            .cmp(&right.room_id)
+            .then_with(|| left.token_hash.cmp(&right.token_hash))
+    });
+
+    let mut sessions = runtime
+        .sessions
+        .values()
+        .map(|session| {
+            let mut credentials = session
+                .credentials_by_device
+                .iter()
+                .filter_map(|(device_id, token_hash)| {
+                    runtime.session_tokens.get(token_hash).map(|credential| {
+                        PersistedSessionCredential {
+                            token: credential.token.clone(),
+                            device_id: device_id.clone(),
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            credentials.sort_by(|left, right| left.device_id.cmp(&right.device_id));
+            PersistedSession {
+                session_id: session.session_id.clone(),
+                room_id: session.room_id.clone(),
+                match_id: session.match_id.clone(),
+                round_number: session.round_number,
+                left_team: session.left_team.clone(),
+                right_team: session.right_team.clone(),
+                round_revision: session.round_revision,
+                assignment_revision: session.assignment_revision,
+                assignment_fingerprint: session.assignment_fingerprint.clone(),
+                status: session.status,
+                updated_at: session.updated_at.clone(),
+                credentials,
+                writer_device: session.writer_device.clone(),
+                latest_progress_sequence: session
+                    .latest_progress
+                    .as_ref()
+                    .map(|progress| progress.sequence),
+                final_fingerprint: session.final_fingerprint.clone(),
+                final_result_id: session.final_result_id.clone(),
+                roster_amendments: session.roster_amendments.clone(),
+            }
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+    RuntimeCredentialSnapshot {
+        version: RUNTIME_CREDENTIAL_SNAPSHOT_VERSION,
+        tournament_id,
+        room_tokens,
+        sessions,
+    }
+}
+
+fn runtime_from_snapshot(
+    snapshot: RuntimeCredentialSnapshot,
+    config: &QbtcpConfig,
+) -> RuntimeState {
+    let mut runtime = RuntimeState::default();
+    for token in snapshot.room_tokens {
+        if !token.room_id.is_empty() && token.room_id.chars().count() <= 200 {
+            runtime.room_tokens.insert(
+                token.token_hash,
+                RoomTokenRecord {
+                    room_id: token.room_id,
+                },
+            );
+        }
+    }
+    let now = Instant::now();
+    for persisted in snapshot.sessions {
+        if persisted.session_id.is_empty()
+            || persisted.session_id.chars().count() > 200
+            || persisted.room_id.is_empty()
+            || persisted.room_id.chars().count() > 200
+            || persisted.match_id.is_empty()
+            || persisted.match_id.chars().count() > 200
+        {
+            continue;
+        }
+        let mut credentials_by_device = HashMap::new();
+        let mut writer_token = None;
+        for credential in persisted.credentials {
+            if credential.token.is_empty()
+                || credential.token.len() > 1024
+                || credential.device_id.is_empty()
+                || credential.device_id.chars().count() > 200
+            {
+                continue;
+            }
+            let token_hash = digest_secret(&credential.token);
+            if runtime.session_tokens.contains_key(&token_hash) {
+                continue;
+            }
+            if persisted.writer_device.as_deref() == Some(credential.device_id.as_str()) {
+                writer_token = Some(token_hash);
+            }
+            credentials_by_device.insert(credential.device_id.clone(), token_hash);
+            runtime.session_tokens.insert(
+                token_hash,
+                SessionCredential {
+                    token: credential.token,
+                    session_id: persisted.session_id.clone(),
+                    device_id: credential.device_id,
+                },
+            );
+        }
+        if credentials_by_device.is_empty() {
+            continue;
+        }
+        let is_open = persisted.status == SessionStatus::Open;
+        let writer_device = if is_open && writer_token.is_some() {
+            persisted.writer_device
+        } else {
+            None
+        };
+        runtime.sessions.insert(
+            persisted.session_id.clone(),
+            SessionRecord {
+                session_id: persisted.session_id,
+                room_id: persisted.room_id,
+                match_id: persisted.match_id,
+                round_number: persisted.round_number,
+                left_team: persisted.left_team,
+                right_team: persisted.right_team,
+                round_revision: persisted.round_revision,
+                assignment_revision: persisted.assignment_revision,
+                assignment_fingerprint: persisted.assignment_fingerprint,
+                status: persisted.status,
+                updated_at: persisted.updated_at,
+                last_activity: now,
+                expires_at: is_open.then_some(now + config.session_idle_timeout),
+                credentials_by_device,
+                writer_token: is_open.then_some(writer_token).flatten(),
+                writer_device,
+                latest_progress: persisted
+                    .latest_progress_sequence
+                    .map(|sequence| ProgressSnapshot { sequence }),
+                // Full score state remains local-first on the scorer and is deliberately not part
+                // of the minimum credential vault.
+                latest_qbj: None,
+                final_fingerprint: persisted.final_fingerprint,
+                final_result_id: persisted.final_result_id,
+                roster_amendments: persisted.roster_amendments,
+            },
+        );
+    }
+    runtime
 }
 
 fn session_matches_assignment(session: &SessionRecord, assignment: &AssignedAssignment) -> bool {

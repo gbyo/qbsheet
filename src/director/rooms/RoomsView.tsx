@@ -31,12 +31,13 @@ import {
   SummaryList,
   TextArea,
   TextInput,
+  useConfirm,
   type SelectOption,
 } from '../components';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
-import { isNativeDirector, issueNativeRoomPairing } from '../platform/native';
+import { isNativeDirector, issueNativeRoomPairing, resetNativeQbtcpCredentials } from '../platform/native';
 import type { NativeServerState } from '../server/useNativeServerStatus';
 import {
   deriveQbtcpOperationalHealth,
@@ -121,7 +122,9 @@ export function RoomsView({
   const [editingStaffId, setEditingStaffId] = useState<string | null | 'new'>(null);
   const [editingEquipmentId, setEditingEquipmentId] = useState<string | null | 'new'>(null);
   const [pairingRoomId, setPairingRoomId] = useState<string | null>(null);
+  const [resettingPairings, setResettingPairings] = useState(false);
   const [amendmentMappings, setAmendmentMappings] = useState<Record<string, string>>({});
+  const confirmAction = useConfirm();
 
   const targetRoomId =
     navigationTarget?.section === 'rooms' && navigationTarget.entityType === 'room'
@@ -226,6 +229,31 @@ export function RoomsView({
           reason instanceof Error ? reason.message : 'The QBTCP advertised address could not be set.',
         ),
       );
+    }
+  };
+
+  const resetPairings = async () => {
+    if (!nativeServer) return;
+    const approved = await confirmAction({
+      title: 'Reset all QBTCP pairings?',
+      body: 'Use this only when you intend to revoke the current scorer authority for this tournament.',
+      consequence:
+        'Every paired scorer and open session will be disconnected and will need a fresh room invitation.',
+      confirmLabel: 'Reset all pairings',
+      tone: 'danger',
+    });
+    if (!approved) return;
+    setResettingPairings(true);
+    try {
+      const next = await resetNativeQbtcpCredentials();
+      nativeServer.apply(next);
+      onAnnounce(next.message ?? 'QBTCP pairings were reset.');
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(reason instanceof Error ? reason.message : 'QBTCP pairings could not be reset.'),
+      );
+    } finally {
+      setResettingPairings(false);
     }
   };
 
@@ -376,7 +404,9 @@ export function RoomsView({
             invitations={invitations}
             expiredPairingRoomIds={qbtcpStatus?.expiredPairingRoomIds ?? []}
             pairingRoomId={pairingRoomId}
+            resettingPairings={resettingPairings}
             onToggle={() => void toggleServer()}
+            onReset={() => void resetPairings()}
             onIssue={(roomId) => void issuePairing(roomId)}
             onCopy={(url, message) => void copyPairingLink(url, message)}
             onSetAddress={setAdvertisedAddress}
@@ -1348,7 +1378,9 @@ function QbtcpNetwork({
   invitations = [],
   expiredPairingRoomIds = [],
   pairingRoomId,
+  resettingPairings,
   onToggle,
+  onReset,
   onIssue,
   onCopy,
   onSetAddress,
@@ -1364,7 +1396,9 @@ function QbtcpNetwork({
   invitations: NonNullable<NativeServerState['status']>['pairingInvitations'];
   expiredPairingRoomIds: string[];
   pairingRoomId: string | null;
+  resettingPairings: boolean;
   onToggle: () => void;
+  onReset: () => void;
   onIssue: (roomId: string) => void;
   onCopy: (url: string, message: string) => void;
   onSetAddress: (address: string) => Promise<void>;
@@ -1426,6 +1460,11 @@ function QbtcpNetwork({
             onClick={() => onCopy(status.pairingUrl ?? '', 'Pairing link copied.')}
           >
             Copy pairing link
+          </Button>
+        )}
+        {nativeDirector && (
+          <Button variant="quiet" disabled={qbtcpLoading || resettingPairings} onClick={onReset}>
+            {resettingPairings ? 'Resetting pairings…' : 'Reset all pairings'}
           </Button>
         )}
       </div>

@@ -27,6 +27,10 @@ and pass/fail beside each step. Do not use the only copy of a real tournament fo
 - [ ] Finish all games in Round 5. Confirm Lunch appears before Round 6.
 - [ ] If QBTCP will be used: pair an actual scorer on the tournament LAN, receive its assignment,
       submit one result, and verify review/accept. Also return that result by file: no second game.
+- [ ] With a paired scorer and an open game, stop/start QBTCP and restart Director. Confirm the same
+      room/session credentials resume without re-pairing and the local scoresheet remains intact.
+- [ ] Use **Reset all pairings**. Confirm the old room/session credentials are refused and a fresh
+      room invitation can pair the scorer again to the unchanged assignment.
 - [ ] Disable internet access while preserving LAN connectivity if QBTCP is used. Run another complete
       round through Start, score, return/manual entry, accept, finish, and standings.
 - [ ] In Settings → Recovery, create a recovery point. Change a team or remove a test round.

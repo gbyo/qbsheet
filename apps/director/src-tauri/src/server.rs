@@ -5,12 +5,17 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use chacha20poly1305::aead::{Aead, KeyInit, Payload};
+use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use qbtcp_server::{
     AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceRecord,
     ProgressRecord, QbtcpConfig, QbtcpError, QbtcpServer, QbtcpState, ResultDisposition,
-    ResultSubmission, RoomInfo, RosterAmendment, RosterAmendmentRequest, SessionEvent, StateError,
+    ResultSubmission, RoomInfo, RosterAmendment, RosterAmendmentRequest,
+    RuntimeCredentialPersistence, RuntimeCredentialSnapshot, SessionEvent, StateError,
     TournamentInfo,
 };
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
@@ -28,6 +33,9 @@ const UNRESOLVED_RESULT_MESSAGE: &str =
 const RETIRED_PACKET_REASON: &str = "retired-packet";
 const RETIRED_PACKET_MESSAGE: &str =
     "This game's packet is retired. Restore it or assign a replacement in Director before pairing this room.";
+const QBTCP_CREDENTIAL_SERVICE: &str = "com.qbsheet.director.qbtcp";
+const QBTCP_CREDENTIAL_ACCOUNT: &str = "runtime-vault-key-v1";
+const QBTCP_CIPHERTEXT_VERSION: u8 = 1;
 
 const ALLOWED_SCORE_SHEET_ORIGINS: &[&str] = &[
     "https://qbsheet.com",
@@ -56,6 +64,118 @@ pub enum ServerError {
     AdvertisedAddress(String),
     #[error("QBTCP operation failed: {0}")]
     Operation(String),
+    #[error("the QBTCP credential store is unavailable: {0}")]
+    CredentialStore(String),
+    #[error("the saved QBTCP credential vault is invalid or cannot be decrypted")]
+    InvalidCredentialVault,
+}
+
+trait QbtcpKeyStore: Send + Sync {
+    fn key(&self) -> Result<[u8; 32], ServerError>;
+}
+
+#[derive(Default)]
+struct KeychainQbtcpKeyStore;
+
+impl QbtcpKeyStore for KeychainQbtcpKeyStore {
+    fn key(&self) -> Result<[u8; 32], ServerError> {
+        let entry = keyring::Entry::new(QBTCP_CREDENTIAL_SERVICE, QBTCP_CREDENTIAL_ACCOUNT)
+            .map_err(|error| ServerError::CredentialStore(error.to_string()))?;
+        let encoded = match entry.get_password() {
+            Ok(value) => value,
+            Err(keyring::Error::NoEntry) => {
+                let mut key = [0_u8; 32];
+                OsRng.fill_bytes(&mut key);
+                let encoded = BASE64.encode(key);
+                entry
+                    .set_password(&encoded)
+                    .map_err(|error| ServerError::CredentialStore(error.to_string()))?;
+                encoded
+            }
+            Err(error) => return Err(ServerError::CredentialStore(error.to_string())),
+        };
+        let decoded = BASE64
+            .decode(encoded)
+            .map_err(|_| ServerError::InvalidCredentialVault)?;
+        decoded
+            .try_into()
+            .map_err(|_| ServerError::InvalidCredentialVault)
+    }
+}
+
+struct EncryptedQbtcpCredentialPersistence {
+    store: Arc<crate::store::DirectorStore>,
+    tournament_id: String,
+    key: [u8; 32],
+}
+
+impl EncryptedQbtcpCredentialPersistence {
+    fn load(&self) -> Result<Option<RuntimeCredentialSnapshot>, ServerError> {
+        self.store
+            .load_qbtcp_credentials(&self.tournament_id)
+            .map_err(|error| ServerError::CredentialStore(error.to_string()))?
+            .map(|ciphertext| {
+                decrypt_credential_snapshot(&self.key, &self.tournament_id, &ciphertext)
+            })
+            .transpose()
+    }
+}
+
+impl RuntimeCredentialPersistence for EncryptedQbtcpCredentialPersistence {
+    fn persist(&self, snapshot: &RuntimeCredentialSnapshot) -> Result<(), String> {
+        let ciphertext = encrypt_credential_snapshot(&self.key, &self.tournament_id, snapshot)
+            .map_err(|error| error.to_string())?;
+        self.store
+            .save_qbtcp_credentials(&self.tournament_id, &ciphertext)
+            .map_err(|error| error.to_string())
+    }
+}
+
+fn encrypt_credential_snapshot(
+    key: &[u8; 32],
+    tournament_id: &str,
+    snapshot: &RuntimeCredentialSnapshot,
+) -> Result<Vec<u8>, ServerError> {
+    let plaintext = serde_json::to_vec(snapshot)
+        .map_err(|error| ServerError::CredentialStore(error.to_string()))?;
+    let cipher = ChaCha20Poly1305::new(key.into());
+    let mut nonce_bytes = [0_u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let encrypted = cipher
+        .encrypt(
+            Nonce::from_slice(&nonce_bytes),
+            Payload {
+                msg: &plaintext,
+                aad: tournament_id.as_bytes(),
+            },
+        )
+        .map_err(|_| ServerError::InvalidCredentialVault)?;
+    let mut output = Vec::with_capacity(1 + nonce_bytes.len() + encrypted.len());
+    output.push(QBTCP_CIPHERTEXT_VERSION);
+    output.extend_from_slice(&nonce_bytes);
+    output.extend_from_slice(&encrypted);
+    Ok(output)
+}
+
+fn decrypt_credential_snapshot(
+    key: &[u8; 32],
+    tournament_id: &str,
+    ciphertext: &[u8],
+) -> Result<RuntimeCredentialSnapshot, ServerError> {
+    if ciphertext.len() <= 13 || ciphertext[0] != QBTCP_CIPHERTEXT_VERSION {
+        return Err(ServerError::InvalidCredentialVault);
+    }
+    let cipher = ChaCha20Poly1305::new(key.into());
+    let plaintext = cipher
+        .decrypt(
+            Nonce::from_slice(&ciphertext[1..13]),
+            Payload {
+                msg: &ciphertext[13..],
+                aad: tournament_id.as_bytes(),
+            },
+        )
+        .map_err(|_| ServerError::InvalidCredentialVault)?;
+    serde_json::from_slice(&plaintext).map_err(|_| ServerError::InvalidCredentialVault)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -187,17 +307,33 @@ struct ServerRuntimeState {
 /// shared `qbtcp-server` crate.
 pub struct ServerRuntime {
     inner: Mutex<ServerRuntimeState>,
+    key_store: Arc<dyn QbtcpKeyStore>,
 }
 
 impl Default for ServerRuntime {
     fn default() -> Self {
         Self {
             inner: Mutex::new(ServerRuntimeState::default()),
+            key_store: Arc::new(KeychainQbtcpKeyStore),
         }
     }
 }
 
 impl ServerRuntime {
+    #[cfg(test)]
+    pub(crate) fn with_key(key: [u8; 32]) -> Self {
+        struct FixedKeyStore([u8; 32]);
+        impl QbtcpKeyStore for FixedKeyStore {
+            fn key(&self) -> Result<[u8; 32], ServerError> {
+                Ok(self.0)
+            }
+        }
+        Self {
+            inner: Mutex::new(ServerRuntimeState::default()),
+            key_store: Arc::new(FixedKeyStore(key)),
+        }
+    }
+
     pub fn status(&self) -> ServerStatus {
         let server = self
             .inner
@@ -277,6 +413,7 @@ impl ServerRuntime {
             .await
             .map_err(ServerError::Bind)?;
         let port = listener.local_addr().map_err(ServerError::Bind)?.port();
+        let persistent_store = store.clone();
         let state = Arc::new(match store {
             Some(store) => DirectorQbtcpState::from_document_with_store(document.as_ref(), store),
             None => DirectorQbtcpState::from_document(document.as_ref()),
@@ -289,8 +426,34 @@ impl ServerRuntime {
                 .collect(),
             ..QbtcpConfig::default()
         };
-        let server =
-            Arc::new(QbtcpServer::new(Arc::clone(&state), config).map_err(ServerError::Config)?);
+        let server = Arc::new(if let Some(store) = persistent_store {
+            let key = self.key_store.key()?;
+            let tournament_id = state.tournament().map_err(|_| ServerError::Unavailable)?.id;
+            let persistence = Arc::new(EncryptedQbtcpCredentialPersistence {
+                store,
+                tournament_id,
+                key,
+            });
+            let snapshot = persistence.load()?;
+            let persistence_boundary: Arc<dyn RuntimeCredentialPersistence> = persistence.clone();
+            let server = QbtcpServer::new_with_credentials(
+                Arc::clone(&state),
+                config,
+                snapshot,
+                persistence_boundary,
+            )
+            .map_err(ServerError::Config)?;
+            persistence
+                .persist(
+                    &server
+                        .credential_snapshot()
+                        .map_err(|error| ServerError::Operation(format!("{error:?}")))?,
+                )
+                .map_err(ServerError::CredentialStore)?;
+            server
+        } else {
+            QbtcpServer::new(Arc::clone(&state), config).map_err(ServerError::Config)?
+        });
 
         let address_candidates = detect_lan_candidates();
         let address = select_candidate_address(&address_candidates);
@@ -366,6 +529,19 @@ impl ServerRuntime {
             task.abort();
         }
         self.status()
+    }
+
+    /// Deliberately revoke restart continuity for the active tournament. The caller stops the
+    /// running listener first so no in-memory credential can remain authoritative after success.
+    pub fn forget_persisted_credentials(
+        &self,
+        document: Option<&Value>,
+        store: &crate::store::DirectorStore,
+    ) -> Result<(), ServerError> {
+        let tournament_id = tournament_from_document(document).id;
+        store
+            .forget_qbtcp_credentials(&tournament_id)
+            .map_err(|error| ServerError::CredentialStore(error.to_string()))
     }
 
     pub fn refresh_state(&self, document: Option<&Value>) {
@@ -2105,6 +2281,23 @@ fn percent_encode(value: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+    fn temporary_database_path(name: &str) -> PathBuf {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        std::env::temp_dir().join(format!(
+            "qbsheet-qbtcp-{name}-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT.fetch_add(1, AtomicOrdering::Relaxed)
+        ))
+    }
+
+    fn cleanup_database(path: &std::path::Path) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-wal"));
+        let _ = std::fs::remove_file(path.with_extension("sqlite3-shm"));
+    }
 
     #[test]
     fn document_rooms_are_converted_without_exposing_credentials() {
@@ -3030,5 +3223,83 @@ mod tests {
         assert_eq!(replacement.room_id, "room-102");
         assert_eq!(runtime.status().pairing_invitations.len(), 2);
         runtime.stop();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn encrypted_room_authority_survives_runtime_recreation_until_explicit_reset() {
+        let path = temporary_database_path("restart-authority");
+        let store = Arc::new(crate::store::DirectorStore::open(path.clone()).expect("store opens"));
+        let document = json!({
+            "tournament": {"id": "t-restart", "name": "Restart test"},
+            "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+        });
+        let key = [37_u8; 32];
+        let first = ServerRuntime::with_key(key);
+        let status = first
+            .start_with_store_on_port(Some(document.clone()), store.clone(), 0)
+            .await
+            .expect("first server starts");
+        let port = status.port.expect("port");
+        let code = status.pairing_invitations[0].pairing_code.clone();
+        let paired_response = reqwest::Client::new()
+            .post(format!("http://127.0.0.1:{port}/qbtcp/v1/pair"))
+            .header("content-type", "application/json")
+            .body(json!({"code": code, "room_id": "room-101"}).to_string())
+            .send()
+            .await
+            .expect("pair request")
+            .error_for_status()
+            .expect("pair succeeds");
+        let paired = serde_json::from_slice::<Value>(
+            &paired_response.bytes().await.expect("pair response bytes"),
+        )
+        .expect("pair response");
+        let token = paired["token"].as_str().expect("room token").to_owned();
+        first.stop();
+
+        let encrypted = store
+            .load_qbtcp_credentials("t-restart")
+            .expect("vault reads")
+            .expect("vault exists");
+        assert!(!String::from_utf8_lossy(&encrypted).contains(&token));
+
+        let second = ServerRuntime::with_key(key);
+        let status = second
+            .start_with_store_on_port(Some(document.clone()), store.clone(), 0)
+            .await
+            .expect("second server starts");
+        let restored = reqwest::Client::new()
+            .get(format!(
+                "http://127.0.0.1:{}/qbtcp/v1/assignment/status",
+                status.port.expect("port")
+            ))
+            .header(qbtcp_server::ROOM_TOKEN_HEADER, &token)
+            .send()
+            .await
+            .expect("restored credential request");
+        assert_eq!(restored.status(), reqwest::StatusCode::OK);
+        second.stop();
+        second
+            .forget_persisted_credentials(Some(&document), &store)
+            .expect("explicit reset");
+
+        let third = ServerRuntime::with_key(key);
+        let status = third
+            .start_with_store_on_port(Some(document), store.clone(), 0)
+            .await
+            .expect("third server starts");
+        let revoked = reqwest::Client::new()
+            .get(format!(
+                "http://127.0.0.1:{}/qbtcp/v1/assignment/status",
+                status.port.expect("port")
+            ))
+            .header(qbtcp_server::ROOM_TOKEN_HEADER, token)
+            .send()
+            .await
+            .expect("revoked credential request");
+        assert_eq!(revoked.status(), reqwest::StatusCode::UNAUTHORIZED);
+        third.stop();
+        drop(store);
+        cleanup_database(&path);
     }
 }

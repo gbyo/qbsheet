@@ -10,7 +10,9 @@ mod model;
 mod state;
 mod transport;
 
-pub use core::{PairingInvitation, QbtcpServer};
+pub use core::{
+    PairingInvitation, QbtcpServer, RuntimeCredentialPersistence, RuntimeCredentialSnapshot,
+};
 pub use model::*;
 pub use state::*;
 pub use transport::router;

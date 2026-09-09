@@ -255,6 +255,15 @@ export async function stopNativeServer(): Promise<NativeServerStatus> {
   }
 }
 
+export async function resetNativeQbtcpCredentials(): Promise<NativeServerStatus> {
+  const native = bridge();
+  if (!native) throw new Error('Open the Tauri Director app to reset QBTCP pairings.');
+  return normalizeStatus(
+    await native.invoke('director_reset_qbtcp_credentials'),
+    'The native server returned an invalid reset status.',
+  );
+}
+
 export async function issueNativeRoomPairing(roomId: string): Promise<NativeRoomPairingInvitation> {
   const native = bridge();
   if (!native) throw new Error('Open the Tauri Director app to issue a room pairing invitation.');

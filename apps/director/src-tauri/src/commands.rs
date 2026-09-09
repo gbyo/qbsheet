@@ -408,8 +408,9 @@ pub async fn director_restore_checkpoint(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,
 ) -> Result<Value, CommandError> {
-    // Stop live sessions before replacing their authoritative assignments. New pairing
-    // invitations after restart belong to the restored tournament, never stale sessions.
+    // A checkpoint restore is an intentional authority reset, unlike an ordinary QBTCP restart.
+    // Stop first, then discard the saved capability vault only after storage has committed the
+    // restored document; a failed restore rolls the outgoing runtime back with its authority intact.
     let running = server.status().running;
     if running {
         server.stop();
@@ -422,7 +423,18 @@ pub async fn director_restore_checkpoint(
             // failure here would exit before `start_with_store` and leave QBTCP stopped.
             Err(_) => store.load_state().ok().flatten(),
         };
-        if let Err(error) = server
+        let authority_reset = match (&outcome, document.as_ref()) {
+            (Ok(_), Some(document)) => server
+                .forget_persisted_credentials(Some(document), &store)
+                .map_err(|error| error.to_string()),
+            _ => Ok(()),
+        };
+        if let Err(error) = authority_reset {
+            // Storage has already committed. Leave QBTCP stopped rather than restore authority
+            // across an intentional rollback, while still returning the restored document so the
+            // UI and durable state cannot diverge.
+            eprintln!("QBTCP credentials could not be reset after recovery: {error}");
+        } else if let Err(error) = server
             .start_with_store(document, std::sync::Arc::new((*store).clone()))
             .await
         {
@@ -561,6 +573,39 @@ pub fn director_stop_qbtcp_server(
     server: State<'_, ServerRuntime>,
 ) -> Result<ServerStatus, CommandError> {
     Ok(server.stop())
+}
+
+#[tauri::command]
+pub async fn director_reset_qbtcp_credentials(
+    store: State<'_, DirectorStore>,
+    server: State<'_, ServerRuntime>,
+) -> Result<ServerStatus, CommandError> {
+    let document = store.load_state().map_err(CommandError::store)?;
+    let restart = server.status().running;
+    if restart {
+        server.stop();
+    }
+    server
+        .forget_persisted_credentials(document.as_ref(), &store)
+        .map_err(CommandError::server)?;
+    if restart {
+        let mut status = server
+            .start_with_store(document, std::sync::Arc::new((*store).clone()))
+            .await
+            .map_err(CommandError::server)?;
+        status.message = Some(
+            "QBTCP pairings were reset. Existing room and session credentials are revoked."
+                .to_owned(),
+        );
+        Ok(status)
+    } else {
+        let mut status = server.status();
+        status.message = Some(
+            "Saved QBTCP pairings were reset. Existing credentials will not work after the next start."
+                .to_owned(),
+        );
+        Ok(status)
+    }
 }
 
 #[tauri::command]
@@ -886,7 +931,7 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
         store.save_state(&current).expect("current document saves");
-        let server = ServerRuntime::default();
+        let server = ServerRuntime::with_key([0x41; 32]);
         server
             .start_on_port(Some(current.clone()), 0)
             .await
@@ -917,7 +962,7 @@ mod tests {
         let store = DirectorStore::open(path.clone()).expect("database opens");
         let current = document("tournament-a", "Tournament A");
         store.save_state(&current).expect("current document saves");
-        let server = ServerRuntime::default();
+        let server = ServerRuntime::with_key([0x42; 32]);
         server
             .start_on_port(Some(current), 0)
             .await

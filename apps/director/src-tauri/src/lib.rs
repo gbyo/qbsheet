@@ -77,6 +77,7 @@ pub fn run() {
             commands::director_clear_local_live,
             commands::director_start_qbtcp_server,
             commands::director_stop_qbtcp_server,
+            commands::director_reset_qbtcp_credentials,
             commands::checkpoint_store,
             commands::open_tournament_file,
             commands::save_tournament_file,

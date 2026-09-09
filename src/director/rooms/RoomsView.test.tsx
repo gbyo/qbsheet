@@ -12,13 +12,17 @@
  * assignability is not the same claim as what it is doing right now.
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DirectorController } from '../state/useDirectorController';
 import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import { RoomsView } from './RoomsView';
 import { ConfirmProvider } from '../components/Dialog';
+import type { NativeServerState } from '../server/useNativeServerStatus';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  delete window.__TAURI_INTERNALS__;
+});
 
 function controllerWith(overrides: Partial<DirectorController> = {}): DirectorController {
   return {
@@ -258,5 +262,48 @@ describe('room operations visibility', () => {
     expect(screen.getByText(/Last seen/)).toBeInTheDocument();
     expect(screen.getByText(/Resumable/)).toBeInTheDocument();
     expect(screen.getAllByText(/Morgan/).length).toBeGreaterThan(0);
+  });
+});
+
+describe('QBTCP credential control', () => {
+  test('requires explicit confirmation before resetting every pairing', async () => {
+    const invoke = vi.fn(async (command: string) => {
+      expect(command).toBe('director_reset_qbtcp_credentials');
+      return {
+        running: true,
+        message: 'QBTCP pairings were reset.',
+        pairingInvitations: [],
+      };
+    });
+    window.__TAURI_INTERNALS__ = { invoke };
+    const apply = vi.fn();
+    const server = {
+      status: { running: true, address: '192.168.1.10', port: 8787, pairingInvitations: [] },
+      loading: false,
+      refresh: vi.fn(),
+      toggle: vi.fn(),
+      addInvitation: vi.fn(),
+      setAdvertisedAddress: vi.fn(),
+      apply,
+    } as unknown as NativeServerState;
+
+    render(
+      <ConfirmProvider>
+        <RoomsView
+          state={tournamentState()}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          server={server}
+        />
+      </ConfirmProvider>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Reset all pairings' }));
+    expect(invoke).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText(/Every paired scorer and open session/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Reset all pairings' }));
+
+    await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
+    expect(apply).toHaveBeenCalledWith(expect.objectContaining({ running: true }));
   });
 });
