@@ -1,14 +1,16 @@
 import {
-  addGameRowAnchors,
-  buildStatReportBundle,
+  buildExtendedStatReportBundle,
+  defaultReportOptions,
   renderStageAwareStandingsReport,
   zipStatReportBundle,
+  type ReportOptions,
   type StatReportPage,
 } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
 import { buildCanonicalSnapshot } from './canonicalReports';
 import { safeReportName } from './downloads';
 import { buildCanonicalStandingsReport } from './standingsReport';
+import { withReportPresentation } from './reportPresentation';
 
 export interface CanonicalStatReportArtifact {
   fileName: string;
@@ -16,14 +18,19 @@ export interface CanonicalStatReportArtifact {
   bytes: Uint8Array;
 }
 
-function buildCanonicalReportPages(state: DirectorState, generatedAt: string): StatReportPage[] {
-  const snapshot = buildCanonicalSnapshot(state, undefined, generatedAt);
+function buildCanonicalReportPages(
+  state: DirectorState,
+  generatedAt: string,
+  options: ReportOptions = defaultReportOptions,
+): StatReportPage[] {
+  const snapshot = withReportPresentation(
+    state,
+    buildCanonicalSnapshot(state, undefined, generatedAt),
+    options,
+  );
   const standings = renderStageAwareStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
-  return buildStatReportBundle(snapshot).map((page) => {
+  return buildExtendedStatReportBundle(snapshot).map((page) => {
     if (page.name === 'standings.html') return { ...page, content: standings };
-    if (page.name === 'games.html') {
-      return { ...page, content: addGameRowAnchors(page.content, snapshot.games) };
-    }
     return page;
   });
 }
@@ -32,8 +39,9 @@ function buildCanonicalReportPages(state: DirectorState, generatedAt: string): S
 export function buildCanonicalStatReport(
   state: DirectorState,
   generatedAt = new Date().toISOString(),
+  options: ReportOptions = defaultReportOptions,
 ): CanonicalStatReportArtifact {
-  const pages = buildCanonicalReportPages(state, generatedAt);
+  const pages = buildCanonicalReportPages(state, generatedAt, options);
   return {
     fileName: `${safeReportName(state.tournament?.name ?? 'tournament')}-stat-report.zip`,
     pages,

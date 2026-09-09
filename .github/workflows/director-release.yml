@@ -13,8 +13,8 @@ name: Director release
 #
 # # The four properties this workflow keeps
 #
-# * **The version is checked before a runner is spent on it.** Director's version is written in five
-#   places and the tag is a sixth. `guard` reads all of them first, and it is cheap: no `npm ci`, no
+# * **The version is checked before a runner is spent on it.** Director's version is written in four
+#   places and the tag is a fifth. `guard` reads all of them first, and it is cheap: no `npm ci`, no
 #   toolchain, no bundle. The header of `scripts/release/director-version.mjs` records what a
 #   disagreement does to a released installer and to the updater.
 # * **The release is created once, before anything is built.** `draft` does it, and the bundle jobs

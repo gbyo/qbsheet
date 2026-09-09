@@ -1,3 +1,5 @@
+import { useMemo, useState } from 'react';
+import { defaultReportOptions, type ReportOptions } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
 import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
 import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
@@ -6,7 +8,9 @@ import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFil
 import { isNativeDirector, saveNativeFile } from '../platform/native';
 import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
 import { saveOrDownloadBytes } from '../reports/downloads';
+import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
+import { ReportOptionsDialog } from './ReportOptionsDialog';
 
 export function PublishView({
   state,
@@ -17,6 +21,24 @@ export function PublishView({
   onNavigate?: (section: import('../app/navigation').SectionId) => void;
 }) {
   const hasTournament = state.tournament !== null;
+  const tournamentId = state.tournament?.id ?? '';
+  const loadedReportOptions = useMemo(
+    () =>
+      tournamentId
+        ? loadReportOptions(tournamentId)
+        : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] },
+    [tournamentId],
+  );
+  const [reportOptionsOverride, setReportOptionsOverride] = useState<{
+    tournamentId: string;
+    options: ReportOptions;
+  } | null>(null);
+  const reportOptions =
+    reportOptionsOverride?.tournamentId === tournamentId
+      ? reportOptionsOverride.options
+      : loadedReportOptions;
+  const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
+
   return (
     <Page>
       <PageHeader
@@ -48,9 +70,10 @@ export function PublishView({
           <SummaryList ariaLabel="Export formats">
             <ExportAction
               title="Printable stat report"
-              description="Linked standings, individuals, games, rounds, team, and player pages for printing or static hosting."
+              description="Rules-aware linked standings, individuals, games, rounds, team, and player pages for printing or static hosting."
               action="Download report"
-              onClick={() => void downloadStatReport(state, onAnnounce)}
+              secondaryAction={{ label: 'Report options', onClick: () => setReportOptionsOpen(true) }}
+              onClick={() => void downloadStatReport(state, onAnnounce, reportOptions)}
             />
             <ExportAction
               title="Team standings HTML"
@@ -91,6 +114,19 @@ export function PublishView({
           </SummaryList>
         </Panel>
       )}
+
+      {reportOptionsOpen && state.tournament && (
+        <ReportOptionsDialog
+          options={reportOptions}
+          onClose={() => setReportOptionsOpen(false)}
+          onSave={(options) => {
+            const saved = saveReportOptions(state.tournament!.id, options);
+            setReportOptionsOverride({ tournamentId: state.tournament!.id, options: saved });
+            setReportOptionsOpen(false);
+            onAnnounce(infoNotice('Printable report options saved on this Director.'));
+          }}
+        />
+      )}
     </Page>
   );
 }
@@ -99,11 +135,13 @@ function ExportAction({
   title,
   description,
   action,
+  secondaryAction,
   onClick,
 }: {
   title: string;
   description: string;
   action: string;
+  secondaryAction?: { label: string; onClick: () => void };
   onClick: () => void;
 }) {
   return (
@@ -111,9 +149,16 @@ function ExportAction({
       title={<strong>{title}</strong>}
       summary={description}
       actions={
-        <Button variant="secondary" icon="download" onClick={onClick}>
-          {action}
-        </Button>
+        <div className="director-actions">
+          {secondaryAction && (
+            <Button variant="quiet" onClick={secondaryAction.onClick}>
+              {secondaryAction.label}
+            </Button>
+          )}
+          <Button variant="secondary" icon="download" onClick={onClick}>
+            {action}
+          </Button>
+        </div>
       }
     />
   );
@@ -153,9 +198,10 @@ export async function downloadArchive(
 export async function downloadStatReport(
   state: DirectorState,
   onAnnounce: (announcement: AnnounceInput) => void,
+  options: ReportOptions = defaultReportOptions,
 ): Promise<void> {
   try {
-    const artifact = buildCanonicalStatReport(state);
+    const artifact = buildCanonicalStatReport(state, new Date().toISOString(), options);
     await saveOrDownloadBytes(
       artifact.bytes,
       artifact.fileName,

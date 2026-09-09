@@ -1,0 +1,136 @@
+import type { DirectorId, DirectorState, GameRecord } from './model.js';
+import { gameDetailedCountsKnown } from './canonicalStats.js';
+import { orderDayItems } from './dayOrder.js';
+import { acceptedGameRecords, type DirectorStandingsOptions } from './stats.js';
+
+export interface RoundStatsRow {
+  roundId: DirectorId;
+  roundName: string;
+  phaseId?: DirectorId;
+  /** All accepted competitive results in the round, including forfeits. */
+  games: number;
+  /** Games eligible for scoring aggregates. Scoreless administrative forfeits are excluded. */
+  playedGames: number;
+  /** Played games whose detailed count fields are trustworthy. */
+  detailedGames: number;
+  /** Average final points scored by one team in an eligible played game. */
+  pointsPerTeam: number | null;
+  superpowers: number | null;
+  powers: number | null;
+  gets: number | null;
+  negs: number | null;
+  bonusesHeard: number | null;
+  bonusPoints: number | null;
+  ppb: number | null;
+  /** Exact tossups read are not yet persisted on Director GameRecord. */
+  tossupsRead: number | null;
+  /** Reserved for the normalized metric once exact per-game tossup denominators are canonical. */
+  pointsPerTeamPerXTuh: number | null;
+  powerRate: number | null;
+  tossupConversionRate: number | null;
+  negRatePerXTuh: number | null;
+  packetIds: DirectorId[];
+}
+
+function hasRecordedPlayDetail(game: GameRecord): boolean {
+  if (game.detailedStats === 'complete' || game.playerStats.length > 0) return true;
+  return game.scores.some(
+    (score) =>
+      score.superpowers > 0 ||
+      score.powers > 0 ||
+      score.gets > 0 ||
+      score.negs > 0 ||
+      score.bonuses > 0 ||
+      score.bonusPoints > 0 ||
+      score.bouncebacks > 0,
+  );
+}
+
+function eligibleForScoringAggregates(game: GameRecord): boolean {
+  // Administrative forfeits count in standings/result totals, but a documentary 0-0 score is not
+  // a played scoring sample. If exact played detail exists, keep it available for round analysis.
+  return game.status !== 'forfeit' || hasRecordedPlayDetail(game);
+}
+
+/**
+ * Derive round-level report facts from the same accepted-game selector used by standings.
+ *
+ * This intentionally exposes numerator/count aggregates before inventing tossup-normalized rates.
+ * Director's persisted GameRecord does not yet carry exact tossups-read/overtime counts, so metrics
+ * that require those denominators remain null until the source of truth can support them honestly.
+ */
+export function deriveRoundStats(
+  state: DirectorState,
+  options: DirectorStandingsOptions = {},
+): RoundStatsRow[] {
+  const games = acceptedGameRecords(state, options);
+  const byRound = new Map<DirectorId, GameRecord[]>();
+  for (const game of games) {
+    const rows = byRound.get(game.roundId) ?? [];
+    rows.push(game);
+    byRound.set(game.roundId, rows);
+  }
+
+  const roundById = new Map(state.rounds.map((round) => [round.id, round]));
+  const dayOrder = new Map<DirectorId, number>();
+  orderDayItems(state.rounds, state.timeline).forEach((entry, index) => {
+    if (entry.kind === 'round' && entry.round) dayOrder.set(entry.round.id, index);
+  });
+
+  return [...byRound.entries()]
+    .sort(
+      ([leftId], [rightId]) =>
+        (dayOrder.get(leftId) ?? Number.MAX_SAFE_INTEGER) -
+          (dayOrder.get(rightId) ?? Number.MAX_SAFE_INTEGER) || leftId.localeCompare(rightId),
+    )
+    .map(([roundId, roundGames]) => {
+      const round = roundById.get(roundId);
+      const played = roundGames.filter(eligibleForScoringAggregates);
+      const detailed = played.filter(gameDetailedCountsKnown);
+      const detailComplete = played.length > 0 && detailed.length === played.length;
+      const points = played.reduce(
+        (sum, game) => sum + game.scores.reduce((gameSum, score) => gameSum + score.score, 0),
+        0,
+      );
+      const count = <K extends 'superpowers' | 'powers' | 'gets' | 'negs' | 'bonuses' | 'bonusPoints'>(
+        key: K,
+      ): number | null =>
+        detailComplete
+          ? detailed.reduce(
+              (sum, game) => sum + game.scores.reduce((gameSum, score) => gameSum + score[key], 0),
+              0,
+            )
+          : null;
+      const bonusesHeard = count('bonuses');
+      const bonusPoints = count('bonusPoints');
+      const packetIds = [
+        ...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null)),
+      ];
+
+      return {
+        roundId,
+        roundName: round?.name ?? roundId,
+        ...(round?.phaseId ? { phaseId: round.phaseId } : {}),
+        games: roundGames.length,
+        playedGames: played.length,
+        detailedGames: detailed.length,
+        pointsPerTeam: played.length > 0 ? points / (played.length * 2) : null,
+        superpowers: count('superpowers'),
+        powers: count('powers'),
+        gets: count('gets'),
+        negs: count('negs'),
+        bonusesHeard,
+        bonusPoints,
+        ppb:
+          bonusesHeard !== null && bonusPoints !== null && bonusesHeard > 0
+            ? bonusPoints / bonusesHeard
+            : null,
+        tossupsRead: null,
+        pointsPerTeamPerXTuh: null,
+        powerRate: null,
+        tossupConversionRate: null,
+        negRatePerXTuh: null,
+        packetIds,
+      };
+    });
+}

@@ -11,17 +11,16 @@ optional: the checks in CI cannot see removable media, OS permissions, write cac
 
 ## Cut a release
 
-1. **Bump the version.** Director's version is written in five places, and all five have to agree:
+1. **Bump the version.** Director's version is written in four places, and all four have to agree:
 
    | File | What its copy decides |
    | --- | --- |
    | `apps/director/src-tauri/tauri.conf.json` | the installer file names, the About window, and the version the updater compares |
    | `apps/director/package.json` | the npm package the Tauri shell builds from |
    | `apps/director/src-tauri/Cargo.toml` | the native crate |
-   | `apps/director/package-lock.json` | npm's record of the package |
    | `package-lock.json` | npm's record of `apps/director` in the workspace |
 
-   Edit the first three by hand; `npm install` writes the two lockfiles. Then check the result:
+   Edit the first three by hand; `npm install` writes the workspace lockfile. Then check the result:
 
    ```sh
    node scripts/release/director-version.mjs --tag director-v0.2.0
