@@ -31,7 +31,9 @@ export function renderReportIndex(snapshot: StatsSnapshot): string {
   const body =
     `<p class="meta">${snapshot.teams.length} teams · ${snapshot.players.length} players · ${snapshot.games.length} games.</p>` +
     `<ul>${presentation.options.pages
-      .map((page) => `<li><a href="${reportPageFiles[page]}">${reportEscape(reportPageLabels[page])}</a></li>`)
+      .map(
+        (page) => `<li><a href="${reportPageFiles[page]}">${reportEscape(reportPageLabels[page])}</a></li>`,
+      )
       .join('')}</ul>`;
   return renderReportPage(snapshot, 'Stat report', body);
 }
@@ -65,7 +67,8 @@ export function renderRulesAwareStandings(snapshot: StatsSnapshot): string {
     (row) => row.calculatedRank !== undefined && row.calculatedRank !== row.rank,
   );
   const showClassifications =
-    presentation.options.showClassifications && snapshot.teams.some((row) => (row.classifications ?? []).length > 0);
+    presentation.options.showClassifications &&
+    snapshot.teams.some((row) => (row.classifications ?? []).length > 0);
   const rows = snapshot.teams
     .map((row) => teamRowHtml(row, presentation, showCalculatedRank, showClassifications))
     .join('');

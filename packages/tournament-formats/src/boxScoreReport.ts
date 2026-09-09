@@ -26,23 +26,20 @@ function scoreText(game: GameStatsRow): string {
 function detailKnown(team: GameTeamStatsRow | undefined): boolean {
   return Boolean(
     team &&
-      [
-        team.superpowers,
-        team.powers,
-        team.gets,
-        team.negs,
-        team.tossupsHeard,
-        team.bonusesHeard,
-        team.bonusPoints,
-        team.bouncebacks,
-      ].some((value) => value !== null),
+    [
+      team.superpowers,
+      team.powers,
+      team.gets,
+      team.negs,
+      team.tossupsHeard,
+      team.bonusesHeard,
+      team.bonusPoints,
+      team.bouncebacks,
+    ].some((value) => value !== null),
   );
 }
 
-function playerRows(
-  players: readonly GamePlayerStatsRow[],
-  presentation: ReportPresentation,
-): string {
+function playerRows(players: readonly GamePlayerStatsRow[], presentation: ReportPresentation): string {
   return players
     .map(
       (player) =>
@@ -53,11 +50,7 @@ function playerRows(
     .join('');
 }
 
-function teamBox(
-  game: GameStatsRow,
-  team: GameTeamStatsRow,
-  presentation: ReportPresentation,
-): string {
+function teamBox(game: GameStatsRow, team: GameTeamStatsRow, presentation: ReportPresentation): string {
   const players = (game.playerStats ?? []).filter((player) => player.teamId === team.teamId);
   const columns = 3 + presentation.answerColumns.length;
   const playerBody =
@@ -83,7 +76,8 @@ function teamBox(
 function gameMeta(game: GameStatsRow, presentation: ReportPresentation): string {
   const items: string[] = [];
   if (presentation.applicability.stage && game.phaseId) items.push(`Stage: ${reportEscape(game.phaseId)}`);
-  if (presentation.applicability.packet && game.packetName) items.push(`Packet: ${reportEscape(game.packetName)}`);
+  if (presentation.applicability.packet && game.packetName)
+    items.push(`Packet: ${reportEscape(game.packetName)}`);
   if (typeof game.tossupsRead === 'number') items.push(`Tossups read: ${game.tossupsRead}`);
   if (
     presentation.applicability.overtime &&
@@ -139,7 +133,9 @@ export function renderBoxScoreReport(snapshot: StatsSnapshot): string {
   const contents =
     groups.length > 1
       ? `<nav aria-label="Rounds"><strong>Rounds</strong><ul>${groups
-          .map((group) => `<li><a href="#${reportRoundAnchor(group.id)}">${reportEscape(group.name)}</a></li>`)
+          .map(
+            (group) => `<li><a href="#${reportRoundAnchor(group.id)}">${reportEscape(group.name)}</a></li>`,
+          )
           .join('')}</ul></nav>`
       : '';
   const sections = groups

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { defaultReportOptions, type ReportOptions } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
 import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
@@ -22,16 +22,22 @@ export function PublishView({
 }) {
   const hasTournament = state.tournament !== null;
   const tournamentId = state.tournament?.id ?? '';
-  const [reportOptions, setReportOptions] = useState<ReportOptions>(() =>
-    tournamentId ? loadReportOptions(tournamentId) : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] },
+  const loadedReportOptions = useMemo(
+    () =>
+      tournamentId
+        ? loadReportOptions(tournamentId)
+        : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] },
+    [tournamentId],
   );
+  const [reportOptionsOverride, setReportOptionsOverride] = useState<{
+    tournamentId: string;
+    options: ReportOptions;
+  } | null>(null);
+  const reportOptions =
+    reportOptionsOverride?.tournamentId === tournamentId
+      ? reportOptionsOverride.options
+      : loadedReportOptions;
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
-
-  useEffect(() => {
-    setReportOptions(
-      tournamentId ? loadReportOptions(tournamentId) : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] },
-    );
-  }, [tournamentId]);
 
   return (
     <Page>
@@ -115,7 +121,7 @@ export function PublishView({
           onClose={() => setReportOptionsOpen(false)}
           onSave={(options) => {
             const saved = saveReportOptions(state.tournament!.id, options);
-            setReportOptions(saved);
+            setReportOptionsOverride({ tournamentId: state.tournament!.id, options: saved });
             setReportOptionsOpen(false);
             onAnnounce(infoNotice('Printable report options saved on this Director.'));
           }}

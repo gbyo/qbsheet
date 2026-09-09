@@ -33,7 +33,9 @@ export function loadReportOptions(
   if (!tournamentId || !storage) return { ...defaultReportOptions, pages: [...defaultReportOptions.pages] };
   try {
     const raw = storage.getItem(reportPreferenceKey(tournamentId));
-    return raw ? normalizeReportOptions(JSON.parse(raw)) : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] };
+    return raw
+      ? normalizeReportOptions(JSON.parse(raw))
+      : { ...defaultReportOptions, pages: [...defaultReportOptions.pages] };
   } catch {
     return { ...defaultReportOptions, pages: [...defaultReportOptions.pages] };
   }

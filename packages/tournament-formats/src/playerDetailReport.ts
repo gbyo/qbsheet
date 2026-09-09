@@ -51,7 +51,8 @@ function summary(row: PlayerStatsRow, presentation: ReportPresentation): string 
     `${row.gamesPlayed} games`,
     row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`,
     ...presentation.answerColumns.map(
-      (column) => `${reportNumber(answerCount(row, column.key))} ${column.label.toLowerCase()}${answerCount(row, column.key) === 1 ? '' : 's'}`,
+      (column) =>
+        `${reportNumber(answerCount(row, column.key))} ${column.label.toLowerCase()}${answerCount(row, column.key) === 1 ? '' : 's'}`,
     ),
     `${row.points} pts`,
     `${reportPointsMetricValue(row, presentation)} ${reportPointsMetricLabel(presentation)}`,

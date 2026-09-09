@@ -97,7 +97,7 @@ export function ReportOptionsDialog({
         <Checkbox
           checked={draft.showClassifications}
           label="Reporting classifications when used"
-          onChange={(showClassifications) => setDraft((current) => ({ ...current, showClassifications }))
+          onChange={(showClassifications) => setDraft((current) => ({ ...current, showClassifications }))}
         />
       </DialogSection>
       <DialogSection title="Context columns">

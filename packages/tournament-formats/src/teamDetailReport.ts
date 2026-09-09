@@ -1,5 +1,5 @@
 import type { GameTeamStatsRow } from './reportDetail.js';
-import { reportNumber, reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
+import { reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
 import type { GameStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 import {
   renderReportPage,

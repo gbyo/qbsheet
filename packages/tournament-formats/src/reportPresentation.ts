@@ -3,13 +3,7 @@ import type { PlayerStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 
 export const reportUnknown = '—' as const;
 
-export type ReportPageKey =
-  | 'standings'
-  | 'individuals'
-  | 'games'
-  | 'rounds'
-  | 'teamDetail'
-  | 'playerDetail';
+export type ReportPageKey = 'standings' | 'individuals' | 'games' | 'rounds' | 'teamDetail' | 'playerDetail';
 
 export const reportPageOrder: readonly ReportPageKey[] = [
   'standings',
@@ -163,7 +157,10 @@ interface BuildReportPresentationInput {
   capabilities?: ReportPresentationCapabilities;
 }
 
-const answerNames: Record<ReportAnswerKey, { label: string; shortLabel: string; role: 'positive' | 'negative' }> = {
+const answerNames: Record<
+  ReportAnswerKey,
+  { label: string; shortLabel: string; role: 'positive' | 'negative' }
+> = {
   superpower: { label: 'Superpower', shortLabel: 'Super', role: 'positive' },
   power: { label: 'Power', shortLabel: 'Power', role: 'positive' },
   get: { label: 'Get', shortLabel: 'Get', role: 'positive' },
@@ -285,7 +282,10 @@ export function answerCount(
   return typeof legacy === 'number' && Number.isFinite(legacy) ? legacy : null;
 }
 
-export function pointsPerX(pptuh: number | null | undefined, tossups: number | null | undefined): number | null {
+export function pointsPerX(
+  pptuh: number | null | undefined,
+  tossups: number | null | undefined,
+): number | null {
   if (typeof pptuh !== 'number' || !Number.isFinite(pptuh) || typeof tossups !== 'number' || tossups <= 0) {
     return null;
   }
@@ -297,7 +297,9 @@ export function reportNumber(value: number | null | undefined, digits = 0): stri
 }
 
 export function reportPercent(value: number | null | undefined, digits = 1): string {
-  return typeof value === 'number' && Number.isFinite(value) ? `${(value * 100).toFixed(digits)}%` : reportUnknown;
+  return typeof value === 'number' && Number.isFinite(value)
+    ? `${(value * 100).toFixed(digits)}%`
+    : reportUnknown;
 }
 
 function legacyPresentation(snapshot: StatsSnapshot): ReportPresentation {
@@ -314,16 +316,33 @@ function legacyPresentation(snapshot: StatsSnapshot): ReportPresentation {
   );
   const answerColumns: ReportAnswerColumn[] = [
     ...(hasSuperpowers
-      ? [{ key: 'superpower' as const, label: 'Superpower', shortLabel: 'Super', role: 'positive' as const, pointValue: null, pointValues: [] }]
+      ? [
+          {
+            key: 'superpower' as const,
+            label: 'Superpower',
+            shortLabel: 'Super',
+            role: 'positive' as const,
+            pointValue: null,
+            pointValues: [],
+          },
+        ]
       : []),
-    { key: 'power', label: 'Power', shortLabel: 'Power', role: 'positive', pointValue: null, pointValues: [] },
+    {
+      key: 'power',
+      label: 'Power',
+      shortLabel: 'Power',
+      role: 'positive',
+      pointValue: null,
+      pointValues: [],
+    },
     { key: 'get', label: 'Get', shortLabel: 'Get', role: 'positive', pointValue: null, pointValues: [] },
     { key: 'neg', label: 'Neg', shortLabel: 'Neg', role: 'negative', pointValue: null, pointValues: [] },
   ];
   return {
     metadata: {
       tournamentName: snapshot.tournament.name,
-      scopeLabel: typeof snapshot.extensions?.scopeLabel === 'string' ? snapshot.extensions.scopeLabel : 'Overall',
+      scopeLabel:
+        typeof snapshot.extensions?.scopeLabel === 'string' ? snapshot.extensions.scopeLabel : 'Overall',
       generatedAt: snapshot.generatedAt,
     },
     options: { ...defaultReportOptions, pages: [...reportPageOrder] },

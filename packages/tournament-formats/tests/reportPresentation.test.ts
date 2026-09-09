@@ -93,12 +93,7 @@ function snapshot(): StatsSnapshot {
 describe('rules-aware report presentation', () => {
   test('enabled answer tiers remain columns even when every recorded count is zero', () => {
     const report = presentation();
-    expect(report.answerColumns.map((column) => column.key)).toEqual([
-      'superpower',
-      'power',
-      'get',
-      'neg',
-    ]);
+    expect(report.answerColumns.map((column) => column.key)).toEqual(['superpower', 'power', 'get', 'neg']);
     expect(report.answerColumns.find((column) => column.key === 'superpower')?.pointValue).toBe(30);
 
     const standings = buildExtendedStatReportBundle(snapshot()).find(
@@ -220,9 +215,7 @@ describe('rules-aware report presentation', () => {
         ],
       },
     ];
-    const rounds = buildExtendedStatReportBundle(snap).find(
-      (page) => page.name === 'rounds.html',
-    )!.content;
+    const rounds = buildExtendedStatReportBundle(snap).find((page) => page.name === 'rounds.html')!.content;
     expect(rounds).toContain('<th scope="col">Stage</th>');
     expect(rounds).toContain('prelims');
     expect(rounds).toContain('>Bounceback pts</th>');

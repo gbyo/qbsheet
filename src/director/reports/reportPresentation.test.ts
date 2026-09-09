@@ -26,7 +26,11 @@ describe('Director report presentation adapter', () => {
       summary: 'PRIVATE AUDIT DETAIL',
     });
 
-    const options = { ...defaultReportOptions, pages: [...defaultReportOptions.pages], pointsMetric: 'pointsPerX' as const };
+    const options = {
+      ...defaultReportOptions,
+      pages: [...defaultReportOptions.pages],
+      pointsMetric: 'pointsPerX' as const,
+    };
     const snapshot = withReportPresentation(
       state,
       buildCanonicalSnapshot(state, undefined, '2026-09-09T21:00:00.000Z'),
