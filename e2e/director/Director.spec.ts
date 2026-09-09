@@ -828,13 +828,16 @@ test('Director keeps unavailable resources out of new room assignments', async (
   await expect(page.getByText('Moderator Two').first()).toBeVisible();
 
   // Maintenance actions are in the row's overflow menu, not permanent chrome.
+  // Marking unavailable asks for confirmation with a schedule-impact preview.
   await page.getByRole('button', { name: /Moderator Two actions/ }).click();
   await page.getByRole('option', { name: 'Mark unavailable' }).click();
+  await footerButton('Mark unavailable').click();
   await expect(page.getByText('Unavailable').first()).toBeVisible();
 
   await view(/^Equipment/).click();
   await page.getByRole('button', { name: /Buzzer One actions/ }).click();
   await page.getByRole('option', { name: 'Mark unavailable' }).click();
+  await footerButton('Mark unavailable').click();
 
   /*
    * The point of the test: a resource marked unavailable is not offered for a
