@@ -39,9 +39,7 @@ export function canonicalCompetitionRanks(
       for (const standing of ordered) {
         const previous = partitions.at(-1);
         const value = teamTiebreakerValue(standing, key, group, games);
-        const previousValue = previous
-          ? teamTiebreakerValue(previous[0]!, key, group, games)
-          : undefined;
+        const previousValue = previous ? teamTiebreakerValue(previous[0]!, key, group, games) : undefined;
         if (previous && previousValue === value) previous.push(standing);
         else partitions.push([standing]);
       }
@@ -55,8 +53,7 @@ export function canonicalCompetitionRanks(
   const flattened = normalizedGroups.flat();
   const canonical = rankTeamStandings(standings, games, tiebreakers);
   if (
-    flattened.map((row) => row.teamId).join('\u0000') !==
-    canonical.map((row) => row.teamId).join('\u0000')
+    flattened.map((row) => row.teamId).join('\u0000') !== canonical.map((row) => row.teamId).join('\u0000')
   ) {
     throw new Error('Canonical standings tie groups no longer match canonical standings ordering.');
   }

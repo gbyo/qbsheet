@@ -150,7 +150,8 @@ function renderSection(report: CanonicalStandingsReport, section: StandingsRepor
   const carryover = section.carryover
     ? '<p class="meta">Includes canonical prior-stage carryover games for this field; each physical game is counted once.</p>'
     : '';
-  const finalContext = section.kind === 'final' ? contextBlock('Finals & placement results', report.finalResults ?? []) : '';
+  const finalContext =
+    section.kind === 'final' ? contextBlock('Finals & placement results', report.finalResults ?? []) : '';
   const tiebreakers = contextBlock('Tiebreaker results', section.contextGames ?? []);
   return (
     `<section id="${escapeHtml(section.id)}"><h2>${escapeHtml(section.title)}</h2>` +

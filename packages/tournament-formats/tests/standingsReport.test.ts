@@ -115,7 +115,8 @@ describe('stage-aware standings report HTML', () => {
   });
 
   test('adds one stable anchor to each legacy games-table row', () => {
-    const page = '<html><body><table><tbody><tr><td>one</td></tr><tr><td>two</td></tr></tbody></table></body></html>';
+    const page =
+      '<html><body><table><tbody><tr><td>one</td></tr><tr><td>two</td></tr></tbody></table></body></html>';
     const anchored = addGameRowAnchors(page, [
       {
         gameId: 'game/one',

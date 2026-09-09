@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { DirectorState, Phase } from '../domain';
-import {
-  acceptedGame,
-  playedTournament,
-  scheduledGame,
-  score,
-  team,
-} from '../../../tests/directorFixtures';
+import { acceptedGame, playedTournament, scheduledGame, score, team } from '../../../tests/directorFixtures';
 import { buildCanonicalStandingsReport } from './standingsReport';
 
 const generatedAt = '2026-09-09T20:00:00.000Z';
@@ -299,16 +293,7 @@ describe('canonical standings report composition', () => {
       status: 'complete',
     });
     addRound(state, 'round-final', finals.id, 'Championship Round', 2, 2);
-    addAcceptedGame(
-      state,
-      'game-final',
-      'scheduled-final',
-      'round-final',
-      'team-b',
-      'team-a',
-      250,
-      200,
-    );
+    addAcceptedGame(state, 'game-final', 'scheduled-final', 'round-final', 'team-b', 'team-a', 250, 200);
     const placement = addPhase(state, 'phase-placement', 'Placement', 3, {
       kind: 'placement',
       teamIds: ['team-a', 'team-b'],

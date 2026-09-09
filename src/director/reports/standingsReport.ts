@@ -24,11 +24,17 @@ interface BuiltSection {
   phase?: Phase;
 }
 
+function withoutFinalPlacement(tournament: NonNullable<DirectorState['tournament']>) {
+  const result = { ...tournament };
+  delete result.finalPlacement;
+  return result;
+}
+
 function calculatedOverallSnapshot(state: DirectorState, generatedAt: string) {
   if (!state.tournament?.finalPlacement) {
     return buildCanonicalSnapshot(state, { label: 'All Games' }, generatedAt);
   }
-  const { finalPlacement: _finalPlacement, ...tournament } = state.tournament;
+  const tournament = withoutFinalPlacement(state.tournament);
   return buildCanonicalSnapshot({ ...state, tournament }, { label: 'All Games' }, generatedAt);
 }
 
@@ -41,9 +47,7 @@ function activePhases(state: DirectorState): Phase[] {
 
 function phasePools(state: DirectorState, phase: Phase): Pool[] {
   return state.pools
-    .filter(
-      (pool) => pool.phaseId === phase.id && pool.archived !== true && phase.poolIds.includes(pool.id),
-    )
+    .filter((pool) => pool.phaseId === phase.id && pool.archived !== true && phase.poolIds.includes(pool.id))
     .slice()
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
 }
@@ -113,9 +117,7 @@ function carryoverSnapshot(
   const games = carryoverGames(state, phase, pool);
   const gameIds = new Set(games.map((game) => game.id));
   const teamIds = new Set(fieldTeamIds(state, phase, pool));
-  const tournament = state.tournament
-    ? (({ finalPlacement: _finalPlacement, ...rest }) => rest)(state.tournament)
-    : null;
+  const tournament = state.tournament ? withoutFinalPlacement(state.tournament) : null;
   const narrowed: DirectorState = {
     ...state,
     tournament,
@@ -148,7 +150,9 @@ function latestAdvancementCommit(state: DirectorState, sourcePhaseId: string) {
     .at(-1);
 }
 
-function assignmentTeamIds(event: ReturnType<typeof latestAdvancementCommit>): Map<string, string | undefined> {
+function assignmentTeamIds(
+  event: ReturnType<typeof latestAdvancementCommit>,
+): Map<string, string | undefined> {
   const assignments = new Map<string, string | undefined>();
   const raw = event?.details?.assignments;
   if (!Array.isArray(raw)) return assignments;
