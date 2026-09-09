@@ -65,6 +65,7 @@ import {
   type TournamentStatus,
 } from '../domain';
 import { advancementCommitBlocker, releasedRoundResultBlocker } from './tournamentSafety';
+import { usbRoundDeliveryBlocker } from './roundStartSafety';
 import {
   createDirectorRepository,
   normalizeDirectorState,
@@ -703,11 +704,7 @@ function roundDeliveryBlocker(state: DirectorState, roundId: DirectorId): string
     (game) => game.roundId === roundId && !game.bye && game.status !== 'cancelled',
   );
   if (mode === 'manual') return null;
-  if (mode === 'usb') {
-    return state.transfers.locations.length > 0
-      ? null
-      : `${round.name} is configured for USB delivery, but no transfer location is configured. Add a USB or folder before starting.`;
-  }
+  if (mode === 'usb') return usbRoundDeliveryBlocker(state, roundId);
   const missing = games.filter((game) => game.roomId === null);
   if (missing.length > 0) {
     return `${round.name} is configured for electronic QBTCP delivery, but ${missing.length} game(s) have no room assignment. Assign rooms before starting.`;
@@ -4283,7 +4280,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           generated: false,
         };
       }
-      commit((draft) => {
+      const committed = commit((draft) => {
         const phase = draft.phases.find((entry) => entry.id === generatedRound.phaseId);
         if (!phase || draft.tournament?.currentPhaseId !== phase.id) return;
         const existingRound = draft.rounds.find((entry) => entry.id === generatedRound.id);
@@ -4325,7 +4322,15 @@ export function useDirectorController(repository = createDirectorRepository()): 
           details: { conflicts },
         });
       });
-      return { conflicts, generated: true };
+      return committed
+        ? { conflicts, generated: true }
+        : {
+            conflicts: [
+              ...conflicts,
+              'The generated round could not be saved. Review the Director warning and try again.',
+            ],
+            generated: false,
+          };
     },
     [commit],
   );
