@@ -19,11 +19,28 @@ import {
 
 export interface AdvancementPreview {
   phaseId: DirectorId;
+  /** Stable fingerprint of the competitive inputs used to produce this preview. */
+  basisToken: string;
   qualifiers: Team[];
   /** Subset of qualifiers selected as cross-pool wildcards, in selection order. */
   wildcards: Team[];
   unresolved: Array<{ teamIds: DirectorId[]; reason: string }>;
   explanation: string[];
+}
+
+export function advancementBasisToken(state: DirectorState, phase: Phase): string {
+  const roundIds = new Set(phase.roundIds);
+  return JSON.stringify({
+    phase: {
+      id: phase.id,
+      status: phase.status,
+      poolIds: phase.poolIds,
+      advancementRule: phase.advancementRule,
+    },
+    pools: phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId)?.teamIds ?? []),
+    teams: state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
+    games: state.games.filter((game) => roundIds.has(game.roundId)),
+  });
 }
 
 export function previewAdvancement(state: DirectorState, phase: Phase): AdvancementPreview {
@@ -81,6 +98,7 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
   const wildcardGames = new Set(wildcardStandings.map((standing) => standing.gamesPlayed));
   return {
     phaseId: phase.id,
+    basisToken: advancementBasisToken(state, phase),
     qualifiers: [...qualifierTeams, ...wildcardTeams],
     wildcards: wildcardTeams,
     unresolved,

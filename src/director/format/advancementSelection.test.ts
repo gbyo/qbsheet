@@ -14,6 +14,7 @@ describe('advancement cutoff selection', () => {
   test('allows the Director to replace the deterministic team in a two-for-one tie', () => {
     const preview: AdvancementPreview = {
       phaseId: 'prelims',
+      basisToken: 'basis',
       qualifiers: [team('A')],
       wildcards: [],
       unresolved: [{ teamIds: ['A', 'B'], reason: 'cutoff tied' }],
@@ -32,6 +33,7 @@ describe('advancement cutoff selection', () => {
   test('requires exactly the number of berths crossing an N-for-M tie', () => {
     const preview: AdvancementPreview = {
       phaseId: 'prelims',
+      basisToken: 'basis',
       qualifiers: [team('A'), team('B')],
       wildcards: [],
       unresolved: [{ teamIds: ['A', 'B', 'C'], reason: 'cutoff tied' }],

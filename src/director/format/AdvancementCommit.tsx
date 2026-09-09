@@ -4,7 +4,6 @@ import type { AdvancementPreview, DirectorState } from '../domain';
 import type { AnnounceInput } from '../notices';
 import { errorNotice, infoNotice } from '../notices';
 import { Button, Checkbox, Field, Select, TextInput } from '../components';
-import { commitAdvancementSafely } from './advancementCommitPlan';
 import {
   advancementCutoffDecisions,
   cutoffDecisionsAreValid,
@@ -112,13 +111,14 @@ export function AdvancementCommit({
       onAnnounce(errorNotice('Choose exactly the available number of berths in every tied cutoff.'));
       return;
     }
-    const result = await commitAdvancementSafely(controller, state, {
+    const result = controller.commitAdvancement({
       sourcePhaseId,
       targetPhaseId: target.id,
       assignments: selectedTeams
         .map((team) => ({ teamId: team.id, targetPoolId: proposal[team.id] ?? '' }))
         .filter((assignment) => assignment.targetPoolId !== ''),
       reason,
+      previewBasisToken: preview.basisToken,
     });
     onAnnounce(result.committed ? infoNotice(result.message) : errorNotice(result.message));
   };

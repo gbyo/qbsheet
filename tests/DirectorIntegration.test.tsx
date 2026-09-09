@@ -985,9 +985,24 @@ describe('Director integration hardening', () => {
       .filter((pool) => pool.phaseId === playoff.id)
       .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
     expect(playoffPools.length).toBeGreaterThan(0);
+    // Seed an omitted target pool to prove the canonical commit clears it atomically.
+    const outsider = live.teams.find(
+      (team) => team.status === 'confirmed' && !qualifierIds.includes(team.id),
+    )!;
+    if (playoffPools.length > 1) {
+      const seeded = structuredClone(live);
+      seeded.pools.find((pool) => pool.id === playoffPools[1]!.id)!.teamIds = [outsider.id];
+      await act(async () => {
+        expect(
+          await hook.result.current.editTournamentSnapshot(seeded, 'Seed omitted advancement pool'),
+        ).toBe(true);
+      });
+      live = hook.result.current.state;
+    }
+    const assignedPools = playoffPools.length > 1 ? playoffPools.slice(0, -1) : playoffPools;
     const assignments = qualifierIds.map((teamId, index) => ({
       teamId,
-      targetPoolId: playoffPools[index % playoffPools.length]!.id,
+      targetPoolId: assignedPools[index % assignedPools.length]!.id,
     }));
     let result: ReturnType<typeof hook.result.current.commitAdvancement>;
     act(() => {
@@ -995,17 +1010,51 @@ describe('Director integration hardening', () => {
         sourcePhaseId: prelim.id,
         targetPhaseId: playoff.id,
         assignments,
+        previewBasisToken: `${preview.basisToken}-stale`,
+      });
+    });
+    expect(result!.committed).toBe(false);
+    expect(result!.message).toMatch(/standings changed/);
+    expect(hook.result.current.state.pools.find((pool) => pool.id === playoffPools[1]?.id)?.teamIds).toEqual(
+      playoffPools.length > 1 ? [outsider.id] : [],
+    );
+    expect(
+      hook.result.current.state.audit.filter((event) => event.type === 'advancement-committed'),
+    ).toHaveLength(0);
+
+    // An unrelated current mutation must survive the advancement commit.
+    act(() => {
+      expect(hook.result.current.addPacket('Unrelated packet')).toBe(true);
+    });
+    act(() => {
+      result = hook.result.current.commitAdvancement({
+        sourcePhaseId: prelim.id,
+        targetPhaseId: playoff.id,
+        assignments,
+        previewBasisToken: preview.basisToken,
       });
     });
     expect(result!.committed).toBe(true);
     expect(result!.overridden).toHaveLength(0);
 
-    live = hook.result.current.state;
-    const placed = live.pools
+    const committedState = hook.result.current.state;
+    live = committedState;
+    const placed = committedState.pools
       .filter((pool) => pool.phaseId === playoff.id)
       .flatMap((pool) => pool.teamIds)
       .sort();
     expect(placed).toEqual([...qualifierIds].sort());
+    expect(
+      committedState.pools
+        .filter((pool) => playoff.poolIds.includes(pool.id))
+        .every((pool) =>
+          assignedPools.some((assignedPool) => assignedPool.id === pool.id)
+            ? pool.teamIds.length > 0
+            : pool.teamIds.length === 0,
+        ),
+    ).toBe(true);
+    expect(committedState.packets.some((packet) => packet.name === 'Unrelated packet')).toBe(true);
+    expect(committedState.audit.filter((event) => event.type === 'advancement-committed')).toHaveLength(1);
     // Game results are untouched by the rebracket.
     expect(live.games.length).toBe(gamesBefore);
     expect(
@@ -1030,10 +1079,13 @@ describe('Director integration hardening', () => {
     ).toEqual([...qualifierIds].sort());
 
     // A team outside the preview needs an explicit director reason.
-    const outsider = live.teams.find(
+    const overrideOutsider = live.teams.find(
       (team) => team.status === 'confirmed' && !qualifierIds.includes(team.id),
     )!;
-    const overrideAssignments = [{ teamId: outsider.id, targetPoolId: playoffPools[0]!.id }];
+    const overrideAssignments = [
+      ...assignments,
+      { teamId: overrideOutsider.id, targetPoolId: playoffPools.at(-1)!.id },
+    ];
     act(() => {
       result = hook.result.current.commitAdvancement({
         sourcePhaseId: prelim.id,
@@ -1051,7 +1103,7 @@ describe('Director integration hardening', () => {
       });
     });
     expect(result!.committed).toBe(true);
-    expect(result!.overridden).toEqual([outsider.id]);
+    expect(result!.overridden).toEqual([overrideOutsider.id]);
 
     // Once the target stage has pairings, rebracketing is refused.
     act(() => {
@@ -1060,6 +1112,12 @@ describe('Director integration hardening', () => {
     act(() => {
       expect(hook.result.current.generateSchedule().generated).toBe(true);
     });
+    const pairedMembership = hook.result.current.state.pools
+      .filter((pool) => playoff.poolIds.includes(pool.id))
+      .map((pool) => ({ id: pool.id, teamIds: [...pool.teamIds] }));
+    const pairedAdvancementAudits = hook.result.current.state.audit.filter(
+      (event) => event.type === 'advancement-committed',
+    ).length;
     act(() => {
       result = hook.result.current.commitAdvancement({
         sourcePhaseId: prelim.id,
@@ -1069,6 +1127,14 @@ describe('Director integration hardening', () => {
     });
     expect(result!.committed).toBe(false);
     expect(result!.message).toMatch(/pairings/);
+    expect(
+      hook.result.current.state.pools
+        .filter((pool) => playoff.poolIds.includes(pool.id))
+        .map((pool) => ({ id: pool.id, teamIds: [...pool.teamIds] })),
+    ).toEqual(pairedMembership);
+    expect(
+      hook.result.current.state.audit.filter((event) => event.type === 'advancement-committed'),
+    ).toHaveLength(pairedAdvancementAudits);
   });
 
   test('final placement: explicit order overrides nothing but the final ranking', async () => {

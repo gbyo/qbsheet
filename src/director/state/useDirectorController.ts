@@ -9,7 +9,6 @@ import {
   advancementCommitBlocker,
   advancementCorrectionBlocker,
   assignmentRuleChangeBlocker,
-  partialAdvancementCommitBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
   unresolvedReleasedRoundBlocker,
@@ -101,15 +100,6 @@ export function useDirectorController(
         if (readinessBlocker) {
           raise(readinessBlocker);
           return { committed: false, message: readinessBlocker, assigned: 0, overridden: [] };
-        }
-        const partialBlocker = partialAdvancementCommitBlocker(
-          base.state,
-          input.targetPhaseId,
-          input.assignments,
-        );
-        if (partialBlocker) {
-          raise(partialBlocker);
-          return { committed: false, message: partialBlocker, assigned: 0, overridden: [] };
         }
         allow();
         return base.commitAdvancement(input);
