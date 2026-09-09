@@ -1,9 +1,11 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  formatDistance,
   formatGenerationAvailability,
   roomIsAssignable,
   roundScheduleIsValid,
+  tournamentCompletionBlockers,
   type TeamGameScore,
 } from '../src/director/domain';
 import { dropTeamFlexibly } from '../src/director/state/flexibleEditing';
@@ -92,9 +94,121 @@ describe('Director tournament-critical regressions', () => {
     delete window.__TAURI_INTERNALS__;
   });
 
+  test('does not complete an incremental Swiss phase or tournament before its configured distance', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => {
+      expect(hook.result.current.updateFormat({ kind: 'swiss', name: 'Swiss', roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule({ roundName: 'Swiss round 1' }).generated).toBe(true);
+    });
+
+    const settleRound = async (roundId: string) => {
+      await act(async () => {
+        expect((await hook.result.current.startRound(roundId)).ok).toBe(true);
+      });
+      const games = hook.result.current.state.scheduledGames.filter(
+        (game) => game.roundId === roundId && !game.bye,
+      );
+      act(() => {
+        for (const game of games) {
+          expect(
+            hook.result.current.addManualResult({
+              scheduledGameId: game.id,
+              scores: [score(game.leftTeamId, 100), score(game.rightTeamId!, 90)],
+            }),
+          ).toBe(true);
+        }
+        expect(hook.result.current.closeRound(roundId)).toBe(true);
+      });
+    };
+
+    const firstRoundId = hook.result.current.state.rounds[0]!.id;
+    await settleRound(firstRoundId);
+    expect(hook.result.current.state.phases[0]?.status).toBe('active');
+    expect(formatDistance(hook.result.current.state, hook.result.current.state.phases[0]!.id)).toMatchObject({
+      requiredRounds: 2,
+      generatedRounds: 1,
+      closedRounds: 1,
+      exhausted: false,
+    });
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
+    expect(tournamentCompletionBlockers(hook.result.current.state)).toEqual(
+      expect.arrayContaining([expect.stringContaining('requires 2 rounds')]),
+    );
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(false));
+    expect(hook.result.current.error).toMatch(/requires 2 rounds/i);
+
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Swiss round 2', packetId: secondPacket.id })
+          .generated,
+      ).toBe(true),
+    );
+    await settleRound(hook.result.current.state.rounds[1]!.id);
+    expect(hook.result.current.state.phases[0]?.status).toBe('complete');
+    expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(false);
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(true));
+    expect(hook.result.current.state.tournament?.status).toBe('complete');
+    hook.unmount();
+  });
+
+  test('uses a full single round-robin cycle as the endpoint when no limit is configured', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+
+    const phaseId = hook.result.current.state.phases[0]!.id;
+    expect(formatDistance(hook.result.current.state, phaseId)).toMatchObject({
+      requiredRounds: 3,
+      generatedRounds: 1,
+      exhausted: false,
+    });
+    const round = hook.result.current.state.rounds[0]!;
+    await act(async () => {
+      expect((await hook.result.current.startRound(round.id)).ok).toBe(true);
+    });
+    act(() => {
+      for (const game of hook.result.current.state.scheduledGames.filter(
+        (entry) => entry.roundId === round.id && !entry.bye,
+      )) {
+        expect(
+          hook.result.current.addManualResult({
+            scheduledGameId: game.id,
+            scores: [score(game.leftTeamId, 100), score(game.rightTeamId!, 90)],
+          }),
+        ).toBe(true);
+      }
+      expect(hook.result.current.closeRound(round.id)).toBe(true);
+    });
+    expect(hook.result.current.state.phases[0]?.status).toBe('active');
+    act(() => expect(hook.result.current.setTournamentStatus('complete')).toBe(false));
+    expect(hook.result.current.error).toMatch(/requires 3 rounds/i);
+    hook.unmount();
+  });
+
+  test('permits intentional finite exhaustion and blocks generation beyond it', async () => {
+    const hook = await directorWithSetup(4, 2);
+    act(() => expect(hook.result.current.updateFormat({ roundsPerTeam: 1 })).toBe(true));
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    const phaseId = hook.result.current.state.phases[0]!.id;
+    expect(formatDistance(hook.result.current.state, phaseId)).toMatchObject({
+      requiredRounds: 1,
+      generatedRounds: 1,
+      exhausted: true,
+    });
+    expect(formatGenerationAvailability(hook.result.current.state)).toMatchObject({ supported: false });
+    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(false));
+    expect(hook.result.current.state.rounds).toHaveLength(1);
+    hook.unmount();
+  });
+
   test('QBTCP applies matching progress, remains idempotent, rejects older progress, and protects an occupied room', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule().generated).toBe(true));
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule().generated).toBe(true);
+    });
     const round = hook.result.current.state.rounds[0];
     const scheduled = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -179,9 +293,16 @@ describe('Director tournament-critical regressions', () => {
       progress: { tossupsRead: 5, leftScore: 30, rightScore: 10 },
     });
 
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
+
     let secondRoundResult: ReturnType<typeof hook.result.current.generateSchedule>;
     act(() => {
-      secondRoundResult = hook.result.current.generateSchedule({ roundName: 'Round 2' });
+      secondRoundResult = hook.result.current.generateSchedule({
+        roundName: 'Round 2',
+        packetId: secondPacket.id,
+      });
     });
     expect(secondRoundResult!).toMatchObject({ generated: true });
     const secondRound = hook.result.current.state.rounds.at(-1);
@@ -219,7 +340,10 @@ describe('Director tournament-critical regressions', () => {
 
   test('a resumable abandoned session cannot free an unresolved room, but cancellation releases it', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true);
+    });
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -269,7 +393,10 @@ describe('Director tournament-critical regressions', () => {
 
   test('a paired session keeps its released game room-reserved until that game is resolved', async () => {
     const hook = await directorWithSetup(2, 1);
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
+    act(() => {
+      expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
+      expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true);
+    });
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
     const room = hook.result.current.state.rooms[0];
@@ -404,8 +531,16 @@ describe('Director tournament-critical regressions', () => {
 
   test('dropping a team closes a released round without losing matchup history and leaves future rounds operable', async () => {
     const hook = await directorWithSetup(4, 1);
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!secondPacket) throw new Error('test setup did not create a second packet');
+
     act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 2', packetId: secondPacket.id }).generated,
+      ).toBe(true),
+    );
     const round = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 1');
     const futureRound = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 2');
     if (!round || !futureRound) throw new Error('test setup did not create both rounds');
@@ -706,7 +841,14 @@ describe('Director tournament-critical regressions', () => {
     expect(hook.result.current.state.phases[0]?.status).toBe('active');
     expect(formatGenerationAvailability(hook.result.current.state).supported).toBe(true);
 
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Final' }).generated).toBe(true));
+    act(() => expect(hook.result.current.addPacket('Packet 2')).toBe(true));
+    const finalPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
+    if (!finalPacket) throw new Error('test setup did not create a final packet');
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Final', packetId: finalPacket.id }).generated,
+      ).toBe(true),
+    );
     const finalRound = hook.result.current.state.rounds.find((round) => round.id !== semifinalRound.id);
     const final = finalRound
       ? hook.result.current.state.scheduledGames.find((game) => game.roundId === finalRound.id && !game.bye)

@@ -6,11 +6,39 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import { importSqbsTeams } from '@qbsheet/tournament-formats';
-import { useDirectorController } from '../src/director/state/useDirectorController';
+import { useDirectorController, type BulkImportResult } from '../src/director/state/useDirectorController';
 import { MemoryDirectorRepository } from '../src/director/persistence';
 import { toImportedTeamInputs } from '../src/director/teams/teamImport';
+
+class GatedCheckpointRepository extends MemoryDirectorRepository {
+  private checkpointStartedResolve: (() => void) | null = null;
+  private checkpointReleaseResolve: (() => void) | null = null;
+
+  blockNextCheckpoint(): { started: Promise<void>; release: () => void } {
+    const started = new Promise<void>((resolve) => {
+      this.checkpointStartedResolve = resolve;
+    });
+    return {
+      started,
+      release: () => this.checkpointReleaseResolve?.(),
+    };
+  }
+
+  override async checkpoint(
+    state: Parameters<MemoryDirectorRepository['checkpoint']>[0],
+    reason: Parameters<MemoryDirectorRepository['checkpoint']>[1],
+  ): Promise<void> {
+    this.checkpointStartedResolve?.();
+    await new Promise<void>((resolve) => {
+      this.checkpointReleaseResolve = resolve;
+    });
+    this.checkpointStartedResolve = null;
+    this.checkpointReleaseResolve = null;
+    await super.checkpoint(state, reason);
+  }
+}
 
 const ROSTER = [
   '3',
@@ -29,6 +57,10 @@ const ROSTER = [
 ].join('\n');
 
 describe('Scenario K: SQBS team import', () => {
+  afterEach(() => {
+    delete window.__TAURI_INTERNALS__;
+  });
+
   test('same-organization teams import without merging', async () => {
     const parsed = importSqbsTeams(ROSTER);
     expect(parsed.ok).toBe(true);
@@ -48,7 +80,7 @@ describe('Scenario K: SQBS team import', () => {
       });
       result = hook.result.current.addImportedTeams(toImportedTeamInputs(parsed.value));
     });
-    expect(result).toEqual({ inserted: 3, skipped: 0 });
+    expect(result).toEqual({ ok: true, inserted: 3, skipped: 0 });
 
     const state = hook.result.current.state;
     expect(state.teams.map((team) => team.displayName).sort()).toEqual(['Southside', 'Wren A', 'Wren B']);
@@ -67,5 +99,99 @@ describe('Scenario K: SQBS team import', () => {
     // Stable SQBS-derived identities survive the import.
     expect(new Set(state.teams.map((team) => team.id)).size).toBe(3);
     expect(new Set(state.players.map((player) => player.id)).size).toBe(6);
+    hook.unmount();
+  });
+
+  test('duplicate-only imports are successful zero-insertion results', async () => {
+    const repository = new MemoryDirectorRepository();
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    act(() => {
+      hook.result.current.createTournament({ name: 'Duplicate import', date: '', venue: '', organizer: '' });
+      expect(hook.result.current.addImportedTeams([{ displayName: 'Already here' }])).toEqual({
+        ok: true,
+        inserted: 1,
+        skipped: 0,
+      });
+    });
+
+    let result!: BulkImportResult;
+    act(() => {
+      result = hook.result.current.addImportedTeams([{ displayName: 'Already here' }]);
+    });
+    expect(result).toEqual({ ok: true, inserted: 0, skipped: 1 });
+    expect(hook.result.current.state.teams).toHaveLength(1);
+    hook.unmount();
+  });
+
+  test('a blocked writer rejects the import without changing teams or audit history', async () => {
+    const repository = new MemoryDirectorRepository();
+    const first = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(first.result.current.loading).toBe(false));
+    act(() =>
+      first.result.current.createTournament({ name: 'Blocked import', date: '', venue: '', organizer: '' }),
+    );
+    await waitFor(() => expect(first.result.current.saving).toBe(false));
+
+    const second = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(second.result.current.loading).toBe(false));
+    await waitFor(() => {
+      expect([first.result.current.writerStatus, second.result.current.writerStatus].sort()).toEqual([
+        'blocked',
+        'held',
+      ]);
+    });
+
+    const blocked = first.result.current.writerStatus === 'blocked' ? first : second;
+    const auditBefore = blocked.result.current.state.audit.length;
+    let result;
+    act(() => {
+      result = blocked.result.current.addImportedTeams([{ displayName: 'Rejected team' }]);
+    });
+    expect(result).toEqual({ ok: false, inserted: 0, skipped: 0 });
+    expect(blocked.result.current.error).toMatch(/another Director tab|read-only/i);
+    expect(blocked.result.current.state.teams).toHaveLength(0);
+    expect(blocked.result.current.state.audit).toHaveLength(auditBefore);
+    expect(blocked.result.current.state.audit.some((event) => event.summary.includes('Rejected team'))).toBe(
+      false,
+    );
+
+    first.unmount();
+    second.unmount();
+  });
+
+  test('a protected document transition rejects the import without adding an audit entry', async () => {
+    const repository = new GatedCheckpointRepository();
+    const hook = renderHook(() => useDirectorController(repository));
+    await waitFor(() => expect(hook.result.current.loading).toBe(false));
+    act(() =>
+      hook.result.current.createTournament({ name: 'Transition import', date: '', venue: '', organizer: '' }),
+    );
+    await waitFor(() => expect(hook.result.current.saving).toBe(false));
+
+    const auditBefore = hook.result.current.state.audit.length;
+    const next = structuredClone(hook.result.current.state);
+    next.tournament!.name = 'Transition edit';
+    const checkpoint = repository.blockNextCheckpoint();
+    let transition!: Promise<boolean>;
+    act(() => {
+      transition = hook.result.current.editTournamentSnapshot(next, 'Guard import transition');
+    });
+    await checkpoint.started;
+
+    let result: BulkImportResult;
+    act(() => {
+      result = hook.result.current.addImportedTeams([{ displayName: 'Transition rejected team' }]);
+    });
+    expect(result!).toEqual({ ok: false, inserted: 0, skipped: 0 });
+    expect(hook.result.current.state.teams).toHaveLength(0);
+    expect(hook.result.current.state.audit).toHaveLength(auditBefore);
+    expect(
+      hook.result.current.state.audit.some((event) => event.summary.includes('Transition rejected')),
+    ).toBe(false);
+
+    checkpoint.release();
+    await expect(transition).resolves.toBe(true);
+    hook.unmount();
   });
 });

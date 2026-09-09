@@ -6,6 +6,8 @@ import {
   type PlayerGameStat,
   type TournamentRules,
 } from './model.js';
+import { gameDetailedCountsKnown, gameOutcomeForTeam } from './canonicalStats.js';
+import { resultDecisionIssue } from './results.js';
 
 export interface TeamStanding {
   teamId: DirectorId;
@@ -18,7 +20,11 @@ export interface TeamStanding {
   margin: number;
   superpowers: number;
   powers: number;
+  /** False when any contributing game's detailed powers are unknown. */
+  powersKnown: boolean;
   gets: number;
+  /** False when any contributing game's detailed gets are unknown. */
+  getsKnown: boolean;
   negs: number;
   tossupsHeard: number;
   /** False when any contributing scoresheet omitted tossups-heard. */
@@ -110,6 +116,11 @@ export function acceptedGameRecords(
       return options.phaseId === undefined && options.poolId === undefined && options.gameIds === undefined;
     }
     if (scheduled.status === 'cancelled') return false;
+    if (resultDecisionIssue(state, scheduled, game.scores, { forfeitedTeamId: game.forfeitedTeamId })) {
+      // Invalid legacy/imported records remain in the document and audit history, but must not
+      // feed standings or any public projection until a decisive result is accepted.
+      return false;
+    }
     if (scheduled.bye || scheduled.leftTeamId === scheduled.rightTeamId) return false;
     const round = roundById.get(scheduled.roundId) ?? roundById.get(game.roundId);
     if (options.phaseId && round && round.phaseId !== options.phaseId) return false;
@@ -200,7 +211,9 @@ export function deriveTeamStandings(
       margin: 0,
       superpowers: 0,
       powers: 0,
+      powersKnown: true,
       gets: 0,
+      getsKnown: true,
       negs: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
@@ -227,6 +240,12 @@ export function deriveTeamStandings(
     rightStanding.margin += right.score - left.score;
     leftStanding.superpowers += left.superpowers;
     rightStanding.superpowers += right.superpowers;
+    if (!gameDetailedCountsKnown(game)) {
+      leftStanding.powersKnown = false;
+      rightStanding.powersKnown = false;
+      leftStanding.getsKnown = false;
+      rightStanding.getsKnown = false;
+    }
     addTeamTossupsHeard(leftStanding, game.playerStats, left.teamId);
     addTeamTossupsHeard(rightStanding, game.playerStats, right.teamId);
     leftStanding.powers += left.powers;
@@ -239,29 +258,14 @@ export function deriveTeamStandings(
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    if (
-      game.status === 'forfeit' &&
-      (left.teamId === game.forfeitedTeamId || right.teamId === game.forfeitedTeamId)
-    ) {
-      // A forfeit is never a tie and never decided by the score line: the
-      // side that did not forfeit wins, even when both scores are zero.
-      if (left.teamId === game.forfeitedTeamId) {
-        rightStanding.wins += 1;
-        leftStanding.losses += 1;
-      } else {
-        leftStanding.wins += 1;
-        rightStanding.losses += 1;
-      }
-    } else if (left.score > right.score) {
-      leftStanding.wins += 1;
-      rightStanding.losses += 1;
-    } else if (right.score > left.score) {
-      rightStanding.wins += 1;
-      leftStanding.losses += 1;
-    } else {
-      leftStanding.ties += 1;
-      rightStanding.ties += 1;
-    }
+    const leftOutcome = gameOutcomeForTeam(game, left.teamId);
+    const rightOutcome = gameOutcomeForTeam(game, right.teamId);
+    if (leftOutcome === 'win') leftStanding.wins += 1;
+    else if (leftOutcome === 'loss') leftStanding.losses += 1;
+    else if (leftOutcome === 'tie') leftStanding.ties += 1;
+    if (rightOutcome === 'win') rightStanding.wins += 1;
+    else if (rightOutcome === 'loss') rightStanding.losses += 1;
+    else if (rightOutcome === 'tie') rightStanding.ties += 1;
   }
 
   for (const standing of byTeam.values()) {
@@ -289,11 +293,29 @@ function rankStandings(
   games: GameRecord[],
   rules?: TournamentRules,
 ): TeamStanding[] {
-  const order = rules?.tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
-  let groups: TeamStanding[][] = [standings];
+  return rankTeamStandings(standings, games, rules?.tiebreakers);
+}
+
+/**
+ * Rank an arbitrary candidate subset with the canonical progressive tie-break cascade.
+ *
+ * This is also used by cross-pool advancement: every later criterion receives only the group
+ * that remained tied after the earlier criteria, just as ordinary standings do.
+ */
+export function rankTeamStandings(
+  standings: readonly TeamStanding[],
+  games: readonly GameRecord[],
+  tiebreakers?: TournamentRules['tiebreakers'],
+): TeamStanding[] {
+  const order = tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
+  let groups: TeamStanding[][] = [[...standings]];
   for (const key of order) {
     groups = groups.flatMap((group) => {
       if (group.length < 2) return [group];
+      // A detailed criterion cannot turn data availability into a competitive result. When one
+      // team in the currently tied group is unknown, leave the whole group tied for this key and
+      // let a later comparable criterion decide it.
+      if (!tiebreakerIsComparable(key, group, games)) return [group];
       const ordered = [...group].sort(
         (left, right) => comparisonValue(right, key, group, games) - comparisonValue(left, key, group, games),
       );
@@ -321,22 +343,32 @@ function comparisonValue(
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
 ): number {
-  switch (key) {
-    case 'head-to-head':
-      return headToHeadValue(standing.teamId, group, games);
-    case 'record':
-      return standing.winPercentage;
-    case 'points':
-      return standing.pointsFor;
-    case 'margin':
-      return standing.margin;
-    case 'powers':
-      return standing.powers;
-    case 'gets':
-      return standing.gets;
-    default:
-      return 0;
-  }
+  return teamTiebreakerValue(standing, key, group, games) ?? 0;
+}
+
+export function teamTiebreakerValue(
+  standing: TeamStanding,
+  key: TournamentRules['tiebreakers'][number],
+  group: readonly TeamStanding[],
+  games: readonly GameRecord[],
+): number | null {
+  if (key === 'powers' && !standing.powersKnown) return null;
+  if (key === 'gets' && !standing.getsKnown) return null;
+  if (key === 'record') return standing.winPercentage;
+  if (key === 'points') return standing.pointsFor;
+  if (key === 'margin') return standing.margin;
+  if (key === 'powers') return standing.powers;
+  if (key === 'gets') return standing.gets;
+  if (key === 'head-to-head') return headToHeadValue(standing.teamId, group, games);
+  return 0;
+}
+
+export function tiebreakerIsComparable(
+  key: TournamentRules['tiebreakers'][number],
+  group: readonly TeamStanding[],
+  games: readonly GameRecord[],
+): boolean {
+  return group.every((standing) => teamTiebreakerValue(standing, key, group, games) !== null);
 }
 
 function headToHeadValue(
@@ -353,8 +385,9 @@ function headToHeadValue(
     const opponent = game.scores.find((score) => score.teamId !== teamId && groupIds.has(score.teamId));
     if (!opponent) continue;
     gamesPlayed += 1;
-    if (own.score > opponent.score) wins += 1;
-    else if (own.score === opponent.score) wins += 0.5;
+    const outcome = gameOutcomeForTeam(game, teamId);
+    if (outcome === 'win') wins += 1;
+    else if (outcome === 'tie') wins += 0.5;
   }
   return gamesPlayed === 0 ? 0 : wins / gamesPlayed;
 }

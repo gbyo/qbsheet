@@ -506,3 +506,18 @@ test('round navigation scopes manual entry to that round even when an earlier ro
   expect(options).toHaveLength(1);
   expect(options[0]).toHaveTextContent('Round 2');
 });
+
+test('manual entry shows an actionable error for a tied winner-required final', () => {
+  const state = stateForReview();
+  const addManualResult = vi.fn(() => true);
+  renderResults(
+    <ResultsView state={state} controller={controllerWith({ addManualResult })} onAnnounce={vi.fn()} />,
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Enter result' }));
+  fireEvent.change(screen.getByLabelText('Ninety Six'), { target: { value: '200' } });
+  fireEvent.change(screen.getByLabelText('Greenwood'), { target: { value: '200' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Accept manual result' }));
+
+  expect(screen.getByText(/requires a winner.*tied.*overtime.*forfeit/i)).toBeInTheDocument();
+  expect(addManualResult).not.toHaveBeenCalled();
+});

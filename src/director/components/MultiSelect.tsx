@@ -110,10 +110,14 @@ export function MultiSelect<T extends string = string>({
   }, [options, query]);
 
   const toggle = (value: T) => {
+    if (options.find((option) => option.value === value)?.disabled) return;
     onChange(selected.has(value) ? values.filter((entry) => entry !== value) : [...values, value]);
   };
 
+  const enabledOptions = options.filter((option) => !option.disabled);
   const selectedOptions = options.filter((option) => selected.has(option.value));
+  const selectedEnabledOptions = enabledOptions.filter((option) => selected.has(option.value));
+  const hasUnselectedEnabledOptions = enabledOptions.some((option) => !selected.has(option.value));
   const shownTags = selectedOptions.slice(0, maxTags);
   const overflow = selectedOptions.length - shownTags.length;
 
@@ -209,7 +213,7 @@ export function MultiSelect<T extends string = string>({
             <span className="director-text-meta">
               {selectedOptions.length === 0 && allLabel
                 ? allLabel
-                : `${selectedOptions.length} of ${options.length} selected`}
+                : `${selectedEnabledOptions.length} of ${enabledOptions.length} selected`}
             </span>
             <div className="director-actions">
               {values.length > 0 && (
@@ -217,11 +221,11 @@ export function MultiSelect<T extends string = string>({
                   {allLabel ? `Reset to ${allLabel.toLocaleLowerCase()}` : 'Clear'}
                 </Button>
               )}
-              {values.length !== options.length && (
+              {hasUnselectedEnabledOptions && (
                 <Button
                   variant="quiet"
                   size="sm"
-                  onClick={() => onChange(options.filter((o) => !o.disabled).map((o) => o.value))}
+                  onClick={() => onChange(enabledOptions.map((option) => option.value))}
                 >
                   Select all
                 </Button>

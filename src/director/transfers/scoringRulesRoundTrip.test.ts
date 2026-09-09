@@ -189,4 +189,67 @@ describe('scenario G: custom 20/15/10/-5 rules round-trip exactly', () => {
     expect(scores[0]).toMatchObject({ superpowers: 0, powers: 0, gets: 0, negs: 0 });
     expect(warnings).toContain(ingestWarnings.unrecognizedAnswerValue);
   });
+
+  it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    'does not accumulate malformed superpower answer count %s',
+    (number) => {
+      const state = directorFixture();
+      const rules = customRules();
+      state.tournament!.rules = rules;
+      const scheduled = state.scheduledGames.find((game) => game.id === 'game-5-1');
+      const { scores, playerStats, warnings } = readResultStatistics(
+        {
+          type: 'Match',
+          match_teams: [
+            {
+              team: { $ref: 'team-1' },
+              points: 20,
+              match_players: [
+                {
+                  player: { $ref: 'team-1-player-1' },
+                  answer_counts: [{ answer_type: { value: 20 }, number }],
+                },
+              ],
+            },
+            { team: { $ref: 'team-2' }, points: 0, match_players: [] },
+          ],
+        },
+        state,
+        scheduled,
+      );
+
+      expect(scores[0]).toMatchObject({ superpowers: 0 });
+      expect(playerStats[0]).toMatchObject({ superpowers: 0 });
+      expect(warnings).toContain(ingestWarnings.invalidStatisticCount);
+    },
+  );
+
+  it('accepts an explicit zero superpower count as a known zero', () => {
+    const state = directorFixture();
+    state.tournament!.rules = customRules();
+    const scheduled = state.scheduledGames.find((game) => game.id === 'game-5-1');
+    const { scores, warnings } = readResultStatistics(
+      {
+        type: 'Match',
+        match_teams: [
+          {
+            team: { $ref: 'team-1' },
+            points: 0,
+            match_players: [
+              {
+                player: { $ref: 'team-1-player-1' },
+                answer_counts: [{ answer_type: { value: 20 }, number: 0 }],
+              },
+            ],
+          },
+          { team: { $ref: 'team-2' }, points: 0, match_players: [] },
+        ],
+      },
+      state,
+      scheduled,
+    );
+
+    expect(scores[0]).toMatchObject({ superpowers: 0 });
+    expect(warnings).not.toContain(ingestWarnings.invalidStatisticCount);
+  });
 });

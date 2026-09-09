@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { DirectorState } from '../domain';
+import { packetRetirementImpact, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   ActionMenu,
@@ -66,6 +66,7 @@ export function PacketsView({
           notes: packet.notes,
         })),
       );
+      if (!result.ok) return;
       onAnnounce(
         `${result.inserted} packet${result.inserted === 1 ? '' : 's'} imported${
           result.skipped ? `; ${result.skipped} duplicate${result.skipped === 1 ? '' : 's'} skipped` : ''
@@ -212,6 +213,12 @@ function PacketItem({
   const replacement = packet.replacementForPacketId
     ? state.packets.find((entry) => entry.id === packet.replacementForPacketId)
     : undefined;
+  const retirementImpact = !packet.retired ? packetRetirementImpact(state, packet.id) : null;
+  const affectedRounds = retirementImpact
+    ? retirementImpact.futureRoundIds
+        .map((roundId) => state.rounds.find((round) => round.id === roundId)?.name ?? roundId)
+        .join(', ')
+    : '';
 
   return (
     <SummaryItem
@@ -279,8 +286,20 @@ function PacketItem({
                       if (!packet.retired) {
                         const approved = await confirmAction({
                           title: `Retire ${packet.name}?`,
-                          body: 'Its assignment and usage history will remain.',
-                          consequence: 'Retired packets cannot be selected for future rounds until restored.',
+                          body: affectedRounds
+                            ? `${packet.name} is assigned to future play in ${affectedRounds}.`
+                            : 'No unresolved future assignments currently reference this packet.',
+                          consequence: [
+                            retirementImpact && retirementImpact.futureGameIds.length > 0
+                              ? `${retirementImpact.futureGameIds.length} future game assignment${retirementImpact.futureGameIds.length === 1 ? '' : 's'} will be cleared and must be reassigned.`
+                              : null,
+                            retirementImpact && retirementImpact.releasedUnresolvedGameIds.length > 0
+                              ? `${retirementImpact.releasedUnresolvedGameIds.length} released unresolved game${retirementImpact.releasedUnresolvedGameIds.length === 1 ? '' : 's'} will remain blocked for explicit recovery.`
+                              : null,
+                            'Accepted and usage history remains attached to the packet.',
+                          ]
+                            .filter(Boolean)
+                            .join(' '),
                           confirmLabel: 'Retire packet',
                           tone: 'danger',
                         });
