@@ -43,6 +43,7 @@ jobs:
                   print(line[10:] if line.startswith('          ') else line)
           PY
           bash /tmp/apply-fix.sh
+          sed -i "s/getByLabelText('Name')/getByLabelText('Tournament name')/g" src/director/app/DirectorApp.newTournament.test.tsx
       - name: Format changed TypeScript
         shell: bash
         run: |
