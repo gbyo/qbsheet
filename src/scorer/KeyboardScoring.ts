@@ -346,8 +346,25 @@ function matches(element: unknown, selector: string): boolean {
   return element instanceof Element && element.closest(selector) !== null;
 }
 
+/**
+ * Marker for an open, unresolved anchored ruling picker. The picker is an ARIA
+ * `role="dialog"`, not a native `<dialog>`, so focus position alone cannot prove
+ * it is closed: a keyboard user can Tab out while it is still visibly awaiting a
+ * ruling. The scorer keyboard layer suppresses global seat/action shortcuts for
+ * as long as this marker is present, wherever focus happens to be. The selector
+ * is deliberately narrow (not a broad `[role="dialog"]` query) so other
+ * non-blocking ARIA surfaces do not suppress scoring.
+ */
+export const OPEN_RULING_PICKER_SELECTOR = '[data-ruling-picker="open"]';
+
+/** Whether an unresolved anchored ruling picker is currently open. */
+export function isRulingPickerOpen(root: Document = document): boolean {
+  return root.querySelector(OPEN_RULING_PICKER_SELECTOR) !== null;
+}
+
 export function keystrokeBelongsToControl(event: KeyboardEvent, root: Document = document): boolean {
   if (matches(event.target, controlSelector) || matches(root.activeElement, controlSelector)) return true;
+  if (isRulingPickerOpen(root)) return true;
   return root.querySelector('dialog[open]') !== null;
 }
 

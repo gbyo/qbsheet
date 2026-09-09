@@ -13,9 +13,9 @@
  *
  * Once for assistive technology, which needs to be told that a small surface with its own name has
  * taken over. And once for the keyboard: `keystrokeBelongsToControl` treats anything inside a
- * `role="dialog"` as owning its own keystrokes, so an open picker suppresses the global seat/action
- * sequence without this file knowing that layer exists. Sarah's picker being open is exactly why
- * pressing `3` cannot score Jeremy behind it.
+ * `role="dialog"` as owning its own keystrokes, and the `data-ruling-picker="open"` marker keeps
+ * the global seat/action sequence suppressed for as long as the picker is open even if focus Tab-moves
+ * elsewhere. Sarah's picker being open is exactly why pressing `3` cannot score Jeremy behind it.
  *
  * # Positioned by measurement, not by a library
  *
@@ -120,6 +120,26 @@ export default function RulingPicker(props: IRulingPickerProps) {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Tab' && !event.repeat) {
+        // The picker has taken over keyboard ownership: Tab cycles through its
+        // choices instead of leaving a visibly open picker behind while global
+        // scorer shortcuts become active again. This trap is a usability
+        // boundary only; shortcut suppression does not depend on it (see
+        // keystrokeBelongsToControl's open-picker check).
+        const buttons = Array.from(surface.current?.querySelectorAll('button') ?? []);
+        if (buttons.length === 0) return;
+        const first = buttons[0];
+        const last = buttons[buttons.length - 1];
+        const active = document.activeElement;
+        if (!event.shiftKey && active === last) {
+          event.preventDefault();
+          first?.focus();
+        } else if (event.shiftKey && active === first) {
+          event.preventDefault();
+          last?.focus();
+        }
+        return;
+      }
       if (event.key !== 'Escape' || event.repeat) return;
       event.preventDefault();
       // Escape belongs to the picker and stops here, so it cannot also close something behind it.
@@ -157,6 +177,7 @@ export default function RulingPicker(props: IRulingPickerProps) {
       ref={surface}
       className="scorer-ruling-picker"
       data-placement={placement?.side ?? 'below'}
+      data-ruling-picker="open"
       role="dialog"
       aria-label={`Ruling for ${playerName}, ${teamName}`}
       style={style}
