@@ -41,6 +41,8 @@ describe('native server status activation', () => {
             roomId: 'old-room',
             roomName: 'Old room',
             pairingCode: 'OLD123',
+            issuedAt: '2026-09-09T12:00:00.000Z',
+            expiresAt: '2026-09-09T12:05:00.000Z',
             expiresInSeconds: 300,
           },
         ],
@@ -55,11 +57,30 @@ describe('native server status activation', () => {
     expect(result.current.status).toEqual({ running: false });
 
     await act(async () => {
-      second.resolve({ running: true, pairingCode: 'NEW456' });
+      second.resolve({
+        running: true,
+        pairingCode: 'NEW456',
+        pairingInvitations: [
+          {
+            roomId: 'new-room',
+            roomName: 'New room',
+            pairingCode: 'NEW456',
+            issuedAt: '2999-09-09T12:00:00.000Z',
+            expiresAt: '2999-09-09T12:05:00.000Z',
+            expiresInSeconds: 300,
+          },
+        ],
+      });
       await second.promise;
     });
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.status).toEqual({ running: true, pairingCode: 'NEW456' });
+    expect(result.current.status).toEqual(
+      expect.objectContaining({
+        running: true,
+        pairingCode: 'NEW456',
+        expiredPairingRoomIds: [],
+      }),
+    );
 
     unmount();
     read.mockRestore();

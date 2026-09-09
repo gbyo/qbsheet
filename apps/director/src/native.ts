@@ -21,7 +21,12 @@ export interface StoreStatus {
 export interface NativeServerStatus {
   running: boolean;
   address?: string;
+  bindAddress?: string;
   port?: number;
+  addressCandidates?: NativeAdvertisedAddressCandidate[];
+  addressSelectionRequired?: boolean;
+  advertisedAddressSource?: string;
+  expiredPairingRoomIds?: string[];
   protocol?: string;
   pairedRooms?: number;
   pairingInvitations?: NativeRoomPairingInvitation[];
@@ -30,11 +35,18 @@ export interface NativeServerStatus {
   message?: string;
 }
 
+export interface NativeAdvertisedAddressCandidate {
+  interfaceName: string;
+  address: string;
+}
+
 export interface NativeRoomPairingInvitation {
   roomId: string;
   roomName: string;
   pairingCode: string;
   pairingUrl?: string;
+  issuedAt: string;
+  expiresAt: string;
   expiresInSeconds: number;
 }
 
@@ -115,6 +127,11 @@ export async function stopQbtcpServer(): Promise<NativeServerStatus> {
 export async function issueRoomPairing(roomId: string): Promise<NativeRoomPairingInvitation> {
   requireTauri();
   return invoke<NativeRoomPairingInvitation>('director_issue_qbtcp_pairing', { roomId });
+}
+
+export async function setQbtcpAdvertisedAddress(address: string): Promise<NativeServerStatus> {
+  requireTauri();
+  return invoke<NativeServerStatus>('director_set_qbtcp_advertised_address', { address });
 }
 
 export async function openTournamentFile(): Promise<SelectedFile | null> {

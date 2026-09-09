@@ -919,9 +919,12 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
   await footerButton('Add packet').click();
 
   await goToSection(page, 'Rooms');
-  await page.getByRole('button', { name: 'Add room' }).click();
-  await page.getByLabel('Room name').fill('Main room');
-  await footerButton('Add room').click();
+  const roomNames = Array.from({ length: 5 }, (_, index) => `Main room ${index + 1}`);
+  for (const roomName of roomNames) {
+    await page.getByRole('button', { name: 'Add room' }).click();
+    await page.getByLabel('Room name').fill(roomName);
+    await footerButton('Add room').click();
+  }
 
   /*
    * The round owns its packet and rooms, reached from the round itself — but
@@ -942,10 +945,15 @@ test('ten-team release rehearsal: rounds, lunch, assignments, one-action start, 
 
   await firstRound.getByRole('button', { name: /Round 1 actions/ }).click();
   await page.getByRole('menuitem', { name: 'Assign rooms…' }).click();
-  await page.getByRole('dialog').getByRole('combobox').first().click();
-  await page.getByRole('option', { name: /Main room/ }).click();
+  const roomDialog = page.getByRole('dialog');
+  const roomAssignments = roomDialog.getByRole('combobox');
+  await expect(roomAssignments).toHaveCount(roomNames.length);
+  for (let index = 0; index < roomNames.length; index++) {
+    await roomAssignments.nth(index).click();
+    await page.getByRole('option', { name: roomNames[index], exact: true }).click();
+  }
   await footerButton('Save rooms').click();
-  await expect(firstRound).toContainText('Main room');
+  await expect(firstRound).toContainText(`${roomNames.length} rooms`);
 
   // The ordinary workflow is one action, named for what it does.
   await firstRound.getByRole('button', { name: 'Start round' }).click();

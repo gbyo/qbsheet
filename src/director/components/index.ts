@@ -81,9 +81,21 @@ export {
   TextArea,
   TextInput,
   TimeField,
+  DirtyFormProvider,
+  useDirtyForms,
   useFormState,
 } from './Fields';
-export { FilterBar, SearchField, TabPanel, Tabs, Toolbar, useFilterState, useTextFilter } from './Filters';
+export {
+  FilterBar,
+  SearchField,
+  TabGroup,
+  TabPanel,
+  Tabs,
+  Toolbar,
+  normalizeSearchText,
+  useFilterState,
+  useTextFilter,
+} from './Filters';
 export { DataTable, IdentityCell, RowDetail, type Column } from './DataTable';
 export { FilePicker, type PickedFile } from './FilePicker';
 export { ReorderHandle, ReorderNotice, ReorderToggle, useDragReorder, useReorderMode } from './Reorder';

@@ -1,5 +1,5 @@
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { isValidTimeZone, timeZoneLabel, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { OperatorProfile } from '../operator/operatorProfile';
@@ -12,15 +12,19 @@ import {
   EmptyState,
   Field,
   FieldGrid,
+  FormActions,
   Page,
   PageHeader,
   Panel,
+  SaveState,
   Segmented,
   StateLabel,
   SummaryItem,
   SummaryList,
   TextInput,
   TimeZoneField,
+  useDirtyForms,
+  useFormState,
   useConfirm,
 } from '../components';
 import { errorNotice, type AnnounceInput } from '../notices';
@@ -44,7 +48,7 @@ export function SettingsView({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
   operatorProfile?: OperatorProfile;
-  onSaveOperator?: (profile: OperatorProfile) => void;
+  onSaveOperator?: (profile: OperatorProfile) => boolean | void;
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
   onRestoreCheckpoint?: (checkpointId: string) => Promise<boolean>;
@@ -68,6 +72,8 @@ export function SettingsView({
   }
   const section = sectionState.section;
   const setSection = (next: SettingsSection) => setSectionState({ target: targetSection, section: next });
+  const dirtyForms = useDirtyForms();
+  const generalDirty = dirtyForms.some((form) => form.id.startsWith('settings-') && form.dirty);
   useEffect(() => {
     if (targetSection) onClearNavigationTarget?.();
   }, [targetSection, onClearNavigationTarget]);
@@ -90,14 +96,14 @@ export function SettingsView({
         onChange={setSection}
         ariaLabel="Settings section"
         options={[
-          { value: 'general', label: 'General' },
+          { value: 'general', label: generalDirty ? 'General · Unsaved' : 'General' },
           { value: 'recovery', label: `Recovery ${(controller.checkpoints ?? []).length}` },
           { value: 'audit', label: `Audit ${state.audit.length}` },
           { value: 'system', label: 'System' },
         ]}
       />
 
-      {section === 'general' && (
+      <div hidden={section !== 'general'}>
         <GeneralSettings
           state={state}
           controller={controller}
@@ -105,7 +111,7 @@ export function SettingsView({
           operatorProfile={operatorProfile}
           onSaveOperator={onSaveOperator}
         />
-      )}
+      </div>
       {section === 'recovery' && (
         <RecoverySettings
           state={state}
@@ -120,6 +126,16 @@ export function SettingsView({
   );
 }
 
+type TournamentDetailsDraft = {
+  name: string;
+  date: string;
+  endDate: string;
+  venue: string;
+  organizer: string;
+  questionSet: string;
+  timeZone: string;
+};
+
 function GeneralSettings({
   state,
   controller,
@@ -131,83 +147,62 @@ function GeneralSettings({
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
   operatorProfile?: OperatorProfile;
-  onSaveOperator?: (profile: OperatorProfile) => void;
+  onSaveOperator?: (profile: OperatorProfile) => boolean | void;
 }) {
-  const tournamentKey = [
-    state.tournament?.id ?? '',
-    state.tournament?.name ?? '',
-    state.tournament?.date ?? '',
-    state.tournament?.endDate ?? '',
-    state.tournament?.venue ?? '',
-    state.tournament?.organizer ?? '',
-    state.tournament?.questionSet ?? '',
-    state.tournament?.timeZone ?? 'UTC',
-  ].join('|');
-  const [tournamentDraft, setTournamentDraft] = useState({
-    key: tournamentKey,
-    name: state.tournament?.name ?? '',
-    date: state.tournament?.date ?? '',
-    endDate: state.tournament?.endDate ?? '',
-    venue: state.tournament?.venue ?? '',
-    organizer: state.tournament?.organizer ?? '',
-    questionSet: state.tournament?.questionSet ?? '',
-    timeZone: state.tournament?.timeZone ?? 'UTC',
+  const tournamentInitial = useMemo<TournamentDetailsDraft>(
+    () => ({
+      name: state.tournament?.name ?? '',
+      date: state.tournament?.date ?? '',
+      endDate: state.tournament?.endDate ?? '',
+      venue: state.tournament?.venue ?? '',
+      organizer: state.tournament?.organizer ?? '',
+      questionSet: state.tournament?.questionSet ?? '',
+      timeZone: state.tournament?.timeZone ?? 'UTC',
+    }),
+    [state.tournament],
+  );
+  const tournamentForm = useFormState<TournamentDetailsDraft>({
+    initial: tournamentInitial,
+    validate: (draft) => ({
+      ...(draft.name.trim() ? {} : { name: 'Enter a tournament name first.' }),
+      ...(isValidTimeZone(draft.timeZone) ? {} : { timeZone: 'Choose a recognized IANA timezone.' }),
+    }),
+    onSubmit: (draft) => {
+      const saved = controller.updateTournament(draft);
+      onAnnounce(
+        saved
+          ? 'Tournament details updated locally; saving now.'
+          : errorNotice('Tournament details were not updated; review the Director error.'),
+      );
+      return saved;
+    },
+    formId: state.tournament ? `settings-tournament-${state.tournament.id}` : undefined,
+    formLabel: 'Tournament details',
   });
-  const details =
-    tournamentDraft.key === tournamentKey
-      ? tournamentDraft
-      : {
-          key: tournamentKey,
-          name: state.tournament?.name ?? '',
-          date: state.tournament?.date ?? '',
-          endDate: state.tournament?.endDate ?? '',
-          venue: state.tournament?.venue ?? '',
-          organizer: state.tournament?.organizer ?? '',
-          questionSet: state.tournament?.questionSet ?? '',
-          timeZone: state.tournament?.timeZone ?? 'UTC',
-        };
-  const updateDetails = (changes: Partial<Omit<typeof details, 'key'>>) =>
-    setTournamentDraft({ ...details, ...changes, key: tournamentKey });
 
-  const operatorKey = `${operatorProfile?.displayName ?? ''}|${operatorProfile?.role ?? ''}`;
-  const [operatorDraft, setOperatorDraft] = useState({
-    key: operatorKey,
-    name: operatorProfile?.displayName ?? 'Local operator',
-    role: operatorProfile?.role ?? '',
+  const operatorInitial = useMemo(
+    () => ({
+      name: operatorProfile?.displayName ?? 'Local operator',
+      role: operatorProfile?.role ?? '',
+    }),
+    [operatorProfile],
+  );
+  const operatorForm = useFormState({
+    initial: operatorInitial,
+    validate: (draft) => (draft.name.trim() ? {} : { name: 'Enter an operator name first.' }),
+    onSubmit: (draft) => {
+      if (!onSaveOperator) return false;
+      const accepted = onSaveOperator({
+        displayName: draft.name.trim(),
+        role: draft.role.trim() || undefined,
+      });
+      if (accepted === false) return false;
+      onAnnounce('Operator identity saved locally.');
+      return true;
+    },
+    formId: 'settings-operator',
+    formLabel: 'Local operator',
   });
-  const operator =
-    operatorDraft.key === operatorKey
-      ? operatorDraft
-      : {
-          key: operatorKey,
-          name: operatorProfile?.displayName ?? 'Local operator',
-          role: operatorProfile?.role ?? '',
-        };
-
-  const saveTournament = () => {
-    if (!details.name.trim()) {
-      onAnnounce(errorNotice('Enter a tournament name first.'));
-      return;
-    }
-    if (!isValidTimeZone(details.timeZone)) {
-      onAnnounce(errorNotice('Choose a recognized IANA timezone.'));
-      return;
-    }
-    const saved = controller.updateTournament({
-      name: details.name,
-      date: details.date,
-      endDate: details.endDate,
-      venue: details.venue,
-      organizer: details.organizer,
-      questionSet: details.questionSet,
-      timeZone: details.timeZone,
-    });
-    onAnnounce(
-      saved
-        ? 'Tournament details updated locally; saving now.'
-        : errorNotice('Tournament details were not updated; review the Director error.'),
-    );
-  };
 
   return (
     <div className="director-stack">
@@ -221,20 +216,21 @@ function GeneralSettings({
             className="director-stack"
             onSubmit={(event) => {
               event.preventDefault();
-              saveTournament();
+              tournamentForm.submit();
             }}
           >
             <FieldGrid>
-              <Field label="Name">
+              <Field label="Name" error={tournamentForm.errorFor('name')}>
                 <TextInput
-                  value={details.name}
-                  onChange={(event) => updateDetails({ name: event.target.value })}
+                  value={tournamentForm.draft.name}
+                  onChange={(event) => tournamentForm.set('name', event.target.value)}
+                  invalid={Boolean(tournamentForm.errorFor('name'))}
                 />
               </Field>
               <Field label="Venue" optional>
                 <TextInput
-                  value={details.venue}
-                  onChange={(event) => updateDetails({ venue: event.target.value })}
+                  value={tournamentForm.draft.venue}
+                  onChange={(event) => tournamentForm.set('venue', event.target.value)}
                 />
               </Field>
               <Field
@@ -243,8 +239,8 @@ function GeneralSettings({
                   <DateField
                     id={id}
                     aria-describedby={describedBy}
-                    value={details.date}
-                    onChange={(event) => updateDetails({ date: event.target.value })}
+                    value={tournamentForm.draft.date}
+                    onChange={(event) => tournamentForm.set('date', event.target.value)}
                   />
                 )}
               />
@@ -256,45 +252,51 @@ function GeneralSettings({
                   <DateField
                     id={id}
                     aria-describedby={describedBy}
-                    value={details.endDate}
-                    onChange={(event) => updateDetails({ endDate: event.target.value })}
+                    value={tournamentForm.draft.endDate}
+                    onChange={(event) => tournamentForm.set('endDate', event.target.value)}
                   />
                 )}
               />
               <Field label="Organizer" optional>
                 <TextInput
-                  value={details.organizer}
-                  onChange={(event) => updateDetails({ organizer: event.target.value })}
+                  value={tournamentForm.draft.organizer}
+                  onChange={(event) => tournamentForm.set('organizer', event.target.value)}
                 />
               </Field>
               <Field label="Question set" optional>
                 <TextInput
-                  value={details.questionSet}
-                  onChange={(event) => updateDetails({ questionSet: event.target.value })}
+                  value={tournamentForm.draft.questionSet}
+                  onChange={(event) => tournamentForm.set('questionSet', event.target.value)}
                   placeholder="e.g. ACF Fall 2025"
                 />
               </Field>
               <Field
                 label="Tournament timezone"
                 spanAll
-                hint={`${timeZoneLabel(details.timeZone)}. Future schedule inputs use this zone; stored instants are not shifted.`}
+                hint={`${timeZoneLabel(tournamentForm.draft.timeZone)}. Future schedule inputs use this zone; stored instants are not shifted.`}
+                error={tournamentForm.errorFor('timeZone')}
                 render={({ id, labelId, describedBy, invalid }) => (
                   <TimeZoneField
                     id={id}
                     ariaLabelledBy={labelId}
                     ariaDescribedBy={describedBy}
                     invalid={invalid}
-                    value={details.timeZone}
-                    onChange={(timeZone) => updateDetails({ timeZone })}
+                    value={tournamentForm.draft.timeZone}
+                    onChange={(timeZone) => tournamentForm.set('timeZone', timeZone)}
                   />
                 )}
               />
             </FieldGrid>
-            <div className="director-form-actions">
-              <Button variant="primary" type="submit">
+            <FormActions state={<SaveState state={tournamentForm.saveState} />}>
+              {tournamentForm.dirty && (
+                <Button variant="secondary" onClick={() => tournamentForm.reset()}>
+                  Discard changes
+                </Button>
+              )}
+              <Button variant="primary" type="submit" disabled={!tournamentForm.dirty}>
                 Save tournament details
               </Button>
-            </div>
+            </FormActions>
           </form>
         ) : (
           <EmptyState
@@ -319,38 +321,39 @@ function GeneralSettings({
         <form
           onSubmit={(event) => {
             event.preventDefault();
-            if (!onSaveOperator || !operator.name.trim()) return;
-            onSaveOperator({
-              displayName: operator.name.trim(),
-              role: operator.role.trim() || undefined,
-            });
-            onAnnounce('Operator identity saved locally.');
+            operatorForm.submit();
           }}
         >
           <FieldGrid>
-            <Field label="Display name">
+            <Field label="Display name" error={operatorForm.errorFor('name')}>
               <TextInput
-                value={operator.name}
-                onChange={(event) =>
-                  setOperatorDraft({ ...operator, key: operatorKey, name: event.target.value })
-                }
+                value={operatorForm.draft.name}
+                onChange={(event) => operatorForm.set('name', event.target.value)}
+                invalid={Boolean(operatorForm.errorFor('name'))}
               />
             </Field>
             <Field label="Role" optional>
               <TextInput
-                value={operator.role}
-                onChange={(event) =>
-                  setOperatorDraft({ ...operator, key: operatorKey, role: event.target.value })
-                }
+                value={operatorForm.draft.role}
+                onChange={(event) => operatorForm.set('role', event.target.value)}
                 placeholder="Tournament director"
               />
             </Field>
           </FieldGrid>
-          <div className="director-form-actions">
-            <Button variant="primary" type="submit" disabled={!onSaveOperator || !operator.name.trim()}>
+          <FormActions state={<SaveState state={operatorForm.saveState} />}>
+            {operatorForm.dirty && (
+              <Button variant="secondary" onClick={() => operatorForm.reset()}>
+                Discard changes
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              type="submit"
+              disabled={!onSaveOperator || !operatorForm.dirty || !operatorForm.draft.name.trim()}
+            >
               Save operator
             </Button>
-          </div>
+          </FormActions>
         </form>
       </Panel>
     </div>

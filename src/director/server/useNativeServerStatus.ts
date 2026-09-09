@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   readNativeServerStatus,
+  setNativeQbtcpAdvertisedAddress,
   startNativeServer,
   stopNativeServer,
   type NativeRoomPairingInvitation,
@@ -30,8 +31,72 @@ export interface NativeServerState {
   toggle(): Promise<NativeServerStatus>;
   /** Merge a newly issued pairing invitation into the shared snapshot. */
   addInvitation(invitation: NativeRoomPairingInvitation): void;
+  /** Set the endpoint embedded in future and existing pairing links. */
+  setAdvertisedAddress(address: string): Promise<NativeServerStatus>;
   /** Replace the snapshot, e.g. after an external/native change observed elsewhere. */
   apply(next: NativeServerStatus): void;
+}
+
+/**
+ * Keep expiry policy in the shared status owner. An invitation with a missing or malformed
+ * absolute deadline is not active, even if an older native server still supplies its relative TTL.
+ * `expiredPairingRoomIds` lets the UI offer a deterministic reissue action without retaining the
+ * old code or link.
+ */
+export function pruneExpiredNativePairingInvitations(
+  next: NativeServerStatus,
+  now = Date.now(),
+): NativeServerStatus {
+  if (!next.running) {
+    const hadPairingState =
+      next.pairingInvitations !== undefined ||
+      next.pairingCode !== undefined ||
+      next.pairingUrl !== undefined ||
+      next.expiredPairingRoomIds !== undefined;
+    if (!hadPairingState) return next;
+    return {
+      ...next,
+      pairingInvitations: [],
+      pairingCode: undefined,
+      pairingUrl: undefined,
+      expiredPairingRoomIds: [],
+    };
+  }
+  const expired = new Set(next.expiredPairingRoomIds ?? []);
+  const pairingInvitations = (next.pairingInvitations ?? []).filter((invitation) => {
+    const expiresAt = Date.parse(invitation.expiresAt);
+    const active = Number.isFinite(expiresAt) && expiresAt > now;
+    if (!active) expired.add(invitation.roomId);
+    return active;
+  });
+  const expiredPairingRoomIds = [...expired].sort();
+  return {
+    ...next,
+    pairingInvitations,
+    pairingCode: pairingInvitations.length === 1 ? pairingInvitations[0].pairingCode : undefined,
+    pairingUrl: pairingInvitations.length === 1 ? pairingInvitations[0].pairingUrl : undefined,
+    expiredPairingRoomIds,
+  };
+}
+
+export function mergeNativePairingInvitation(
+  previous: NativeServerStatus,
+  invitation: NativeRoomPairingInvitation,
+  now = Date.now(),
+): NativeServerStatus {
+  return pruneExpiredNativePairingInvitations(
+    {
+      ...previous,
+      pairingInvitations: [
+        ...(previous.pairingInvitations ?? []).filter((entry) => entry.roomId !== invitation.roomId),
+        invitation,
+      ],
+      expiredPairingRoomIds: (previous.expiredPairingRoomIds ?? []).filter(
+        (roomId) => roomId !== invitation.roomId,
+      ),
+    },
+    now,
+  );
 }
 
 export function useNativeServerStatus(options: {
@@ -105,7 +170,7 @@ export function useNativeServerStatus(options: {
   /** Authoritative write: supersedes any read that is already in flight. */
   const commitStatus = useCallback((next: NativeServerStatus) => {
     generationRef.current += 1;
-    if (activeRef.current) setStatus(next);
+    if (activeRef.current) setStatus(pruneExpiredNativePairingInvitations(next));
   }, []);
 
   const refresh = useCallback(async () => {
@@ -114,7 +179,7 @@ export function useNativeServerStatus(options: {
     const generation = generationRef.current;
     try {
       const next = await readNativeServerStatus();
-      if (generationRef.current === generation) setStatus(next);
+      if (generationRef.current === generation) setStatus(pruneExpiredNativePairingInvitations(next));
     } catch (reason: unknown) {
       if (generationRef.current === generation) {
         setStatus({
@@ -133,6 +198,7 @@ export function useNativeServerStatus(options: {
     let mounted = true;
     const poll = () => {
       if (!mounted) return;
+      setStatus((previous) => pruneExpiredNativePairingInvitations(previous));
       onPollRef.current?.();
       void refresh();
     };
@@ -158,21 +224,31 @@ export function useNativeServerStatus(options: {
 
   const addInvitation = useCallback((invitation: NativeRoomPairingInvitation) => {
     generationRef.current += 1;
-    setStatus((previous) => {
-      const current = (previous.pairingInvitations ?? []).filter(
-        (entry) => entry.roomId !== invitation.roomId,
-      );
-      const nextInvitations = [...current, invitation].sort((left, right) =>
-        left.roomId.localeCompare(right.roomId),
-      );
-      return {
-        ...previous,
-        pairingInvitations: nextInvitations,
-        pairingCode: nextInvitations.length === 1 ? nextInvitations[0].pairingCode : undefined,
-        pairingUrl: nextInvitations.length === 1 ? nextInvitations[0].pairingUrl : undefined,
-      };
-    });
+    setStatus((previous) => mergeNativePairingInvitation(previous, invitation));
   }, []);
 
-  return { status, loading, refresh, toggle, addInvitation, apply: commitStatus };
+  const setAdvertisedAddress = useCallback(
+    async (address: string) => {
+      setPendingMutations((count) => count + 1);
+      try {
+        const next = await setNativeQbtcpAdvertisedAddress(address);
+        commitStatus(next);
+        return next;
+      } finally {
+        if (activeRef.current) setEverLoaded(true);
+        setPendingMutations((count) => Math.max(0, count - 1));
+      }
+    },
+    [commitStatus],
+  );
+
+  return {
+    status,
+    loading,
+    refresh,
+    toggle,
+    addInvitation,
+    setAdvertisedAddress,
+    apply: commitStatus,
+  };
 }

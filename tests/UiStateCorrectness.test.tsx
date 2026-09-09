@@ -473,6 +473,8 @@ describe('shared native QBTCP server status', () => {
           roomId: 'room-1',
           roomName: 'Room 1',
           pairingCode: '111111',
+          issuedAt: '2999-09-09T12:00:00.000Z',
+          expiresAt: '2999-09-09T12:05:00.000Z',
           expiresInSeconds: 300,
         });
       });
@@ -482,6 +484,8 @@ describe('shared native QBTCP server status', () => {
           roomId: 'room-1',
           roomName: 'Room 1',
           pairingCode: '222222',
+          issuedAt: '2999-09-09T12:00:00.000Z',
+          expiresAt: '2999-09-09T12:05:00.000Z',
           expiresInSeconds: 300,
         });
       });

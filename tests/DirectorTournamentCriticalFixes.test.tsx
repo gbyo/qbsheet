@@ -376,7 +376,11 @@ describe('Director tournament-critical regressions', () => {
     });
     expect(roomIsAssignable(hook.result.current.state, room.id)).toBe(false);
 
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 2' }).generated).toBe(true));
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 2', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
     const secondRound = hook.result.current.state.rounds.find((round) => round.name === 'Round 2');
     const secondGame = secondRound
       ? hook.result.current.state.scheduledGames.find((game) => game.roundId === secondRound.id && !game.bye)
@@ -395,7 +399,9 @@ describe('Director tournament-critical regressions', () => {
     const hook = await directorWithSetup(2, 1);
     act(() => {
       expect(hook.result.current.updateFormat({ roundsPerTeam: 2 })).toBe(true);
-      expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true);
+      expect(
+        hook.result.current.generateSchedule({ roundName: 'Round 1', deliveryMode: 'manual' }).generated,
+      ).toBe(true);
     });
     const firstRound = hook.result.current.state.rounds[0];
     const firstGame = hook.result.current.state.scheduledGames.find((game) => !game.bye);
@@ -535,10 +541,18 @@ describe('Director tournament-critical regressions', () => {
     const secondPacket = hook.result.current.state.packets.find((packet) => packet.name === 'Packet 2');
     if (!secondPacket) throw new Error('test setup did not create a second packet');
 
-    act(() => expect(hook.result.current.generateSchedule({ roundName: 'Round 1' }).generated).toBe(true));
     act(() =>
       expect(
-        hook.result.current.generateSchedule({ roundName: 'Round 2', packetId: secondPacket.id }).generated,
+        hook.result.current.generateSchedule({ roundName: 'Round 1', deliveryMode: 'manual' }).generated,
+      ).toBe(true),
+    );
+    act(() =>
+      expect(
+        hook.result.current.generateSchedule({
+          roundName: 'Round 2',
+          packetId: secondPacket.id,
+          deliveryMode: 'manual',
+        }).generated,
       ).toBe(true),
     );
     const round = hook.result.current.state.rounds.find((entry) => entry.name === 'Round 1');
