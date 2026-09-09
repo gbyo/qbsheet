@@ -60,6 +60,8 @@ function addRound(
     startedAt: null,
     closedAt: generatedAt,
   });
+  const phase = state.phases.find((entry) => entry.id === phaseId);
+  if (phase && !phase.roundIds.includes(id)) phase.roundIds.push(id);
 }
 
 function addAcceptedGame(
@@ -80,7 +82,10 @@ function addAcceptedGame(
     ...(options.bracketKey ? { bracketKey: options.bracketKey } : {}),
   });
   state.scheduledGames.push(scheduled);
-  const game = acceptedGame(gameId, scheduledId, [score(leftTeamId, leftPoints), score(rightTeamId, rightPoints)]);
+  const game = acceptedGame(gameId, scheduledId, [
+    score(leftTeamId, leftPoints),
+    score(rightTeamId, rightPoints),
+  ]);
   game.roundId = roundId;
   game.packetId = options.packetId ?? null;
   state.games.push(game);
@@ -161,7 +166,6 @@ describe('canonical standings report composition', () => {
     });
     const playoffs = addPhase(state, 'phase-zzz', 'Playoffs', 2, {
       teamIds: ['team-a', 'team-c'],
-      roundIds: ['round-playoff'],
     });
     addRound(state, 'round-playoff', playoffs.id, 'Playoff Round', 99, 1);
     addAcceptedGame(
@@ -253,6 +257,7 @@ describe('canonical standings report composition', () => {
 
     expect(Object.values(prelim.advancement ?? {}).every((cell) => cell.status === 'unresolved')).toBe(true);
     expect(prelim.advancement?.['team-a']?.note).toMatch(/tie/i);
+    expect(prelim.advancement?.['team-a']?.note).toMatch(/resolution is required/i);
     expect(report.displayRanks?.[`${prelim.id}:team-a`]).toBe(1);
     expect(report.displayRanks?.[`${prelim.id}:team-b`]).toBe(1);
     expect(report.displayRanks?.[`${prelim.id}:team-c`]).toBe(1);
@@ -286,12 +291,11 @@ describe('canonical standings report composition', () => {
     expect(teamA.gamesPlayed).toBe(2);
   });
 
-  test('final placement, explicit final result context, and calculated all-games order remain distinct', () => {
+  test('final placement, explicit finals and placement results, and calculated all-games order stay distinct', () => {
     const state = playedTournament();
     const finals = addPhase(state, 'phase-final', 'Finals', 2, {
       kind: 'final',
       teamIds: ['team-a', 'team-b'],
-      roundIds: ['round-final'],
       status: 'complete',
     });
     addRound(state, 'round-final', finals.id, 'Championship Round', 2, 2);
@@ -304,6 +308,22 @@ describe('canonical standings report composition', () => {
       'team-a',
       250,
       200,
+    );
+    const placement = addPhase(state, 'phase-placement', 'Placement', 3, {
+      kind: 'placement',
+      teamIds: ['team-a', 'team-b'],
+      status: 'complete',
+    });
+    addRound(state, 'round-placement', placement.id, 'Placement Round', 3, 3);
+    addAcceptedGame(
+      state,
+      'game-placement',
+      'scheduled-placement',
+      'round-placement',
+      'team-a',
+      'team-b',
+      100,
+      0,
     );
     state.tournament!.finalPlacement = {
       order: ['team-b', 'team-a'],
@@ -320,6 +340,7 @@ describe('canonical standings report composition', () => {
     expect(final.teams.map((row) => row.teamId)).toEqual(['team-b', 'team-a']);
     expect(final.contextGames).toEqual([
       expect.objectContaining({ gameId: 'game-final', kind: 'final', label: 'Finals' }),
+      expect.objectContaining({ gameId: 'game-placement', kind: 'placement', label: 'Placement' }),
     ]);
     expect(cumulative).toMatchObject({ kind: 'cumulative', title: 'All Games' });
     expect(cumulative.teams.map((row) => row.teamId)).toEqual(['team-a', 'team-b']);
@@ -330,7 +351,6 @@ describe('canonical standings report composition', () => {
     const state = playedTournament();
     const playoffs = addPhase(state, 'phase-2', 'Playoffs', 2, {
       teamIds: ['team-a', 'team-b'],
-      roundIds: ['round-2'],
       carryover: true,
     });
     addRound(state, 'round-2', playoffs.id, 'Round 2', 2, 2);
