@@ -1,0 +1,489 @@
+name: Apply fix 519
+
+on:
+  push:
+    branches: [fix/519-settings-unsaved-state]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/519-settings-unsaved-state
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply shared save-state contract and tests
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+
+          settings = Path('src/director/settings/SettingsView.tsx')
+          text = settings.read_text()
+          text = text.replace('  FieldGrid,\n  Page,', '  FieldGrid,\n  FormActions,\n  Page,', 1)
+          text = text.replace('  Segmented,\n  StateLabel,', '  SaveState,\n  Segmented,\n  StateLabel,', 1)
+          text = text.replace('  TimeZoneField,\n  useConfirm,', '  TimeZoneField,\n  useConfirm,\n  useFormState,', 1)
+
+          old_render = """      {section === 'general' && (
+        <GeneralSettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          operatorProfile={operatorProfile}
+          onSaveOperator={onSaveOperator}
+        />
+      )}
+"""
+          new_render = """      <div hidden={section !== 'general'} aria-hidden={section !== 'general'}>
+        <GeneralSettings
+          state={state}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          operatorProfile={operatorProfile}
+          onSaveOperator={onSaveOperator}
+        />
+      </div>
+"""
+          if text.count(old_render) != 1:
+              raise SystemExit('Settings General conditional render did not match')
+          text = text.replace(old_render,new_render,1)
+
+          start = text.index('function GeneralSettings({')
+          end = text.index('\nfunction RecoverySettings(', start)
+          replacement = r'''export function GeneralSettings({
+  state,
+  controller,
+  onAnnounce,
+  operatorProfile,
+  onSaveOperator,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+  onAnnounce: (announcement: AnnounceInput) => void;
+  operatorProfile?: OperatorProfile;
+  onSaveOperator?: (profile: OperatorProfile) => void;
+}) {
+  const tournamentInitial = {
+    name: state.tournament?.name ?? '',
+    date: state.tournament?.date ?? '',
+    endDate: state.tournament?.endDate ?? '',
+    venue: state.tournament?.venue ?? '',
+    organizer: state.tournament?.organizer ?? '',
+    questionSet: state.tournament?.questionSet ?? '',
+    timeZone: state.tournament?.timeZone ?? 'UTC',
+  };
+  const tournamentKey = [state.tournament?.id ?? '', ...Object.values(tournamentInitial)].join('|');
+  const tournamentForm = useFormState({
+    initial: tournamentInitial,
+    validate: (draft) => ({
+      ...(!draft.name.trim() ? { name: 'Enter a tournament name first.' } : {}),
+      ...(!isValidTimeZone(draft.timeZone) ? { timeZone: 'Choose a recognized IANA timezone.' } : {}),
+    }),
+    onSubmit: (draft) => {
+      const saved = controller.updateTournament({
+        name: draft.name,
+        date: draft.date,
+        endDate: draft.endDate,
+        venue: draft.venue,
+        organizer: draft.organizer,
+        questionSet: draft.questionSet,
+        timeZone: draft.timeZone,
+      });
+      onAnnounce(
+        saved
+          ? 'Tournament details updated locally; saving now.'
+          : errorNotice('Tournament details were not updated; review the Director error.'),
+      );
+      return saved;
+    },
+  });
+  const { dirty: tournamentDirty, reset: resetTournament } = tournamentForm;
+  useEffect(() => {
+    if (!tournamentDirty) resetTournament(tournamentInitial);
+    // tournamentKey is the committed-value identity. A dirty draft deliberately wins over external changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tournamentKey]);
+
+  const operatorInitial = {
+    name: operatorProfile?.displayName ?? 'Local operator',
+    role: operatorProfile?.role ?? '',
+  };
+  const operatorKey = `${operatorInitial.name}|${operatorInitial.role}`;
+  const operatorForm = useFormState({
+    initial: operatorInitial,
+    validate: (draft) => (!draft.name.trim() ? { name: 'Enter a display name first.' } : {}),
+    onSubmit: (draft) => {
+      if (!onSaveOperator) return false;
+      onSaveOperator({
+        displayName: draft.name.trim(),
+        role: draft.role.trim() || undefined,
+      });
+      onAnnounce('Operator identity saved locally.');
+      return true;
+    },
+  });
+  const { dirty: operatorDirty, reset: resetOperator } = operatorForm;
+  useEffect(() => {
+    if (!operatorDirty) resetOperator(operatorInitial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [operatorKey]);
+
+  return (
+    <div className="director-stack">
+      <Panel
+        title="Tournament details"
+        description="This is the canonical tournament identity form used by every Settings/Tournament entry point."
+        id="settings-tournament"
+      >
+        {state.tournament ? (
+          <form
+            className="director-stack"
+            onSubmit={(event) => {
+              event.preventDefault();
+              tournamentForm.submit();
+            }}
+          >
+            <FieldGrid>
+              <Field label="Name" error={tournamentForm.errorFor('name')}>
+                <TextInput
+                  value={tournamentForm.draft.name}
+                  onChange={(event) => tournamentForm.set('name', event.target.value)}
+                />
+              </Field>
+              <Field label="Venue" optional>
+                <TextInput
+                  value={tournamentForm.draft.venue}
+                  onChange={(event) => tournamentForm.set('venue', event.target.value)}
+                />
+              </Field>
+              <Field
+                label="Date"
+                render={({ id, describedBy }) => (
+                  <DateField
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={tournamentForm.draft.date}
+                    onChange={(event) => tournamentForm.set('date', event.target.value)}
+                  />
+                )}
+              />
+              <Field
+                label="End date"
+                optional
+                hint="For multi-day tournaments."
+                render={({ id, describedBy }) => (
+                  <DateField
+                    id={id}
+                    aria-describedby={describedBy}
+                    value={tournamentForm.draft.endDate}
+                    onChange={(event) => tournamentForm.set('endDate', event.target.value)}
+                  />
+                )}
+              />
+              <Field label="Organizer" optional>
+                <TextInput
+                  value={tournamentForm.draft.organizer}
+                  onChange={(event) => tournamentForm.set('organizer', event.target.value)}
+                />
+              </Field>
+              <Field label="Question set" optional>
+                <TextInput
+                  value={tournamentForm.draft.questionSet}
+                  onChange={(event) => tournamentForm.set('questionSet', event.target.value)}
+                  placeholder="e.g. ACF Fall 2025"
+                />
+              </Field>
+              <Field
+                label="Tournament timezone"
+                spanAll
+                error={tournamentForm.errorFor('timeZone')}
+                hint={`${timeZoneLabel(tournamentForm.draft.timeZone)}. Future schedule inputs use this zone; stored instants are not shifted.`}
+                render={({ id, labelId, describedBy, invalid }) => (
+                  <TimeZoneField
+                    id={id}
+                    ariaLabelledBy={labelId}
+                    ariaDescribedBy={describedBy}
+                    invalid={invalid}
+                    value={tournamentForm.draft.timeZone}
+                    onChange={(timeZone) => tournamentForm.set('timeZone', timeZone)}
+                  />
+                )}
+              />
+            </FieldGrid>
+            <FormActions state={<SaveState state={tournamentForm.saveState} />}>
+              <Button variant="primary" type="submit" disabled={!tournamentForm.dirty}>
+                Save tournament details
+              </Button>
+            </FormActions>
+          </form>
+        ) : (
+          <EmptyState
+            title="No tournament open"
+            description="Open or create a tournament before editing tournament details."
+          />
+        )}
+      </Panel>
+
+      <Panel
+        title="Local operator"
+        description="Used to attribute Director decisions. This is a local app setting, not authentication, and is not exported with tournament data."
+        id="settings-operator"
+        actions={<StateLabel state="info" label="Local app setting" />}
+      >
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            operatorForm.submit();
+          }}
+        >
+          <FieldGrid>
+            <Field label="Display name" error={operatorForm.errorFor('name')}>
+              <TextInput
+                value={operatorForm.draft.name}
+                onChange={(event) => operatorForm.set('name', event.target.value)}
+              />
+            </Field>
+            <Field label="Role" optional>
+              <TextInput
+                value={operatorForm.draft.role}
+                onChange={(event) => operatorForm.set('role', event.target.value)}
+                placeholder="Tournament director"
+              />
+            </Field>
+          </FieldGrid>
+          <FormActions state={<SaveState state={operatorForm.saveState} />}>
+            <Button
+              variant="primary"
+              type="submit"
+              disabled={!onSaveOperator || !operatorForm.draft.name.trim() || !operatorForm.dirty}
+            >
+              Save operator
+            </Button>
+          </FormActions>
+        </form>
+      </Panel>
+    </div>
+  );
+}
+'''
+          text = text[:start] + replacement + text[end:]
+          settings.write_text(text)
+
+          fmt = Path('src/director/format/FormatView.tsx')
+          text = fmt.read_text()
+          text = text.replace('  FieldGrid,\n  MenuItem,', '  FieldGrid,\n  FormActions,\n  MenuItem,', 1)
+          text = text.replace('  Select,\n  StateLabel,', '  SaveState,\n  Select,\n  StateLabel,', 1)
+          text = text.replace('  useConfirm,\n  useReorderMode,', '  useConfirm,\n  useFormState,\n  useReorderMode,', 1)
+          start = text.index('function FormatBasics({')
+          end = text.index('\nfunction ScoringRulesDialog(', start)
+          block = text[start:end]
+          old_state = """  const locked = state.rounds.length > 0;
+  const [kind, setKind] = useState(format.kind);
+  const [roundsPerTeam, setRoundsPerTeam] = useState(format.roundsPerTeam?.toString() ?? '');
+  const [avoidRematches, setAvoidRematches] = useState(format.avoidRematches);
+  const [avoidSameOrganization, setAvoidSameOrganization] = useState(format.avoidSameOrganization);
+  const [allowByes, setAllowByes] = useState(format.allowByes);
+
+  const save = () => {
+    const raw = roundsPerTeam.trim();
+    const rounds = raw === '' ? null : Number(raw);
+    if (rounds !== null && (!Number.isInteger(rounds) || rounds < 1 || rounds > 99)) {
+      onAnnounce(
+        errorNotice('Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.'),
+      );
+      return;
+    }
+    const saved = controller.updateFormat({
+      kind,
+      name: formatName(kind),
+      roundsPerTeam: rounds,
+      avoidRematches,
+      avoidSameOrganization,
+      allowByes,
+    });
+    onAnnounce(
+      saved
+        ? `${formatName(kind)} settings saved.`
+        : errorNotice('Format settings were not saved; review the Director error.'),
+    );
+  };
+"""
+          new_state = """  const locked = state.rounds.length > 0;
+  const form = useFormState({
+    initial: {
+      kind: format.kind,
+      roundsPerTeam: format.roundsPerTeam?.toString() ?? '',
+      avoidRematches: format.avoidRematches,
+      avoidSameOrganization: format.avoidSameOrganization,
+      allowByes: format.allowByes,
+    },
+    validate: (draft) => {
+      const raw = draft.roundsPerTeam.trim();
+      const rounds = raw === '' ? null : Number(raw);
+      return rounds !== null && (!Number.isInteger(rounds) || rounds < 1 || rounds > 99)
+        ? { roundsPerTeam: 'Rounds per team must be a whole number from 1 to 99, or blank for no fixed limit.' }
+        : {};
+    },
+    onSubmit: (draft) => {
+      const raw = draft.roundsPerTeam.trim();
+      const rounds = raw === '' ? null : Number(raw);
+      const saved = controller.updateFormat({
+        kind: draft.kind,
+        name: formatName(draft.kind),
+        roundsPerTeam: rounds,
+        avoidRematches: draft.avoidRematches,
+        avoidSameOrganization: draft.avoidSameOrganization,
+        allowByes: draft.allowByes,
+      });
+      onAnnounce(
+        saved
+          ? `${formatName(draft.kind)} settings saved.`
+          : errorNotice('Format settings were not saved; review the Director error.'),
+      );
+      return saved;
+    },
+  });
+"""
+          if block.count(old_state) != 1:
+              raise SystemExit('FormatBasics local draft block did not match')
+          block = block.replace(old_state,new_state,1)
+          replacements = {
+            'value={kind}': 'value={form.draft.kind}',
+            'onChange={setKind}': "onChange={(kind) => form.set('kind', kind)}",
+            'value={roundsPerTeam}': 'value={form.draft.roundsPerTeam}',
+            'onChange={(event) => setRoundsPerTeam(event.target.value)}': "onChange={(event) => form.set('roundsPerTeam', event.target.value)}",
+            'checked={avoidRematches}': 'checked={form.draft.avoidRematches}',
+            'onChange={setAvoidRematches}': "onChange={(value) => form.set('avoidRematches', value)}",
+            'checked={avoidSameOrganization}': 'checked={form.draft.avoidSameOrganization}',
+            'onChange={setAvoidSameOrganization}': "onChange={(value) => form.set('avoidSameOrganization', value)}",
+            'checked={allowByes}': 'checked={form.draft.allowByes}',
+            'onChange={setAllowByes}': "onChange={(value) => form.set('allowByes', value)}",
+          }
+          for old,new in replacements.items():
+              if block.count(old) != 1:
+                  raise SystemExit(f'FormatBasics expected exactly one {old}')
+              block = block.replace(old,new,1)
+          old_field = '<Field label="Rounds per team" hint="Leave blank for no fixed limit.">'
+          new_field = '<Field label="Rounds per team" hint="Leave blank for no fixed limit." error={form.errorFor(\'roundsPerTeam\')}>'
+          if block.count(old_field) != 1:
+              raise SystemExit('FormatBasics rounds field did not match')
+          block = block.replace(old_field,new_field,1)
+          old_actions = """      <div className=\"director-form-actions\">
+        <span className={generationSupported ? 'director-text-meta' : 'director-text-warning'}>
+          {generationMessage}
+        </span>
+        <Button variant=\"primary\" disabled={!format.editable} onClick={save}>
+          Save format
+        </Button>
+      </div>
+"""
+          new_actions = """      <FormActions
+        state={
+          <>
+            <SaveState state={form.saveState} />
+            <span className={generationSupported ? 'director-text-meta' : 'director-text-warning'}>
+              {generationMessage}
+            </span>
+          </>
+        }
+      >
+        <Button variant=\"primary\" disabled={!format.editable || !form.dirty} onClick={() => form.submit()}>
+          Save format
+        </Button>
+      </FormActions>
+"""
+          if block.count(old_actions) != 1:
+              raise SystemExit('FormatBasics actions did not match')
+          block = block.replace(old_actions,new_actions,1)
+          text = text[:start] + block + text[end:]
+          fmt.write_text(text)
+          PY
+          cat > src/director/settings/SettingsView.unsaved.test.tsx <<'EOF'
+          import { fireEvent, render, screen } from '@testing-library/react';
+          import { describe, expect, test, vi } from 'vitest';
+          import { ConfirmProvider } from '../components/Dialog';
+          import { SettingsView } from './SettingsView';
+          import { directorFixture } from '../transfers/testFixtures';
+          import type { DirectorController } from '../state/useDirectorController';
+
+          function controller(updateResult = true): DirectorController {
+            return {
+              error: null,
+              persistence: { status: 'saved', revision: 1, durableRevision: 1, error: null },
+              checkpoints: [],
+              repositoryKind: 'memory',
+              recovering: false,
+              updateTournament: vi.fn(() => updateResult),
+            } as unknown as DirectorController;
+          }
+
+          function renderSettings(updateResult = true) {
+            const state = directorFixture();
+            const mock = controller(updateResult);
+            render(
+              <ConfirmProvider>
+                <SettingsView
+                  state={state}
+                  controller={mock}
+                  onAnnounce={vi.fn()}
+                  operatorProfile={{ displayName: 'Local operator' }}
+                  onSaveOperator={vi.fn()}
+                />
+              </ConfirmProvider>,
+            );
+            return mock;
+          }
+
+          describe('Settings unsaved form contract', () => {
+            test('marks tournament edits dirty and preserves them across Settings sections', () => {
+              renderSettings();
+              const name = screen.getByLabelText('Name');
+              fireEvent.change(name, { target: { value: 'Draft tournament name' } });
+              expect(screen.getAllByText('Unsaved changes').length).toBeGreaterThan(0);
+
+              fireEvent.click(screen.getByRole('button', { name: /Recovery/ }));
+              expect(screen.queryByDisplayValue('Draft tournament name')).not.toBeVisible();
+              fireEvent.click(screen.getByRole('button', { name: 'General' }));
+              expect(screen.getByDisplayValue('Draft tournament name')).toBeVisible();
+            });
+
+            test('a rejected save keeps the tournament form dirty', () => {
+              const mock = renderSettings(false);
+              fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Rejected draft' } });
+              fireEvent.click(screen.getByRole('button', { name: 'Save tournament details' }));
+              expect(mock.updateTournament).toHaveBeenCalledTimes(1);
+              expect(screen.getByDisplayValue('Rejected draft')).toBeVisible();
+              expect(screen.getAllByText('Unsaved changes').length).toBeGreaterThan(0);
+            });
+
+            test('a successful save clears dirty state', () => {
+              renderSettings(true);
+              fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Saved draft' } });
+              fireEvent.click(screen.getByRole('button', { name: 'Save tournament details' }));
+              expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
+              expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
+            });
+          });
+          EOF
+      - run: npx prettier --write src/director/settings/SettingsView.tsx src/director/format/FormatView.tsx src/director/settings/SettingsView.unsaved.test.tsx
+      - run: npx vitest --run src/director/settings/SettingsView.unsaved.test.tsx
+      - run: npm run typecheck
+      - name: Commit verified fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm .github/workflows/fix-519.yml
+          git add src/director/settings/SettingsView.tsx src/director/format/FormatView.tsx src/director/settings/SettingsView.unsaved.test.tsx
+          git commit -m 'fix: preserve and surface unsaved Director drafts (#519)'
+          git push origin HEAD:fix/519-settings-unsaved-state
