@@ -311,6 +311,22 @@ export type DocumentTransitionCheck =
       error: string | null;
     };
 
+export type DirectorDocumentTransition =
+  | { kind: 'switching'; tournamentId: DirectorId }
+  | { kind: 'restoring-checkpoint'; checkpointId: string }
+  | { kind: 'recovery-edit'; reason: string };
+
+function documentTransitionConflictMessage(transition: DirectorDocumentTransition): string {
+  switch (transition.kind) {
+    case 'switching':
+      return 'The tournament is being opened. Wait for opening to finish, then try again.';
+    case 'restoring-checkpoint':
+      return 'The tournament is being restored. Wait for recovery to finish, then try again.';
+    case 'recovery-edit':
+      return 'The tournament is being changed through recovery. Wait for recovery to finish, then try again.';
+  }
+}
+
 export interface DirectorController {
   state: DirectorState;
   loading: boolean;
@@ -500,7 +516,7 @@ export interface DirectorController {
   dismissTransferArtifact(artifactId: DirectorId): void;
   checkpoint(reason: string): Promise<void>;
   checkpoints: DirectorCheckpoint[];
-  recovering: boolean;
+  documentTransition: DirectorDocumentTransition | null;
   documentEpoch: number;
   restoreCheckpoint(checkpointId: string): Promise<boolean>;
   editTournamentSnapshot(value: DirectorState, reason: string): Promise<boolean>;
@@ -606,9 +622,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
     isNativeDirector() ? 'native' : 'checking',
   );
   const [checkpoints, setCheckpoints] = useState<DirectorCheckpoint[]>([]);
-  const [recovering, setRecovering] = useState(false);
+  const [documentTransition, setDocumentTransition] = useState<DirectorDocumentTransition | null>(null);
   const [documentEpoch, setDocumentEpoch] = useState(0);
-  const documentTransitionRef = useRef(false);
+  const documentTransitionRef = useRef<DirectorDocumentTransition | null>(null);
   const documentEpochRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [tournaments, setTournaments] = useState<TournamentCatalogEntry[]>([]);
@@ -1056,7 +1072,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const commit = useCallback(
     (mutator: (draft: DirectorState) => void): boolean => {
       /*
-       * A commit dropped mid-recovery is a failure, and says so.
+       * A commit dropped while a document is being replaced is a failure, and says so.
        *
        * `restoreCheckpoint` and `editTournamentSnapshot` replace the whole document, and they
        * await storage while doing it. A click that lands inside that window cannot be applied
@@ -1064,7 +1080,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
        * either, so every caller that returns a success boolean returns this one.
        */
       if (documentTransitionRef.current) {
-        setError('The tournament is being restored. Wait for recovery to finish, then try again.');
+        setError(documentTransitionConflictMessage(documentTransitionRef.current));
         return false;
       }
       if (!ensureWriter()) return false;
@@ -1173,9 +1189,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('The tournament is already changing. Wait for that operation to finish.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'switching', tournamentId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // All writes queued before the switch belong to the outgoing document. Waiting here prevents
         // a late save from racing the incoming document selection.
@@ -1215,12 +1232,16 @@ export function useDirectorController(repository = createDirectorRepository()): 
         await refreshTournaments();
         return true;
       } catch (reason: unknown) {
-        setError(reason instanceof Error ? reason.message : 'The selected tournament could not be opened.');
+        setError(
+          reason instanceof Error
+            ? `The selected tournament could not be opened. ${reason.message}`
+            : 'The selected tournament could not be opened.',
+        );
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [ensureDocumentTransitionAllowed, refreshTournaments, settleWriterReady],
@@ -4686,7 +4707,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
 
   const checkpoint = useCallback(
     async (reason: string) => {
-      if (documentTransitionRef.current) throw new Error('Wait for tournament recovery to finish.');
+      if (documentTransitionRef.current)
+        throw new Error(documentTransitionConflictMessage(documentTransitionRef.current));
       if (!ensureWriter()) throw new Error('This tournament is read-only in this Director tab.');
       const snapshot = structuredClone(stateRef.current);
       const next = structuredClone(snapshot);
@@ -4726,9 +4748,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This storage backend does not support recovery points.');
         return false;
       }
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'restoring-checkpoint', checkpointId };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4795,9 +4818,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The recovery point could not be restored.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [
@@ -4820,9 +4843,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
         return false;
       }
       if (!ensureWriter()) return false;
-      documentTransitionRef.current = true;
+      const transition: DirectorDocumentTransition = { kind: 'recovery-edit', reason };
+      documentTransitionRef.current = transition;
       documentEpochRef.current += 1;
-      setRecovering(true);
+      setDocumentTransition(transition);
       try {
         // Settle, never adopt. A QBTCP read or a Live drain that rejected in the background
         // is why a director is reaching for recovery; letting its rejection propagate here
@@ -4867,9 +4891,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(reason instanceof Error ? reason.message : 'The edit could not be saved.');
         return false;
       } finally {
-        documentTransitionRef.current = false;
+        documentTransitionRef.current = null;
         setDocumentEpoch(documentEpochRef.current);
-        setRecovering(false);
+        setDocumentTransition(null);
       }
     },
     [assertWriteAuthority, captureWriteAuthority, ensureWriter, refreshCheckpoints, refreshTournaments],
@@ -6059,7 +6083,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     dismissTransferArtifact: dismissTransferArtifactAction,
     checkpoint,
     checkpoints,
-    recovering,
+    documentTransition,
     documentEpoch,
     restoreCheckpoint,
     editTournamentSnapshot,
