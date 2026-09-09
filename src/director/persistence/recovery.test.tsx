@@ -125,8 +125,10 @@ test('controller restores exact document and preserves the state before destruct
   const hook = renderHook(() => useDirectorController(repository));
   await waitFor(() => expect(hook.result.current.loading).toBe(false));
   const before = structuredClone(hook.result.current.state);
+  // Flexible removal is planning cleanup, so target the unplayed round; this test is about the
+  // checkpoint/restore mechanics, not about rewriting played history.
   await act(async () => {
-    expect(await removeRoundFlexibly(hook.result.current, before.rounds[0].id)).toBe(true);
+    expect(await removeRoundFlexibly(hook.result.current, before.rounds[1].id)).toBe(true);
   });
   expect(hook.result.current.state.rounds).toHaveLength(before.rounds.length - 1);
   expect(hook.result.current.state.tournament!.id).toBe(before.tournament!.id);
@@ -150,7 +152,7 @@ test('a failed safety checkpoint prevents a destructive edit', async () => {
   const before = structuredClone(hook.result.current.state);
   vi.spyOn(repository, 'checkpoint').mockRejectedValueOnce(new Error('Disk full'));
   await act(async () => {
-    expect(await removeRoundFlexibly(hook.result.current, before.rounds[0].id)).toBe(false);
+    expect(await removeRoundFlexibly(hook.result.current, before.rounds[1].id)).toBe(false);
   });
   expect(hook.result.current.state).toEqual(before);
   expect(hook.result.current.error).toBe('Disk full');
