@@ -13,22 +13,22 @@ import {
   acceptedGameRecords,
   applyFinalPlacement,
   derivePlayerStandings,
-  deriveRoundStats,
   deriveTeamStandings,
   gameDetailedCountsKnown,
   orderDayItems,
   playerPoints,
   type DirectorState,
   type GameRecord,
-  type RoundStatsGameFacts,
 } from '../domain';
-import type {
-  GamePlayerStatsRow,
-  GameStatsRow,
-  GameTeamStatsRow,
-  PlayerStatsRow,
-  StatsSnapshot,
-  TeamStatsRow,
+import {
+  deriveRoundStats,
+  type GamePlayerStatsRow,
+  type GameStatsRow,
+  type GameTeamStatsRow,
+  type PlayerStatsRow,
+  type RoundStatDefinition,
+  type StatsSnapshot,
+  type TeamStatsRow,
 } from '@qbsheet/tournament-formats';
 import { classificationLabels, teamClassificationsOf } from '../standings/statsDisplay';
 
@@ -152,20 +152,24 @@ function historicalGameDefinition(game: GameRecord): HistoricalGameDefinition {
   };
 }
 
-function forfeitHasPlayedStatistics(game: GameRecord, historical: HistoricalGameDefinition): boolean {
-  if (game.status !== 'forfeit') return true;
-  if ((historical.tossupsRead ?? 0) > 0 || game.playerStats.length > 0) return true;
-  return game.scores.some(
-    (score) =>
-      score.score !== 0 ||
-      score.superpowers !== 0 ||
-      score.powers !== 0 ||
-      score.gets !== 0 ||
-      score.negs !== 0 ||
-      score.bonuses !== 0 ||
-      score.bonusPoints !== 0 ||
-      score.bouncebacks !== 0,
-  );
+/**
+ * Project the per-game historical definition resolved from the game's own
+ * evidence onto the round-stat derivation input. Fields the evidence cannot
+ * prove stay null so the derivation declines the metric instead of guessing.
+ * Provenance is reported as unknown until per-game definition storage (#671)
+ * records where each historical definition came from.
+ */
+function roundStatDefinitionOf(historical: HistoricalGameDefinition): RoundStatDefinition {
+  return {
+    regulationTossups: historical.regulationTossupCount,
+    regulationLengthFixed: null,
+    overtimeEnabled: null,
+    powers: historical.powerApplicable,
+    superpowers: historical.superpowerApplicable,
+    bonuses: historical.bonusApplicable,
+    maximumBonusScore: historical.maximumBonusScore,
+    source: 'unknown',
+  };
 }
 
 export function buildCanonicalSnapshot(
@@ -273,12 +277,10 @@ export function buildCanonicalSnapshot(
         (dayIndex.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
           (dayIndex.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id),
     );
-  const roundFacts: RoundStatsGameFacts[] = [];
   const games: GameStatsRow[] = acceptedGames.map((game) => {
     const [left, right] = game.scores;
     const scheduled = scheduledById.get(game.scheduledGameId);
     const detailedCountsKnown = gameDetailedCountsKnown(game);
-    const detailComplete = game.detailedStats !== 'unknown' && game.detailedStats !== 'incomplete';
     const resolvedPacketId = game.packetId ?? scheduled?.packetId ?? undefined;
     const historical = historicalGameDefinition(game);
     const teamStats: GameTeamStatsRow[] = game.scores.map((score) => {
@@ -313,35 +315,13 @@ export function buildCanonicalSnapshot(
     }));
 
     const phaseId = roundPhase.get(game.roundId);
-    roundFacts.push({
-      gameId: game.id,
-      roundId: game.roundId,
-      roundName: roundName.get(game.roundId) ?? game.roundId,
-      ...(phaseId ? { phaseId, phaseName: phaseName.get(phaseId) } : {}),
-      packetId: resolvedPacketId ?? null,
-      packetName: resolvedPacketId ? (packetName.get(resolvedPacketId) ?? null) : null,
-      teamIds: game.scores.map((score) => score.teamId),
-      teamPoints: game.scores.map((score) => score.score),
-      played: forfeitHasPlayedStatistics(game, historical),
-      detailComplete,
-      tossupsRead: historical.tossupsRead,
-      regulationTossupCount: historical.regulationTossupCount,
-      superpowers: detailComplete ? game.scores.reduce((sum, score) => sum + score.superpowers, 0) : null,
-      powers: detailComplete ? game.scores.reduce((sum, score) => sum + score.powers, 0) : null,
-      gets: detailComplete ? game.scores.reduce((sum, score) => sum + score.gets, 0) : null,
-      negs: detailComplete ? game.scores.reduce((sum, score) => sum + score.negs, 0) : null,
-      bonusesHeard: detailComplete ? game.scores.reduce((sum, score) => sum + score.bonuses, 0) : null,
-      bonusPoints: detailComplete ? game.scores.reduce((sum, score) => sum + score.bonusPoints, 0) : null,
-      maximumBonusScore: historical.maximumBonusScore,
-      superpowerApplicable: historical.superpowerApplicable,
-      powerApplicable: historical.powerApplicable,
-      negApplicable: historical.negApplicable,
-      bonusApplicable: historical.bonusApplicable,
-    });
 
+    const phaseNameText = phaseId ? phaseName.get(phaseId) : undefined;
     return {
       gameId: game.id,
+      roundStatDefinition: roundStatDefinitionOf(historical),
       ...(phaseId ? { phaseId } : {}),
+      ...(phaseNameText ? { phaseName: phaseNameText } : {}),
       roundId: game.roundId,
       ...(scheduled?.poolId ? { poolId: scheduled.poolId } : {}),
       ...(roundName.get(game.roundId) ? { roundName: roundName.get(game.roundId) } : {}),
@@ -368,7 +348,7 @@ export function buildCanonicalSnapshot(
       playerStats,
     };
   });
-  const roundReport = deriveRoundStats(roundFacts);
+  const roundReport = deriveRoundStats(games);
 
   return {
     format: 'qbsheet-stats' as const,
@@ -381,8 +361,7 @@ export function buildCanonicalSnapshot(
     teams,
     players,
     games,
-    rounds: roundReport.rows,
-    roundTotal: roundReport.total,
+    roundStats: roundReport,
     extensions: {
       scopeLabel: scope.label,
       finalPlacementApplied: isOverall && state.tournament?.finalPlacement !== undefined,

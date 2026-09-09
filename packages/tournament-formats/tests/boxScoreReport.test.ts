@@ -256,6 +256,7 @@ describe('printable game box scores', () => {
     expect(games).toContain('href="#round-round-1"');
     expect(games).toContain('Packet: Packet &lt;A&gt;');
     expect(games).toContain('Tossups read: 20');
+    expect(games).toContain('>Super</th>');
     expect(games).toContain('Alice &amp; Co.');
     expect(games).toContain('Team total');
     expect(games).toContain('Bonuses heard: <strong>8</strong>');
@@ -287,4 +288,164 @@ describe('printable game box scores', () => {
       ].sort(),
     );
   });
+
+  test('shows the winner and an honest unknown tossups line for decided games', () => {
+    const games = gamesHtml(snapshot());
+    expect(games).toContain('Tossups read: 20');
+    expect(games).toContain('Tossups read: —');
+    expect(games).toContain('Winner: Aiken &lt;A&gt;');
+  });
+
+  test('names the forfeit without fabricating statistics or a winner', () => {
+    const games = gamesHtml(
+      minimalSnapshot([
+        {
+          gameId: 'game-forfeit',
+          roundId: 'round-1',
+          roundName: 'Round 1',
+          teamOneId: 'team-a',
+          teamOneName: 'Aiken <A>',
+          teamOnePoints: 0,
+          teamTwoId: 'team-b',
+          teamTwoName: 'Wren',
+          teamTwoPoints: 0,
+          forfeitedTeamId: 'team-b',
+          status: 'accepted',
+        },
+      ]),
+    );
+    expect(games).toContain('Forfeit: Wren forfeited');
+    expect(games).not.toContain('Winner:');
+    expect(games).toContain('Detailed statistics unavailable for this result.');
+  });
+
+  test('marks real ties instead of inventing a winner', () => {
+    const games = gamesHtml(
+      minimalSnapshot([
+        {
+          gameId: 'game-tie',
+          roundId: 'round-1',
+          roundName: 'Round 1',
+          teamOneId: 'team-a',
+          teamOneName: 'Aiken <A>',
+          teamOnePoints: 250,
+          teamTwoId: 'team-b',
+          teamTwoName: 'Wren',
+          teamTwoPoints: 250,
+          status: 'accepted',
+        },
+      ]),
+    );
+    expect(games).toContain('Result: Tie');
+    expect(games).not.toContain('Winner:');
+  });
+
+  test('displays known nonzero overtime distinctly and stays silent otherwise', () => {
+    expect(gamesHtml(snapshot())).not.toContain('Overtime tossups');
+    const games = gamesHtml(
+      minimalSnapshot([
+        {
+          gameId: 'game-ot',
+          roundId: 'round-1',
+          roundName: 'Round 1',
+          teamOneId: 'team-a',
+          teamOneName: 'Aiken',
+          teamOnePoints: 320,
+          teamTwoId: 'team-b',
+          teamTwoName: 'Wren',
+          teamTwoPoints: 310,
+          winnerId: 'team-a',
+          status: 'accepted',
+          tossupsRead: 24,
+          overtimeTossupsRead: 3,
+        },
+      ]),
+    );
+    expect(games).toContain('Overtime tossups: 3');
+  });
+
+  test('renders known team totals with an honest player-detail note when player lines are missing', () => {
+    const games = gamesHtml(
+      minimalSnapshot([
+        {
+          gameId: 'game-partial',
+          roundId: 'round-1',
+          roundName: 'Round 1',
+          teamOneId: 'team-a',
+          teamOneName: 'Aiken',
+          teamOnePoints: 300,
+          teamTwoId: 'team-b',
+          teamTwoName: 'Wren',
+          teamTwoPoints: 200,
+          winnerId: 'team-a',
+          status: 'accepted',
+          detail: 'partial',
+          tossupsRead: 20,
+          teamStats: [
+            detailedTeam({ teamId: 'team-a', teamName: 'Aiken', points: 300 }),
+            detailedTeam({ teamId: 'team-b', teamName: 'Wren', points: 200 }),
+          ],
+        },
+      ]),
+    );
+    expect(games).toContain('Team total');
+    expect(games).toContain('Player-level statistics unavailable.');
+    expect(games).not.toContain('Detailed statistics unavailable for this result.');
+  });
+
+  test('keeps small box scores together in print but lets large ones break', () => {
+    const small = gamesHtml(snapshot());
+    expect(small).toContain('class="game game-compact"');
+    expect(small).toContain('.game-compact{break-inside:avoid-page}');
+    expect(small).toContain('.game-header{break-after:avoid}');
+    expect(small).not.toContain('.game{break-inside');
+
+    const players = Array.from({ length: 11 }, (_, index) =>
+      detailedPlayer({
+        playerId: `player-${index}`,
+        playerName: `Player ${index}`,
+        teamId: 'team-a',
+        teamName: 'Aiken',
+      }),
+    );
+    const large = gamesHtml(
+      minimalSnapshot([
+        {
+          gameId: 'game-large',
+          roundId: 'round-1',
+          roundName: 'Round 1',
+          teamOneId: 'team-a',
+          teamOneName: 'Aiken',
+          teamOnePoints: 400,
+          teamTwoId: 'team-b',
+          teamTwoName: 'Wren',
+          teamTwoPoints: 100,
+          winnerId: 'team-a',
+          status: 'accepted',
+          detail: 'complete',
+          tossupsRead: 20,
+          teamStats: [detailedTeam({ teamId: 'team-a', teamName: 'Aiken', points: 400 })],
+          playerStats: players,
+        },
+      ]),
+    );
+    expect(large).toContain('<section class="game" id="game-game-large"');
+    expect(large).not.toContain('class="game game-compact"');
+  });
 });
+
+function minimalSnapshot(games: StatsSnapshot['games']): StatsSnapshot {
+  return {
+    format: 'qbsheet-stats',
+    version: 1,
+    generatedAt: '2026-09-09T20:00:00.000Z',
+    tournament: { id: 'tournament', name: 'Cavalier Classic' },
+    teams: [],
+    players: [],
+    games,
+  };
+}
+
+function gamesHtml(snapshot: StatsSnapshot): string {
+  return buildPrintableStatReportBundle(snapshot).find((page) => page.name === 'games.html')!.content;
+}

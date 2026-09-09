@@ -61,7 +61,7 @@ const reportStyle = [
   'td.num,th.num{text-align:right}',
   'th{background:#f1f4f6}tbody tr:nth-child(even){background:#fafbfc}tfoot{font-weight:650}',
   'footer{margin-top:32px;padding-top:12px;border-top:1px solid #d7dde3;color:#52606d;font-size:13px}',
-  '@media print{body{max-width:none;padding:8px}.game{break-inside:avoid-page}.table-wrap{overflow:visible}nav{display:none}}',
+  '@media print{body{max-width:none;padding:8px}.game-compact{break-inside:avoid-page}.game-header{break-after:avoid}.table-wrap{overflow:visible}nav{display:none}}',
 ].join('');
 
 function dateOnly(value: string | undefined): string | undefined {

@@ -1,5 +1,5 @@
 import { buildStatReportBundle as buildBaseStatReportBundle, type StatReportPage } from './stats.js';
-import { deriveRoundStats, type RoundStatsReport, type RoundStatsRow } from './roundStats.js';
+import { deriveRoundStats, type RoundStatsReport, type RoundReportRow } from './roundStats.js';
 import type { GameStatsRow, StatsSnapshot } from './stats.js';
 
 function htmlEscape(value: unknown): string {
@@ -25,7 +25,7 @@ function roundAnchor(game: Pick<GameStatsRow, 'gameId' | 'roundId'>): string {
   return `round-${slugify(game.roundId ?? game.gameId)}`;
 }
 
-function rowAnchor(row: RoundStatsRow): string | null {
+function rowAnchor(row: RoundReportRow): string | null {
   return row.roundId ? `round-${slugify(row.roundId)}` : null;
 }
 
@@ -41,24 +41,24 @@ function percentCell(value: number | null | undefined): string {
     : '<td class="num">—</td>';
 }
 
-function gamesCell(row: RoundStatsRow): string {
+function gamesCell(row: RoundReportRow): string {
   if (row.results === row.games) return `<td class="num">${row.games}</td>`;
   const excluded = row.results - row.games;
   const title = `${row.results} accepted result${row.results === 1 ? '' : 's'}; ${excluded} pure forfeit${excluded === 1 ? '' : 's'} excluded from scoring denominators`;
   return `<td class="num" title="${htmlEscape(title)}">${row.games}</td>`;
 }
 
-function roundNameCell(row: RoundStatsRow): string {
+function roundNameCell(row: RoundReportRow): string {
   const anchor = rowAnchor(row);
   const name = htmlEscape(row.roundName);
   return anchor ? `<td><a href="games.html#${anchor}">${name}</a></td>` : `<td>${name}</td>`;
 }
 
-function stageCell(row: RoundStatsRow): string {
+function stageCell(row: RoundReportRow): string {
   return `<td>${htmlEscape(row.phaseName ?? row.phaseId ?? '—')}</td>`;
 }
 
-function packetCell(row: RoundStatsRow): string {
+function packetCell(row: RoundReportRow): string {
   return `<td>${htmlEscape(row.packetName ?? '—')}</td>`;
 }
 
@@ -86,7 +86,7 @@ function metricHeaders(report: RoundStatsReport): string {
   );
 }
 
-function statsCells(row: RoundStatsRow, report: RoundStatsReport): string {
+function statsCells(row: RoundReportRow, report: RoundStatsReport): string {
   return (
     roundNameCell(row) +
     (report.showPhase ? stageCell(row) : '') +
@@ -128,10 +128,14 @@ function roundReportHtml(report: RoundStatsReport): string {
     'Rates use aggregate numerators and denominators; the Overall row is recomputed from all games rather than averaging round percentages.',
     '“—” means a required denominator or detailed field is not known for every included game; QBSheet does not report a known-subset value as the whole round.',
     ...(forfeits > 0
-      ? [`${forfeits} pure forfeit${forfeits === 1 ? '' : 's'} count as results but are excluded from scoring and conversion denominators.`]
+      ? [
+          `${forfeits} pure forfeit${forfeits === 1 ? '' : 's'} count as results but are excluded from scoring and conversion denominators.`,
+        ]
       : []),
     ...(report.hasMixedRegulation
-      ? ['The report scope contains different regulation tossup counts, so definition-dependent Overall per-X metrics are unavailable.']
+      ? [
+          'The report scope contains different regulation tossup counts, so definition-dependent Overall per-X metrics are unavailable.',
+        ]
       : []),
     ...(partial
       ? ['At least one row has partial source detail; unavailable cells are intentionally shown as —.']

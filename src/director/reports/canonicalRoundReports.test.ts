@@ -13,11 +13,7 @@ import { buildCanonicalRoundStatsSnapshot } from './canonicalRoundReports';
 
 const generatedAt = '2026-09-09T20:00:00.000Z';
 
-function historicalQbj(
-  regulationTossups: number,
-  tossupsRead: number,
-  packet = 'Packet 18',
-): unknown {
+function historicalQbj(regulationTossups: number, tossupsRead: number, packet = 'Packet 18'): unknown {
   return {
     version: '2.1.1',
     objects: [
@@ -111,10 +107,7 @@ function multiScopeState(): DirectorState {
     closedAt: generatedAt,
   });
   state.teams.push(team('team-c', 'C'), team('team-d', 'D'));
-  state.players.push(
-    player('player-c', 'team-c', 'C Player'),
-    player('player-d', 'team-d', 'D Player'),
-  );
+  state.players.push(player('player-c', 'team-c', 'C Player'), player('player-d', 'team-d', 'D Player'));
   state.scheduledGames.push(
     scheduledGame('scheduled-2', 'team-c', 'team-d', { roundId: 'round-2', poolId: null }),
   );
@@ -184,11 +177,7 @@ describe('buildCanonicalRoundStatsSnapshot', () => {
     expect(phase.games.map((game) => game.gameId)).toEqual(['game-2']);
     expect(phase.roundStats!.rows.map((row) => row.roundId)).toEqual(['round-2']);
 
-    const pool = buildCanonicalRoundStatsSnapshot(
-      state,
-      { poolId: 'pool-a', label: 'Pool A' },
-      generatedAt,
-    );
+    const pool = buildCanonicalRoundStatsSnapshot(state, { poolId: 'pool-a', label: 'Pool A' }, generatedAt);
     expect(pool.games.map((game) => game.gameId)).toEqual(['game-1']);
     expect(pool.roundStats!.total.games).toBe(1);
   });

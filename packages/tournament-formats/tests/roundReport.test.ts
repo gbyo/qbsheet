@@ -1,19 +1,25 @@
 import { describe, expect, test } from 'vitest';
-import { buildStatReportBundle, type RoundStatsRow, type StatsSnapshot } from '../src/index.js';
+import {
+  buildRoundAwareStatReportBundle,
+  type RoundReportRow,
+  type RoundStatsReport,
+  type StatsSnapshot,
+} from '../src/index.js';
 
 const at = '2026-09-09T12:00:00.000Z';
 
-function round(overrides: Partial<RoundStatsRow> = {}): RoundStatsRow {
+function round(overrides: Partial<RoundReportRow> = {}): RoundReportRow {
   return {
     roundId: 'round-1',
     roundName: 'Round 1',
     phaseId: 'phase-1',
     phaseName: 'Preliminary',
     packetName: 'Packet One',
+    packetMixed: false,
+    results: 1,
     games: 1,
     teams: 2,
-    playedGames: 1,
-    regulationTossupCount: 20,
+    regulationTossups: 20,
     tossupsRead: 20,
     pointsPerTeamPerXTuh: 250,
     superpowerRate: null,
@@ -22,24 +28,29 @@ function round(overrides: Partial<RoundStatsRow> = {}): RoundStatsRow {
     negRatePerXTuh: 3,
     ppb: 14,
     bonusConversionRate: 14 / 30,
-    superpowerApplicable: false,
-    powerApplicable: true,
-    negApplicable: true,
-    bonusApplicable: true,
-    coverage: {
-      playedGames: 1,
-      detailGames: 1,
-      tossupsReadGames: 1,
-      regulationGames: 1,
-      bonusGames: 1,
-    },
-    notes: [],
+    detailGames: 1,
+    excludedForfeits: 0,
+    partial: false,
+    ...overrides,
+  };
+}
+
+function report(overrides: Partial<RoundStatsReport> = {}): RoundStatsReport {
+  const row = round();
+  return {
+    rows: [row],
+    total: { ...row, roundId: 'overall', roundName: 'Overall', packetName: null },
+    showPhase: false,
+    showSuperpowers: false,
+    showPowers: true,
+    showBonuses: true,
+    showBonusConversion: true,
+    hasMixedRegulation: false,
     ...overrides,
   };
 }
 
 function snapshot(): StatsSnapshot {
-  const row = round();
   return {
     format: 'qbsheet-stats',
     version: 1,
@@ -66,15 +77,14 @@ function snapshot(): StatsSnapshot {
         detail: 'complete',
       },
     ],
-    rounds: [row],
-    roundTotal: { ...row, roundId: 'overall', roundName: 'Overall', packetName: null },
+    roundStats: report(),
     extensions: { scopeLabel: 'Overall' },
   };
 }
 
 describe('printable round report', () => {
   test('renders canonical round metrics as a linked printable table', () => {
-    const pages = buildStatReportBundle(snapshot());
+    const pages = buildRoundAwareStatReportBundle(snapshot());
     const rounds = pages.find((page) => page.name === 'rounds.html')?.content ?? '';
     const games = pages.find((page) => page.name === 'games.html')?.content ?? '';
 
@@ -95,27 +105,27 @@ describe('printable round report', () => {
 
   test('omits columns that are irrelevant to the included scoring definitions', () => {
     const value = snapshot();
-    const noPowerOrBonus = round({
-      powerRate: null,
-      negRatePerXTuh: null,
-      ppb: null,
-      bonusConversionRate: null,
-      powerApplicable: false,
-      negApplicable: false,
-      bonusApplicable: false,
-      packetName: null,
+    value.roundStats = report({
+      rows: [
+        round({
+          powerRate: null,
+          negRatePerXTuh: null,
+          ppb: null,
+          bonusConversionRate: null,
+          packetName: null,
+        }),
+      ],
+      showPowers: false,
+      showBonuses: false,
+      showBonusConversion: false,
     });
-    value.rounds = [noPowerOrBonus];
-    value.roundTotal = { ...noPowerOrBonus, roundId: 'overall', roundName: 'Overall' };
-    const rounds = buildStatReportBundle(value).find((page) => page.name === 'rounds.html')?.content ?? '';
+    const rounds =
+      buildRoundAwareStatReportBundle(value).find((page) => page.name === 'rounds.html')?.content ?? '';
 
-    expect(rounds).not.toContain(
-      'title="Superpowers plus powers divided by positive tossup conversions">Power %',
-    );
-    expect(rounds).not.toContain(
-      'title="Negs normalized to the historical regulation tossup count">Negs/reg',
-    );
-    expect(rounds).not.toContain('title="Bonus points divided by bonuses heard">PPB');
+    expect(rounds).not.toContain('>Power %');
+    expect(rounds).not.toContain('>PPB');
+    expect(rounds).not.toContain('>Bonus Conv %');
     expect(rounds).not.toContain('<th scope="col">Packet</th>');
+    expect(rounds).toContain('TU Conv %');
   });
 });
