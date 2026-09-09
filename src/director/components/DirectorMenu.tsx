@@ -74,18 +74,17 @@ export function getFloatingMenuPosition(
 export function DirectorMenu({
   label,
   className,
-  id,
   align = 'start',
   placement = 'bottom',
   floating = false,
   openerRef,
   onClose,
+  onListboxId,
   searchPlaceholder,
   children,
 }: {
   label: string;
   className?: string;
-  id?: string;
   /** Which edge the popover is anchored to; read by the stylesheet. */
   align?: 'start' | 'end';
   placement?: 'bottom' | 'top';
@@ -93,20 +92,34 @@ export function DirectorMenu({
   floating?: boolean;
   openerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
+  /** Reports cmdk's generated listbox ID for an external popup trigger. */
+  onListboxId?: (id: string) => void;
   /** Overrides the filter field's placeholder, e.g. "Search tournaments". */
   searchPlaceholder?: string;
   children: React.ReactNode;
 }) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const onCloseRef = useRef(onClose);
   const searchRef = useRef('');
   const [search, setSearch] = useState('');
   const [position, setPosition] = useState<FloatingMenuPosition | null>(null);
+  const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
 
   useLayoutEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
+
+  useLayoutEffect(() => {
+    const id = listboxRef.current?.id;
+    if (id) onListboxId?.(id);
+  }, [onListboxId, portalRoot]);
+
+  useLayoutEffect(() => {
+    if (!floating) return;
+    setPortalRoot(openerRef.current?.closest<HTMLDialogElement>('dialog') ?? document.body);
+  }, [floating, openerRef]);
 
   useLayoutEffect(() => {
     searchRef.current = search;
@@ -117,7 +130,7 @@ export function DirectorMenu({
   // do not steal focus back — a menu entry that opens a dialog has to be able to hand it over.
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
-  }, []);
+  }, [portalRoot]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -196,7 +209,6 @@ export function DirectorMenu({
   const menu = (
     <Command
       ref={menuRef}
-      id={id}
       /* Names the filter field: `cmdk` renders this as the input's visually hidden label. */
       label={`Search ${label.toLocaleLowerCase()}`}
       className={className}
@@ -216,12 +228,11 @@ export function DirectorMenu({
           placeholder={searchPlaceholder ?? 'Search'}
         />
       </div>
-      <Command.List label={label} className="director-menu-list">
+      <Command.List ref={listboxRef} label={label} className="director-menu-list">
         <Command.Empty className="director-menu-empty">Nothing matches “{search}”.</Command.Empty>
         {children}
       </Command.List>
     </Command>
   );
-  const portalRoot = openerRef.current?.closest<HTMLDialogElement>('dialog') ?? document.body;
-  return floating ? createPortal(menu, portalRoot) : menu;
+  return floating ? (portalRoot ? createPortal(menu, portalRoot) : null) : menu;
 }
