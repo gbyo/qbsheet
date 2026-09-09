@@ -1540,10 +1540,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
   }, []);
 
   const restoreLocalLivePublication = useCallback(
-    async (
-      outgoing: DirectorState,
-      documentTransition: DirectorDocumentTransition,
-    ): Promise<void> => {
+    async (outgoing: DirectorState, documentTransition: DirectorDocumentTransition): Promise<void> => {
       const publication = outgoing.live;
       if (
         !publication?.settings.enabled ||
