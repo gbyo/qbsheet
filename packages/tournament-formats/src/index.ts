@@ -9,3 +9,4 @@ export * from './yft';
 export * from './stats';
 export * from './reportDetail';
 export * from './standingsReport';
+export * from './stageAwareStandingsReport';
