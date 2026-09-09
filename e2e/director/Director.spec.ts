@@ -77,7 +77,7 @@ test('Director accepts a QBJ document even when its upload is named .json', asyn
   });
 
   await expect(page.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible();
-  await expect(page.getByRole('status')).toContainText('QBJ tournament imported');
+  await expect(page.locator('.director-toast')).toContainText('QBJ tournament imported');
 });
 
 test('Director layout keeps dialog, table, status, and narrow-window contracts', async ({ page }) => {
