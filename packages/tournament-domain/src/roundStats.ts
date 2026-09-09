@@ -58,7 +58,7 @@ export interface CanonicalRoundStatsRow {
   pointsPerTeamPerXTuh: number | null;
   /** Superpowers divided by positive tossup conversions. */
   superpowerRate: number | null;
-  /** Powers (including superpowers) divided by positive tossup conversions. */
+  /** Powers divided by positive tossup conversions. */
   powerRate: number | null;
   /** Positive tossup conversions divided by tossups read. */
   tossupConversionRate: number | null;
@@ -191,11 +191,17 @@ function aggregateRow(
       ? played.reduce((sum, game) => sum + (game.tossupsRead ?? 0) * game.teamIds.length, 0)
       : 0;
   const points = played.reduce(
-    (sum, game) => sum + game.teamPoints.filter((value) => Number.isFinite(value)).reduce((inner, value) => inner + value, 0),
+    (sum, game) =>
+      sum +
+      game.teamPoints
+        .filter((value) => Number.isFinite(value))
+        .reduce((inner, value) => inner + value, 0),
     0,
   );
   const pointsPerTeamPerXTuh =
-    regulation !== null && teamQuestionDenominator > 0 ? (points / teamQuestionDenominator) * regulation : null;
+    regulation !== null && teamQuestionDenominator > 0
+      ? (points / teamQuestionDenominator) * regulation
+      : null;
   const tossupConversionRate =
     tossupsRead !== null && tossupsRead > 0 && positiveConversions !== null
       ? positiveConversions / tossupsRead
@@ -205,19 +211,24 @@ function aggregateRow(
   const powerRelevant = applicability(played, 'powerApplicable', 'powers');
   const negRelevant = applicability(played, 'negApplicable', 'negs');
   const bonusRelevant = applicability(played, 'bonusApplicable', 'bonusesHeard');
-  const superpowerComparable = applicabilityComparable(played, 'superpowerApplicable', 'superpowers');
+  const superpowerComparable = applicabilityComparable(
+    played,
+    'superpowerApplicable',
+    'superpowers',
+  );
   const powerComparable = applicabilityComparable(played, 'powerApplicable', 'powers');
   const negComparable = applicabilityComparable(played, 'negApplicable', 'negs');
 
   const superpowerRate =
-    superpowerComparable && positiveConversions !== null && positiveConversions > 0 && superpowers !== null
+    superpowerComparable &&
+    positiveConversions !== null &&
+    positiveConversions > 0 &&
+    superpowers !== null
       ? superpowers / positiveConversions
       : null;
-  const earlyConversions =
-    superpowers !== null && powers !== null ? superpowers + powers : null;
   const powerRate =
-    powerComparable && positiveConversions !== null && positiveConversions > 0 && earlyConversions !== null
-      ? earlyConversions / positiveConversions
+    powerComparable && positiveConversions !== null && positiveConversions > 0 && powers !== null
+      ? powers / positiveConversions
       : null;
   const negRatePerXTuh =
     negComparable && regulation !== null && tossupsRead !== null && tossupsRead > 0 && negs !== null
@@ -280,7 +291,9 @@ function aggregateRow(
     notes.push(`${exactTossups.length}/${played.length} played games report exact tossups read.`);
   }
   if (played.length > 0 && exactRegulation.length !== played.length) {
-    notes.push(`${exactRegulation.length}/${played.length} played games have a historical regulation length.`);
+    notes.push(
+      `${exactRegulation.length}/${played.length} played games have a historical regulation length.`,
+    );
   } else if (played.length > 0 && regulation === null) {
     notes.push('Mixed regulation lengths; regulation-normalized metrics are unavailable.');
   }
@@ -302,7 +315,9 @@ function aggregateRow(
     bonusGames.length > 0 &&
     bonusGames.some((game) => !finitePositive(game.maximumBonusScore))
   ) {
-    notes.push('Bonus maximum is unknown for at least one included game; bonus conversion is unavailable.');
+    notes.push(
+      'Bonus maximum is unknown for at least one included game; bonus conversion is unavailable.',
+    );
   }
 
   const teams = new Set(facts.flatMap((game) => [...game.teamIds])).size;
@@ -357,6 +372,9 @@ export function deriveRoundStats(facts: readonly RoundStatsGameFacts[]): Canonic
   );
   return {
     rows,
-    total: facts.length > 0 ? aggregateRow(facts, { roundId: 'overall', roundName: 'Overall' }) : null,
+    total:
+      facts.length > 0
+        ? aggregateRow(facts, { roundId: 'overall', roundName: 'Overall' })
+        : null,
   };
 }
