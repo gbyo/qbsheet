@@ -89,9 +89,11 @@ export function connectionBelongsTo(
   connection: IConnectedSession | null,
   record: IStoredGameRecord,
 ): boolean {
-  if (!connection?.sessionId || !connection.sessionToken) return false;
+  const hasPrimary = Boolean(connection?.sessionId && connection.sessionToken);
+  const hasLan = Boolean(connection?.lanSessionId && connection.lanSessionToken);
+  if (!connection || (!hasPrimary && !hasLan)) return false;
   if (connection.gameRecordId !== undefined) return connection.gameRecordId === record.id;
-  return connection.sessionId === record.gameKey;
+  return connection.sessionId === record.gameKey || connection.lanSessionId === record.gameKey;
 }
 
 /** The package's roster shape, rebuilt from the names a correction settled on. */
@@ -201,7 +203,10 @@ export default function ScoringScreen(props: {
         operatorName: operatorName?.trim() || undefined,
         roomName: connection.roomName,
       },
-      credentials: { sessionId: connection.sessionId as string, token: connection.sessionToken as string },
+      credentials:
+        connection.sessionId && connection.sessionToken
+          ? { sessionId: connection.sessionId, token: connection.sessionToken }
+          : { sessionId: '', token: '' },
       tournamentKey: connection.tournamentKey,
     };
   }, [record, connection, operatorName]);
@@ -274,6 +279,7 @@ export default function ScoringScreen(props: {
     lanClient,
     lanIdentity,
     lanCredentials,
+    initialLan: Boolean(live && !live.credentials.sessionId && lanCredentials),
   });
 
   /**
@@ -393,22 +399,27 @@ export default function ScoringScreen(props: {
       if (live) {
         // The capability is device-only. If this write is refused, the live send still happens and
         // the completed QBJ remains safe; only a post-reload retry cannot be promised.
-        resultDelivery.remember(
-          record.id,
-          {
-            baseUrl: live.client.baseUrl,
-            sessionId: live.credentials.sessionId,
-            sessionToken: live.credentials.token,
-            ...(lanBaseUrl !== undefined && lanCredentials !== undefined
-              ? {
-                  lanBaseUrl,
-                  lanSessionId: lanCredentials.sessionId,
-                  lanSessionToken: lanCredentials.token,
-                }
-              : {}),
-          },
-          completedAt,
-        );
+        const retryCapability = live.credentials.sessionId
+          ? {
+              baseUrl: live.client.baseUrl,
+              sessionId: live.credentials.sessionId,
+              sessionToken: live.credentials.token,
+              ...(lanBaseUrl !== undefined && lanCredentials !== undefined
+                ? {
+                    lanBaseUrl,
+                    lanSessionId: lanCredentials.sessionId,
+                    lanSessionToken: lanCredentials.token,
+                  }
+                : {}),
+            }
+          : lanBaseUrl !== undefined && lanCredentials !== undefined
+            ? {
+                baseUrl: lanBaseUrl,
+                sessionId: lanCredentials.sessionId,
+                sessionToken: lanCredentials.token,
+              }
+            : null;
+        if (retryCapability) resultDelivery.remember(record.id, retryCapability, completedAt);
 
         // Send exactly the object just committed as `finalQbj`. The internal scorer recovery layer
         // is for this device and must not be a second version of the portable QBTCP/file result.

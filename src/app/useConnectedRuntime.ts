@@ -159,6 +159,8 @@ export interface IConnectedRuntimeInput {
   /** Credentials minted by the LAN authority; required before LAN can be selected. */
   lanIdentity?: IRoomIdentity;
   lanCredentials?: ISessionCredentials;
+  /** The game opened on LAN while the preferred Internet endpoint was unavailable. */
+  initialLan?: boolean;
   /**
    * How the realtime stream is opened. Defaults to the browser WebSocket; `null`
    * disables the stream (honest HTTP-only operation); tests inject a fake.
@@ -452,6 +454,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     lanClient,
     lanIdentity,
     lanCredentials,
+    initialLan = false,
     socketFactory,
   } = input;
 
@@ -502,8 +505,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * yet, so claiming the stream would be inferring support from the URL — exactly what
    * the contract forbids. A client with no address (a file game) starts local-only.
    */
+  const startsOnLan = Boolean(initialLan && lanClient && lanIdentity && lanCredentials);
   const [transport, setTransport] = useState<QbtcpTransport>(() =>
-    client.baseUrl ? { kind: 'internet-http', endpoint: client.baseUrl } : { kind: 'none' },
+    startsOnLan && lanClient
+      ? { kind: 'lan', endpoint: lanClient.baseUrl }
+      : client.baseUrl
+        ? { kind: 'internet-http', endpoint: client.baseUrl }
+        : { kind: 'none' },
   );
   /**
    * The contract-level connection underneath the endpoint-aware transport above.
@@ -515,7 +523,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    */
   const contractRef = useRef<TransportState>('http-only');
   /** Sticky failover memory for this mounted game. Reset per mount, never per poll. */
-  const failoverRef = useRef<IFailoverMemory>(initialFailoverMemory);
+  const failoverRef = useRef<IFailoverMemory>(
+    startsOnLan ? { consecutivePrimaryFailures: 0, lanActive: true } : initialFailoverMemory,
+  );
   /** The live stream client, when discovery advertised one and this browser could open it. */
   const streamRef = useRef<QbtcpStreamClient | null>(null);
   /**

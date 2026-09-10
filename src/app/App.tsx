@@ -1080,9 +1080,11 @@ export default function App() {
       if (!isCurrent()) return staleStart();
       // The session id is the game key for a new game, so a browser that reloads finds the same
       // history the server would recover, and so two devices in one room cannot collide on a key.
+      const activeCredentials = start.credentials ?? start.lanCredentials;
+      if (!activeCredentials) return { ok: false, error: 'Tournament control did not open this game.' };
       const record = await ensureRecord(start.definition, {
         connected: true,
-        gameKey: start.credentials.sessionId,
+        gameKey: activeCredentials.sessionId,
         resumeExisting: true,
         isCurrent,
         failureScreen: { kind: 'room' },
@@ -1099,8 +1101,9 @@ export default function App() {
       if (!isCurrent()) return staleStart();
       const stored: Omit<IConnectedSession, 'version' | 'updatedAt'> = {
         ...start.room,
-        sessionId: start.credentials.sessionId,
-        sessionToken: start.credentials.token,
+        ...(start.credentials
+          ? { sessionId: start.credentials.sessionId, sessionToken: start.credentials.token }
+          : {}),
         ...(start.lanCredentials
           ? {
               lanSessionId: start.lanCredentials.sessionId,
