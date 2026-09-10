@@ -301,9 +301,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -342,11 +343,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -363,12 +393,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -390,7 +420,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -406,11 +436,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -425,8 +471,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -448,7 +494,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -464,11 +510,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -483,8 +545,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -506,7 +568,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -529,6 +591,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -541,8 +619,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -564,7 +642,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -587,6 +665,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -599,8 +693,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -633,9 +727,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -674,11 +769,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -695,12 +819,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -722,7 +846,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -738,11 +862,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -757,8 +897,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -780,7 +920,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -796,11 +936,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -815,8 +971,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -838,7 +994,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -861,6 +1017,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -873,8 +1045,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -896,7 +1068,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -919,6 +1091,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -931,8 +1119,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -965,9 +1153,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -1006,11 +1195,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -1027,12 +1245,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -1054,7 +1272,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -1070,11 +1288,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -1089,8 +1323,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -1112,7 +1346,7 @@
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -1128,11 +1362,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -1147,8 +1397,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -1170,7 +1420,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -1193,6 +1443,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -1205,8 +1471,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -1228,7 +1494,7 @@
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -1251,6 +1517,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -1263,8 +1545,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -1313,26 +1595,49 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "alignment": "trailing",
+          "precision": 2,
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 2,
-          "alignment": "trailing",
           "description": "Points per bonus"
-        },
-        {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 1,
-          "alignment": "trailing"
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1361,12 +1666,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1399,12 +1716,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1437,12 +1766,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1475,12 +1816,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,
@@ -1531,26 +1884,49 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "alignment": "trailing",
+          "precision": 2,
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 2,
-          "alignment": "trailing",
           "description": "Points per bonus"
-        },
-        {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 1,
-          "alignment": "trailing"
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1579,12 +1955,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1617,12 +2005,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1655,12 +2055,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1693,12 +2105,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,
@@ -1749,26 +2173,49 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "alignment": "trailing",
+          "precision": 2,
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 2,
-          "alignment": "trailing",
           "description": "Points per bonus"
-        },
-        {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
+          "alignment": "trailing",
           "precision": 1,
-          "alignment": "trailing"
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1797,12 +2244,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1835,12 +2294,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1873,12 +2344,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1911,12 +2394,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,
@@ -1933,6 +2428,12 @@
       "scopeLabel": "Overall",
       "columns": [
         {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
           "id": "player",
           "label": "Player",
           "kind": "player",
@@ -1945,10 +2446,40 @@
           "alignment": "leading"
         },
         {
+          "id": "year",
+          "label": "Grade",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "School year or grade"
+        },
+        {
+          "id": "ug",
+          "label": "UG",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Undergraduate eligible"
+        },
+        {
+          "id": "d2",
+          "label": "D2",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Division II eligible"
+        },
+        {
           "id": "games",
           "label": "G",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Tossups heard"
         },
         {
           "id": "powers",
@@ -1975,14 +2506,31 @@
           "id": "points",
           "label": "Pts",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Total points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonus",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
         }
       ],
       "rows": [
@@ -1992,6 +2540,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
               "value": "Player 0-0",
               "entityId": "player-0-0"
             },
@@ -2000,8 +2552,24 @@
               "entityId": "team-a"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 3,
@@ -2020,8 +2588,16 @@
               "display": "85"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 85.0,
+              "display": "85.0"
+            },
+            {
+              "value": 4.25,
+              "display": "4.25"
+            },
+            {
+              "value": 20,
+              "display": "20"
             }
           ]
         },
@@ -2031,6 +2607,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
               "value": "Player 1-0",
               "entityId": "player-1-0"
             },
@@ -2039,8 +2619,24 @@
               "entityId": "team-b"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 1,
@@ -2059,8 +2655,16 @@
               "display": "40"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 40.0,
+              "display": "40.0"
+            },
+            {
+              "value": 2.0,
+              "display": "2.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -2070,6 +2674,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-1",
               "entityId": "player-0-1"
             },
@@ -2078,8 +2686,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2098,8 +2722,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2109,6 +2741,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-2",
               "entityId": "player-0-2"
             },
@@ -2117,8 +2753,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -2137,8 +2789,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2148,6 +2808,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-3",
               "entityId": "player-0-3"
             },
@@ -2156,8 +2820,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2176,8 +2856,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2187,6 +2875,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-1",
               "entityId": "player-1-1"
             },
@@ -2195,8 +2887,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2215,8 +2923,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2226,6 +2942,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-2",
               "entityId": "player-1-2"
             },
@@ -2234,8 +2954,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2254,8 +2990,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2265,6 +3009,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-3",
               "entityId": "player-1-3"
             },
@@ -2273,8 +3021,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2293,8 +3057,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2304,6 +3076,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-0",
               "entityId": "player-2-0"
             },
@@ -2312,8 +3088,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2332,8 +3124,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 30,
+              "display": "30"
             }
           ]
         },
@@ -2343,6 +3143,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-1",
               "entityId": "player-2-1"
             },
@@ -2351,8 +3155,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2371,8 +3191,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2382,6 +3210,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-2",
               "entityId": "player-2-2"
             },
@@ -2390,8 +3222,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2410,8 +3258,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2421,6 +3277,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-3",
               "entityId": "player-2-3"
             },
@@ -2429,8 +3289,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -2449,8 +3325,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2460,6 +3344,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-0",
               "entityId": "player-3-0"
             },
@@ -2468,8 +3356,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2488,8 +3392,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -2499,6 +3411,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-1",
               "entityId": "player-3-1"
             },
@@ -2507,8 +3423,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2527,8 +3459,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2538,6 +3478,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-2",
               "entityId": "player-3-2"
             },
@@ -2546,8 +3490,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2566,8 +3526,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2577,6 +3545,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-3",
               "entityId": "player-3-3"
             },
@@ -2585,8 +3557,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2605,8 +3593,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         }
@@ -2619,6 +3615,12 @@
       "scopeLabel": "Preliminary",
       "columns": [
         {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
           "id": "player",
           "label": "Player",
           "kind": "player",
@@ -2631,10 +3633,40 @@
           "alignment": "leading"
         },
         {
+          "id": "year",
+          "label": "Grade",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "School year or grade"
+        },
+        {
+          "id": "ug",
+          "label": "UG",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Undergraduate eligible"
+        },
+        {
+          "id": "d2",
+          "label": "D2",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Division II eligible"
+        },
+        {
           "id": "games",
           "label": "G",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Tossups heard"
         },
         {
           "id": "powers",
@@ -2661,14 +3693,31 @@
           "id": "points",
           "label": "Pts",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Total points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonus",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
         }
       ],
       "rows": [
@@ -2678,6 +3727,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
               "value": "Player 0-0",
               "entityId": "player-0-0"
             },
@@ -2686,8 +3739,24 @@
               "entityId": "team-a"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 3,
@@ -2706,8 +3775,16 @@
               "display": "85"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 85.0,
+              "display": "85.0"
+            },
+            {
+              "value": 4.25,
+              "display": "4.25"
+            },
+            {
+              "value": 20,
+              "display": "20"
             }
           ]
         },
@@ -2717,6 +3794,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
               "value": "Player 1-0",
               "entityId": "player-1-0"
             },
@@ -2725,8 +3806,24 @@
               "entityId": "team-b"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 1,
@@ -2745,8 +3842,16 @@
               "display": "40"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 40.0,
+              "display": "40.0"
+            },
+            {
+              "value": 2.0,
+              "display": "2.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -2756,6 +3861,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-1",
               "entityId": "player-0-1"
             },
@@ -2764,8 +3873,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2784,8 +3909,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2795,6 +3928,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-2",
               "entityId": "player-0-2"
             },
@@ -2803,8 +3940,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -2823,8 +3976,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2834,6 +3995,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-3",
               "entityId": "player-0-3"
             },
@@ -2842,8 +4007,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2862,8 +4043,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2873,6 +4062,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-1",
               "entityId": "player-1-1"
             },
@@ -2881,8 +4074,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2901,8 +4110,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2912,6 +4129,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-2",
               "entityId": "player-1-2"
             },
@@ -2920,8 +4141,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2940,8 +4177,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2951,6 +4196,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-3",
               "entityId": "player-1-3"
             },
@@ -2959,8 +4208,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -2979,8 +4244,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2990,6 +4263,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-0",
               "entityId": "player-2-0"
             },
@@ -2998,8 +4275,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3018,8 +4311,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 30,
+              "display": "30"
             }
           ]
         },
@@ -3029,6 +4330,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-1",
               "entityId": "player-2-1"
             },
@@ -3037,8 +4342,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3057,8 +4378,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3068,6 +4397,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-2",
               "entityId": "player-2-2"
             },
@@ -3076,8 +4409,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3096,8 +4445,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3107,6 +4464,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-3",
               "entityId": "player-2-3"
             },
@@ -3115,8 +4476,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -3135,8 +4512,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3146,6 +4531,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-0",
               "entityId": "player-3-0"
             },
@@ -3154,8 +4543,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3174,8 +4579,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -3185,6 +4598,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-1",
               "entityId": "player-3-1"
             },
@@ -3193,8 +4610,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3213,8 +4646,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3224,6 +4665,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-2",
               "entityId": "player-3-2"
             },
@@ -3232,8 +4677,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3252,8 +4713,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3263,6 +4732,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-3",
               "entityId": "player-3-3"
             },
@@ -3271,8 +4744,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3291,8 +4780,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         }
@@ -3305,6 +4802,12 @@
       "scopeLabel": "Preliminary · Pool A",
       "columns": [
         {
+          "id": "rank",
+          "label": "#",
+          "kind": "rank",
+          "alignment": "trailing"
+        },
+        {
           "id": "player",
           "label": "Player",
           "kind": "player",
@@ -3317,10 +4820,40 @@
           "alignment": "leading"
         },
         {
+          "id": "year",
+          "label": "Grade",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "School year or grade"
+        },
+        {
+          "id": "ug",
+          "label": "UG",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Undergraduate eligible"
+        },
+        {
+          "id": "d2",
+          "label": "D2",
+          "kind": "text",
+          "alignment": "trailing",
+          "description": "Division II eligible"
+        },
+        {
           "id": "games",
           "label": "G",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Tossups heard"
         },
         {
           "id": "powers",
@@ -3347,14 +4880,31 @@
           "id": "points",
           "label": "Pts",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Total points"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonus",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
         }
       ],
       "rows": [
@@ -3364,6 +4914,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
               "value": "Player 0-0",
               "entityId": "player-0-0"
             },
@@ -3372,8 +4926,24 @@
               "entityId": "team-a"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 3,
@@ -3392,8 +4962,16 @@
               "display": "85"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 85.0,
+              "display": "85.0"
+            },
+            {
+              "value": 4.25,
+              "display": "4.25"
+            },
+            {
+              "value": 20,
+              "display": "20"
             }
           ]
         },
@@ -3403,6 +4981,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
               "value": "Player 1-0",
               "entityId": "player-1-0"
             },
@@ -3411,8 +4993,24 @@
               "entityId": "team-b"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 1,
@@ -3431,8 +5029,16 @@
               "display": "40"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 40.0,
+              "display": "40.0"
+            },
+            {
+              "value": 2.0,
+              "display": "2.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -3442,6 +5048,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-1",
               "entityId": "player-0-1"
             },
@@ -3450,8 +5060,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3470,8 +5096,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3481,6 +5115,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-2",
               "entityId": "player-0-2"
             },
@@ -3489,8 +5127,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -3509,8 +5163,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3520,6 +5182,10 @@
           "teamId": "team-a",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 0-3",
               "entityId": "player-0-3"
             },
@@ -3528,8 +5194,24 @@
               "entityId": "team-a"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3548,8 +5230,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3559,6 +5249,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-1",
               "entityId": "player-1-1"
             },
@@ -3567,8 +5261,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3587,8 +5297,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3598,6 +5316,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-2",
               "entityId": "player-1-2"
             },
@@ -3606,8 +5328,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3626,8 +5364,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3637,6 +5383,10 @@
           "teamId": "team-b",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 1-3",
               "entityId": "player-1-3"
             },
@@ -3645,8 +5395,24 @@
               "entityId": "team-b"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3665,8 +5431,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3676,6 +5450,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-0",
               "entityId": "player-2-0"
             },
@@ -3684,8 +5462,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3704,8 +5498,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 30,
+              "display": "30"
             }
           ]
         },
@@ -3715,6 +5517,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-1",
               "entityId": "player-2-1"
             },
@@ -3723,8 +5529,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3743,8 +5565,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3754,6 +5584,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-2",
               "entityId": "player-2-2"
             },
@@ -3762,8 +5596,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3782,8 +5632,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3793,6 +5651,10 @@
           "teamId": "team-c",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 2-3",
               "entityId": "player-2-3"
             },
@@ -3801,8 +5663,24 @@
               "entityId": "team-c"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 0.5,
+              "display": "0.50"
+            },
+            {
+              "value": 10,
+              "display": "10"
             },
             {
               "value": 0,
@@ -3821,8 +5699,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3832,6 +5718,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-0",
               "entityId": "player-3-0"
             },
@@ -3840,8 +5730,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 11,
+              "display": "Grade 11"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3860,8 +5766,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 10,
+              "display": "10"
             }
           ]
         },
@@ -3871,6 +5785,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-1",
               "entityId": "player-3-1"
             },
@@ -3879,8 +5797,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 10,
+              "display": "Grade 10"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3899,8 +5833,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3910,6 +5852,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-2",
               "entityId": "player-3-2"
             },
@@ -3918,8 +5864,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 9,
+              "display": "Grade 9"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3938,8 +5900,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3949,6 +5919,10 @@
           "teamId": "team-d",
           "cells": [
             {
+              "value": 3,
+              "display": "3="
+            },
+            {
               "value": "Player 3-3",
               "entityId": "player-3-3"
             },
@@ -3957,8 +5931,24 @@
               "entityId": "team-d"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": 12,
+              "display": "Grade 12"
+            },
+            {
+              "value": "yes",
+              "display": "Yes"
+            },
+            {
+              "value": "no",
+              "display": "No"
+            },
+            {
+              "value": 1.0,
+              "display": "1"
+            },
+            {
+              "value": 20,
+              "display": "20"
             },
             {
               "value": 0,
@@ -3977,8 +5967,16 @@
               "display": "0"
             },
             {
-              "value": 0,
+              "value": 0.0,
               "display": "0.0"
+            },
+            {
+              "value": 0.0,
+              "display": "0.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             }
           ]
         }

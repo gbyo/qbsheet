@@ -72,6 +72,11 @@ export function privacyFixture(): DirectorState {
       active: true,
       rosterNumber: slot + 1,
       notes: SENTINEL,
+      // Published metadata for the privacy sweep: distinctive values the
+      // targeted tests can search for when publication is off.
+      ...(teamIndex === 0 && slot === 0
+        ? { schoolYear: 12, undergraduateEligible: true, divisionTwoEligible: false }
+        : {}),
     })),
   );
 
