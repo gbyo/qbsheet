@@ -209,9 +209,7 @@ function rankRows<T>(rows: T[], compare: (left: T, right: T) => number): T[] {
 function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
   const tossups =
-    mutable.tossupsHeardKnown && typeof mutable.tossupsHeard === 'number'
-      ? mutable.tossupsHeard
-      : 0;
+    mutable.tossupsHeardKnown && typeof mutable.tossupsHeard === 'number' ? mutable.tossupsHeard : 0;
   const bonuses = mutable.bonusesHeard;
   return {
     rank: 0,

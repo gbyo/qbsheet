@@ -14,10 +14,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import {
-  buildStandingsTable,
-  buildTeamStatisticsTable,
-} from '@qbsheet/qblive-projection';
+import { buildStandingsTable, buildTeamStatisticsTable } from '@qbsheet/qblive-projection';
 import { parseCsvTable } from '@qbsheet/tournament-formats';
 import { renderStageAwareStandingsReport } from '@qbsheet/tournament-formats';
 import { derivePlayerStandings, deriveTeamStandings } from '../src/director/domain';
@@ -42,9 +39,7 @@ const naming = {
 const overall = { id: 'overall', label: 'Overall' };
 
 function teamStanding(teamId = 'team-a') {
-  const standing = deriveTeamStandings(playedTournament()).find(
-    (entry) => entry.teamId === teamId,
-  );
+  const standing = deriveTeamStandings(playedTournament()).find((entry) => entry.teamId === teamId);
   if (!standing) throw new Error(`missing standing for ${teamId}`);
   return standing;
 }
@@ -61,7 +56,10 @@ function csvRow(csv: string, teamName: string): Record<string, string> {
 }
 
 function qbliveCell(
-  table: { columns: { id: string }[]; rows: { teamId?: string; cells: { value: unknown; display?: string }[] }[] },
+  table: {
+    columns: { id: string }[];
+    rows: { teamId?: string; cells: { value: unknown; display?: string }[] }[];
+  },
   teamId: string,
   columnId: string,
 ) {
@@ -125,9 +123,7 @@ describe('one tournament, every surface (#754)', () => {
 
   test('player facts agree between the domain, Director, and printable rows', () => {
     const state = playedTournament();
-    const standing = derivePlayerStandings(state).find(
-      (entry) => entry.playerId === 'player-a',
-    )!;
+    const standing = derivePlayerStandings(state).find((entry) => entry.playerId === 'player-a')!;
     expect(standing.gamesPlayed).toBe(1);
     expect(standing.tossupsHeard).toBe(20);
 
