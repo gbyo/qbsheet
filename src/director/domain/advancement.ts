@@ -40,7 +40,50 @@ export function advancementBasisToken(state: DirectorState, phase: Phase): strin
     pools: phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId)?.teamIds ?? []),
     teams: state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
     games: state.games.filter((game) => roundIds.has(game.roundId)),
+    // The standings tiebreakers decide cutoffs, so they are part of the basis (#673). A
+    // tiebreaker reorder after a commit must read as a changed basis, never silently
+    // current. Scoring point values are deliberately excluded: accepted games resolve
+    // under their pinned definitions, so a future-defaults save cannot move history.
+    tiebreakers: phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers,
   });
+}
+
+/** A committed advancement record and whether its basis still verifies. */
+export type AdvancementBasisStatus = 'current' | 'stale' | 'unknown' | 'uncommitted';
+
+export function latestAdvancementCommit(
+  state: DirectorState,
+  sourcePhaseId: DirectorId,
+): DirectorState['audit'][number] | undefined {
+  return [...state.audit].reverse().find((entry) => {
+    if (entry.type !== 'advancement-committed' || !entry.details || typeof entry.details !== 'object') {
+      return false;
+    }
+    return (entry.details as Record<string, unknown>).sourcePhaseId === sourcePhaseId;
+  });
+}
+
+/**
+ * Whether the latest committed advancement for a phase still verifies (#673).
+ *
+ * Committed advancement is never presented as current unless its stored basis token
+ * matches a fresh computation. Commits that predate basis tracking read as `unknown`,
+ * which callers treat like `stale` with honest copy.
+ */
+export function advancementBasisStatus(
+  state: DirectorState,
+  sourcePhaseId: DirectorId,
+): AdvancementBasisStatus {
+  const phase = state.phases.find((entry) => entry.id === sourcePhaseId);
+  if (!phase) return 'uncommitted';
+  const commit = latestAdvancementCommit(state, sourcePhaseId);
+  if (!commit) return 'uncommitted';
+  const stored =
+    commit.details && typeof commit.details === 'object'
+      ? (commit.details as Record<string, unknown>).basisToken
+      : undefined;
+  if (typeof stored !== 'string') return 'unknown';
+  return stored === advancementBasisToken(state, phase) ? 'current' : 'stale';
 }
 
 export function previewAdvancement(state: DirectorState, phase: Phase): AdvancementPreview {

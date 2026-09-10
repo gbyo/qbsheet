@@ -14,6 +14,7 @@ import {
   packetRetirementImpact,
   phaseCanComplete,
   packetUseConflicts,
+  advancementBasisStatus,
   previewAdvancement,
   recommendTournamentPlan,
   roundScheduleIsValid,
@@ -1095,6 +1096,11 @@ describe('Director integration hardening', () => {
     ).toBe(true);
     expect(committedState.packets.some((packet) => packet.name === 'Unrelated packet')).toBe(true);
     expect(committedState.audit.filter((event) => event.type === 'advancement-committed')).toHaveLength(1);
+    // The commit persists its basis, and the committed advancement verifies as current (#673).
+    const commitEvent = committedState.audit.find((event) => event.type === 'advancement-committed')!;
+    expect((commitEvent.details as { basisToken?: unknown }).basisToken).toBe(preview.basisToken);
+    expect((commitEvent.details as { qualifierTeamIds?: unknown }).qualifierTeamIds).toEqual(qualifierIds);
+    expect(advancementBasisStatus(committedState, prelim.id)).toBe('current');
     // Game results are untouched by the rebracket.
     expect(live.games.length).toBe(gamesBefore);
     expect(

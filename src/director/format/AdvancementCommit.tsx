@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { DirectorController } from '../state/useDirectorController';
+import { advancementBasisStatus } from '../domain';
 import type { AdvancementPreview, DirectorState } from '../domain';
 import type { AnnounceInput } from '../notices';
 import { errorNotice, infoNotice } from '../notices';
-import { Button, Checkbox, Field, Select, TextInput } from '../components';
+import { Button, Callout, Checkbox, Field, Select, TextInput } from '../components';
 import {
   advancementCutoffDecisions,
   cutoffDecisionsAreValid,
@@ -90,6 +91,8 @@ export function AdvancementCommit({
     return next;
   }, [selectedTeams, targetPools, moves]);
 
+  const basisStatus = useMemo(() => advancementBasisStatus(state, sourcePhaseId), [state, sourcePhaseId]);
+
   if (targets.length === 0 || !target) return null;
 
   const previewQualifierIds = new Set(preview.qualifiers.map((team) => team.id));
@@ -127,6 +130,13 @@ export function AdvancementCommit({
   return (
     <div className="director-advancement-commit">
       <h3>Advance to {target.name}</h3>
+      {(basisStatus === 'stale' || basisStatus === 'unknown') && (
+        <Callout tone="warning" title="Previously committed advancement no longer verifies">
+          {basisStatus === 'stale'
+            ? 'The qualifying games, teams, pools, rule, or tiebreakers changed since the last commit. Recompute the preview and commit again rather than trusting the old placement.'
+            : 'The last commit predates basis tracking, so it cannot be verified. Recompute the preview and commit again before downstream play.'}
+        </Callout>
+      )}
       {rule && (
         <p className="director-text-secondary">
           Top {rule.qualifiersPerPool} from each pool
