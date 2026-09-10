@@ -545,6 +545,11 @@ function newBouncebackSideTotals(): BouncebackSideTotals {
   };
 }
 
+/** A forfeit with no bounceback breakdown on either side is an administrative placeholder. */
+export function isPureForfeitPlaceholder(game: GameRecord): boolean {
+  return game.status === 'forfeit' && game.scores.every((score) => score.bouncebacks === null);
+}
+
 /**
  * One side of one game into shared bounceback totals (#748, #750).
  *
@@ -559,19 +564,29 @@ function accumulateBouncebackSide(
   own: TeamGameScore,
   opponent: TeamGameScore,
   game: GameRecord,
-  rules: TournamentRules,
+  rules: TournamentRules | null | undefined,
   detailKnown: boolean,
 ): void {
-  if (game.status === 'forfeit' && own.bouncebacks === null) return;
+  if (game.status === 'forfeit' && own.bouncebacks === null) {
+    // A pure-forfeit placeholder carries no signal; a partial forfeit unknowns the
+    // side that kept no breakdown while the entered side aggregates as-entered.
+    if (!isPureForfeitPlaceholder(game)) {
+      totals.pointsKnown = false;
+      totals.partsKnown = false;
+    }
+    return;
+  }
   if (own.bouncebacks === null) {
     totals.pointsKnown = false;
     totals.partsKnown = false;
     return;
   }
   totals.points += own.bouncebacks ?? 0;
-  const heard = detailKnown
-    ? bouncebackPartsHeardForTeam(opponent.bonuses, opponent.bonusPoints, rules)
-    : null;
+  if (!rules || !detailKnown) {
+    totals.partsKnown = false;
+    return;
+  }
+  const heard = bouncebackPartsHeardForTeam(opponent.bonuses, opponent.bonusPoints, rules);
   if (heard === null) {
     totals.partsKnown = false;
     return;
@@ -656,9 +671,11 @@ export function bouncebackDerivationForTeam(
     if (!own) continue;
     const opponent = game.scores.find((score) => score.teamId !== teamId);
     if (!opponent) continue;
-    if (game.status === 'forfeit' && own.bouncebacks === null) continue;
+    if (game.status === 'forfeit' && own.bouncebacks === null && isPureForfeitPlaceholder(game)) continue;
     contributingGames += 1;
-    const rules = state ? (rulesForGame(state, game) ?? defaultRules) : defaultRules;
+    // Exact game rules are required for parts denominators; without state the live
+    // defaults apply, but a state that names no rules leaves parts unavailable.
+    const rules = state ? rulesForGame(state, game) : defaultRules;
     accumulateBouncebackSide(totals, own, opponent, game, rules, gameDetailedCountsKnown(game));
     bonuses += own.bonuses;
     bonusPoints += own.bonusPoints;
