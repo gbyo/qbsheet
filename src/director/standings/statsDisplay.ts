@@ -102,7 +102,12 @@ export function formatPpb(standing: Pick<TeamStanding, 'bonuses' | 'bonusPoints'
   return standing.bonuses > 0 ? (standing.bonusPoints / standing.bonuses).toFixed(2) : UNKNOWN_STAT;
 }
 
-export function formatTuh(standing: Pick<PlayerStanding, 'tossupsHeard' | 'tossupsHeardKnown'>): string {
+export interface TossupsHeardKnown {
+  tossupsHeard: number;
+  tossupsHeardKnown?: boolean;
+}
+
+export function formatTuh(standing: TossupsHeardKnown): string {
   return standing.tossupsHeardKnown === false ? UNKNOWN_STAT : String(standing.tossupsHeard);
 }
 
@@ -129,46 +134,210 @@ export function formatPlayerPpg(standing: Pick<PlayerStanding, 'gamesPlayedKnown
 }
 
 /** Points per tossup heard needs a known, nonzero denominator; otherwise "—". */
-export function formatPptuh(
-  points: number,
-  standing: Pick<PlayerStanding, 'tossupsHeard' | 'tossupsHeardKnown'>,
-): string {
+export function formatPptuh(points: number, standing: TossupsHeardKnown): string {
   if (standing.tossupsHeardKnown === false || standing.tossupsHeard === 0) return UNKNOWN_STAT;
   return (points / standing.tossupsHeard).toFixed(2);
+}
+
+/** Signed point differential: a bare number cannot tell a lead from a deficit. */
+export function formatMargin(standing: Pick<TeamStanding, 'margin'>): string {
+  return `${standing.margin > 0 ? '+' : ''}${standing.margin}`;
 }
 
 export interface StatsColumn {
   id: string;
   label: string;
+  /** Short accessible description, read for abbreviated headers and the column chooser. */
+  description: string;
+  /** DataTable priority: 1 identity, 2 the point of the page, 3 context. */
+  priority: 1 | 2 | 3;
   defaultVisible: boolean;
 }
 
 export const TEAM_COLUMNS: StatsColumn[] = [
-  { id: 'record', label: 'Record', defaultVisible: true },
-  { id: 'winpct', label: 'Win %', defaultVisible: true },
-  { id: 'pf', label: 'PF', defaultVisible: true },
-  { id: 'pa', label: 'PA', defaultVisible: true },
-  { id: 'margin', label: 'Margin', defaultVisible: true },
-  { id: 'ppg', label: 'PPG', defaultVisible: true },
-  { id: 'papg', label: 'PAPG', defaultVisible: false },
-  { id: 'ppb', label: 'PPB', defaultVisible: true },
-  { id: 'superpowers', label: 'Superpowers', defaultVisible: false },
-  { id: 'powers', label: 'Powers', defaultVisible: true },
-  { id: 'gets', label: 'Gets', defaultVisible: true },
-  { id: 'negs', label: 'Negs', defaultVisible: true },
+  { id: 'record', label: 'Record', description: 'Wins, losses, and ties', priority: 1, defaultVisible: true },
+  { id: 'winpct', label: 'Win %', description: 'Win percentage', priority: 2, defaultVisible: true },
+  { id: 'games', label: 'GP', description: 'Games played', priority: 2, defaultVisible: true },
+  { id: 'margin', label: 'Margin', description: 'Point differential', priority: 2, defaultVisible: true },
+  { id: 'pf', label: 'PF', description: 'Points for', priority: 3, defaultVisible: false },
+  { id: 'pa', label: 'PA', description: 'Points against', priority: 3, defaultVisible: false },
+  { id: 'ppg', label: 'PPG', description: 'Points per game', priority: 2, defaultVisible: true },
+  { id: 'papg', label: 'PAPG', description: 'Points against per game', priority: 3, defaultVisible: false },
+  {
+    id: 'superpowers',
+    label: 'Superpowers',
+    description: 'Superpower tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  {
+    id: 'powers',
+    label: 'Powers',
+    description: 'Power tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  { id: 'gets', label: 'Gets', description: 'Regular tossups answered', priority: 3, defaultVisible: false },
+  { id: 'negs', label: 'Negs', description: 'Incorrect interrupts', priority: 3, defaultVisible: false },
+  { id: 'tuh', label: 'TUH', description: 'Tossups heard', priority: 2, defaultVisible: true },
+  { id: 'pptuh', label: 'PPTUH', description: 'Points per tossup heard', priority: 3, defaultVisible: false },
+  { id: 'bonuses', label: 'Bonuses', description: 'Bonuses heard', priority: 3, defaultVisible: false },
+  { id: 'bonuspoints', label: 'Bonus pts', description: 'Bonus points', priority: 3, defaultVisible: false },
+  { id: 'ppb', label: 'PPB', description: 'Points per bonus', priority: 2, defaultVisible: true },
 ];
 
 export const INDIVIDUAL_COLUMNS: StatsColumn[] = [
-  { id: 'tuh', label: 'TUH', defaultVisible: true },
-  { id: 'superpowers', label: 'Superpowers', defaultVisible: false },
-  { id: 'powers', label: 'Powers', defaultVisible: true },
-  { id: 'gets', label: 'Gets', defaultVisible: true },
-  { id: 'negs', label: 'Negs', defaultVisible: true },
-  { id: 'points', label: 'Points', defaultVisible: true },
-  { id: 'ppg', label: 'PPG', defaultVisible: true },
-  { id: 'pptuh', label: 'PPTUH', defaultVisible: true },
-  { id: 'bonus', label: 'Bonus pts', defaultVisible: false },
+  { id: 'games', label: 'GP', description: 'Games played', priority: 2, defaultVisible: true },
+  { id: 'points', label: 'Pts', description: 'Total points', priority: 2, defaultVisible: true },
+  { id: 'ppg', label: 'PPG', description: 'Points per game', priority: 2, defaultVisible: true },
+  { id: 'tuh', label: 'TUH', description: 'Tossups heard', priority: 2, defaultVisible: true },
+  { id: 'pptuh', label: 'PPTUH', description: 'Points per tossup heard', priority: 3, defaultVisible: true },
+  {
+    id: 'superpowers',
+    label: 'Superpowers',
+    description: 'Superpower tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  {
+    id: 'powers',
+    label: 'Powers',
+    description: 'Power tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  { id: 'gets', label: 'Gets', description: 'Regular tossups answered', priority: 3, defaultVisible: false },
+  { id: 'negs', label: 'Negs', description: 'Incorrect interrupts', priority: 3, defaultVisible: false },
+  { id: 'bonus', label: 'Bonus pts', description: 'Bonus points', priority: 3, defaultVisible: false },
 ];
+
+/**
+ * Bonus columns are applicability-gated, not zero-filled: a tossup-only format has no bonus
+ * facts, so offering Bonuses/PPB there would print a column of meaningless zeroes (#750).
+ * History outlives defaults (#671): issued bonus definitions keep the columns even after the
+ * default moves on, and observed bonus data keeps them even without a definition.
+ */
+export function bonusesInUse(state: DirectorState): boolean {
+  if (state.tournament?.rules.useBonuses) return true;
+  if (state.gameDefinitions.some((entry) => entry.rules.useBonuses)) return true;
+  return state.games.some((game) => game.scores.some((score) => score.bonuses > 0 || score.bonusPoints > 0));
+}
+
+const TEAM_BONUS_COLUMN_IDS = new Set(['bonuses', 'bonuspoints', 'ppb']);
+const INDIVIDUAL_BONUS_COLUMN_IDS = new Set(['bonus']);
+
+/** Columns that exist for this tournament: bonus tiers drop out when bonuses are not in use. */
+export function teamColumnsForState(state: DirectorState): StatsColumn[] {
+  const bonus = bonusesInUse(state);
+  const tiers = superpowersInUse(state);
+  return TEAM_COLUMNS.filter(
+    (column) => (bonus || !TEAM_BONUS_COLUMN_IDS.has(column.id)) && (tiers || column.id !== 'superpowers'),
+  );
+}
+
+/** Columns that exist for this tournament's individuals. */
+export function individualColumnsForState(state: DirectorState): StatsColumn[] {
+  const bonus = bonusesInUse(state);
+  const tiers = superpowersInUse(state);
+  return INDIVIDUAL_COLUMNS.filter(
+    (column) =>
+      (bonus || !INDIVIDUAL_BONUS_COLUMN_IDS.has(column.id)) && (tiers || column.id !== 'superpowers'),
+  );
+}
+
+/**
+ * Fresh defaults: the schema's visible set, with the superpower tier promoted when the format
+ * enables it — even when nobody has recorded one yet, an enabled-but-zero tier is a fact (#750).
+ */
+export function defaultTeamColumnIds(state: DirectorState): string[] {
+  const applicable = teamColumnsForState(state);
+  const ids = applicable.filter((column) => column.defaultVisible).map((column) => column.id);
+  if (superpowersInUse(state) && !ids.includes('superpowers')) ids.push('superpowers');
+  return ids;
+}
+
+/** Fresh defaults for the individual table. */
+export function defaultIndividualColumnIds(state: DirectorState): string[] {
+  const applicable = individualColumnsForState(state);
+  const ids = applicable.filter((column) => column.defaultVisible).map((column) => column.id);
+  if (superpowersInUse(state) && !ids.includes('superpowers')) ids.push('superpowers');
+  return ids;
+}
+
+/**
+ * One shared mapping from schema column to cell text for the team table, so Director, printable
+ * reports, and QBLive cannot drift into three vocabularies (#750). Printable parity notes: PPG
+ * and PAPG are 0.0 for a team with no games, matching the canonical snapshot rows; unknowns
+ * stay "—".
+ */
+export function teamStatCell(columnId: string, standing: TeamStanding): string {
+  switch (columnId) {
+    case 'record':
+      return formatRecord(standing);
+    case 'winpct':
+      return formatWinPct(standing);
+    case 'games':
+      return String(standing.gamesPlayed);
+    case 'margin':
+      return formatMargin(standing);
+    case 'pf':
+      return String(standing.pointsFor);
+    case 'pa':
+      return String(standing.pointsAgainst);
+    case 'ppg':
+      return formatAverage(standing.pointsFor, standing.gamesPlayed);
+    case 'papg':
+      return formatAverage(standing.pointsAgainst, standing.gamesPlayed);
+    case 'superpowers':
+      return String(standing.superpowers);
+    case 'powers':
+      return String(standing.powers);
+    case 'gets':
+      return String(standing.gets);
+    case 'negs':
+      return String(standing.negs);
+    case 'tuh':
+      return formatTuh(standing);
+    case 'pptuh':
+      return formatPptuh(standing.pointsFor, standing);
+    case 'bonuses':
+      return String(standing.bonuses);
+    case 'bonuspoints':
+      return String(standing.bonusPoints);
+    case 'ppb':
+      return formatPpb(standing);
+    default:
+      return UNKNOWN_STAT;
+  }
+}
+
+/** One shared mapping from schema column to cell text for the individual table (#750). */
+export function playerStatCell(columnId: string, standing: PlayerStanding): string {
+  switch (columnId) {
+    case 'games':
+      return String(formatGamesPlayed(standing));
+    case 'points':
+      return String(standing.points);
+    case 'ppg':
+      return formatPlayerPpg(standing);
+    case 'tuh':
+      return formatTuh(standing);
+    case 'pptuh':
+      return formatPptuh(standing.points, standing);
+    case 'superpowers':
+      return String(standing.superpowers);
+    case 'powers':
+      return String(standing.powers);
+    case 'gets':
+      return String(standing.gets);
+    case 'negs':
+      return String(standing.negs);
+    case 'bonus':
+      return String(standing.bonusPoints);
+    default:
+      return UNKNOWN_STAT;
+  }
+}
 
 export interface StatsColumnPrefs {
   teams: string[];

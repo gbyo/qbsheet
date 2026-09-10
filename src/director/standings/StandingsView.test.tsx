@@ -5,7 +5,7 @@
  * in Director that reports player statistics. Eleventh place did not exist anywhere in the
  * application.
  */
-import { afterEach, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { derivePlayerStandings, playerHasAppearance, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
@@ -21,6 +21,12 @@ import {
 import { StandingsView } from './StandingsView';
 
 afterEach(cleanup);
+
+// Column preferences persist per tournament in localStorage: every test starts
+// from fresh defaults so one test's chooser cannot leak into another's table.
+beforeEach(() => {
+  localStorage.clear();
+});
 
 const controller = {} as DirectorController;
 
@@ -58,8 +64,18 @@ function teamTable(): HTMLElement {
   return screen.getByRole('table', { name: 'Team standings' });
 }
 
-function detailedSwitch(): HTMLElement {
-  return screen.getByRole('switch', { name: 'Detailed scoring columns' });
+function openChooser(label: string): void {
+  fireEvent.click(screen.getByRole('button', { name: label }));
+}
+
+function toggleColumn(name: string): void {
+  fireEvent.click(screen.getByRole('switch', { name }));
+}
+
+function headerNames(table: HTMLElement): (string | null)[] {
+  return within(table)
+    .getAllByRole('columnheader')
+    .map((header) => header.textContent);
 }
 
 function expectPinnedColumns(table: HTMLElement, headers: string[], priority: string): void {
@@ -120,11 +136,16 @@ test('the ordering is the derivation’s, and the page says how many players it 
 test('a scorer with unknown participation shows unknown PPG, not 0.0', () => {
   render(<StandingsView state={tournamentWithPlayers(1)} controller={controller} onAnnounce={vi.fn()} />);
 
+  const headers = within(playerTable())
+    .getAllByRole('columnheader')
+    .map((header) => header.textContent);
   const row = within(playerTable()).getByText('Player 0').closest('tr') as HTMLElement;
   const cells = within(row).getAllByRole('cell');
-  // Player, Games, PPG
-  expect(cells[1]?.textContent).toBe('—');
-  expect(cells[2]?.textContent).toBe('—');
+  // Unknown renders "—" plus a visually-hidden label for screen readers, since a
+  // bare dash misannounces as zero (#750); the visible node stays "—".
+  const visibleText = (header: string) => cells[headers.indexOf(header)]?.childNodes[0]?.textContent;
+  expect(visibleText('GP')).toBe('—');
+  expect(visibleText('PPG')).toBe('—');
 });
 
 /**
@@ -158,7 +179,9 @@ test('a team that has not played shows an unknown win rate, not 0.0%', () => {
   const row = within(teamTable()).getByText('Abbeville').closest('tr') as HTMLElement;
   const cells = within(row).getAllByRole('cell');
   // #, Team, W–L, Win %
-  expect(cells[3]?.textContent).toBe('—');
+  const winPct = cells[3] as HTMLElement;
+  expect(winPct.textContent).toContain('—');
+  expect(winPct.querySelector('.director-visually-hidden')?.textContent).toBe('Win % not available');
   expect(row.textContent).not.toContain('0.0%');
 });
 
@@ -169,58 +192,151 @@ test('a team that has played still shows the rate it earned', () => {
   expect(within(row).getAllByRole('cell')[3]?.textContent).toBe('100.0%');
 });
 
-test('team detail columns are omitted by default and pinned when enabled', () => {
+test('the team table shows the schema core by default: GP, PPG, TUH, PPB', () => {
   render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
 
-  const compactTable = teamTable();
-  expect(within(compactTable).queryByRole('columnheader', { name: 'PF' })).toBeNull();
-  expect(
-    within(compactTable)
-      .getAllByRole('columnheader')
-      .map((header) => header.dataset.priority),
-  ).toEqual(['1', '1', '1', '2', '2']);
-  expect(detailedSwitch()).toHaveAttribute('aria-checked', 'false');
+  expect(headerNames(teamTable())).toEqual([
+    '#',
+    'Team',
+    'Record',
+    'Win %',
+    'GP',
+    'Margin',
+    'PPG',
+    'TUH',
+    'PPB',
+  ]);
+  // PF/PA and answer tiers stay in the chooser until the director asks for them.
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'PF' })).toBeNull();
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).toBeNull();
+});
 
-  fireEvent.click(detailedSwitch());
+test('team context columns are individually toggleable and pinned when enabled', () => {
+  render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
 
-  expect(detailedSwitch()).toHaveAttribute('aria-checked', 'true');
+  openChooser('Team columns');
+  toggleColumn('Powers');
+  toggleColumn('Gets');
+  toggleColumn('Negs');
+  toggleColumn('PF');
+  toggleColumn('PA');
+
   const detailedTable = teamTable();
   expectPinnedColumns(detailedTable, ['PF', 'PA', 'Powers', 'Gets', 'Negs'], '3');
   expect(
     within(detailedTable)
       .getAllByRole('columnheader')
-      .slice(0, 5)
+      .slice(0, 2)
       .every((header) => !header.dataset.pinned),
   ).toBe(true);
 
-  fireEvent.click(detailedSwitch());
+  toggleColumn('PF');
   expect(within(teamTable()).queryByRole('columnheader', { name: 'PF' })).toBeNull();
+  // Untoggled core columns are unaffected by chooser traffic.
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'PPB' })).not.toBeNull();
 });
 
-test('player detail columns pin Bonus pts without changing the compact core', () => {
+test('player context columns pin without changing the compact core', () => {
   render(<StandingsView state={tournamentWithPlayers(2)} controller={controller} onAnnounce={vi.fn()} />);
 
   fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
   const table = screen.getByRole('table', { name: 'Player statistics' });
+  expect(headerNames(table)).toEqual(['Player', 'GP', 'Pts', 'PPG', 'TUH', 'PPTUH']);
   expect(within(table).queryByRole('columnheader', { name: 'Bonus pts' })).toBeNull();
 
-  fireEvent.click(detailedSwitch());
+  openChooser('Player columns');
+  toggleColumn('Powers');
+  toggleColumn('Gets');
+  toggleColumn('Negs');
+  toggleColumn('Bonus pts');
 
   const detailedTable = screen.getByRole('table', { name: 'Player statistics' });
-  expectPinnedColumns(detailedTable, ['Powers', 'Gets', 'Negs'], '2');
-  expectPinnedColumns(detailedTable, ['Bonus pts'], '3');
-  expect(within(detailedTable).getAllByRole('columnheader')).toHaveLength(7);
-  expect(
-    within(detailedTable)
-      .getAllByRole('columnheader')
-      .slice(0, 3)
-      .map((header) => header.dataset.priority),
-  ).toEqual(['1', '1', '1']);
+  expectPinnedColumns(detailedTable, ['Powers', 'Gets', 'Negs', 'Bonus pts'], '3');
+  expect(within(detailedTable).getAllByRole('columnheader')).toHaveLength(10);
 
-  fireEvent.click(detailedSwitch());
+  toggleColumn('Bonus pts');
   expect(
     within(screen.getByRole('table', { name: 'Player statistics' })).queryByRole('columnheader', {
       name: 'Bonus pts',
     }),
   ).toBeNull();
+});
+
+test('a column choice survives a fresh render of the same tournament', () => {
+  const first = playedTournament();
+  render(<StandingsView state={first} controller={controller} onAnnounce={vi.fn()} />);
+  openChooser('Team columns');
+  toggleColumn('Powers');
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).not.toBeNull();
+  cleanup();
+
+  // A new render is a new component tree: only the persisted preference brings Powers back.
+  render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).not.toBeNull();
+});
+
+test('a second stage adds a scope selector that re-derives both tables', () => {
+  const state = playedTournament();
+  state.phases.push({
+    id: 'phase-2',
+    name: 'Playoffs',
+    kind: 'playoff',
+    order: 2,
+    formatId: 'format-1',
+    poolIds: [],
+    roundIds: [],
+    advancementRule: null,
+    carryover: false,
+    status: 'active',
+  });
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Playoffs' }));
+  expect(within(teamTable()).getByText('No accepted results in Playoffs yet.')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Preliminary' }));
+  expect(within(teamTable()).getByText('Ninety Six')).toBeTruthy();
+
+  fireEvent.click(screen.getByRole('button', { name: 'Overall' }));
+  expect(within(teamTable()).getByText('Ninety Six')).toBeTruthy();
+});
+
+test('a tossup-only format offers no bonus columns to fill with zeroes', () => {
+  const state = playedTournament();
+  state.tournament!.rules.useBonuses = false;
+  for (const game of state.games) {
+    for (const score of game.scores) {
+      score.bonuses = 0;
+      score.bonusPoints = 0;
+    }
+  }
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  expect(headerNames(teamTable())).not.toContain('PPB');
+  openChooser('Team columns');
+  expect(screen.queryByRole('switch', { name: 'Bonuses' })).toBeNull();
+  expect(screen.queryByRole('switch', { name: 'PPB' })).toBeNull();
+});
+
+test('an enabled-but-scoreless superpower tier still gets its column', () => {
+  const state = playedTournament();
+  state.tournament!.rules.superpowerValue = 20;
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  expect(headerNames(teamTable())).toContain('Superpowers');
+});
+
+test('an unknown TUH is announced as unavailable, not rendered as zero', () => {
+  const state = playedTournament();
+  state.games[0].playerStats[0].tossupsHeard = null;
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
+  const table = screen.getByRole('table', { name: 'Player statistics' });
+  const row = within(table).getByText('Gibson').closest('tr') as HTMLElement;
+  const tuhIndex = headerNames(table).indexOf('TUH');
+  const cell = within(row).getAllByRole('cell')[tuhIndex] as HTMLElement;
+  expect(cell.textContent).toContain('—');
+  expect(cell.textContent).not.toContain('0');
+  expect(within(cell).getByText('TUH not available')).toHaveClass('director-visually-hidden');
 });
