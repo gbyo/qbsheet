@@ -1,4 +1,11 @@
-import { reportTeamAnchor } from './reportHtml.js';
+import {
+  reportAnswerCells,
+  reportAnswerHeaders,
+  reportPointsMetricLabel,
+  reportPointsMetricValue,
+  reportTeamAnchor,
+} from './reportHtml.js';
+import { reportNumber, reportPercent, type ReportPresentation } from './reportPresentation.js';
 import type { GameStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 
 export type StandingsReportSectionKind = 'final' | 'phase' | 'pool' | 'cumulative';
@@ -43,6 +50,12 @@ export interface CanonicalStandingsReport {
   finalResults?: StandingsContextGame[];
   /** Canonical competition ranks for unresolved ties; absent means ordinary sequential rank. */
   displayRanks?: Record<string, number>;
+  /**
+   * Shared rules-aware presentation contract. When present, the section tables consume its
+   * answer-tier columns, points metric, and options instead of the legacy fixed vocabulary;
+   * when absent, tables render the legacy fixed set (#751).
+   */
+  presentation?: ReportPresentation;
 }
 
 function escapeHtml(value: unknown): string {
@@ -72,11 +85,6 @@ function recordText(row: TeamStatsRow): string {
   return row.ties > 0 ? `${row.wins}–${row.losses}–${row.ties}` : `${row.wins}–${row.losses}`;
 }
 
-function numberText(value: number | null | undefined, digits?: number): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
-  return digits === undefined ? String(value) : value.toFixed(digits);
-}
-
 function advancementText(cell: StandingsAdvancementCell | undefined): string {
   if (!cell) return '';
   if (cell.status === 'committed') return cell.target ? `Advanced to ${cell.target}` : 'Advanced';
@@ -102,13 +110,46 @@ function contextBlock(title: string, games: readonly StandingsContextGame[]): st
   return `<div class="context"><h3>${escapeHtml(title)}</h3><ul>${games.map(resultLine).join('')}</ul></div>`;
 }
 
+/**
+ * Legacy fixed tier vocabulary, kept for reports composed without a presentation contract.
+ * Counts come from the row's legacy fields, so output is unchanged for existing callers.
+ */
+function legacyAnswerCells(row: TeamStatsRow, showSuperpowers: boolean): string {
+  const cells: string[] = [];
+  if (showSuperpowers) cells.push(`<td class="num">${row.superpowers}</td>`);
+  cells.push(
+    `<td class="num">${row.powers}</td>`,
+    `<td class="num">${row.gets}</td>`,
+    `<td class="num">${row.negs}</td>`,
+  );
+  return cells.join('');
+}
+
+function legacyAnswerHeaders(showSuperpowers: boolean): string {
+  return (
+    `${showSuperpowers ? '<th scope="col" class="num">Superpowers</th>' : ''}` +
+    `<th scope="col" class="num">Powers</th><th scope="col" class="num">Gets</th><th scope="col" class="num">Negs</th>`
+  );
+}
+
 function sectionTable(report: CanonicalStandingsReport, section: StandingsReportSection): string {
+  const presentation = report.presentation;
   const showCalculated = section.teams.some(
     (row) => row.calculatedRank !== undefined && row.calculatedRank !== row.rank,
   );
   const showClassifications = section.teams.some((row) => (row.classifications ?? []).length > 0);
-  const showSuperpowers = section.teams.some((row) => row.superpowers > 0);
   const showAdvancement = section.advancement !== undefined;
+  // Without a presentation contract the table keeps its legacy fixed vocabulary; with one,
+  // PF/PA/Margin follow the shared report option and tiers/metric follow the schema (#751).
+  const showExtras = presentation ? presentation.options.showPointsForAgainstMargin : true;
+  const showSuperpowers = presentation
+    ? presentation.answerColumns.some((column) => column.key === 'superpower')
+    : section.teams.some((row) => row.superpowers > 0);
+  const scoringLabel = presentation ? reportPointsMetricLabel(presentation) : 'PPG';
+  const scoringCell = (row: TeamStatsRow): string =>
+    presentation
+      ? `<td class="num">${reportPointsMetricValue(row, presentation)}</td>`
+      : `<td class="num">${row.ppg.toFixed(1)}</td>`;
   const rows = section.teams
     .map((row) => {
       const displayRank = report.displayRanks?.[`${section.id}:${row.teamId}`] ?? row.rank;
@@ -117,12 +158,13 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
         `${showCalculated ? `<td class="num">${row.calculatedRank ?? ''}</td>` : ''}` +
         `<td><a href="teamdetail.html#${reportTeamAnchor(row)}">${escapeHtml(row.teamName)}</a></td>` +
         `${showClassifications ? `<td>${escapeHtml((row.classifications ?? []).join('; ') || '—')}</td>` : ''}` +
-        `<td class="num">${escapeHtml(recordText(row))}</td><td class="num">${(row.winPercentage * 100).toFixed(1)}%</td>` +
-        `<td class="num">${row.pointsFor}</td><td class="num">${row.pointsAgainst}</td><td class="num">${row.margin}</td>` +
-        `<td class="num">${row.ppg.toFixed(1)}</td>${showSuperpowers ? `<td class="num">${row.superpowers}</td>` : ''}` +
-        `<td class="num">${row.powers}</td><td class="num">${row.gets}</td><td class="num">${row.negs}</td>` +
-        `<td class="num">${row.tossupsHeardKnown ? row.tossupsHeard : '—'}</td><td class="num">${numberText(row.pptuh, 2)}</td>` +
-        `<td class="num">${numberText(row.ppb, 2)}</td>` +
+        `<td class="num">${escapeHtml(recordText(row))}</td><td class="num">${reportPercent(row.winPercentage, 1)}</td>` +
+        `${showExtras ? `<td class="num">${row.pointsFor}</td><td class="num">${row.pointsAgainst}</td><td class="num">${row.margin}</td>` : ''}` +
+        `${scoringCell(row)}` +
+        `${presentation ? reportAnswerCells(row, presentation) : legacyAnswerCells(row, showSuperpowers)}` +
+        `<td class="num">${reportNumber(row.tossupsHeardKnown ? row.tossupsHeard : null)}</td>` +
+        `<td class="num">${reportNumber(row.pptuh, 2)}</td>` +
+        `<td class="num">${reportNumber(row.ppb, 2)}</td>` +
         `${showAdvancement ? `<td>${escapeHtml(advancementText(section.advancement?.[row.teamId]))}</td>` : ''}</tr>`
       );
     })
@@ -131,10 +173,10 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
     `<div class="table-wrap"><table><thead><tr><th scope="col" class="num">#</th>` +
     `${showCalculated ? '<th scope="col" class="num">Calc</th>' : ''}<th scope="col">Team</th>` +
     `${showClassifications ? '<th scope="col">Group</th>' : ''}<th scope="col" class="num">Record</th>` +
-    `<th scope="col" class="num">Win %</th><th scope="col" class="num">PF</th><th scope="col" class="num">PA</th>` +
-    `<th scope="col" class="num">Margin</th><th scope="col" class="num">PPG</th>` +
-    `${showSuperpowers ? '<th scope="col" class="num">Superpowers</th>' : ''}` +
-    `<th scope="col" class="num">Powers</th><th scope="col" class="num">Gets</th><th scope="col" class="num">Negs</th>` +
+    `<th scope="col" class="num">Win %</th>` +
+    `${showExtras ? '<th scope="col" class="num">PF</th><th scope="col" class="num">PA</th><th scope="col" class="num">Margin</th>' : ''}` +
+    `<th scope="col" class="num">${escapeHtml(scoringLabel)}</th>` +
+    `${presentation ? reportAnswerHeaders(presentation) : legacyAnswerHeaders(showSuperpowers)}` +
     `<th scope="col" class="num">TUH</th><th scope="col" class="num">PPTUH</th><th scope="col" class="num">PPB</th>` +
     `${showAdvancement ? '<th scope="col">Advancement</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`
   );
@@ -163,6 +205,7 @@ const reportStyle = [
   'th,td{border:1px solid #d7dde3;padding:5px 8px;text-align:left;white-space:nowrap}',
   'td.num,th.num{text-align:right}th{background:#f1f4f6}tr:nth-child(even){background:#fafbfc}',
   'footer{margin-top:32px;padding-top:12px;border-top:1px solid #d7dde3;color:#52606d;font-size:13px}',
+  '.report-note{padding:9px 12px;border-left:3px solid #9aa5b1;background:#f1f4f6;color:#52606d}',
   '@media print{body{max-width:none}section{break-inside:avoid-page}.table-wrap{overflow:visible}}',
 ].join('');
 
@@ -179,10 +222,13 @@ export function renderCanonicalStandingsReport(report: CanonicalStandingsReport)
           .join('')}</ul></nav>`
       : '';
   const body = report.sections.map((section) => renderSection(report, section)).join('');
+  const mixed = report.presentation?.mixedDefinitionNote
+    ? `<p class="report-note">${escapeHtml(report.presentation.mixedDefinitionNote)}</p>`
+    : '';
   return (
     '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
     `<title>Standings · ${escapeHtml(report.tournament.name)}</title><style>${reportStyle}</style></head><body>${statNav}` +
-    `<h1>${escapeHtml(report.tournament.name)}</h1>${sectionNav}${body || '<p class="meta">No standings.</p>'}` +
+    `<h1>${escapeHtml(report.tournament.name)}</h1>${sectionNav}${mixed}${body || '<p class="meta">No standings.</p>'}` +
     `<footer>Generated ${escapeHtml(report.generatedAt)} · QBSheet stat report</footer></body></html>`
   );
 }
