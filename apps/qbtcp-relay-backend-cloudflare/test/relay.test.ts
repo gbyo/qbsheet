@@ -566,6 +566,48 @@ describe('sessions and writers', () => {
 // ---------------------------------------------------------------------------
 
 describe('progress', () => {
+  it('accepts the normative `match` progress key over HTTP and the stream', async () => {
+    const { tournamentId, roomToken } = await setupRoom();
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+
+    // `match` is the documented QBTCP progress key; the relay historically read only
+    // `match_state`. Both spellings must store the same snapshot.
+    const overHttp = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: JSON.stringify({ sequence: 1, match: { type: 'Match', tossups: 1 } }),
+    });
+    expect(overHttp.status).toBe(200);
+    expect(await overHttp.json()).toEqual({ accepted: true, sequence: 1 });
+
+    const socket = await openSocket(tournamentId);
+    const seen = collectFrames(socket);
+    await authenticate(socket, seen, { sessionToken: token, sessionId });
+    socket.send(
+      JSON.stringify({
+        version: 1,
+        type: 'progress',
+        session_id: sessionId,
+        payload: { sequence: 2, match: { type: 'Match', tossups: 2 } },
+      }),
+    );
+    await vi.waitFor(async () => {
+      const recovery = (await (
+        await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/recovery`, {
+          headers: sessionHeaders(token),
+        })
+      ).json()) as { progress_sequence: number; latest_qbj: { tossups: number } };
+      expect(recovery.progress_sequence).toBe(2);
+    });
+    const recovery = (await (
+      await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/recovery`, {
+        headers: sessionHeaders(token),
+      })
+    ).json()) as { latest_qbj: { tossups: number } };
+    expect(recovery.latest_qbj.tossups).toBe(2);
+    socket.close();
+  });
+
   it('coalesces to the newest snapshot and answers stale offers without writing', async () => {
     const { tournamentId, management, roomToken } = await setupRoom();
     const { sessionId, token } = await openSession(tournamentId, roomToken);

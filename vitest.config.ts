@@ -20,6 +20,7 @@ const nodeTestFiles = [
   'tests/QbjAssignment.test.ts',
   'tests/QbjScoringRulesMalformed.test.ts',
   'tests/Qbtcp.test.ts',
+  'tests/QbtcpPreferredTransport.test.ts',
   'tests/QbtcpStream.test.ts',
   'tests/RoomDeriveGame.test.ts',
   'tests/RoomGameCorrection.test.ts',

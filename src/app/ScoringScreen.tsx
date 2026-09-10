@@ -58,6 +58,7 @@ import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import type { IRosterAddResult, IRosterAmendment } from '../integrations/fruity/FruityServerClient';
 import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
+import { describeTransport } from '../qbtcp/QbtcpPreferredTransport';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
@@ -206,6 +207,20 @@ export default function ScoringScreen(props: {
   }, [record, connection, operatorName]);
 
   /**
+   * The tournament-supplied LAN fallback under the same pairing, if any.
+   *
+   * A separate client because the address differs; the authority does not, so the same
+   * room and session credentials travel on either path and no second pairing exists.
+   */
+  // `live` gates on the connection belonging to this game; hoisting the address out keeps
+  // the memo key a plain value the compiler can verify instead of a deep property access.
+  const lanBaseUrl = live ? connection?.lanBaseUrl : undefined;
+  const lanClient = useMemo(
+    () => (lanBaseUrl ? new FruityServerClient(lanBaseUrl) : undefined),
+    [lanBaseUrl],
+  );
+
+  /**
    * Only the fields a repair actually produced.
    *
    * A change carrying `sessionToken: undefined` is indistinguishable from one deliberately clearing
@@ -240,6 +255,7 @@ export default function ScoringScreen(props: {
     onCredentialsRepaired,
     progressSequence: connection?.progressSequence,
     onProgressSequence,
+    lanClient,
   });
 
   /**
@@ -598,6 +614,7 @@ export default function ScoringScreen(props: {
         durableSetup={record.setup}
         durableEvents={record.events}
         degradedMessage={live ? runtime.degradedMessage : undefined}
+        scoringPath={live ? describeTransport(runtime.transport) : undefined}
         onSubmit={submit}
         onCorrectGame={correctGame}
         onDownload={write}

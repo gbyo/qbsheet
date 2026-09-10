@@ -126,6 +126,14 @@ export async function exchangePairingCode(
   code: string,
   roomId: string | undefined,
   existingDeviceId?: string,
+  /**
+   * Optional LAN fallback for the same room authority, usually from a pairing launch link.
+   *
+   * Validated, never trusted blind: a value that is not a well-formed secondary endpoint —
+   * or that equals the primary — is dropped rather than stored, so a bad hint leaves a
+   * primary-only pairing instead of a broken fallback.
+   */
+  lanServer?: string,
 ): Promise<PairingExchangeResult> {
   const trimmed = code.trim();
   if (trimmed === '') return { ok: false, error: 'Enter the pairing code for this room.' };
@@ -133,6 +141,7 @@ export async function exchangePairingCode(
   const joined = await client.join(trimmed, roomId === undefined || roomId === '' ? undefined : roomId);
   if (!joined.ok) return { ok: false, error: joined.error };
 
+  const lanBaseUrl = readSecondaryEndpoint(lanServer, client.baseUrl);
   return {
     ok: true,
     value: {
@@ -141,6 +150,21 @@ export async function exchangePairingCode(
       roomName: joined.value.roomName,
       roomToken: joined.value.accessToken,
       deviceId: existingDeviceId ?? newDeviceId(),
+      ...(lanBaseUrl !== undefined ? { lanBaseUrl } : {}),
     },
   };
+}
+
+/**
+ * Keep a secondary endpoint only when it is genuinely secondary.
+ *
+ * Same address rules as pairing itself, minus the code: http(s), no query, no fragment,
+ * and different from the primary it backs up. Anything else is absent, not an error —
+ * the pairing it arrived with is still good.
+ */
+function readSecondaryEndpoint(value: string | undefined, primary: string): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = normalizeBaseUrl(value.trim());
+  if (!normalized.ok || normalized.value === primary) return undefined;
+  return normalized.value;
 }
