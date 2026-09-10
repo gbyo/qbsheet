@@ -276,6 +276,22 @@ describe('frame validation', () => {
     }
     const astralFixture = validateStreamFrame(fixture('frame-unicode-astral.json'), { maxBytes: 100 });
     expect(astralFixture.ok).toBe(false);
+    // Mixed ASCII + BMP + astral, the shape a real progress note takes: 73 UTF-16 code units but
+    // 82 UTF-8 bytes. At a 80-byte bound, `.length` would call this frame acceptable and the
+    // contract calls it oversize — so this fixture fails on any implementation that measures
+    // UTF-16 code units, on either side of the wire.
+    const mixed = fixture('frame-unicode-mixed.json');
+    expect(JSON.stringify(mixed).length).toBe(73);
+    expect(new TextEncoder().encode(JSON.stringify(mixed)).length).toBe(82);
+    const mixedOversize = validateStreamFrame(mixed, { maxBytes: 80 });
+    expect(mixedOversize.ok).toBe(false);
+    if (!mixedOversize.ok && mixedOversize.error.code === 'too-large') {
+      expect(mixedOversize.error.size).toBe(82);
+      expect(mixedOversize.error.maxBytes).toBe(80);
+    }
+    // Boundary, in bytes: exactly at the limit passes, one byte under it does not.
+    expect(validateStreamFrame(mixed, { maxBytes: 82 }).ok).toBe(true);
+    expect(validateStreamFrame(mixed, { maxBytes: 81 }).ok).toBe(false);
     // ASCII boundary: at the limit passes, one byte over fails.
     const ascii = { version: 1, type: 'hello' };
     const asciiSize = new TextEncoder().encode(JSON.stringify(ascii)).length;

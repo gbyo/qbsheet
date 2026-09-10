@@ -16,7 +16,7 @@ export default defineConfig({
       miniflare: {
         bindings: {
           RELAY_SETUP_TOKEN: 'test-setup-token',
-          RELAY_ALLOWED_ORIGINS: 'https://scorer.example,https://director.example',
+          RELAY_ALLOWED_ORIGINS: 'https://qbsheet.com,https://scorer.example,https://director.example',
         },
       },
     }),

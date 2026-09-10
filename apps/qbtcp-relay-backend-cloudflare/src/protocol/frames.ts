@@ -19,6 +19,8 @@
  * It is not the scorer transport. It validates; the Durable Object in `../relay.ts` decides.
  */
 
+import { jsonUtf8ByteLength } from './bytes';
+
 export const STREAM_CAPABILITY = 'stream';
 export const STREAM_FRAME_VERSION = 1;
 export const STREAM_SUBPROTOCOL = 'qbtcp.stream.v1';
@@ -90,12 +92,16 @@ function cleanBoundedText(value: unknown, maxLength: number): string | null {
  * Unknown frame types validate as ignored so a future scorer cannot break this relay. Anything
  * structurally wrong — including a frame version other than 1 and any oversize frame — is an
  * error the caller must answer without mutating durable state.
+ *
+ * The size bound is UTF-8 bytes of the serialized JSON, matching `max_frame_bytes` in
+ * `docs/QBTCP-STREAM.md`, the scorer in `src/qbtcp/QbtcpStream.ts`, and the Rust mirror.
+ * JavaScript string length (UTF-16 code units) is never used as a byte count.
  */
 export function validateStreamFrame(value: unknown, options: { maxBytes?: number } = {}): FrameOutcome {
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_STREAM_FRAME_BYTES;
   let size = 0;
   try {
-    size = JSON.stringify(value)?.length ?? 0;
+    size = jsonUtf8ByteLength(value);
   } catch {
     return { ok: false, error: { code: 'malformed', detail: 'A stream frame must be a JSON object.' } };
   }

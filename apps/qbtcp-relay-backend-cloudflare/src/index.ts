@@ -11,6 +11,13 @@
  * several tournaments, each resolving to its own object.
  */
 
+import {
+  credentialedCorsHeaders,
+  isOriginAllowed,
+  normalizeOrigin,
+  parseAllowedOrigins,
+  publicCorsHeaders,
+} from './protocol/cors';
 import { isTournamentId, QbtcpRelay, RelayError, json } from './relay';
 
 export { QbtcpRelay };
@@ -27,22 +34,47 @@ function tournamentIdFromPath(value: string | undefined): string | null {
   return value;
 }
 
-const publicCors: Record<string, string> = {
-  'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, OPTIONS',
-  'access-control-allow-headers': 'content-type',
-  'access-control-max-age': '86400',
-};
+const publicCors = publicCorsHeaders();
+
+/** Methods that carry no request body, so the forwarded inner request must not declare one. */
+function hasNoBody(method: string): boolean {
+  return method === 'GET' || method === 'DELETE' || method === 'OPTIONS';
+}
+
+/**
+ * The preflight answer for `POST /qbtcp/v1/manage/claim`, which the Worker must produce itself.
+ *
+ * Every other route names its tournament in the path, so its preflight is forwarded to that
+ * tournament's Durable Object and answered by the same route table that serves the real request.
+ * Claim is the exception: a freshly deployed relay does not know which tournament it is for, so the
+ * id arrives in the request body — and a preflight has no body. Rather than conjure a Durable
+ * Object to ask, the Worker answers with the shared credentialed policy. Claim carries a setup
+ * token and a management `Authorization`, so `*` is not an option here either: the browser origin
+ * is validated against the operator's allowlist exactly as the object would validate it.
+ */
+function claimPreflight(request: Request, env: Env): Response {
+  const origin = normalizeOrigin(request);
+  if (origin !== '' && !isOriginAllowed(origin, parseAllowedOrigins(env.RELAY_ALLOWED_ORIGINS))) {
+    // The same wire code the Durable Object uses, so a browser scorer reads one answer for an
+    // unapproved origin no matter which layer noticed.
+    return new RelayError(403, 'origin_not_allowed', 'This browser origin is not approved.').toResponse({});
+  }
+  return new Response(null, { status: 204, headers: credentialedCorsHeaders(origin) });
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: publicCors });
-    }
-
+    // Note what is deliberately absent here: a blanket `OPTIONS` handler. This Worker used to
+    // answer every preflight with the public `GET, OPTIONS` / `content-type` policy above, which
+    // is right for the two paths below and wrong for every other route on the relay — a browser
+    // scorer's preflight for `POST .../sessions` with `x-yf-room-token` came back 204, looking
+    // successful, while allowing neither the method nor the header the real request needed, so the
+    // browser refused to send it. Credentialed preflights now reach the Durable Object, whose
+    // route table answers them with the policy it would apply to the request itself.
     if (url.pathname === '/' || url.pathname === '/health') {
+      if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: publicCors });
       // Deliberately says nothing about which tournaments exist on this relay.
       return json({ service: 'qbtcp-relay', protocolVersion: 1 }, 200, publicCors);
     }
@@ -61,11 +93,15 @@ export default {
       const inner = new Request(`https://relay/${action}${url.search}`, {
         method: request.method,
         headers: withStreamPath(request.headers, url.pathname),
-        body: request.method === 'GET' || request.method === 'DELETE' ? undefined : request.body,
+        body: hasNoBody(request.method) ? undefined : request.body,
         // @ts-expect-error Duplex is required for streamed request bodies in workers.
-        duplex: request.method === 'GET' || request.method === 'DELETE' ? undefined : 'half',
+        duplex: hasNoBody(request.method) ? undefined : 'half',
       });
       return stub.fetch(inner);
+    }
+
+    if (url.pathname === '/qbtcp/v1/manage/claim' && request.method === 'OPTIONS') {
+      return claimPreflight(request, env);
     }
 
     if (url.pathname === '/qbtcp/v1/manage/claim' && request.method === 'POST') {
@@ -104,7 +140,8 @@ export default {
       // DELETE without an action destroys the tournament; anything else without an action is
       // not a route. Forwarding a scorer-shaped request here must never gain management power,
       // and answering it 200 would read as though it did.
-      if (!action && request.method !== 'DELETE') {
+      // OPTIONS is allowed through so the object can preflight the DELETE.
+      if (!action && request.method !== 'DELETE' && request.method !== 'OPTIONS') {
         return new RelayError(404, 'not-found', 'No such relay route.').toResponse({});
       }
       const target = !action
@@ -117,9 +154,9 @@ export default {
         new Request(`https://relay/${target}${url.search}`, {
           method: request.method,
           headers: request.headers,
-          body: request.method === 'GET' || request.method === 'DELETE' ? undefined : request.body,
+          body: hasNoBody(request.method) ? undefined : request.body,
           // @ts-expect-error Duplex is required for streamed request bodies in workers.
-          duplex: request.method === 'GET' || request.method === 'DELETE' ? undefined : 'half',
+          duplex: hasNoBody(request.method) ? undefined : 'half',
         }),
       );
     }

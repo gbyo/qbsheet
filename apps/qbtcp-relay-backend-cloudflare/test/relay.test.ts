@@ -14,6 +14,7 @@
 import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { trimTrailingSlashes } from '../src/protocol/cors';
 import { validateStreamFrame } from '../src/protocol/frames';
 import { resultFingerprint } from '../src/protocol/qbj';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
@@ -23,6 +24,9 @@ import authenticateFixture from '../../../tests/fixtures/qbtcp-stream/authentica
 import malformedFixture from '../../../tests/fixtures/qbtcp-stream/frame-malformed.json';
 import unsupportedFixture from '../../../tests/fixtures/qbtcp-stream/frame-unsupported-version.json';
 import discoveryFixture from '../../../tests/fixtures/qbtcp-stream/discovery-with-stream.json';
+import unicodeBmpFixture from '../../../tests/fixtures/qbtcp-stream/frame-unicode-bmp.json';
+import unicodeAstralFixture from '../../../tests/fixtures/qbtcp-stream/frame-unicode-astral.json';
+import unicodeMixedFixture from '../../../tests/fixtures/qbtcp-stream/frame-unicode-mixed.json';
 
 // ---------------------------------------------------------------------------
 // Harness
@@ -1632,5 +1636,606 @@ describe('contract conformance', () => {
     expect(await resultFingerprint(withTransport)).toBe(await resultFingerprint(qbj));
     const different = finalQbj(MATCH_ID, { overtime: true });
     expect(await resultFingerprint(different)).not.toBe(await resultFingerprint(qbj));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Browser CORS preflight: the policy a real browser scorer sees
+// ---------------------------------------------------------------------------
+
+/** Preflight the way a browser does: the intended method and the intended headers, named. */
+async function preflight(
+  path: string,
+  requestMethod: string,
+  requestHeaders: string,
+  origin: string | null = 'https://qbsheet.com',
+): Promise<Response> {
+  return SELF.fetch(path, {
+    method: 'OPTIONS',
+    headers: {
+      ...(origin ? { origin } : {}),
+      'access-control-request-method': requestMethod,
+      ...(requestHeaders ? { 'access-control-request-headers': requestHeaders } : {}),
+    },
+  });
+}
+
+function allowedHeaders(response: Response): string[] {
+  return (response.headers.get('access-control-allow-headers') ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '');
+}
+
+function allowedMethods(response: Response): string[] {
+  return (response.headers.get('access-control-allow-methods') ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toUpperCase())
+    .filter((entry) => entry !== '');
+}
+
+describe('browser CORS preflight', () => {
+  it('lets a browser scorer send the credentialed requests the protocol requires', async () => {
+    const { tournamentId, roomToken } = await setupRoom('room-cors', '43434343');
+    const { sessionId } = await openSession(tournamentId, roomToken);
+
+    // Every credentialed route a browser scorer actually calls, with the headers it actually
+    // sends. Before the preflight fix the outer Worker answered all of these with the public
+    // `GET, OPTIONS` / `content-type` policy, so the browser refused to send the real request:
+    // pairing, session open, progress, and finals were all unreachable from a page.
+    const routes: { path: string; method: string; headers: string }[] = [
+      { path: `${tournamentBase(tournamentId)}/pair`, method: 'POST', headers: 'content-type' },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions`,
+        method: 'POST',
+        headers: 'x-yf-room-token,content-type,x-yf-device-id',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/assignment`,
+        method: 'GET',
+        headers: 'x-yf-room-token,x-yf-device-id',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/assignment/status`,
+        method: 'GET',
+        headers: 'x-yf-room-token',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/presence`,
+        method: 'POST',
+        headers: 'x-yf-room-token,content-type,x-yf-device-id',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/help`,
+        method: 'POST',
+        headers: 'x-yf-room-token,content-type,x-yf-device-id,x-yf-operator-name',
+      },
+      { path: `${tournamentBase(tournamentId)}/help`, method: 'GET', headers: 'x-yf-room-token' },
+      {
+        path: `${tournamentBase(tournamentId)}/help/help-1/cancel`,
+        method: 'POST',
+        headers: 'x-yf-room-token,content-type,x-yf-device-id',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions/${sessionId}`,
+        method: 'GET',
+        headers: 'x-yf-session-token',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions/${sessionId}/writer`,
+        method: 'POST',
+        headers: 'x-yf-session-token,content-type,x-yf-device-id',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions/${sessionId}/progress`,
+        method: 'POST',
+        headers: 'x-yf-session-token,content-type',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions/${sessionId}/result`,
+        method: 'POST',
+        headers: 'x-yf-session-token,content-type',
+      },
+      {
+        path: `${tournamentBase(tournamentId)}/sessions/${sessionId}/recovery`,
+        method: 'GET',
+        headers: 'x-yf-session-token',
+      },
+    ];
+
+    for (const route of routes) {
+      const response = await preflight(route.path, route.method, route.headers);
+      const where = `${route.method} ${route.path}`;
+      expect(response.status, where).toBe(204);
+      // A credentialed route must name the caller's origin, never `*`.
+      expect(response.headers.get('access-control-allow-origin'), where).toBe('https://qbsheet.com');
+      expect(response.headers.get('vary')?.toLowerCase(), where).toBe('origin');
+      expect(allowedMethods(response), where).toContain(route.method);
+      for (const header of route.headers.split(',')) {
+        expect(allowedHeaders(response), `${where} header ${header}`).toContain(header.trim());
+      }
+      expect(Number(response.headers.get('access-control-max-age')), where).toBeGreaterThan(0);
+    }
+  });
+
+  it('allows the whole credentialed method and header set on one preflight', async () => {
+    const { tournamentId } = await setupRoom('room-cors-set', '44444444');
+    const response = await preflight(
+      `${tournamentBase(tournamentId)}/sessions`,
+      'POST',
+      'x-yf-room-token,content-type,x-yf-device-id',
+    );
+    expect(response.status).toBe(204);
+    // PUT and DELETE exist on the relay (the Director mirror, tournament destruction), so the
+    // credentialed policy advertises them rather than the GET-only public list.
+    expect(allowedMethods(response)).toEqual(
+      expect.arrayContaining(['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']),
+    );
+    expect(allowedHeaders(response)).toEqual(
+      expect.arrayContaining([
+        'authorization',
+        'content-type',
+        'x-yf-room-token',
+        'x-yf-session-token',
+        'x-yf-device-id',
+        'x-yf-operator-name',
+      ]),
+    );
+  });
+
+  it('preflights Director management routes including Authorization', async () => {
+    const { tournamentId } = await setupRoom('room-manage', '45454545');
+    const management: { path: string; method: string }[] = [
+      { path: `${manageBase(tournamentId)}/mirror`, method: 'PUT' },
+      { path: `${manageBase(tournamentId)}/rotate`, method: 'POST' },
+      { path: `${manageBase(tournamentId)}/events`, method: 'GET' },
+      { path: `${manageBase(tournamentId)}/sessions`, method: 'GET' },
+      { path: `${manageBase(tournamentId)}/results`, method: 'GET' },
+      { path: `${manageBase(tournamentId)}/help`, method: 'GET' },
+      { path: `${manageBase(tournamentId)}/acks`, method: 'POST' },
+      { path: `${manageBase(tournamentId)}/revoke`, method: 'POST' },
+      { path: `${manageBase(tournamentId)}/close`, method: 'POST' },
+      { path: `${manageBase(tournamentId)}/health`, method: 'GET' },
+      { path: `${manageBase(tournamentId)}/help/help-1/resolve`, method: 'POST' },
+      // Destroying the tournament is a DELETE on the collection path with no action segment.
+      { path: manageBase(tournamentId), method: 'DELETE' },
+    ];
+    for (const route of management) {
+      const response = await preflight(
+        route.path,
+        route.method,
+        'authorization,content-type',
+        'https://director.example',
+      );
+      const where = `${route.method} ${route.path}`;
+      expect(response.status, where).toBe(204);
+      expect(response.headers.get('access-control-allow-origin'), where).toBe('https://director.example');
+      expect(allowedHeaders(response), where).toContain('authorization');
+      expect(allowedMethods(response), where).toContain(route.method);
+    }
+  });
+
+  it('preflights the bodyless claim route the Worker has to answer itself', async () => {
+    // Claim names its tournament in the body, so its preflight cannot be routed to an object.
+    // It still must not be answered with the public policy: claim carries a setup token.
+    const response = await preflight(`${base}/manage/claim`, 'POST', 'authorization,content-type');
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+    expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
+    expect(allowedHeaders(response)).toContain('authorization');
+    expect(allowedMethods(response)).toContain('POST');
+
+    const evil = await preflight(`${base}/manage/claim`, 'POST', 'content-type', 'https://evil.example');
+    expect(evil.status).toBe(403);
+    expect(evil.headers.get('access-control-allow-origin')).toBeNull();
+    // The same wire code the object answers, so a scorer reads one answer for an unapproved origin.
+    expect(await evil.json()).toMatchObject({ error: 'origin_not_allowed' });
+  });
+
+  it('keeps the public policy public and never lets it answer for a credentialed route', async () => {
+    const { tournamentId } = await setupRoom('room-public', '46464646');
+
+    // Discovery is credential-free: any origin may read it, and only GET is on offer.
+    const discovery = await preflight(`${tournamentBase(tournamentId)}/discovery`, 'GET', 'content-type');
+    expect(discovery.status).toBe(204);
+    expect(discovery.headers.get('access-control-allow-origin')).toBe('*');
+    expect(allowedMethods(discovery)).toEqual(['GET', 'OPTIONS']);
+    expect(allowedHeaders(discovery)).toEqual(['content-type']);
+
+    // The service banner and health are the same.
+    for (const path of ['/', '/health']) {
+      const response = await SELF.fetch(`https://relay.example${path}`, { method: 'OPTIONS' });
+      expect(response.status).toBe(204);
+      expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    }
+
+    // The regression itself: no credentialed preflight may answer `*`, and no credentialed
+    // preflight may be limited to the public method/header list.
+    for (const path of [
+      `${tournamentBase(tournamentId)}/sessions`,
+      `${tournamentBase(tournamentId)}/pair`,
+      `${manageBase(tournamentId)}/mirror`,
+      `${base}/manage/claim`,
+    ]) {
+      const response = await preflight(path, 'POST', 'x-yf-room-token,content-type');
+      expect(response.headers.get('access-control-allow-origin'), path).not.toBe('*');
+      expect(allowedHeaders(response), path).toContain('x-yf-room-token');
+    }
+  });
+
+  it('refuses a preflight from an unapproved origin instead of allowing it', async () => {
+    const { tournamentId, sessionId } = await (async () => {
+      const room = await setupRoom('room-evil', '47474747');
+      const session = await openSession(room.tournamentId, room.roomToken);
+      return { tournamentId: room.tournamentId, sessionId: session.sessionId };
+    })();
+
+    for (const path of [
+      `${tournamentBase(tournamentId)}/sessions`,
+      `${tournamentBase(tournamentId)}/sessions/${sessionId}/result`,
+      `${manageBase(tournamentId)}/mirror`,
+    ]) {
+      const response = await preflight(
+        path,
+        'POST',
+        'x-yf-session-token,content-type',
+        'https://evil.example',
+      );
+      expect(response.status, path).toBe(403);
+      expect(await response.json()).toMatchObject({ error: 'origin_not_allowed' });
+      expect(response.headers.get('access-control-allow-origin'), path).toBeNull();
+    }
+  });
+
+  it('answers a native, Origin-free OPTIONS without inventing an origin', async () => {
+    // The native Director and the native scorer are not browsers: they send no `Origin`, they are
+    // not subject to CORS, and the relay must neither refuse them nor claim an origin for them.
+    const { tournamentId } = await setupRoom('room-native', '48484848');
+    const response = await SELF.fetch(`${manageBase(tournamentId)}/mirror`, { method: 'OPTIONS' });
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+    expect(allowedMethods(response)).toContain('PUT');
+    expect(allowedHeaders(response)).toContain('authorization');
+
+    // A bodyless OPTIONS forwarded to the object must not have needed a body to be answered.
+    const claim = await SELF.fetch(`${base}/manage/claim`, { method: 'OPTIONS' });
+    expect(claim.status).toBe(204);
+    expect(claim.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('does not advertise a route it would refuse', async () => {
+    const { tournamentId } = await setupRoom('room-404', '49494949');
+    // A method the route does not serve.
+    const wrongMethod = await preflight(
+      `${tournamentBase(tournamentId)}/discovery`,
+      'DELETE',
+      'content-type',
+    );
+    expect(wrongMethod.status).toBe(404);
+    // A scorer-shaped preflight on the management collection path, which serves only DELETE.
+    const notARoute = await preflight(manageBase(tournamentId), 'POST', 'content-type');
+    expect(notARoute.status).toBe(404);
+    // A path that is not a relay route at all.
+    const nonsense = await preflight(`${base}/tournaments/${tournamentId}/nope`, 'POST', 'content-type');
+    expect(nonsense.status).toBe(404);
+  });
+
+  it('answers the preflight for a route with the same policy the real request returns', async () => {
+    // Drift is the thing being prevented: the preflight and the response it authorizes are
+    // derived from one route table, so their policies agree header for header.
+    const { tournamentId, roomToken } = await setupRoom('room-parity', '50505050');
+    const real = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': roomToken, origin: 'https://qbsheet.com' },
+    });
+    expect(real.status).toBe(200);
+    const pre = await preflight(
+      `${tournamentBase(tournamentId)}/assignment/status`,
+      'GET',
+      'x-yf-room-token',
+    );
+    expect(pre.headers.get('access-control-allow-origin')).toBe(
+      real.headers.get('access-control-allow-origin'),
+    );
+    expect(pre.headers.get('access-control-allow-headers')).toBe(
+      real.headers.get('access-control-allow-headers'),
+    );
+    expect(pre.headers.get('access-control-allow-methods')).toBe(
+      real.headers.get('access-control-allow-methods'),
+    );
+
+    const publicReal = await SELF.fetch(`${tournamentBase(tournamentId)}/discovery`, {
+      headers: { origin: 'https://qbsheet.com' },
+    });
+    const publicPre = await preflight(`${tournamentBase(tournamentId)}/discovery`, 'GET', 'content-type');
+    expect(publicPre.headers.get('access-control-allow-methods')).toBe(
+      publicReal.headers.get('access-control-allow-methods'),
+    );
+    expect(publicPre.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('keeps WebSocket origin validation intact after the preflight change', async () => {
+    const { tournamentId } = await setupRoom('room-ws-origin', '51515151');
+    const evil = await SELF.fetch(`${tournamentBase(tournamentId)}/stream`, {
+      headers: { upgrade: 'websocket', origin: 'https://evil.example' },
+    });
+    expect(evil.status).toBe(403);
+    const ok = await SELF.fetch(`${tournamentBase(tournamentId)}/stream`, {
+      headers: {
+        upgrade: 'websocket',
+        origin: 'https://qbsheet.com',
+        'sec-websocket-protocol': 'qbtcp.stream.v1',
+      },
+    });
+    expect(ok.status).toBe(101);
+    ok.webSocket!.accept();
+    ok.webSocket!.close();
+  });
+
+  it('normalizes trailing slashes on an origin in linear time', async () => {
+    const { tournamentId } = await setupRoom('room-slash', '57575757');
+    // A configured `https://qbsheet.com/` and a browser's `https://qbsheet.com` are the same
+    // origin, so the comparison trims trailing slashes on both sides.
+    const trailing = await preflight(
+      `${tournamentBase(tournamentId)}/sessions`,
+      'POST',
+      'x-yf-room-token,content-type',
+      'https://qbsheet.com/',
+    );
+    expect(trailing.status).toBe(204);
+    expect(trailing.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+
+    // A slash-laden origin is still refused on its merits once normalized: the trailing `x` means
+    // there is nothing to trim, so it does not match the allowlist.
+    const pathological = await preflight(
+      `${tournamentBase(tournamentId)}/sessions`,
+      'POST',
+      'x-yf-room-token,content-type',
+      `https://qbsheet.com${'/'.repeat(2_000)}x`,
+    );
+    expect(pathological.status).toBe(403);
+  });
+
+  it('trims trailing slashes in linear time, not by backtracking', () => {
+    // `replace(/\/+$/, '')` is the obvious spelling of this and it backtracks: with a trailing
+    // character that defeats the anchor, the engine retries the `+` from every slash position.
+    // That is quadratic in the length of an `Origin` header a stranger chooses — 200k slashes
+    // costs a regular expression tens of seconds and a character scan no measurable time.
+    // Tested against the helper rather than through a request because the point is the algorithm,
+    // and a header that large never reaches the Worker to begin with.
+    const pathological = `https://qbsheet.com${'/'.repeat(200_000)}x`;
+    const started = Date.now();
+    expect(trimTrailingSlashes(pathological)).toBe(pathological);
+    expect(Date.now() - started).toBeLessThan(1_000);
+
+    // And it still does the job it exists for.
+    expect(trimTrailingSlashes('https://qbsheet.com/')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('https://qbsheet.com///')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('https://qbsheet.com')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('')).toBe('');
+    expect(trimTrailingSlashes('///')).toBe('');
+  });
+
+  it('never puts a credential in a URL, preflight or not', async () => {
+    const { tournamentId, roomToken } = await setupRoom('room-url', '52525252');
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+    for (const value of [roomToken, token]) {
+      expect(`${tournamentBase(tournamentId)}/sessions/${sessionId}`).not.toContain(value);
+    }
+    // The stream endpoint discovery advertises is a bare relative path with no query at all.
+    const discovery = (await (await SELF.fetch(`${tournamentBase(tournamentId)}/discovery`)).json()) as {
+      stream: { endpoint: string };
+    };
+    expect(discovery.stream.endpoint).toMatch(
+      /^\/qbtcp\/v1\/tournaments\/[0-9bcdfghjklmnpqrstvwxyz]+\/stream$/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// UTF-8 byte limits: `*_BYTES` means bytes, on every path that enforces one
+// ---------------------------------------------------------------------------
+
+/** A string of `count` two-byte characters: `count` UTF-16 units, `2 * count` UTF-8 bytes. */
+function twoByteRun(count: number): string {
+  return 'é'.repeat(count);
+}
+
+/**
+ * Send `body` with no `content-length`, so the relay's own measurement is what decides.
+ *
+ * A declared `content-length` is already in bytes, and `fetch` computes it for a string body — so
+ * an oversize multibyte body sent that way is refused by the declared-length check whether or not
+ * the measured check is correct. Streaming the body removes that cover: the only thing standing
+ * between a 1.08 MB payload and durable storage is how the relay measures the text it read.
+ */
+function streamedBody(body: string): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(body);
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+}
+
+describe('UTF-8 byte limits', () => {
+  it('measures stream frames in UTF-8 bytes, pinned to the canonical fixtures', () => {
+    // The shared corpus both #770 suites read. `.length` would accept every one of these.
+    for (const [name, fixture] of [
+      ['bmp', unicodeBmpFixture],
+      ['astral', unicodeAstralFixture],
+      ['mixed', unicodeMixedFixture],
+    ] as const) {
+      const serialized = JSON.stringify(fixture);
+      const units = serialized.length;
+      const bytes = new TextEncoder().encode(serialized).length;
+      expect(bytes, name).toBeGreaterThan(units);
+      // A bound that sits between the two numbers is the whole regression: UTF-16 says fine,
+      // UTF-8 says oversize, and the contract means UTF-8.
+      const between = units + Math.floor((bytes - units) / 2);
+      const outcome = validateStreamFrame(fixture, { maxBytes: between });
+      expect(outcome.ok, name).toBe(false);
+      if (!outcome.ok && outcome.error.code === 'too-large') {
+        expect(outcome.error.size, name).toBe(bytes);
+        expect(outcome.error.maxBytes, name).toBe(between);
+      }
+      // Boundary: exactly at the byte limit passes, one byte under it does not.
+      expect(validateStreamFrame(fixture, { maxBytes: bytes }).ok, name).toBe(true);
+      expect(validateStreamFrame(fixture, { maxBytes: bytes - 1 }).ok, name).toBe(false);
+    }
+    // The exact numbers the canonical suite asserts, so a fixture edit cannot quietly weaken this.
+    expect(new TextEncoder().encode(JSON.stringify(unicodeMixedFixture)).length).toBe(82);
+    expect(JSON.stringify(unicodeMixedFixture).length).toBe(73);
+  });
+
+  it('rejects a WebSocket frame whose bytes exceed the bound its code units do not', async () => {
+    const { tournamentId } = await setupRoom('room-ws-bytes', '53535353');
+    const stub = env.QBTCP_RELAY.get(env.QBTCP_RELAY.idFromName(tournamentId));
+    // Half a megabyte of two-byte text: ~524k UTF-16 units, well under the 1 MiB bound, but
+    // ~1.05 MB of UTF-8, over it. Driven through the object's own handler because a message this
+    // size is above what the runtime will carry over a live socket.
+    const oversize = JSON.stringify({
+      version: 1,
+      type: 'progress',
+      payload: { note: twoByteRun(530_000) },
+    });
+    expect(oversize.length).toBeLessThan(1_048_576);
+    expect(new TextEncoder().encode(oversize).length).toBeGreaterThan(1_048_576);
+
+    const sent: string[] = [];
+    const socket = {
+      send(value: string) {
+        sent.push(value);
+      },
+      deserializeAttachment() {
+        return null;
+      },
+    } as unknown as WebSocket;
+    await runInDurableObject(stub, async (instance) => {
+      await instance.webSocketMessage(socket, oversize);
+    });
+    expect(sent).toHaveLength(1);
+    const frame = JSON.parse(sent[0]) as { type: string; payload: Record<string, unknown> };
+    expect(frame.type).toBe('error');
+    expect(frame.payload.code).toBe('too-large');
+    // The refusal names the byte bound, and it is the frame bound the descriptor advertises.
+    expect(String(frame.payload.message)).toContain('1048576-byte bound');
+  });
+
+  it('measures a mirrored assignment in UTF-8 bytes, at the limit and one byte over', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+
+    // MAX_ASSIGNMENT_BYTES is 262144. These two documents are 262144 and 262145 UTF-8 bytes but
+    // only ~131k UTF-16 code units, so `.length` would have accepted both — including one that
+    // exceeds the bound the relay advertises.
+    const pad = (extra: string) => ({
+      type: 'Match',
+      id: MATCH_ID,
+      _qbtcp: { round_revision: 3, assignment_revision: 7 },
+      match_teams: [],
+      note: twoByteRun(131_016) + extra,
+    });
+    const atLimit = pad('');
+    const overLimit = pad('x');
+    expect(new TextEncoder().encode(JSON.stringify(atLimit)).length).toBe(262_144);
+    expect(new TextEncoder().encode(JSON.stringify(overLimit)).length).toBe(262_145);
+    expect(JSON.stringify(overLimit).length).toBeLessThan(262_144);
+
+    const accepted = await mirror(management, tournamentId, {
+      rooms: [{ room_id: 'room-bytes', assignment_qbj: atLimit, round_revision: 3, assignment_revision: 7 }],
+    });
+    expect(accepted.status).toBe(200);
+
+    const refused = await mirror(management, tournamentId, {
+      revision: 2,
+      rooms: [
+        { room_id: 'room-bytes', assignment_qbj: overLimit, round_revision: 3, assignment_revision: 8 },
+      ],
+    });
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toMatchObject({ error: 'body_too_large' });
+  });
+
+  it('measures a request body in UTF-8 bytes, not code units', async () => {
+    const { tournamentId, roomToken } = await setupRoom('room-body-bytes', '54545454');
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+
+    // MAX_BODY_BYTES is 262144 for nothing — it is 1 MiB. A progress snapshot of two-byte text
+    // whose UTF-16 length is comfortably under 1 MiB is over 1 MiB on the wire, and the relay
+    // used to store it: the scorer, which measures correctly, would never have sent it.
+    const body = JSON.stringify({ sequence: 1, match_state: { note: twoByteRun(540_000) } });
+    expect(body.length).toBeLessThan(1_048_576);
+    expect(new TextEncoder().encode(body).length).toBeGreaterThan(1_048_576);
+    const refused = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: streamedBody(body),
+      // @ts-expect-error Duplex is required for streamed request bodies in workers.
+      duplex: 'half',
+    });
+    expect(refused.status).toBe(413);
+    expect(await refused.json()).toMatchObject({ error: 'body_too_large' });
+
+    // Multibyte text under the bound still works: this is a byte limit, not a ban on Unicode.
+    const ok = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: JSON.stringify({ sequence: 2, match_state: { note: 'Round 3 — Café 😀 東京' } }),
+    });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toMatchObject({ accepted: true, sequence: 2 });
+  });
+
+  it('rejects a final QBJ document by its bytes', async () => {
+    const { tournamentId, roomToken } = await setupRoom('room-final-bytes', '55555555');
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+    const qbj = { ...finalQbj(), note: twoByteRun(540_000) };
+    const serialized = JSON.stringify({ qbj });
+    expect(serialized.length).toBeLessThan(1_048_576);
+    expect(new TextEncoder().encode(serialized).length).toBeGreaterThan(1_048_576);
+    const refused = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/result`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: streamedBody(serialized),
+      // @ts-expect-error Duplex is required for streamed request bodies in workers.
+      duplex: 'half',
+    });
+    expect(refused.status).toBe(413);
+
+    // And a final full of ordinary non-ASCII text is retained, receipt and all.
+    const unicodeFinal = { ...finalQbj(), venue: 'Café Nöel 東京 😀' };
+    const kept = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/result`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: JSON.stringify({ qbj: unicodeFinal }),
+    });
+    expect(kept.status).toBe(200);
+    expect(await kept.json()).toMatchObject({ received: true, duplicate: false });
+  });
+
+  it('counts bytes_in in bytes, so telemetry does not under-report multibyte traffic', async () => {
+    const { tournamentId, management, roomToken } = await setupRoom('room-telemetry', '56565656');
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+    const before = (await (
+      await SELF.fetch(`${manageBase(tournamentId)}/health`, { headers: manageHeaders(management) })
+    ).json()) as { counters: Record<string, number> };
+
+    const note = twoByteRun(2_000);
+    const body = JSON.stringify({ sequence: 9, match_state: { note } });
+    const response = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/progress`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body,
+    });
+    expect(response.status).toBe(200);
+
+    const after = (await (
+      await SELF.fetch(`${manageBase(tournamentId)}/health`, { headers: manageHeaders(management) })
+    ).json()) as { counters: Record<string, number> };
+    const charged = (after.counters.bytes_in ?? 0) - (before.counters.bytes_in ?? 0);
+    expect(charged).toBeGreaterThanOrEqual(new TextEncoder().encode(body).length);
+    // Strictly more than the code-unit count, which is what the counter used to report.
+    expect(charged).toBeGreaterThan(body.length);
   });
 });
