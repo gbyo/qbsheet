@@ -138,6 +138,11 @@ export const RULES = [
     domains: [],
     why: 'the Cloudflare backend runs in workerd, in qblive.yml',
   },
+  {
+    glob: 'apps/qbtcp-relay-backend-cloudflare/**',
+    domains: [],
+    why: 'the QBTCP relay runs in workerd, in qblive.yml',
+  },
   { glob: 'apps/qblive-push/**', domains: [], why: 'the push gateway runs in workerd, in qblive.yml' },
   { glob: 'apps/qblive-push-prototype/**', domains: [], why: 'a prototype, exercised by qblive.yml' },
   {
@@ -166,6 +171,11 @@ export const RULES = [
     glob: 'packages/qblive-conformance/**',
     domains: [],
     why: 'the conformance suite, run against a real backend in qblive.yml',
+  },
+  {
+    glob: 'packages/qbtcp-relay-conformance/**',
+    domains: [],
+    why: 'the relay conformance suite, run against a real relay in qblive.yml',
   },
 
   // ---------------------------------------------------------------------------------------------
