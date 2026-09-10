@@ -1,4 +1,5 @@
 use axum::body::{to_bytes, Body};
+use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use qbtcp_server::{
     AssignedAssignment, AssignmentMeta, AssignmentState, MemoryState, PresenceUpdate, QbtcpConfig,
@@ -6,6 +7,7 @@ use qbtcp_server::{
     DEVICE_ID_HEADER, OPERATOR_NAME_HEADER, QBTCP_PREFIX, ROOM_TOKEN_HEADER, SESSION_TOKEN_HEADER,
 };
 use serde_json::{json, Value};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -144,11 +146,27 @@ async fn request(
     headers: &[(&str, &str)],
     body: Option<Vec<u8>>,
 ) -> (StatusCode, HeaderMap, Value) {
+    request_with_peer(server, method, path, headers, body, None).await
+}
+
+/// Direct-LAN requests carry socket peer identity like a real listener (#729).
+#[allow(clippy::too_many_arguments)]
+async fn request_with_peer(
+    server: &Arc<QbtcpServer>,
+    method: Method,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: Option<Vec<u8>>,
+    peer: Option<SocketAddr>,
+) -> (StatusCode, HeaderMap, Value) {
     let mut builder = Request::builder().method(method).uri(path);
     for (name, value) in headers {
         builder = builder.header(*name, *value);
     }
-    let request = builder.body(Body::from(body.unwrap_or_default())).unwrap();
+    let mut request = builder.body(Body::from(body.unwrap_or_default())).unwrap();
+    if let Some(addr) = peer {
+        request.extensions_mut().insert(ConnectInfo(addr));
+    }
     let response = server.router().oneshot(request).await.unwrap();
     let status = response.status();
     let headers = response.headers().clone();
@@ -347,6 +365,180 @@ async fn pairing_is_uniform_and_tokens_scope_assignment() {
         .unwrap()
         .starts_with(qbtcp_server::QBJ_MEDIA_TYPE));
     assert_eq!(assignment["objects"][2]["id"], "match-1");
+}
+
+/// A tournament-shaped server with one room per scorer device (#729).
+fn multi_room_fixture(room_count: usize, limit: usize) -> Arc<QbtcpServer> {
+    let rooms = (1..=room_count)
+        .map(|index| RoomInfo {
+            id: format!("room-{index}"),
+            name: format!("Room {index}"),
+            description: None,
+            enabled: true,
+        })
+        .collect();
+    let state = Arc::new(MemoryState::new(
+        TournamentInfo {
+            id: "tournament-1".to_owned(),
+            name: "Contract Tournament".to_owned(),
+            qbj_version: "2.1.1".to_owned(),
+        },
+        rooms,
+    ));
+    let config = QbtcpConfig {
+        pairing_rate_limit: qbtcp_server::PairingRateLimit {
+            max_attempts: limit,
+            window: Duration::from_secs(60),
+        },
+        ..QbtcpConfig::default()
+    };
+    Arc::new(QbtcpServer::new(state, config).unwrap())
+}
+
+fn peer(octet: u8, port: u16) -> SocketAddr {
+    SocketAddr::from(([10, 0, 0, octet], port))
+}
+
+/// Pair one room as one direct-LAN peer identity, without proxy headers.
+async fn pair_as(server: &Arc<QbtcpServer>, room: &str, peer_addr: SocketAddr) -> StatusCode {
+    let invitation = server.issue_pairing(room).unwrap();
+    let body = serde_json::to_vec(&json!({"code": invitation.code, "roomId": room})).unwrap();
+    let (status, _, _) = request_with_peer(
+        server,
+        Method::POST,
+        "/qbtcp/v1/pair",
+        &[("content-type", "application/json")],
+        Some(body),
+        Some(peer_addr),
+    )
+    .await;
+    status
+}
+
+async fn pair_invalid_as(
+    server: &Arc<QbtcpServer>,
+    room: &str,
+    peer_addr: SocketAddr,
+    forwarded: Option<&str>,
+) -> (StatusCode, HeaderMap, Value) {
+    let mut headers = vec![("content-type", "application/json")];
+    if let Some(header) = forwarded {
+        headers.push(("x-forwarded-for", header));
+    }
+    let body = serde_json::to_vec(&json!({"code": "not-a-code", "roomId": room})).unwrap();
+    request_with_peer(
+        server,
+        Method::POST,
+        "/qbtcp/v1/pair",
+        &headers,
+        Some(body),
+        Some(peer_addr),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn twelve_direct_lan_peers_pair_twelve_rooms_in_one_window() {
+    // The production failure from #729: a round starting at once must not
+    // collapse into one shared limiter bucket.
+    let server = multi_room_fixture(12, 32);
+    for index in 1..=12u8 {
+        let status = pair_as(
+            &server,
+            &format!("room-{index}"),
+            peer(index, 5000 + index as u16),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "peer {index} pairs room {index}");
+    }
+}
+
+#[tokio::test]
+async fn one_abusive_peer_is_limited_without_blocking_other_rooms() {
+    let server = multi_room_fixture(2, 5);
+    for _ in 0..5 {
+        let (status, _, _) = pair_invalid_as(&server, "room-1", peer(1, 5001), None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    // The sixth attempt from the same peer IP is rate-limited, with a retry hint.
+    let (limited, headers, _) = pair_invalid_as(&server, "room-1", peer(1, 5001), None).await;
+    assert_eq!(limited, StatusCode::TOO_MANY_REQUESTS);
+    assert!(headers.contains_key("retry-after"));
+    // Reconnecting from a new ephemeral port does not reset abuse protection.
+    let (relimited, _, _) = pair_invalid_as(&server, "room-1", peer(1, 9001), None).await;
+    assert_eq!(relimited, StatusCode::TOO_MANY_REQUESTS);
+    // An unrelated scorer device pairs its own room without interference.
+    assert_eq!(
+        pair_as(&server, "room-2", peer(2, 5002)).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn forged_forwarded_headers_do_not_bypass_the_direct_limiter() {
+    let server = multi_room_fixture(2, 3);
+    for _ in 0..3 {
+        let (status, _, _) =
+            pair_invalid_as(&server, "room-1", peer(7, 5007), Some("forged-a")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    // Same peer, fresh forged identity: still limited, because the direct
+    // listener keys on the socket peer, not the header.
+    let (limited, _, _) = pair_invalid_as(&server, "room-1", peer(7, 5007), Some("forged-b")).await;
+    assert_eq!(limited, StatusCode::TOO_MANY_REQUESTS);
+    // A different peer reusing the same forged header is unaffected.
+    assert_eq!(
+        pair_as(&server, "room-2", peer(8, 5008)).await,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
+async fn trusted_proxy_configuration_honors_forwarded_identity() {
+    let state = Arc::new(MemoryState::new(
+        TournamentInfo {
+            id: "tournament-1".to_owned(),
+            name: "Contract Tournament".to_owned(),
+            qbj_version: "2.1.1".to_owned(),
+        },
+        vec![
+            RoomInfo {
+                id: "room-1".to_owned(),
+                name: "Room 1".to_owned(),
+                description: None,
+                enabled: true,
+            },
+            RoomInfo {
+                id: "room-2".to_owned(),
+                name: "Room 2".to_owned(),
+                description: None,
+                enabled: true,
+            },
+        ],
+    ));
+    let config = QbtcpConfig {
+        trust_forwarded_for: true,
+        pairing_rate_limit: qbtcp_server::PairingRateLimit {
+            max_attempts: 2,
+            window: Duration::from_secs(60),
+        },
+        ..QbtcpConfig::default()
+    };
+    let server = Arc::new(QbtcpServer::new(state, config).unwrap());
+    for _ in 0..2 {
+        let (status, _, _) =
+            pair_invalid_as(&server, "room-1", peer(9, 5009), Some("proxy-client-a")).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (limited, _, _) =
+        pair_invalid_as(&server, "room-1", peer(9, 5009), Some("proxy-client-a")).await;
+    assert_eq!(limited, StatusCode::TOO_MANY_REQUESTS);
+    // A direct peer identity with no proxy header is its own client.
+
+    assert_eq!(
+        pair_as(&server, "room-2", peer(9, 5009)).await,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]

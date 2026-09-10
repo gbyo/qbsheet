@@ -344,11 +344,20 @@ impl QbtcpServer {
 
     /// Serve the router on a Tokio TCP listener. Tauri can instead mount [`Self::router`] into a
     /// listener it already owns.
+    ///
+    /// The service carries socket connect info so pairing rate limits key on
+    /// the peer IP (#729). Hosts that mount [`Self::router`] themselves must do
+    /// the same or every client shares the `"unknown"` limiter bucket.
     pub async fn serve(
         self: Arc<Self>,
         listener: tokio::net::TcpListener,
     ) -> Result<(), std::io::Error> {
-        axum::serve(listener, self.router()).await
+        axum::serve(
+            listener,
+            self.router()
+                .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
     }
 
     pub fn discovery(&self) -> Result<DiscoveryDocument, QbtcpError> {
