@@ -299,13 +299,11 @@ export function resourceCenterPresetScopeKeys(state: DirectorState, preset: Reso
   if (preset === 'combined-only') return ['combined'];
   if (preset === 'phases-only') return scopes.filter((scope) => scope.kind === 'phase').map((s) => s.key);
 
+  const playedPhases = scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0);
   const combined = scopes.find((scope) => scope.kind === 'combined');
-  if (!combined) return scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0).map((s) => s.key);
+  if (!combined) return playedPhases.map((scope) => scope.key);
   if (combined.gameCount === 0) return [combined.key];
-  return [
-    ...scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0).map((scope) => scope.key),
-    combined.key,
-  ];
+  return [...playedPhases.map((scope) => scope.key), combined.key];
 }
 
 export function resourceCenterRecommendedScopeKeys(state: DirectorState): string[] {
@@ -661,7 +659,7 @@ export function buildCanonicalResourceCenterScopeSets(
     if (first !== undefined && first !== set.scopeKey) {
       warnings.push(
         `Duplicate report name "${set.scopeLabel}": two report sets share one display label. ` +
-          `Rename one before posting so each stat report stays distinguishable.`,
+          `Rename one before posting so each stat report stays distinguishishable.`,
       );
     } else if (first === undefined) {
       seenLabels.set(folded, set.scopeKey);
