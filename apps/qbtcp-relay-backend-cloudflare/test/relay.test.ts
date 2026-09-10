@@ -238,6 +238,62 @@ describe('claiming a freshly deployed relay', () => {
   });
 });
 
+describe('rotating the management credential', () => {
+  it('mints a fresh credential; the old one stops working and state survives', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+    await mirrorRoom(management, tournamentId, 'room-a', { code: '42424242' });
+
+    const response = await SELF.fetch(`${manageBase(tournamentId)}/rotate`, {
+      method: 'POST',
+      headers: manageHeaders(management),
+      body: '{}',
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { managementToken: string; tournamentId: string };
+    expect(body.managementToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.managementToken).not.toBe(management);
+    expect(body.tournamentId).toBe(tournamentId);
+    expect(JSON.stringify(body)).not.toMatch(/hash/i);
+
+    // The old credential is dead for management reads …
+    const stale = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(management),
+    });
+    expect(stale.status).toBe(401);
+
+    // … while the new one sees the mirrored state rotation must not disturb.
+    const health = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(body.managementToken),
+    });
+    expect(health.status).toBe(200);
+    expect(await health.json()).toMatchObject({ tournamentId, mirror: { revision: 1 } });
+  });
+
+  it('refuses rotation without a valid management credential', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+    const tampered = `${management.slice(0, -1)}${management.endsWith('0') ? '1' : '0'}`;
+    for (const headers of [
+      { 'content-type': 'application/json' },
+      manageHeaders('0'.repeat(64)),
+      manageHeaders(tampered),
+    ]) {
+      const response = await SELF.fetch(`${manageBase(tournamentId)}/rotate`, {
+        method: 'POST',
+        headers,
+        body: '{}',
+      });
+      expect(response.status).toBe(401);
+    }
+    // A failed rotation leaves the current credential working.
+    const health = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(management),
+    });
+    expect(health.status).toBe(200);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Discovery: the stream capability contract, exactly as #770 defines it
 // ---------------------------------------------------------------------------
