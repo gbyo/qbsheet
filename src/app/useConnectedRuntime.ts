@@ -1468,14 +1468,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       // A healthy stream takes the final through the protocol's durable-receipt path: the
       // relay commits before answering, so a receipt means retained even when Director is
-      // offline — received, never standings-accepted. One retry key covers this whole
-      // attempt: it travels on the stream frame and, unanswered, on the HTTP envelope
-      // below, so the server answers the repeat `duplicate: true` and retains exactly
-      // one result.
-      const retryKey = newFinalRetryKey();
+      // offline — received, never standings-accepted. The stream frame carries a
+      // retry key, and the HTTP fallthrough below posts the bare QBJ both servers
+      // accept, so a repeat is answered `duplicate: true` and exactly one result
+      // is retained.
       const stream = streamRef.current;
       if (stream?.isLive) {
-        const answered = await stream.submitFinal(retryKey, qbj);
+        const answered = await stream.submitFinal(newFinalRetryKey(), qbj);
         if (answered.delivered) {
           const receipt = readResultReceipt(answered.receipt ?? {});
           const delivery = classifyFinalDelivery({ ok: true, value: receipt });
@@ -1487,10 +1486,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           return delivery;
         }
         // Unanswered over the stream is not a refusal — retry over HTTP with the same
-        // key and bytes, and let retry-key plus fingerprint idempotency converge the paths.
+        // bytes, and let fingerprint idempotency converge the two paths.
       }
       const activeClient = getActiveClient();
-      const delivered = await deliverFinalResult(activeClient, credentials, qbj, noteWrite, retryKey);
+      const delivered = await deliverFinalResult(activeClient, credentials, qbj, noteWrite);
       if (delivered.delivery === 'sent') {
         timeline.record(
           delivered.duplicate ? 'final-duplicate' : 'final-sent',

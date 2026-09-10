@@ -1269,6 +1269,11 @@ export class QbtcpRelay extends DurableObject<Env> {
     const tournament = this.requireTournament();
     this.requireLive(tournament);
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as { qbj?: unknown; retry_key?: unknown };
+    // Accept the `{qbj, retry_key}` envelope and the bare QBJ document alike. The shared
+    // client posts bare QBJ because YellowFruit reads the identity out of the raw body —
+    // an envelope would arrive unreadable there — while newer senders may wrap the key
+    // beside the match. Either way retainFinal below still refuses a non-QBJ document.
+    const rawQbj = body.qbj !== undefined ? body.qbj : (body as unknown);
     const presented = this.sessionToken(request) ?? '';
     const writerDevice = (await this.writerTokenHash(session, presented))
       ? await this.deviceForToken(session.session_id, presented)
@@ -1276,7 +1281,7 @@ export class QbtcpRelay extends DurableObject<Env> {
     // Only an open session enforces the writer lock: a retry must stay idempotent and a corrected
     // final must stay retainable after the session settled, mirroring local semantics.
     if (session.status === 'open' && writerDevice === null) throw writerConflict(session.writer_device);
-    return json(await this.retainFinal(tournament, session, body.qbj, body.retry_key), 200, cors);
+    return json(await this.retainFinal(tournament, session, rawQbj, body.retry_key), 200, cors);
   }
 
   private async deviceForToken(sessionId: string, presented: string): Promise<string | null> {

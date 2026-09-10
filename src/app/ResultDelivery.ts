@@ -15,7 +15,6 @@ import {
   ServerDeliveryLedgerOutcome,
 } from '../game/GameStore';
 import { IResultDeliveryCapability, ResultDeliveryCapabilityStore } from './ResultDeliveryCapability';
-import { newFinalRetryKey } from '../qbtcp/QbtcpPreferredTransport';
 
 const rejectedDeliveryFallback = 'Tournament control did not accept this result.';
 
@@ -201,10 +200,6 @@ export class ResultDeliveryService {
       this.makeClient(capability.baseUrl),
       { sessionId: capability.sessionId, token: capability.sessionToken },
       record.finalQbj,
-      undefined,
-      // A fresh key per retry call: cross-call convergence rides the result fingerprint,
-      // which the relay checks alongside the key.
-      newFinalRetryKey(),
     );
     await this.recordOutcome(recordId, delivery, now);
     return delivery;

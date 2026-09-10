@@ -645,12 +645,8 @@ export default class FruityServerClient {
   }
 
   /** Submit the final. Idempotent server-side, so a retry after a network failure is not a second game. */
-  async postFinal(
-    credentials: ISessionCredentials,
-    qbj: object,
-    retryKey?: string,
-  ): Promise<ApiResult<IResultReceipt>> {
-    return (await this.ready()).postResult(credentials, qbj, retryKey);
+  async postFinal(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+    return (await this.ready()).postResult(credentials, qbj);
   }
 
   /** This session's own latest snapshot, for a device that has lost its local copy. */

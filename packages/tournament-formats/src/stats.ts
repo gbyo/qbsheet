@@ -347,8 +347,7 @@ function playerRow(mutable: MutablePlayerStats): PlayerStatsRow {
     rank: 0,
     ...rest,
     tossupsHeard: known ? mutable.tossupsHeard : null,
-    ppg:
-      mutable.gamesPlayedKnown && mutable.gamesPlayed > 0 ? mutable.points / mutable.gamesPlayed : null,
+    ppg: mutable.gamesPlayedKnown && mutable.gamesPlayed > 0 ? mutable.points / mutable.gamesPlayed : null,
     pptuh: known && mutable.tossupsHeard > 0 ? mutable.points / mutable.tossupsHeard : null,
     ppb: mutable.bonusesHeard > 0 ? mutable.bonusPoints / mutable.bonusesHeard : null,
   };
@@ -521,11 +520,7 @@ export function buildStatsSnapshot(
       const player = ensurePlayer(result);
       // Exposure beyond the game's own count is corrupt data, not extra participation:
       // crediting it would publish more than one GP for a single game.
-      if (
-        result.tossupsHeard !== undefined &&
-        gameTuh !== null &&
-        result.tossupsHeard <= gameTuh
-      ) {
+      if (result.tossupsHeard !== undefined && gameTuh !== null && result.tossupsHeard <= gameTuh) {
         player.gamesPlayed += result.tossupsHeard / gameTuh;
       } else {
         player.gamesPlayedKnown = false;

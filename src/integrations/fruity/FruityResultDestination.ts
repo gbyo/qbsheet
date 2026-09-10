@@ -133,10 +133,9 @@ export async function deliverFinalResult(
   credentials: ISessionCredentials,
   frozenQbj: object,
   onResponse?: (result: ApiResult<IResultReceipt>) => void,
-  retryKey?: string,
 ): Promise<IFinalDelivery> {
   try {
-    const result = await client.postFinal(credentials, frozenQbj, retryKey);
+    const result = await client.postFinal(credentials, frozenQbj);
     onResponse?.(result);
     return classifyFinalDelivery(result);
   } catch {

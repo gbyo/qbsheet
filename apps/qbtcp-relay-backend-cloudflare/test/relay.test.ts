@@ -740,6 +740,28 @@ describe('final results', () => {
     expect(committed).toBe(true);
   });
 
+  it('accepts the bare QBJ document YellowFruit-compatible senders post', async () => {
+    const { tournamentId, management, roomToken } = await setupRoom();
+    const { sessionId, token } = await openSession(tournamentId, roomToken);
+    const qbj = finalQbj();
+
+    const response = await SELF.fetch(`${tournamentBase(tournamentId)}/sessions/${sessionId}/result`, {
+      method: 'POST',
+      headers: sessionHeaders(token),
+      body: JSON.stringify(qbj),
+    });
+    expect(response.status).toBe(200);
+    const receipt = (await response.json()) as Record<string, unknown>;
+    expect(receipt).toMatchObject({ received: true, duplicate: false });
+    expect(receipt.fingerprint).toBe(await resultFingerprint(qbj));
+
+    const results = (await (
+      await SELF.fetch(`${manageBase(tournamentId)}/results`, { headers: manageHeaders(management) })
+    ).json()) as { results: { result_id: string; qbj: unknown }[] };
+    expect(results.results).toHaveLength(1);
+    expect(results.results[0].qbj).toEqual(qbj);
+  });
+
   it('answers retries idempotently and retains corrections for review', async () => {
     const { tournamentId, roomToken } = await setupRoom();
     const { sessionId, token } = await openSession(tournamentId, roomToken);

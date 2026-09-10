@@ -526,18 +526,15 @@ describe('what the client puts on the wire', () => {
       },
     });
 
-    const result = await new FruityServerClient('http://control.test', fetchImpl).postFinal(
-      credentials,
-      {
-        tossups_read: 20,
-      },
-      'retry-6f2a',
-    );
+    const result = await new FruityServerClient('http://control.test', fetchImpl).postFinal(credentials, {
+      tossups_read: 20,
+    });
 
     const sent = calls.find((call) => call.path === '/qbtcp/v1/sessions/sess-1/result');
     expect(sent?.headers['Content-Type']).toBe(qbjMediaType);
-    // The relay reads the result as an envelope; a bare QBJ has no `qbj` member.
-    expect(sent?.body).toEqual({ qbj: { tossups_read: 20 }, retry_key: 'retry-6f2a' });
+    // The result posts as the bare QBJ document: YellowFruit reads the identity out of
+    // the raw body, so an envelope would arrive unreadable.
+    expect(sent?.body).toEqual({ tossups_read: 20 });
     expect(result.ok && result.value).toEqual({
       accepted: true,
       duplicate: true,

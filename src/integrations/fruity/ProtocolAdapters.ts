@@ -342,11 +342,7 @@ export interface IServerAdapter {
     questionNumber?: number,
   ): Promise<ApiResult<IRosterAddResult>>;
   putProgress(credentials: ISessionCredentials, qbj: object, sequence: number): Promise<ApiResult<unknown>>;
-  postResult(
-    credentials: ISessionCredentials,
-    qbj: object,
-    retryKey?: string,
-  ): Promise<ApiResult<IResultReceipt>>;
+  postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>>;
   recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>>;
 }
 
@@ -460,11 +456,7 @@ abstract class BaseAdapter implements IServerAdapter {
     sequence: number,
   ): Promise<ApiResult<unknown>>;
 
-  abstract postResult(
-    credentials: ISessionCredentials,
-    qbj: object,
-    retryKey?: string,
-  ): Promise<ApiResult<IResultReceipt>>;
+  abstract postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>>;
 
   recover(credentials: ISessionCredentials): Promise<ApiResult<ISessionRecovery>> {
     return this.request<unknown>(this.routes.recovery(credentials.sessionId), {
@@ -817,26 +809,21 @@ export class QbtcpAdapter extends BaseAdapter {
     });
   }
 
-  postResult(
-    credentials: ISessionCredentials,
-    qbj: object,
-    retryKey?: string,
-  ): Promise<ApiResult<IResultReceipt>> {
-    return this.guard('result', 'result submission', () => this.sendResult(credentials, qbj, retryKey));
+  postResult(credentials: ISessionCredentials, qbj: object): Promise<ApiResult<IResultReceipt>> {
+    return this.guard('result', 'result submission', () => this.sendResult(credentials, qbj));
   }
 
   private async sendResult(
     credentials: ISessionCredentials,
     qbj: object,
-    retryKey?: string,
   ): Promise<ApiResult<IResultReceipt>> {
-    // The relay reads the result and its idempotency key as an envelope; a bare QBJ has no
-    // `qbj` member and is refused as invalid. Transport metadata beside the match, never a
-    // field invented inside the QBJ — the same rule as the progress envelope above.
+    // The result posts as the bare QBJ document both servers accept: YellowFruit reads the
+    // identity out of the raw body, so an envelope would arrive unreadable. Transport
+    // metadata stays out of the QBJ — the same rule as the progress envelope above.
     const result = await this.request<unknown>(this.routes.result(credentials.sessionId), {
       method: 'POST',
       headers: this.sessionHeaders(credentials, qbjMediaType),
-      body: JSON.stringify({ qbj, ...(retryKey !== undefined ? { retry_key: retryKey } : {}) }),
+      body: JSON.stringify(qbj),
     });
     if (!result.ok) return result;
     return { ok: true, value: readResultReceipt(result.value) };
