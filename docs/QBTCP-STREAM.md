@@ -52,7 +52,11 @@ The descriptor answers, in order:
 - `mirrors_assignment`: whether the relay mirrors Director-published assignment and
   session state. A relay MUST advertise `true`.
 - `replay`: the reconnect features offered, a subset of `sequence` (resume from a server
-  sequence cursor) and `resync` (explicit resync-required signalling).
+  sequence cursor) and `resync` (explicit resync-required signalling). Every entry MUST be
+  one of those two strings: a descriptor whose `replay` list contains an unknown or
+  non-string entry is malformed and unusable as a whole — the client MUST fall back to HTTP
+  rather than filter the list — so both implementations make the same stream-capable
+  decision for the same discovery document.
 - `max_frame_bytes`: the bound on one decoded frame. A client MUST NOT send larger
   frames; a server MUST reject them before reading them.
 - `ticket` (optional, default `false`): whether the server additionally offers the
