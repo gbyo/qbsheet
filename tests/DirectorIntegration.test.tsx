@@ -19,7 +19,9 @@ import {
   roundScheduleIsValid,
   runPreflight,
   scheduleIsValid,
+  scoringDefaultsImpact,
   scoringRulePresets,
+  scoringValuesForGameRecord,
   type DirectorState,
   type TeamGameScore,
   type TournamentRules,
@@ -494,7 +496,7 @@ describe('Director integration hardening', () => {
     expect(hook.result.current.state.tournament?.rules.powerValue).toBe(15);
   });
 
-  test('scoring values lock once results exist; procedure and tiebreakers stay editable', async () => {
+  test('scoring saves are prospective once games are issued; accepted count is not the lock', async () => {
     const { hook } = await directorWithSetup(4, 2);
     act(() => {
       expect(hook.result.current.updateRules({ tossupValue: 12 })).toBe(true);
@@ -515,15 +517,16 @@ describe('Director integration hardening', () => {
       ).toBe(true);
     });
     expect(hook.result.current.state.games.some((entry) => entry.status === 'accepted')).toBe(true);
+    expect(scoringDefaultsImpact(hook.result.current.state).completed).toContain(game.id);
 
-    // While the round still has assignments in circulation, every rule edit is refused up front.
+    // Assignments in circulation no longer freeze the settings screen: the save lands as
+    // future defaults while issued games keep their pinned truth.
     act(() => {
-      expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(false);
+      expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(true);
     });
-    expect(hook.result.current.error).toMatch(/assignments in circulation/i);
+    expect(hook.result.current.state.tournament?.rules.bouncebacks).toBe(true);
 
-    // Resolve the rest of the round so the assignment guard clears and the value lock is what
-    // decides the remaining edits.
+    // Resolve the rest of the round.
     for (const remaining of hook.result.current.state.scheduledGames.filter(
       (entry) =>
         entry.roundId === roundId &&
@@ -544,27 +547,44 @@ describe('Director integration hardening', () => {
       });
     }
 
-    // Reinterpreting values are refused with a lock message; nothing changes.
+    // Formerly locked value edits now save as future defaults, and the accepted games keep
+    // resolving under the values they were scored with.
+    const definitionsBefore = hook.result.current.state.gameDefinitions.length;
     act(() => {
-      expect(hook.result.current.updateRules({ tossupValue: 14 })).toBe(false);
+      expect(hook.result.current.updateRules({ tossupValue: 14 })).toBe(true);
     });
-    expect(hook.result.current.error).toMatch(/locked/i);
-    expect(hook.result.current.state.tournament?.rules.tossupValue).toBe(12);
+    expect(hook.result.current.state.tournament?.rules.tossupValue).toBe(14);
+    for (const accepted of hook.result.current.state.games.filter((entry) => entry.status === 'accepted')) {
+      expect(scoringValuesForGameRecord(hook.result.current.state, accepted)?.tossupValue).toBe(12);
+    }
     // Disabling bonuses first requires clearing the overtime-bonus procedure
-    // flag (a coherent combination check), and then the lock still refuses.
+    // flag (a coherent combination check); the save itself stays allowed.
     act(() => {
       expect(hook.result.current.updateRules({ overtimeBonuses: false })).toBe(true);
-      expect(hook.result.current.updateRules({ useBonuses: false })).toBe(false);
+      expect(hook.result.current.updateRules({ useBonuses: false })).toBe(true);
     });
-    expect(hook.result.current.error).toMatch(/locked/i);
+    expect(hook.result.current.state.tournament?.rules.useBonuses).toBe(false);
+    // Saving defaults never mints definition revisions for already-issued games.
+    expect(hook.result.current.state.gameDefinitions.length).toBe(definitionsBefore);
+    // The audit says what the save did and did not touch.
+    const lastAudit = hook.result.current.state.audit.at(-1);
+    expect(lastAudit?.summary).toMatch(/future/);
+    expect(lastAudit?.summary).toMatch(/keep.*existing rules/);
 
-    // Procedure toggles and tiebreakers only affect future games.
+    // Procedure toggles save prospectively; tiebreakers go through the standings-only
+    // path, which never mints a scorer definition revision.
+    const tiebreakerDefinitionsBefore = hook.result.current.state.gameDefinitions.length;
     act(() => {
       expect(hook.result.current.updateRules({ bouncebacks: true })).toBe(true);
-      expect(hook.result.current.updateRules({ tiebreakers: ['record', 'points'] })).toBe(true);
+      expect(
+        hook.result.current.updateTiebreakers(['record', 'points'] as TournamentRules['tiebreakers']),
+      ).toBe(true);
     });
     expect(hook.result.current.state.tournament?.rules.bouncebacks).toBe(true);
     expect(hook.result.current.state.tournament?.rules.tiebreakers).toEqual(['record', 'points']);
+    expect(hook.result.current.state.gameDefinitions.length).toBe(tiebreakerDefinitionsBefore);
+    const tiebreakerAudit = hook.result.current.state.audit.at(-1);
+    expect(tiebreakerAudit?.summary).toMatch(/standings only/i);
   });
 
   test('canonical result acceptance rejects invalid team and player superpower counts', async () => {
