@@ -1355,6 +1355,11 @@ function QbtcpNetwork({
           The server is running, but Director has not ingested its first snapshot yet.
         </Callout>
       )}
+      {qbtcpRunning && status?.sleepPrevention?.warning && (
+        <Callout tone="warning" title="Host sleep protection unavailable">
+          {status.sleepPrevention.warning}
+        </Callout>
+      )}
       <div className="director-actions">
         {nativeDirector ? (
           <Button
@@ -1409,6 +1414,10 @@ function QbtcpNetwork({
             value: qbtcpRunning ? (status?.pairedRooms ?? state.qbtcpSessions.length) : '—',
           },
           { term: 'Protocol', value: qbtcpRunning ? (status?.protocol ?? 'QBTCP v1') : '—' },
+          {
+            term: 'Host sleep',
+            value: qbtcpRunning ? (status?.sleepPrevention?.active ? 'Prevention active' : '—') : '—',
+          },
           {
             term: 'Snapshot sync',
             value: qbtcpOperationalHealth ? qbtcpHealthSummary(qbtcpOperationalHealth) : 'Not available',
