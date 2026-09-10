@@ -53,7 +53,7 @@ Hide it until it is relevant.
 6. **Common actions are contextual.**
    The round owns its life: packet, rooms, pairings, planned time, USB
    handoff, and Start/Finish live next to the round. Specialist pages
-   (Rooms, Packets, Transfers) remain as bulk-management and history tools,
+   (Rooms, Packets, Delivery & Results) remain as bulk-management and history tools,
    reachable by deep link when something needs attention
    ("Room 203 is missing an assignment → Fix room").
 

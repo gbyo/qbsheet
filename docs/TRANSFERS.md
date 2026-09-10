@@ -1,7 +1,9 @@
-# Transfers
+# Delivery & Results (transfers subsystem)
 
-Transfers is how tournament assignments and completed results move between QBSheet Director and
-scoring devices when QBTCP is not the route — or not the only route.
+Delivery & Results is the tournament-day page that answers three questions per current-round
+game: how is this game's assignment expected to reach its room, is it actually ready, and has a
+result come back. Underneath it is the transfers subsystem, which moves tournament assignments and
+completed results between QBSheet Director and scoring devices.
 
 This document describes the subsystem. The file format it moves is ordinary QBJ and is specified in
 [`QBJ_ASSIGNMENT_PROFILE.md`](QBJ_ASSIGNMENT_PROFILE.md); the live protocol is in
@@ -16,28 +18,53 @@ Different rooms may use different mechanisms in the same round, and the same gam
 one — an assignment delivered over the network and duplicated onto a stick as a backup is a normal,
 sensible thing for a tournament to do.
 
-So there is no `mode` setting. Not on the tournament, not on the round, not on a scheduled game.
+So there is no authoritative `mode` setting. Not on the tournament, not on the round, not on a
+scheduled game, and not on a room.
 
-## Why there is no `mode` field
+## Why there is no authoritative `mode` field
 
 A transport setting would make one route the truth and the rest an exception. The first time a
 room's tablet dropped off the network, the director would have to change a tournament-level setting
 to hand out a file — during a round, under time pressure, with the round's other eleven rooms
 depending on that setting staying where it was.
 
-Instead, delivery and return are modelled as **events around** the scheduled game rather than as
+Instead, what actually happened is modelled as **events around** the scheduled game rather than as
 properties of it:
 
-| Record | Means |
-| --- | --- |
+| Record               | Means                                                         |
+| -------------------- | ------------------------------------------------------------- |
 | `AssignmentTransfer` | One revision of one game's assignment went to one destination |
-| `IncomingArtifact` | One file showed up, and here is what Director decided it was |
-| `TransferLocation` | A place Director can write to and read from |
+| `IncomingArtifact`   | One file showed up, and here is what Director decided it was  |
+| `TransferLocation`   | A place Director can write to and read from                   |
 
-Neither transfer record is exclusive, both are many-per-game, and `ScheduledGame` is unchanged. A
-game with a QBTCP delivery and a USB delivery has two `AssignmentTransfer` rows and no contradiction.
+Neither transfer record is exclusive and both are many-per-game. A game with a QBTCP delivery and
+a USB delivery has two `AssignmentTransfer` rows and no contradiction. History is never rewritten
+when routing expectations change.
 
 See [`src/director/transfers/model.ts`](../src/director/transfers/model.ts).
+
+## Per-game delivery intent (#702)
+
+On top of the event history sits one narrow expectation per scheduled game: which route the
+director currently wants this game to use. It is the only routing state that is a property of the
+game, and it exists so the page can say "Room 103 needs a file" without pretending the whole
+round is a USB round.
+
+- `ScheduledGame.deliveryIntent` (`{ primary?: 'qbtcp' | 'file' | 'manual', fallbacks?: [...] }`)
+  is set only by an explicit operator action (`setGameDeliveryIntent`) and only for that game.
+  Siblings, other rounds in the same room, and transfer history are untouched.
+- Everything else derives in [`deliveryStatus.ts`](../src/director/transfers/deliveryStatus.ts):
+  explicit intent, else live QBTCP session evidence for the room, else the round default, else
+  manual. Intent, readiness, and history are three separate values that are never collapsed into
+  one field.
+- `Round.deliveryMode` is only the **default for games without explicit intent or stronger
+  per-game evidence**. Bulk actions ("set the round default", "copy rooms needing files") read
+  it; nothing treats it as per-game truth. Older documents without it derive exactly like
+  unconfigured games, and corrupt persisted intent loads as absent rather than invented routing.
+
+Preparing a file is an action on selected scheduled games and a destination
+(`AssignmentSelection`: one game, an explicit set, or `needing-files`). It never mutates routing —
+a file backup for a QBTCP game leaves the QBTCP primary exactly where it was.
 
 ## One result pipeline
 
@@ -74,20 +101,20 @@ So Director trusts neither. Every document, whatever route it took, is fingerpri
 fingerprint is kept for correlation with its logs and is never used for matching. That is what makes
 "the same result arrived by QBTCP and then on a stick" detectable at all.
 
-`digest` is a different question from `fingerprint`. A fingerprint asks *is this the same result*,
-ignoring transport metadata. A digest asks *is this the same file*, over the exact bytes, so a drive
+`digest` is a different question from `fingerprint`. A fingerprint asks _is this the same result_,
+ignoring transport metadata. A digest asks _is this the same file_, over the exact bytes, so a drive
 plugged in four times does not stage its results four times.
 
 ### Classification
 
-| Classification | Meaning |
-| --- | --- |
-| `ready` | Matched the current assignment, nothing to explain |
-| `duplicate` | Director already has this exact result; no second game is created |
-| `needs-review` | Parses and matches, but something is a question for a person |
-| `assignment` | An unplayed assignment file. **Never** imported as a game |
-| `not-a-result` | Valid JSON, no QBJ match in it |
-| `invalid` | Could not be read; the reason is shown |
+| Classification | Meaning                                                           |
+| -------------- | ----------------------------------------------------------------- |
+| `ready`        | Matched the current assignment, nothing to explain                |
+| `duplicate`    | Director already has this exact result; no second game is created |
+| `needs-review` | Parses and matches, but something is a question for a person      |
+| `assignment`   | An unplayed assignment file. **Never** imported as a game         |
+| `not-a-result` | Valid JSON, no QBJ match in it                                    |
+| `invalid`      | Could not be read; the reason is shown                            |
 
 `needs-review` reasons share the QBTCP server's vocabulary where the meaning is the same:
 `tournament-mismatch`, `missing-tournament-identity`, `missing-match-identity`, `unknown-match`,
@@ -186,7 +213,7 @@ QBSheet finished writing to SanDisk Ultra.
 Eject the drive normally before removing it.
 ```
 
-Director says *eject normally*, not *safe to remove*, because it has not performed an OS-level eject
+Director says _eject normally_, not _safe to remove_, because it has not performed an OS-level eject
 and cannot see the operating system's write cache.
 
 Partial success is reported as partial success. A drive that fills up after eight of twelve files
@@ -229,15 +256,15 @@ root is still a bad thing to do during a round.
 
 From [`limits.ts`](../src/director/transfers/limits.ts):
 
-| Bound | Value |
-| --- | --- |
-| Largest QBJ document read | 8 MB |
-| Entries examined per directory | 500 |
-| Files parsed per batch | 200 |
-| Entries examined in a drive root | 200 |
-| Scan depth below a transfer root | 3 |
-| JSON nesting depth | 64 |
-| JSON nodes per document | 200,000 |
+| Bound                            | Value   |
+| -------------------------------- | ------- |
+| Largest QBJ document read        | 8 MB    |
+| Entries examined per directory   | 500     |
+| Files parsed per batch           | 200     |
+| Entries examined in a drive root | 200     |
+| Scan depth below a transfer root | 3       |
+| JSON nesting depth               | 64      |
+| JSON nodes per document          | 200,000 |
 
 Anything that trips a bound is skipped **with a reason**, never silently: a director who put a file
 in the right folder and saw nothing happen deserves to know why.
@@ -250,7 +277,7 @@ in the right folder and saw nothing happen deserves to know why.
   operation resolves its argument against a registry of authorized roots — directories chosen in a
   native folder picker, or removable volumes the platform reported — and refuses anything outside
   one. The application never requests blanket access to the home directory.
-- **Symlinks are never followed.** The authorization check runs on the *canonical* path, after
+- **Symlinks are never followed.** The authorization check runs on the _canonical_ path, after
   symlinks and `..` are resolved, so a link on a stranger's stick pointing outside the transfer root
   is refused rather than read.
 - **Path traversal is refused, not normalized.** A `..` component in a write path is rejected outright.
@@ -267,24 +294,24 @@ in the right folder and saw nothing happen deserves to know why.
 
 [`apps/director/src-tauri/src/transfers.rs`](../apps/director/src-tauri/src/transfers.rs) provides:
 
-| Command | Purpose |
-| --- | --- |
-| `transfers_list_volumes` | Enumerate mounted volumes via `sysinfo`'s disk API |
-| `transfers_choose_folder` | Native folder picker; the pick is the grant |
-| `transfers_authorize_root` | Re-grant a location saved in an earlier session |
-| `transfers_forget_root` | Drop a grant |
-| `transfers_list_directory` | One directory, bounded, links reported not followed |
-| `transfers_read_file` | One file, size-checked from metadata before the read |
-| `transfers_write_file` | Atomic write |
-| `transfers_create_directory` | `mkdir -p` inside an authorized root |
-| `transfers_exists`, `transfers_available_bytes` | Location status |
+| Command                                         | Purpose                                              |
+| ----------------------------------------------- | ---------------------------------------------------- |
+| `transfers_list_volumes`                        | Enumerate mounted volumes via `sysinfo`'s disk API   |
+| `transfers_choose_folder`                       | Native folder picker; the pick is the grant          |
+| `transfers_authorize_root`                      | Re-grant a location saved in an earlier session      |
+| `transfers_forget_root`                         | Drop a grant                                         |
+| `transfers_list_directory`                      | One directory, bounded, links reported not followed  |
+| `transfers_read_file`                           | One file, size-checked from metadata before the read |
+| `transfers_write_file`                          | Atomic write                                         |
+| `transfers_create_directory`                    | `mkdir -p` inside an authorized root                 |
+| `transfers_exists`, `transfers_available_bytes` | Location status                                      |
 
 Volume detection reports mount point, display name, removable state, read-only state, and free
 space. It does **not** hardcode `/Volumes` or Windows drive letters — `sysinfo` speaks to each
 platform's own API, so a Linux stick under `/run/media/<user>/<label>` is found the same way.
 
 Enumeration runs on a 4-second timer and folder scans on a 5-second timer, and a poll that finds
-nothing writes no state at all. Only locations the director marked as *watched* are read; a
+nothing writes no state at all. Only locations the director marked as _watched_ are read; a
 connected drive nobody asked to watch is left alone.
 
 Filesystem access is behind a port
@@ -301,26 +328,30 @@ removed from the desktop application to keep that path working.
 
 ## Where things live
 
-| | |
-| --- | --- |
-| Page | **Transfers**, under Run, between Tournament and Results |
-| Internal subsystem name | triage (never user-facing) |
-| Discover, import, stage, prepare, write, watch | Transfers |
-| Inspect, review discrepancies, accept/reject/edit/reconcile | Results |
+|                                                             |                                                                   |
+| ----------------------------------------------------------- | ----------------------------------------------------------------- |
+| Page                                                        | **Delivery & Results**, under Run, between Tournament and Results |
+| Internal subsystem name                                     | triage (never user-facing)                                        |
+| Discover, import, stage, prepare, write, watch              | Delivery & Results                                                |
+| Inspect, review discrepancies, accept/reject/edit/reconcile | Results                                                           |
 
-Shortcuts elsewhere navigate into Transfers rather than duplicating it: **Prepare assignment files**
-on a round, **Prepare game file** on a room, **Import result files** on Results.
+Shortcuts elsewhere navigate into Delivery & Results rather than duplicating it: **Prepare
+assignment files** on a round, per-room **Prepare assignment** / **Prepare file fallback** rows,
+**Import returned files** in the page header and the returned-results section.
 
 ## Tests
 
-| File | Covers |
-| --- | --- |
-| [`assignment.test.ts`](../src/director/transfers/assignment.test.ts) | QBJ shape, no leaked pairings, no secrets, filenames, manifest present and absent |
-| [`filesystem.test.ts`](../src/director/transfers/filesystem.test.ts) | Volume discovery, disappearing drive, read-only drive, no space, bounds, symlinks, partial writes |
-| [`ingest.test.ts`](../src/director/transfers/ingest.test.ts) | Classification, revisions, identity mismatches, batch with one bad file, input bounds |
-| [`mixedTransport.test.ts`](../src/director/transfers/mixedTransport.test.ts) | Duplicate and conflict across transports, mixed-transport round, backup USB, locations appearing and disappearing, restart |
-| [`workflow.test.ts`](../src/director/transfers/workflow.test.ts) | The whole tournament day against real temp directories, including opening an exported assignment with the scorer's own parser |
-| `transfers.rs` tests | Root authorization, traversal refusal, symlink refusal, real atomic write |
+| File                                                                                           | Covers                                                                                                                        |
+| ---------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| [`assignment.test.ts`](../src/director/transfers/assignment.test.ts)                           | QBJ shape, no leaked pairings, no secrets, filenames, manifest present and absent                                             |
+| [`deliveryStatus.test.ts`](../src/director/transfers/deliveryStatus.test.ts)                   | Per-game intent derivation, readiness, result status, mixed-round rows                                                        |
+| [`TransfersView.delivery.test.tsx`](../src/director/transfers/TransfersView.delivery.test.tsx) | Room-by-room page, per-room prepare scope, matchup-titled returns, route menu                                                 |
+| [`deliveryIntent.test.ts`](../src/director/state/deliveryIntent.test.ts)                       | Per-game intent mutation isolation, fallback files, audit, rejection of corrupt intent                                        |
+| [`filesystem.test.ts`](../src/director/transfers/filesystem.test.ts)                           | Volume discovery, disappearing drive, read-only drive, no space, bounds, symlinks, partial writes                             |
+| [`ingest.test.ts`](../src/director/transfers/ingest.test.ts)                                   | Classification, revisions, identity mismatches, batch with one bad file, input bounds                                         |
+| [`mixedTransport.test.ts`](../src/director/transfers/mixedTransport.test.ts)                   | Duplicate and conflict across transports, mixed-transport round, backup USB, locations appearing and disappearing, restart    |
+| [`workflow.test.ts`](../src/director/transfers/workflow.test.ts)                               | The whole tournament day against real temp directories, including opening an exported assignment with the scorer's own parser |
+| `transfers.rs` tests                                                                           | Root authorization, traversal refusal, symlink refusal, real atomic write                                                     |
 
 For the parts CI cannot reach, see
 [`TRANSFERS_DEVICE_CHECKLIST.md`](TRANSFERS_DEVICE_CHECKLIST.md).

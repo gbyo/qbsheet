@@ -66,7 +66,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
             Results / review
           </a>
           <a href="#help-transfers" onClick={scrollToHelpSection}>
-            Transfers / USB workflow
+            Delivery &amp; results
           </a>
           <a href="#help-qbtcp" onClick={scrollToHelpSection}>
             QBTCP troubleshooting
@@ -130,10 +130,13 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </section>
 
         <section id="help-transfers">
-          <h3>Transfers / USB workflow</h3>
+          <h3>Delivery &amp; results</h3>
           <p>
-            Use Transfers to import files from USB or watch a folder. Supported: Director .json, QBJ, and
-            portable .qbst archives. Checksum and duplicate handling is automatic.
+            Use Delivery &amp; Results to see how each current-round game reaches its room, prepare assignment
+            files for the rooms that need them, and review returned results. Delivery is per game and room:
+            one round can mix QBTCP, file, and manual rooms, and changing one room never changes its siblings.
+            Supported imports: Director .json, QBJ, and portable .qbst archives. Checksum and duplicate
+            handling is automatic.
           </p>
         </section>
 

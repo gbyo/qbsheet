@@ -109,9 +109,9 @@ export const runGroup: NavigationGroup = {
     { id: 'results', label: 'Results', icon: 'inbox', description: 'Submissions, games, and protests.' },
     {
       id: 'transfers',
-      label: 'Transfers',
+      label: 'Delivery & Results',
       icon: 'usb',
-      description: 'Move assignments out and results in.',
+      description: 'How each game reaches its room, and what has come back.',
     },
   ],
 };

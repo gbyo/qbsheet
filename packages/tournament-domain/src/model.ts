@@ -369,8 +369,28 @@ export interface Phase {
   archived?: boolean;
 }
 
-/** The operator's intended way for a round's assignments to reach scorekeepers. */
+/**
+ * The operator's intended way for a round's assignments to reach scorekeepers.
+ *
+ * #702: this is only the default for games without explicit per-game intent
+ * or stronger per-game evidence. It must never be read as authoritative
+ * per-game truth — one round routinely mixes QBTCP, file, and manual rooms.
+ */
 export type RoundDeliveryMode = 'qbtcp' | 'usb' | 'manual';
+
+/** Per-game delivery route (#702). `file` covers USB drives, folders, and downloads. */
+export type DeliveryTransport = 'qbtcp' | 'file' | 'manual';
+
+/**
+ * Explicit per-scheduled-game delivery intent (#702). Persisted only when the
+ * operator deliberately routes one game; everything else derives from
+ * session/transfer evidence and the round default. Changing one game's intent
+ * never mutates its siblings, and a later game in the same room starts fresh.
+ */
+export interface GameDeliveryIntent {
+  primary?: DeliveryTransport;
+  fallbacks?: DeliveryTransport[];
+}
 
 export interface Pool {
   id: DirectorId;
@@ -404,7 +424,11 @@ export interface Round {
   /** When play actually began, if Director has observed it. */
   startedAt: string | null;
   closedAt: string | null;
-  /** Explicit delivery intent. Older documents omit this and use the deterministic legacy fallback. */
+  /**
+   * Default delivery intent for games without explicit per-game intent
+   * (#702). Older documents omit this and use the deterministic legacy
+   * fallback. Never authoritative per-game truth.
+   */
   deliveryMode?: RoundDeliveryMode;
 }
 
@@ -441,6 +465,12 @@ export interface ScheduledGame {
   publicVisibility?: 'auto' | 'hidden';
   assignmentRevision: number;
   movedFromRoomId?: DirectorId | null;
+  /**
+   * Explicit per-game delivery intent (#702). Absent means "derive": live
+   * QBTCP session evidence, then the round default, then manual. Absent on
+   * older documents, which derive exactly like unconfigured games.
+   */
+  deliveryIntent?: GameDeliveryIntent;
   notes?: string;
   /** Stable key into FormatDefinition.bracket when this is a dependent bracket game. */
   bracketKey?: string;
@@ -663,6 +693,7 @@ export interface AuditEvent {
     | 'qbtcp-help-resolved'
     | 'checkpoint-created'
     | 'definition-reissued'
+    | 'delivery-intent-changed'
     | 'imported'
     | 'exported';
   summary: string;
