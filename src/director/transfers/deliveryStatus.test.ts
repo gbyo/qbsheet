@@ -31,7 +31,11 @@ function room(id: string, name: string): DirectorState['rooms'][number] {
   return { id, name, available: true, status: 'live' } as DirectorState['rooms'][number];
 }
 
-function session(roomId: string, state: QbtcpRoomSession['state']): QbtcpRoomSession {
+function session(
+  roomId: string,
+  state: QbtcpRoomSession['state'],
+  overrides: Partial<QbtcpRoomSession> = {},
+): QbtcpRoomSession {
   return {
     roomId,
     sessionId: `session-${roomId}`,
@@ -40,6 +44,7 @@ function session(roomId: string, state: QbtcpRoomSession['state']): QbtcpRoomSes
     lastSeenAt: AT,
     progress: null,
     helpRequestId: null,
+    ...overrides,
   };
 }
 
@@ -54,6 +59,19 @@ function fileTransfer(gameId: string, revision: number, label = 'SanDisk Ultra')
     destinationLabel: label,
     createdAt: AT,
     status: 'written',
+  };
+}
+
+function qbtcpTransfer(
+  gameId: string,
+  revision: number,
+  status: AssignmentTransfer['status'] = 'written',
+): AssignmentTransfer {
+  return {
+    ...fileTransfer(gameId, revision, 'QBTCP'),
+    id: `qbtcp-${gameId}-${revision}-${status}`,
+    transportKind: 'qbtcp',
+    status,
   };
 }
 
@@ -232,6 +250,63 @@ describe('assignment readiness (#702)', () => {
     const state = mixedState();
     const needing = state.scheduledGames.filter((game) => gameNeedsFiles(state, game)).map((game) => game.id);
     expect(needing.sort()).toEqual(['game-103', 'game-106']);
+  });
+
+  test('only a successful current-revision QBTCP transfer proves delivery', () => {
+    const state = mixedState();
+    const game = state.scheduledGames.find((entry) => entry.id === 'game-105')!;
+    state.transfers.assignments.push(qbtcpTransfer(game.id, game.assignmentRevision));
+    expect(deriveAssignmentReadiness(state, game).state).toBe('qbtcp-delivered');
+  });
+
+  test.each([
+    ['previous revision', qbtcpTransfer('game-105', 1), 2],
+    ['pending transfer', qbtcpTransfer('game-105', 1, 'pending'), 1],
+    ['failed transfer', qbtcpTransfer('game-105', 1, 'failed'), 1],
+  ])('does not treat a %s as current QBTCP delivery', (_case, transfer, currentRevision) => {
+    const state = mixedState();
+    const game = state.scheduledGames.find((entry) => entry.id === 'game-105')!;
+    game.assignmentRevision = currentRevision;
+    state.transfers.assignments.push(transfer);
+    expect(deriveAssignmentReadiness(state, game).state).toBe('problem');
+  });
+
+  test('does not treat a reused-room session for another match as connected or current intent', () => {
+    const state = mixedState();
+    delete state.rounds[0]!.deliveryMode;
+    const game = state.scheduledGames.find((entry) => entry.id === 'game-105')!;
+    state.qbtcpSessions.push(session('room-105', 'live', { matchId: 'older-game' }));
+    expect(deriveGameDeliveryIntent(state, game)).toEqual({
+      primary: 'manual',
+      fallbacks: [],
+      source: 'manual',
+    });
+    expect(
+      deriveAssignmentReadiness(state, game, { primary: 'qbtcp', fallbacks: [], source: 'explicit' }).state,
+    ).toBe('problem');
+  });
+
+  test('treats a live session with the matching match ID as connected', () => {
+    const state = mixedState();
+    const game = state.scheduledGames.find((entry) => entry.id === 'game-105')!;
+    state.qbtcpSessions.push(session('room-105', 'live', { matchId: game.id }));
+    expect(deriveAssignmentReadiness(state, game).state).toBe('qbtcp-connected');
+  });
+
+  test('uses room-only legacy sessions only for the single operational game', () => {
+    const state = mixedState();
+    const game = state.scheduledGames.find((entry) => entry.id === 'game-105')!;
+    state.qbtcpSessions.push(session('room-105', 'live'));
+    expect(deriveAssignmentReadiness(state, game).state).toBe('qbtcp-connected');
+
+    state.scheduledGames.push(
+      scheduledGame('game-205', 'team-b', 'team-c', {
+        roundId: 'round-1',
+        roomId: 'room-105',
+        status: 'released',
+      }),
+    );
+    expect(deriveAssignmentReadiness(state, game).state).toBe('problem');
   });
 });
 
