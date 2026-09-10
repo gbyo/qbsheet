@@ -19,6 +19,8 @@ public struct LiveRootView: View {
     @State private var tab: Tab = .home
     @State private var choosingPlayer = false
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.liveActivityController) private var activityController
+    @State private var activityDriver = LiveActivityDriver()
 
     private let presentation: Presentation
     private let bootstrap: QBLiveBootstrap?
@@ -87,6 +89,22 @@ public struct LiveRootView: View {
             case .background: store.close()
             default: break
             }
+        }
+        .onChange(of: store.snapshot?.revision) { reconcileActivity() }
+        .onChange(of: store.snapshot?.publicationId) { reconcileActivity() }
+        .onChange(of: store.followedTeamId) { reconcileActivity() }
+    }
+
+    /// Keep the Lock Screen activity in step with the followed team. Full app only: the App Clip
+    /// never sets `liveActivityController`, and the presentation check keeps it that way even if
+    /// that changes, so fixing the full app cannot light up activities in the Clip.
+    private func reconcileActivity() {
+        guard presentation == .fullApp, let activityController else { return }
+        let snapshot = store.snapshot
+        let teamId = store.followedTeamId
+        Task { @MainActor in
+            await activityDriver.reconcile(
+                snapshot: snapshot, followedTeamId: teamId, controller: activityController)
         }
     }
 
@@ -295,5 +313,29 @@ public struct ProblemView: View {
         } description: {
             Text(detail)
         }
+    }
+}
+
+/// The Live Activity controller, supplied by the full app and absent everywhere else.
+///
+/// An `any LiveActivityControlling` existential rather than the concrete coordinator: the views
+/// live in QBSheetLiveKit while the coordinator lives in the app's Shared sources, which compile
+/// into both the full app and the Clip. Only the full app sets a value; the default nil is what
+/// keeps the App Clip from ever starting an activity.
+/// Environment storage for the activity controller. A box because an `any
+/// LiveActivityControlling` existential is not `Sendable`; every access happens on the main actor
+/// through the view hierarchy, so sharing the reference is safe.
+struct LiveActivityControllerBox: @unchecked Sendable {
+    var controller: (any LiveActivityControlling)?
+}
+
+private struct LiveActivityControllerKey: EnvironmentKey {
+    static let defaultValue = LiveActivityControllerBox(controller: nil)
+}
+
+public extension EnvironmentValues {
+    var liveActivityController: (any LiveActivityControlling)? {
+        get { self[LiveActivityControllerKey.self].controller }
+        set { self[LiveActivityControllerKey.self].controller = newValue }
     }
 }

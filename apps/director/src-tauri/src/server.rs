@@ -19,6 +19,10 @@ use rand::RngCore;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+
+use crate::sleep::{
+    PlatformSleepLauncher, QbtcpSleepGuard, SleepLauncher, SleepPreventionStatus, SLEEP_WARNING,
+};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::net::TcpListener;
 
@@ -217,6 +221,8 @@ pub struct ServerStatus {
     pub pairing_code: Option<String>,
     pub pairing_url: Option<String>,
     pub message: Option<String>,
+    /// Host sleep-prevention state while QBTCP is serving (#745).
+    pub sleep_prevention: SleepPreventionStatus,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -314,6 +320,7 @@ struct ServerRuntimeState {
 pub struct ServerRuntime {
     inner: Mutex<ServerRuntimeState>,
     key_store: Arc<dyn QbtcpKeyStore>,
+    sleep_launcher: Arc<dyn SleepLauncher>,
 }
 
 impl Default for ServerRuntime {
@@ -321,6 +328,7 @@ impl Default for ServerRuntime {
         Self {
             inner: Mutex::new(ServerRuntimeState::default()),
             key_store: Arc::new(KeychainQbtcpKeyStore),
+            sleep_launcher: Arc::new(PlatformSleepLauncher),
         }
     }
 }
@@ -337,6 +345,16 @@ impl ServerRuntime {
         Self {
             inner: Mutex::new(ServerRuntimeState::default()),
             key_store: Arc::new(FixedKeyStore(key)),
+            sleep_launcher: Arc::new(PlatformSleepLauncher),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_sleep_launcher(launcher: Arc<dyn SleepLauncher>) -> Self {
+        Self {
+            inner: Mutex::new(ServerRuntimeState::default()),
+            key_store: Arc::new(KeychainQbtcpKeyStore),
+            sleep_launcher: launcher,
         }
     }
 
@@ -349,7 +367,7 @@ impl ServerRuntime {
         if let Some(server) = server {
             server.refresh();
         }
-        let Ok(inner) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock() else {
             return ServerStatus {
                 message: Some("QBTCP server status is unavailable.".to_owned()),
                 ..ServerStatus::default()
@@ -358,6 +376,27 @@ impl ServerRuntime {
         let mut status = inner.status.clone();
         if let Some(running) = inner.running.as_ref() {
             status.running = running.load(Ordering::Acquire);
+        }
+        // An aborted or panicked serve task never runs its own shutdown
+        // epilogue, so the running flag can stay set after the listener is
+        // gone. A finished task means the server is not serving (#745).
+        if status.running
+            && inner
+                .task
+                .as_ref()
+                .is_some_and(|task| task.inner().is_finished())
+        {
+            if let Some(running) = inner.running.as_ref() {
+                running.store(false, Ordering::Release);
+            }
+            status.running = false;
+        }
+        // The serve task owns the sleep guard, so an unexpected task exit
+        // releases the OS assertion when the guard drops. Reconcile the
+        // stored flag here so a dead server never reports protection (#745).
+        if !status.running && status.sleep_prevention.active {
+            status.sleep_prevention.active = false;
+            inner.status.sleep_prevention.active = false;
         }
         if let Some(state) = inner.state.as_ref() {
             status.paired_rooms = state.paired_room_count();
@@ -479,7 +518,29 @@ impl ServerRuntime {
         let running = Arc::new(AtomicBool::new(true));
         let task_running = Arc::clone(&running);
         let task_server = Arc::clone(&server);
+        // The serve task owns the sleep guard: normal stop, task abort, and
+        // unexpected task exit all release the OS assertion when the guard
+        // drops. Acquisition failure never blocks tournament service; it is
+        // reported as an actionable warning in status instead (#745).
+        let (sleep_guard, sleep_prevention) = match QbtcpSleepGuard::acquire(&*self.sleep_launcher)
+        {
+            Ok(guard) => (
+                Some(guard),
+                SleepPreventionStatus {
+                    active: true,
+                    warning: None,
+                },
+            ),
+            Err(error) => (
+                None,
+                SleepPreventionStatus {
+                    active: false,
+                    warning: Some(format!("{SLEEP_WARNING} ({error})")),
+                },
+            ),
+        };
         let task = tauri::async_runtime::spawn(async move {
+            let _sleep_guard = sleep_guard;
             let _ = task_server.serve(listener).await;
             task_running.store(false, Ordering::Release);
         });
@@ -509,6 +570,7 @@ impl ServerRuntime {
             pairing_code,
             pairing_url,
             message: Some(start_message(address_selection_required, address.is_some())),
+            sleep_prevention,
         };
         inner.task = Some(task);
         inner.server = Some(server);
@@ -1931,8 +1993,12 @@ fn generated_assignment(
             qbtcp_extension["definition_digest"] = json!(digest);
         }
     }
-    if let Some(timed) = timed_from_rules(rules_value) {
-        qbtcp_extension["scorekeeper"] = json!({"timed": timed});
+    // The canonical file builder always carries the timed room-procedure
+    // handoff in `_qbtcp` when rules are present, read from the top-level
+    // `timed` TournamentRules flag (#783).
+    if rules_value.and_then(Value::as_object).is_some() {
+        qbtcp_extension["scorekeeper"] =
+            json!({"timed": timed_from_rules(rules_value).unwrap_or(false)});
     }
     let match_object = json!({
         "type": "Match",
@@ -2041,55 +2107,103 @@ fn generated_team(root: &Map<String, Value>, team_id: &str) -> Option<Value> {
     }))
 }
 
+/// Director rules as a QBJ `ScoringRules`, mirroring the canonical TypeScript
+/// builder `scoringRulesObject` in `src/director/transfers/assignment.ts`
+/// field for field (#783).
+///
+/// The rules for staying in sync:
+/// - Nullable tiers (`superpowerValue`, `powerValue`, `negValue`) stay absent
+///   when JSON null or missing. Director serializes unused tiers as explicit
+///   nulls; inventing a default here is the split-brain bug this replaces.
+/// - Bonus and lightning blocks are emitted only when the corresponding
+///   toggle is on, exactly like the canonical builder.
+/// - No legacy snake_case fallbacks and no `answer_types` fallback: the
+///   pinned snapshots and Director state this consumes carry the camelCase
+///   scalars the canonical builder reads.
+/// - Scalar fallbacks below mirror `defaultRules` for degenerate documents
+///   that carry no rules object at all; complete `TournamentRules` documents
+///   (the only conformance-tested input) never touch them.
 fn generated_scoring_rules(value: Option<&Value>, id: &str) -> Value {
     let rules = value.and_then(Value::as_object);
-    let tossup = i64_field(rules, "tossupValue")
-        .or_else(|| answer_type_value(rules, "C", "Correct"))
-        .unwrap_or(10);
-    let power = i64_field(rules, "powerValue")
-        .or_else(|| answer_type_value(rules, "P", "Power"))
-        .unwrap_or(15);
-    let neg = i64_field(rules, "negValue")
-        .or_else(|| answer_type_value(rules, "N", "Neg"))
-        .unwrap_or(-5);
-    let bonus = i64_field(rules, "bonusValue")
-        .or_else(|| i64_field(rules, "points_per_bonus_part"))
-        .unwrap_or(10)
-        .max(1);
+    let superpower = i64_field(rules, "superpowerValue");
+    let power = i64_field(rules, "powerValue");
+    let tossup = i64_field(rules, "tossupValue").unwrap_or(10);
+    let neg = i64_field(rules, "negValue");
+    let use_bonuses = rules
+        .and_then(|rules| rules.get("useBonuses"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let bonus = i64_field(rules, "bonusValue").unwrap_or(10).max(1);
     let tossup_count = u32_field(rules, "tossupCount")
-        .or_else(|| u32_field(rules, "regulation_tossup_count"))
         .filter(|value| *value > 0)
         .unwrap_or(20);
+    let maximum_tossups = i64_field(rules, "maximumTossupCount")
+        .map(Value::from)
+        .unwrap_or_else(|| Value::from(tossup_count));
     let bonus_parts = u32_field(rules, "bonusParts")
-        .or_else(|| u32_field(rules, "minimum_parts_per_bonus"))
         .filter(|value| *value > 0)
         .unwrap_or(3);
+    let minimum_parts_raw = i64_field(rules, "minimumBonusParts");
+    let minimum_parts = minimum_parts_raw
+        .map(Value::from)
+        .unwrap_or_else(|| Value::from(bonus_parts));
+    let maximum_bonus_score = i64_field(rules, "maximumBonusScore")
+        .map(Value::from)
+        .unwrap_or_else(|| Value::from(bonus * i64::from(bonus_parts)));
+    let bonus_divisor = i64_field(rules, "bonusDivisor").unwrap_or(bonus);
     let maximum_players = u32_field(rules, "maximumActivePlayers")
-        .or_else(|| u32_field(rules, "maximum_players_per_team"))
         .filter(|value| *value > 0)
         .unwrap_or(4);
     let bouncebacks = rules
         .and_then(|rules| rules.get("bouncebacks"))
         .and_then(Value::as_bool)
-        .or_else(|| {
-            rules
-                .and_then(|rules| rules.get("bonuses_bounce_back"))
-                .and_then(Value::as_bool)
-        })
         .unwrap_or(false);
-    let overtime = rules
-        .and_then(|rules| rules.get("overtime"))
-        .and_then(Value::as_bool)
-        .or_else(|| {
-            rules
-                .and_then(|rules| rules.get("overtime_includes_bonuses"))
-                .and_then(Value::as_bool)
-        })
-        .unwrap_or(true);
+    let overtime_minimum = i64_field(rules, "overtimeTossupCount").unwrap_or(1).max(1);
+    let overtime_bonuses = use_bonuses
+        && rules
+            .and_then(|rules| rules.get("overtimeBonuses"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
     let lightning = rules
         .and_then(|rules| rules.get("lightning"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let lightning_count = u32_field(rules, "lightningCountPerTeam")
+        .filter(|value| *value > 0)
+        .unwrap_or(1);
+    let lightning_divisor = i64_field(rules, "lightningDivisor").unwrap_or(10).max(1);
+
+    let mut answer_types = Vec::new();
+    if let Some(value) = superpower {
+        answer_types.push(json!({"type": "AnswerType", "id": "answer-superpower", "value": value, "label": "Superpower", "short_label": "SP", "awards_bonus": use_bonuses}));
+    }
+    if let Some(value) = power {
+        answer_types.push(json!({"type": "AnswerType", "id": "answer-power", "value": value, "label": "Power", "short_label": "P", "awards_bonus": use_bonuses}));
+    }
+    answer_types.push(json!({"type": "AnswerType", "id": "answer-correct", "value": tossup, "label": "Correct", "short_label": "C", "awards_bonus": use_bonuses}));
+    if let Some(value) = neg {
+        answer_types.push(json!({"type": "AnswerType", "id": "answer-neg", "value": value, "label": "Neg", "short_label": "N", "awards_bonus": false}));
+    }
+
+    // The scorer derives this same divisor from every answer value (negs
+    // included), the bonus divisor, and the lightning divisor.
+    let mut divisor_inputs = Vec::new();
+    if let Some(value) = superpower {
+        divisor_inputs.push(value);
+    }
+    if let Some(value) = power {
+        divisor_inputs.push(value);
+    }
+    divisor_inputs.push(tossup);
+    if let Some(value) = neg {
+        divisor_inputs.push(value);
+    }
+    if use_bonuses {
+        divisor_inputs.push(bonus_divisor);
+    }
+    if lightning {
+        divisor_inputs.push(lightning_divisor);
+    }
     let mut output = json!({
         "type": "ScoringRules",
         "id": id,
@@ -2097,60 +2211,33 @@ fn generated_scoring_rules(value: Option<&Value>, id: &str) -> Value {
         "teams_per_match": 2,
         "maximum_players_per_team": maximum_players,
         "regulation_tossup_count": tossup_count,
-        "maximum_regulation_tossup_count": tossup_count,
-        "minimum_overtime_question_count": 1,
-        "overtime_includes_bonuses": overtime,
-        "total_divisor": score_divisor(&[power, tossup, neg, bonus]),
-        "answer_types": [
-            {"type": "AnswerType", "id": "answer-power", "value": power, "label": "Power", "short_label": "P", "awards_bonus": true},
-            {"type": "AnswerType", "id": "answer-correct", "value": tossup, "label": "Correct", "short_label": "C", "awards_bonus": true},
-            {"type": "AnswerType", "id": "answer-neg", "value": neg, "label": "Neg", "short_label": "N", "awards_bonus": false}
-        ],
-        "maximum_bonus_score": bonus * i64::from(bonus_parts),
-        "bonus_divisor": bonus,
-        "minimum_parts_per_bonus": bonus_parts,
-        "maximum_parts_per_bonus": bonus_parts,
-        "points_per_bonus_part": bonus,
-        "bonuses_bounce_back": bouncebacks
+        "maximum_regulation_tossup_count": maximum_tossups,
+        "minimum_overtime_question_count": overtime_minimum,
+        "overtime_includes_bonuses": overtime_bonuses,
+        "total_divisor": score_divisor(&divisor_inputs),
+        "answer_types": answer_types
     });
+    if use_bonuses {
+        output["maximum_bonus_score"] = maximum_bonus_score;
+        output["bonus_divisor"] = Value::from(bonus_divisor);
+        output["minimum_parts_per_bonus"] = minimum_parts.clone();
+        output["maximum_parts_per_bonus"] = Value::from(bonus_parts);
+        // A single per-part value is only true for regular bonuses. Omitting
+        // it for irregular shapes tells the scorer to take a typed total.
+        if minimum_parts_raw.unwrap_or(i64::from(bonus_parts)) == i64::from(bonus_parts) {
+            output["points_per_bonus_part"] = Value::from(bonus);
+        }
+        output["bonuses_bounce_back"] = Value::from(bouncebacks);
+    }
     if lightning {
-        output["lightning_count_per_team"] = json!(1);
-        output["lightning_divisor"] = json!(10);
+        output["lightning_count_per_team"] = Value::from(lightning_count);
+        output["lightning_divisor"] = Value::from(lightning_divisor);
     }
     output
 }
 
-fn answer_type_value(
-    rules: Option<&Map<String, Value>>,
-    short_label: &str,
-    label: &str,
-) -> Option<i64> {
-    rules
-        .and_then(|rules| rules.get("answer_types"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_object)
-        .find(|answer| {
-            answer.get("short_label").and_then(Value::as_str) == Some(short_label)
-                || answer.get("label").and_then(Value::as_str) == Some(label)
-        })
-        .and_then(|answer| answer.get("value"))
-        .and_then(Value::as_i64)
-}
-
 fn timed_from_rules(value: Option<&Value>) -> Option<bool> {
-    let rules = value?.as_object()?;
-    ["roomProcedure", "room_procedure", "procedure", "regulation"]
-        .iter()
-        .find_map(|key| {
-            rules
-                .get(*key)
-                .and_then(Value::as_object)
-                .and_then(|procedure| procedure.get("timed"))
-                .and_then(Value::as_bool)
-        })
-        .or_else(|| rules.get("timed").and_then(Value::as_bool))
+    value?.as_object()?.get("timed")?.as_bool()
 }
 
 fn score_divisor(values: &[i64]) -> i64 {
@@ -2739,7 +2826,7 @@ mod tests {
     fn released_games_with_qbj_are_projected_to_their_rooms() {
         let document = json!({
             "tournament": {"id": "t-1", "name": "Local Invitational"},
-            "rules": {"roomProcedure": {"timed": true}},
+            "rules": {"timed": true},
             "rooms": [
                 {"id": "room-101", "name": "Room 101", "available": true},
                 {"id": "room-102", "name": "Room 102", "available": true},
@@ -2872,7 +2959,7 @@ mod tests {
         ));
 
         let mut untimed_document = document.clone();
-        untimed_document["rules"]["roomProcedure"]["timed"] = json!(false);
+        untimed_document["rules"]["timed"] = json!(false);
         let untimed_state = DirectorQbtcpState::from_document(Some(&untimed_document));
         let untimed = <DirectorQbtcpState as QbtcpState>::assignment(&untimed_state, "room-102")
             .expect("untimed assignment");
@@ -2889,7 +2976,9 @@ mod tests {
             .remove("rules");
         nested_rules_document["tournament"]["rules"] = json!({
             "tossupValue": 7,
-            "roomProcedure": {"timed": true}
+            "powerValue": 15,
+            "negValue": -5,
+            "timed": true
         });
         let nested_rules_state = DirectorQbtcpState::from_document(Some(&nested_rules_document));
         let nested_rules =
@@ -3282,6 +3371,168 @@ mod tests {
         assert_eq!(stopped.message.as_deref(), Some("QBTCP server stopped."));
     }
 
+    /// #745 lifecycle: startup acquires sleep protection exactly once, a
+    /// duplicate start acquires nothing more, and stop releases it so a
+    /// restart can acquire a fresh guard.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sleep_protection_follows_the_server_lifetime() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+        let document = || {
+            Some(json!({
+                "tournament": {"id": "t-1", "name": "Sleep test"},
+                "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+            }))
+        };
+
+        let status = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("server starts");
+        assert!(status.running);
+        assert!(status.sleep_prevention.active);
+        assert_eq!(status.sleep_prevention.warning, None);
+        assert_eq!(launcher.acquired(), 1);
+
+        let duplicate = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("duplicate start is tolerated");
+        assert!(duplicate.running);
+        assert_eq!(launcher.acquired(), 1);
+        assert!(runtime.status().sleep_prevention.active);
+
+        let stopped = runtime.stop();
+        assert!(!stopped.running);
+        assert!(!stopped.sleep_prevention.active);
+        assert_eq!(launcher.acquired(), 1);
+
+        let restarted = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("restart starts");
+        assert!(restarted.sleep_prevention.active);
+        assert_eq!(launcher.acquired(), 2);
+        runtime.stop();
+        assert!(!runtime.status().sleep_prevention.active);
+    }
+
+    /// #745 failure handling: when keep-awake acquisition fails, QBTCP stays
+    /// usable and status carries the manual-workaround warning instead of
+    /// claiming protection.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sleep_acquisition_failure_warns_without_blocking_service() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::failing(usize::MAX));
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+
+        let status = runtime
+            .start_on_port(
+                Some(json!({
+                    "tournament": {"id": "t-1", "name": "Sleep warning test"},
+                    "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+                })),
+                0,
+            )
+            .await
+            .expect("server starts without sleep protection");
+        assert!(status.running);
+        assert!(!status.sleep_prevention.active);
+        assert!(status
+            .sleep_prevention
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("Disable automatic sleep")));
+
+        let stopped = runtime.stop();
+        assert!(!stopped.running);
+        assert_eq!(stopped.sleep_prevention.warning, None);
+    }
+
+    /// #745 failure handling: a start that fails before the guard exists
+    /// (occupied port) must not acquire anything or report protection.
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_start_acquires_no_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        // Hold the wildcard address: the server binds 0.0.0.0, and BSD
+        // stacks allow a wildcard bind alongside a loopback-only hold.
+        let held = std::net::TcpListener::bind("0.0.0.0:0").expect("occupy a port");
+        let port = held.local_addr().expect("port").port();
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+
+        assert!(runtime.start_on_port(None, port).await.is_err());
+        assert_eq!(launcher.acquired(), 0);
+        let status = runtime.status();
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+    }
+
+    /// #745 task exit: killing the serve task without stop() must not leave
+    /// protection reported once status is observed again.
+    #[tokio::test(flavor = "current_thread")]
+    async fn unexpected_task_exit_clears_reported_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+        let status = runtime
+            .start_on_port(
+                Some(json!({
+                    "tournament": {"id": "t-1", "name": "Task exit test"},
+                    "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+                })),
+                0,
+            )
+            .await
+            .expect("server starts");
+        assert!(status.sleep_prevention.active);
+
+        // Abort through the stored handle without stop(): the task dies
+        // without running any shutdown epilogue, like a real crash.
+        runtime
+            .inner
+            .lock()
+            .expect("runtime lock")
+            .task
+            .as_ref()
+            .expect("serve task")
+            .abort();
+        let mut status = runtime.status();
+        for _ in 0..100 {
+            if !status.running {
+                break;
+            }
+            tokio::task::yield_now().await;
+            status = runtime.status();
+        }
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+        runtime.stop();
+    }
+
+    /// #745 scope: a Director runtime that never started QBTCP holds no
+    /// sleep assertion and reports none.
+    #[test]
+    fn idle_runtime_reports_no_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime = ServerRuntime::with_sleep_launcher(launcher);
+        let status = runtime.status();
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+        assert_eq!(status.sleep_prevention.warning, None);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn server_status_exposes_independent_pairing_invitations_per_room() {
         let runtime = ServerRuntime::default();
@@ -3486,6 +3737,151 @@ mod tests {
         assert_eq!(
             extension.get("definition_digest").and_then(Value::as_str),
             Some("digest-one")
+        );
+    }
+
+    /// Transport parity (#783): the native builder must emit semantically
+    /// identical `ScoringRules` to the canonical TypeScript builder for every
+    /// golden vector. The corpus is generated from `scoringRulesObject`, so
+    /// any divergence here is a split-brain assignment bug by definition.
+    #[test]
+    fn native_scoring_rules_match_the_canonical_golden_corpus() {
+        let corpus = include_str!("../tests/parity/scoring-rules.json");
+        let parsed: Value = serde_json::from_str(corpus).expect("corpus parses");
+        let vectors = parsed
+            .get("vectors")
+            .and_then(Value::as_array)
+            .expect("corpus vectors");
+        assert!(
+            vectors.len() >= 15,
+            "corpus must cover the required competitive vectors"
+        );
+        for vector in vectors {
+            let name = vector
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("<unnamed>");
+            let rules = vector.get("rules").expect("vector rules");
+            let expected = vector.get("expected").expect("vector expected");
+            let actual = generated_scoring_rules(Some(rules), "scoring-rules-parity");
+            assert_eq!(
+                &actual, expected,
+                "native builder diverges from canonical for vector {name}"
+            );
+        }
+    }
+
+    /// Digest integrity (#783): a pinned assignment attaches the snapshot
+    /// digest only alongside rules translated from that same snapshot, with
+    /// null tiers staying absent and the timed handoff carried.
+    #[test]
+    fn pinned_assignment_carries_matching_digest_rules_and_handoff() {
+        let rules = json!({
+            "tossupValue": 10,
+            "superpowerValue": null,
+            "powerValue": null,
+            "negValue": null,
+            "useBonuses": false,
+            "bonusValue": 10,
+            "tossupCount": 20,
+            "bonusParts": 3,
+            "minimumBonusParts": null,
+            "maximumBonusScore": null,
+            "bonusDivisor": null,
+            "bouncebacks": false,
+            "overtime": true,
+            "overtimeTossupCount": 2,
+            "overtimeBonuses": false,
+            "timed": true,
+            "lightning": false,
+            "lightningCountPerTeam": 1,
+            "lightningDivisor": 10,
+            "maximumTossupCount": null,
+            "maximumActivePlayers": 4
+        });
+        let root = json!({
+            "tournament": {"id": "t-1", "name": "Local Invitational"},
+            "teams": [
+                {"id": "team-a", "name": "A"},
+                {"id": "team-b", "name": "B"}
+            ],
+            "rooms": [{"id": "room-101", "name": "Room 101"}],
+            "gameDefinitions": [
+                {
+                    "id": "def-1",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 3,
+                    "digest": "digest-pinned",
+                    "rules": rules
+                }
+            ]
+        });
+        let root_map = root.as_object().expect("root object");
+        let scheduled = json!({
+            "id": "scheduled-1",
+            "leftTeamId": "team-a",
+            "rightTeamId": "team-b",
+            "definitionSnapshotId": "def-1"
+        });
+        let round = json!({"id": "round-1", "name": "Round 1", "number": 1, "phaseId": "phase-1"});
+        let assignment = generated_assignment(
+            root_map,
+            scheduled.as_object().expect("scheduled object"),
+            round.as_object().expect("round object"),
+            "room-101",
+        )
+        .expect("assignment builds");
+        let objects = assignment
+            .get("objects")
+            .and_then(Value::as_array)
+            .expect("objects array");
+        let scoring = objects
+            .iter()
+            .find(|object| object.get("type").and_then(Value::as_str) == Some("ScoringRules"))
+            .expect("scoring rules object");
+        // Null tiers stay absent: tossups-only Correct with no Power, Neg, or
+        // bonus structure.
+        let type_ids: Vec<&str> = scoring
+            .get("answer_types")
+            .and_then(Value::as_array)
+            .expect("answer types")
+            .iter()
+            .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+            .collect();
+        assert_eq!(type_ids, vec!["answer-correct"]);
+        assert!(scoring.get("maximum_bonus_score").is_none());
+        assert!(scoring.get("points_per_bonus_part").is_none());
+        assert_eq!(
+            scoring
+                .get("minimum_overtime_question_count")
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+        assert_eq!(
+            scoring
+                .get("overtime_includes_bonuses")
+                .and_then(Value::as_bool),
+            Some(false)
+        );
+        let generated_match = objects
+            .iter()
+            .find(|object| object.get("type").and_then(Value::as_str) == Some("Match"))
+            .expect("match object");
+        let extension = generated_match.get("_qbtcp").expect("qbtcp extension");
+        assert_eq!(
+            extension.get("definition_revision").and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            extension.get("definition_digest").and_then(Value::as_str),
+            Some("digest-pinned")
+        );
+        assert_eq!(
+            extension
+                .get("scorekeeper")
+                .and_then(|scorekeeper| scorekeeper.get("timed"))
+                .and_then(Value::as_bool),
+            Some(true)
         );
     }
 

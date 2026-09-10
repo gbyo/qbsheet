@@ -310,6 +310,8 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
     bonusPoints: number(team.bonusPoints) ?? 0,
     // An imported result without a bounceback breakdown is unknown, not a verified zero (#748).
     bouncebacks: number(team.bonusBouncebackPoints) ?? null,
+    // YellowFruit parity (#747): unknown lightning stays unknown through interchange.
+    ...(typeof team.lightningPoints === 'number' ? { lightningPoints: team.lightningPoints } : {}),
   }));
 }
 
@@ -444,6 +446,8 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     bonusesHeard: score.bonuses,
     bonusPoints: score.bonusPoints,
     bonusBouncebackPoints: score.bouncebacks,
+    // YellowFruit parity (#747): omit unknown lightning rather than writing a false zero.
+    ...(typeof score.lightningPoints === 'number' ? { lightningPoints: score.lightningPoints } : {}),
     // The forfeiting side is explicit so a re-import awards the win to the
     // other side even when both recorded scores are zero.
     ...(game.status === 'forfeit' && score.teamId === game.forfeitedTeamId ? { forfeitLoss: true } : {}),
@@ -1608,6 +1612,83 @@ function sqbsScopeLabel(state: DirectorState, scope: SqbsTournamentScope): strin
     return state.phases.find((phase) => phase.id === scope.phaseId)?.name ?? 'Stage';
   }
   return 'Entire tournament';
+}
+
+export interface SqbsTournamentScopeOption {
+  /** Stable key for UI selection: 'entire', `phase:<id>`, or `pool:<id>`. */
+  key: string;
+  scope: SqbsTournamentScope;
+  label: string;
+  detail: string;
+}
+
+/**
+ * The SQBS scopes a director can choose between: the entire tournament,
+ * plus one entry per stage when the tournament has several, plus one entry
+ * per pool when pools subdivide play. Single-stage, unpooled tournaments
+ * offer only the entire tournament so the picker never states the obvious
+ * twice. Counts describe decided (accepted/forfeit) games in each scope.
+ */
+export function sqbsTournamentScopes(state: DirectorState): SqbsTournamentScopeOption[] {
+  const options: SqbsTournamentScopeOption[] = [
+    {
+      key: 'entire',
+      scope: {},
+      label: sqbsScopeLabel(state, {}),
+      detail: scopeGameCount(state, {}),
+    },
+  ];
+  if (state.phases.length > 1) {
+    const ordered = [...state.phases].sort((left, right) => left.order - right.order);
+    for (const phase of ordered) {
+      const scope = { phaseId: phase.id };
+      options.push({
+        key: `phase:${phase.id}`,
+        scope,
+        label: sqbsScopeLabel(state, scope),
+        detail: scopeGameCount(state, scope),
+      });
+    }
+  }
+  const livePools = state.pools.filter((pool) => !pool.archived);
+  if (livePools.length > 1) {
+    const ordered = [...livePools].sort((left, right) => left.order - right.order);
+    for (const pool of ordered) {
+      const scope = { poolId: pool.id };
+      options.push({
+        key: `pool:${pool.id}`,
+        scope,
+        label: sqbsScopeLabel(state, scope),
+        detail: scopeGameCount(state, scope),
+      });
+    }
+  }
+  return options;
+}
+
+function scopeGameCount(state: DirectorState, scope: SqbsTournamentScope): string {
+  const count = acceptedGameRecords(state, scope).length;
+  return `${count} game${count === 1 ? '' : 's'}`;
+}
+
+function sanitizeFileSegment(value: string): string {
+  return (
+    value
+      .trim()
+      .replace(/[^a-z0-9]+/gi, '-')
+      .replace(/^-|-$/g, '') || 'tournament'
+  );
+}
+
+/**
+ * `<tournament>-<scope>.sqbs`, sanitized for filesystems. The entire
+ * tournament uses the `-tournament` suffix so the file can never be confused
+ * with the roster-only `<tournament>.sqbs` export.
+ */
+export function sqbsTournamentFileName(state: DirectorState, scope: SqbsTournamentScope = {}): string {
+  const stem = sanitizeFileSegment(state.tournament?.name ?? '');
+  if (!scope.phaseId && !scope.poolId) return `${stem}-tournament.sqbs`;
+  return `${stem}-${sanitizeFileSegment(sqbsScopeLabel(state, scope))}.sqbs`;
 }
 
 export function importArchiveBytes(bytes: Uint8Array): DirectorImportReport {

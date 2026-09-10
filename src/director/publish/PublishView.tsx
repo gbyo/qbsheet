@@ -10,11 +10,15 @@ import { errorNotice, infoNotice, warningNotice, type AnnounceInput } from '../n
 import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
+import { buildCanonicalResourceCenterReport } from '../reports/resourceCenterExport';
 import { ReportOptionsDialog } from './ReportOptionsDialog';
+import { PrepareHsqbDialog } from './PrepareHsqbDialog';
+import { SqbsTournamentDialog } from './SqbsTournamentDialog';
 
 export function PublishView({
   state,
   onAnnounce,
+  onNavigate,
 }: {
   state: DirectorState;
   onAnnounce: (announcement: AnnounceInput) => void;
@@ -38,6 +42,8 @@ export function PublishView({
       ? reportOptionsOverride.options
       : loadedReportOptions;
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
+  const [sqbsTournamentOpen, setSqbsTournamentOpen] = useState(false);
+  const [prepareHsqbOpen, setPrepareHsqbOpen] = useState(false);
 
   return (
     <Page>
@@ -76,6 +82,12 @@ export function PublishView({
               onClick={() => void downloadStatReport(state, onAnnounce, reportOptions)}
             />
             <ExportAction
+              title="Quizbowl Resource Center"
+              description="Prepare official HTML statistics for hsquizbowl.org. QBSheet checks the report, creates the correct upload files, and shows where each file belongs."
+              action="Prepare for HSQuizbowl"
+              onClick={() => setPrepareHsqbOpen(true)}
+            />
+            <ExportAction
               title="Team standings HTML"
               description="Single-page standings from the same canonical snapshot and renderer as the printable stat report."
               action="Download HTML"
@@ -106,13 +118,36 @@ export function PublishView({
               onClick={() => downloadQbj(state, onAnnounce)}
             />
             <ExportAction
+              title="SQBS tournament"
+              description="Full tournament data file for SQBS: teams, players, games, scores, and detail stats."
+              action="Download tournament"
+              onClick={() => setSqbsTournamentOpen(true)}
+            />
+            <ExportAction
               title="SQBS roster"
-              description="Positional roster export for SQBS-compatible tools."
-              action="Download SQBS"
+              description="Roster-only compatibility file for SQBS-compatible tools. No games or scores."
+              action="Download roster"
               onClick={() => downloadSqbs(state, onAnnounce)}
             />
           </SummaryList>
         </Panel>
+      )}
+
+      {sqbsTournamentOpen && state.tournament && (
+        <SqbsTournamentDialog
+          state={state}
+          onAnnounce={onAnnounce}
+          onClose={() => setSqbsTournamentOpen(false)}
+        />
+      )}
+
+      {prepareHsqbOpen && state.tournament && (
+        <PrepareHsqbDialog
+          state={state}
+          onAnnounce={onAnnounce}
+          onClose={() => setPrepareHsqbOpen(false)}
+          onNavigate={onNavigate}
+        />
       )}
 
       {reportOptionsOpen && state.tournament && (
@@ -213,6 +248,36 @@ export async function downloadStatReport(
   } catch (reason: unknown) {
     onAnnounce(
       errorNotice(reason instanceof Error ? reason.message : 'Printable stat report could not be exported.'),
+    );
+  }
+}
+
+export async function downloadResourceCenterReport(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+  options: ReportOptions = defaultReportOptions,
+): Promise<void> {
+  try {
+    const artifact = buildCanonicalResourceCenterReport(state, new Date().toISOString(), options);
+    // Issue #764: an inconsistent set must never reach the uploader. Blocking
+    // diagnostics refuse the download; warnings ride along with it.
+    if (!artifact.preflight.ok) {
+      const details = artifact.preflight.blocking.map((entry) => entry.message).join(' ');
+      onAnnounce(errorNotice(`Resource Center preflight failed: ${details}`));
+      return;
+    }
+    await saveOrDownloadBytes(
+      artifact.bytes,
+      artifact.fileName,
+      'application/zip',
+      onAnnounce,
+      'Resource Center report exported',
+      'Resource Center report save cancelled.',
+    );
+    for (const entry of artifact.preflight.warnings) onAnnounce(warningNotice(entry.message));
+  } catch (reason: unknown) {
+    onAnnounce(
+      errorNotice(reason instanceof Error ? reason.message : 'Resource Center report could not be exported.'),
     );
   }
 }

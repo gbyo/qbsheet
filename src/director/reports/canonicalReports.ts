@@ -227,7 +227,9 @@ export function buildCanonicalSnapshot(
       powers: standing.powers,
       gets: standing.gets,
       negs: standing.negs,
-      tossupsHeard: standing.tossupsHeard,
+      // Unknown TUH is null, matching the player rows below: a partial sum must not
+      // masquerade as a whole-scope zero for consumers that do not check the flag (#754).
+      tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
       tossupsHeardKnown: standing.tossupsHeardKnown,
       pptuh:
         standing.tossupsHeardKnown && standing.tossupsHeard > 0
@@ -238,6 +240,9 @@ export function buildCanonicalSnapshot(
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
       bouncebackPoints: standing.bouncebackPoints,
       bouncebacksKnown: standing.bouncebacksKnown,
+      // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
+      lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
+      lightningKnown: standing.lightningKnown,
     };
   });
 

@@ -71,6 +71,27 @@ public final class LiveActivityCoordinator {
         }
         guard let attributes = QBLiveSharding.attributes(for: followedTeamId, in: snapshot) else { return }
 
+        let state = QBLiveActivityState.contentState(shard: attributes.shard, in: snapshot)
+        var compatibleFound = false
+        for activity in Activity<QBLiveActivityAttributes>.activities
+        where activity.attributes == attributes {
+            // Relaunch, a repeated appearance, or two reconcilers racing: the activity we want
+            // is already there. Refresh it rather than requesting a second one.
+            await activity.update(.init(state: state, staleDate: staleDate(from: snapshot)))
+            compatibleFound = true
+        }
+        if compatibleFound {
+            availability = .available
+            isRunning = true
+            return
+        }
+        // A team or shard change: attributes are immutable, so the old activity cannot become
+        // the new one. End it before requesting, so a publication never runs two.
+        for stale in Activity<QBLiveActivityAttributes>.activities
+        where stale.attributes.publicationId == snapshot.publicationId {
+            await stale.end(nil, dismissalPolicy: .default)
+        }
+
         // Ask the gateway for this shard's channel. Lazily created there: a channel exists only
         // once somebody actually wants an Activity in that shard, which is what keeps a 64-team
         // tournament from consuming eight of Apple's ten thousand channels for nothing.
@@ -85,11 +106,10 @@ public final class LiveActivityCoordinator {
             return
         }
 
-        let initial = QBLiveActivityState.contentState(shard: attributes.shard, in: snapshot)
         do {
             _ = try Activity.request(
                 attributes: attributes,
-                content: .init(state: initial, staleDate: staleDate(from: snapshot)),
+                content: .init(state: state, staleDate: staleDate(from: snapshot)),
                 pushType: .channel(channelId)
             )
             persistence.activityChannelId = channelId
@@ -111,8 +131,10 @@ public final class LiveActivityCoordinator {
         #if canImport(ActivityKit)
         guard let attributes = QBLiveSharding.attributes(for: followedTeamId, in: snapshot) else { return }
         let state = QBLiveActivityState.contentState(shard: attributes.shard, in: snapshot)
+        // Exact attributes, not just the publication: this shard's state must never be pushed
+        // into an activity bound to another shard's broadcast channel.
         for activity in Activity<QBLiveActivityAttributes>.activities
-        where activity.attributes.publicationId == snapshot.publicationId {
+        where activity.attributes == attributes {
             await activity.update(.init(state: state, staleDate: staleDate(from: snapshot)))
         }
         #endif
@@ -137,6 +159,17 @@ public final class LiveActivityCoordinator {
     /// presentation of "we do not know any more".
     private func staleDate(from snapshot: QBLiveSnapshot) -> Date? {
         snapshot.final ? nil : Date().addingTimeInterval(12 * 60)
+    }
+}
+
+extension LiveActivityCoordinator: LiveActivityControlling {
+    /// Keys of the activities the system is still running, for relaunch reconciliation.
+    public func existingKeys() async -> [LiveActivityKey] {
+        #if canImport(ActivityKit)
+        return Activity<QBLiveActivityAttributes>.activities.map { LiveActivityKey(attributes: $0.attributes) }
+        #else
+        return []
+        #endif
     }
 }
 

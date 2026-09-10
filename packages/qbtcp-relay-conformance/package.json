@@ -1,0 +1,27 @@
+{
+  "name": "@qbsheet/qbtcp-relay-conformance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A reusable conformance suite for QBTCP Internet relays, first-party or otherwise",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "qbtcp-relay-conformance": "./dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "conformance": "npm run build && node dist/cli.js",
+    "test": "vitest --run tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "type": "help-changed",
+  "sequence": 131,
+  "payload": {
+    "request": {
+      "id": "help-7",
+      "category": "protest",
+      "status": "open"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "type": "progress",
+  "session_id": "sess-9f13",
+  "payload": {
+    "sequence": 42,
+    "match": {"type": "Match", "id": "sm-4471"}
+  }
+}

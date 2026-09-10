@@ -255,3 +255,90 @@ describe('Delivery & Results page (#702)', () => {
     });
   });
 });
+
+describe('Delivery selection freshness (#756)', () => {
+  function roundTwoState(): DirectorState {
+    const state = mixedState();
+    state.rounds.push({ ...state.rounds[0]!, id: 'round-2', name: 'Round 2', number: 2 });
+    state.rooms.push(room('room-201', 'Room 201'));
+    state.scheduledGames.push(
+      scheduledGame('game-201', 'team-a', 'team-b', {
+        roundId: 'round-2',
+        roomId: 'room-201',
+        status: 'released',
+      }),
+    );
+    state.tournament!.currentRoundId = 'round-2';
+    return state;
+  }
+
+  function renderMounted(state: DirectorState, transfers: TransfersRuntime) {
+    const controller = stubController();
+    const rendered = render(
+      <TransfersView
+        transfers={transfers}
+        state={state}
+        controller={controller}
+        onNavigate={vi.fn()}
+        onAnnounce={vi.fn()}
+      />,
+    );
+    const remount = (next: DirectorState) => {
+      rendered.rerender(
+        <TransfersView
+          transfers={transfers}
+          state={next}
+          controller={controller}
+          onNavigate={vi.fn()}
+          onAnnounce={vi.fn()}
+        />,
+      );
+    };
+    return { ...rendered, remount };
+  }
+
+  test('advancing the current round clears the stale selection', () => {
+    const transfers = stubRuntime();
+    const mounted = renderMounted(mixedState(), transfers);
+    fireEvent.click(
+      within(mounted.container as HTMLElement).getByRole('checkbox', {
+        name: 'Select Room 101, Aiken vs Dorman for file preparation',
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Copy selected (1)' })).toBeTruthy();
+
+    mounted.remount(roundTwoState());
+
+    // The Round 1 rows are gone and nothing may still claim their selection.
+    expect(screen.queryByRole('button', { name: 'Copy selected (1)' })).toBeNull();
+    const copySelected = screen.getByRole('button', { name: 'Copy selected' });
+    expect((copySelected as HTMLButtonElement).disabled).toBe(true);
+    expect(transfers.prepareTo).not.toHaveBeenCalled();
+    expect(screen.getByText('Room 201 · Aiken vs Dorman')).toBeTruthy();
+  });
+
+  test('removing a selected game within the round excludes its stale ID', () => {
+    const transfers = stubRuntime();
+    const first = mixedState();
+    const mounted = renderMounted(first, transfers);
+    fireEvent.click(
+      within(mounted.container as HTMLElement).getByRole('checkbox', {
+        name: 'Select Room 101, Aiken vs Dorman for file preparation',
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Copy selected (1)' })).toBeTruthy();
+
+    const next = mixedState();
+    next.scheduledGames = next.scheduledGames.filter((game) => game.id !== 'game-101');
+    mounted.remount(next);
+
+    expect(
+      within(mounted.container as HTMLElement).queryByRole('checkbox', {
+        name: 'Select Room 101, Aiken vs Dorman for file preparation',
+      }),
+    ).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy selected (1)' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Copy selected' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(transfers.prepareTo).not.toHaveBeenCalled();
+  });
+});
