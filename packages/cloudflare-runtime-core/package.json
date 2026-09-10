@@ -1,0 +1,18 @@
+{
+  "name": "@qbsheet/cloudflare-runtime-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared low-level Cloudflare realtime/replay primitives for QBSheet backends. No services, no credentials, no protocol — see README.md for what stays service-specific",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest --run tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

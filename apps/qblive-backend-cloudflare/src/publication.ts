@@ -681,33 +681,11 @@ export function json(body: unknown, status = 200, headers: Record<string, string
   });
 }
 
-export function clamp(value: number, low: number, high: number): number {
-  if (!Number.isFinite(value)) return low;
-  return Math.min(high, Math.max(low, Math.trunc(value)));
-}
+import {
+  clampPage as clamp,
+  randomToken,
+  sha256Hex,
+  timingSafeEqual,
+} from '@qbsheet/cloudflare-runtime-core';
 
-export async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Length-independent comparison of two hex digests.
- *
- * Both operands are SHA-256 output, so they are the same length whenever the input was well formed;
- * the length check is for the malformed case and does not leak anything about the secret.
- */
-export function timingSafeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-  return difference === 0;
-}
-
-export function randomToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
+export { clamp, randomToken, sha256Hex, timingSafeEqual };
