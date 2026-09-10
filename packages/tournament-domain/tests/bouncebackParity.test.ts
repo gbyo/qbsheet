@@ -254,8 +254,67 @@ describe('bounceback parity (#748)', () => {
     expect(derivation.bouncebackPartsConverted).toBe(3);
 
     const round = deriveRoundStats(state).find((entry) => entry.roundId === 'round-1');
+    expect(round?.bouncebacks).toBe(40);
     expect(round?.bouncebackPartsHeard).toBe(16);
     expect(round?.bouncebackUnknownGames).toBe(0);
+  });
+
+  test('a partial-forfeit keeps the known side and unknowns only the missing side', () => {
+    const state = stateWithGames([
+      game(
+        'g1',
+        [
+          teamScore('a', 0, { bonuses: 6, bonusPoints: 90, bouncebacks: null }),
+          teamScore('b', 200, { bonuses: 4, bonusPoints: 50, bouncebacks: 10 }),
+        ],
+        { status: 'forfeit' },
+      ),
+    ]);
+
+    expect(standingOf(state, 'a').bouncebacksKnown).toBe(false);
+    expect(standingOf(state, 'b').bouncebacksKnown).toBe(true);
+    expect(standingOf(state, 'b').bouncebackPoints).toBe(10);
+
+    const missing = bouncebackDerivationForTeam('a', state.games, state);
+    expect(missing.bouncebackPoints).toBeNull();
+    expect(missing.bouncebackPartsHeard).toBeNull();
+
+    const known = bouncebackDerivationForTeam('b', state.games, state);
+    expect(known.bouncebackPoints).toBe(10);
+    expect(known.bouncebackPartsHeard).toBe(9);
+    expect(known.bouncebackPartsConverted).toBe(1);
+
+    const round = deriveRoundStats(state).find((entry) => entry.roundId === 'round-1');
+    expect(round?.bouncebacks).toBeNull();
+    expect(round?.bouncebackPartsHeard).toBeNull();
+    expect(round?.bouncebackUnknownGames).toBe(1);
+  });
+
+  test('missing game rules keep parts metrics null but use defaults without game state', () => {
+    const state = stateWithGames([
+      game('g1', [
+        teamScore('a', 320, { bonuses: 6, bonusPoints: 90, bouncebacks: 30 }),
+        teamScore('b', 200, { bonuses: 4, bonusPoints: 50, bouncebacks: 10 }),
+      ]),
+    ]);
+    state.tournament = null;
+
+    const withState = bouncebackDerivationForTeam('a', state.games, state);
+    expect(withState.bouncebackPoints).toBe(30);
+    expect(withState.bouncebackPartsHeard).toBeNull();
+    expect(withState.bouncebackPartsConverted).toBeNull();
+    expect(withState.totalBonusConversion).toBeNull();
+    expect(withState.ppbWithoutBouncebacks).toBeCloseTo(90 / 6, 10);
+
+    const withoutState = bouncebackDerivationForTeam('a', state.games);
+    expect(withoutState.bouncebackPartsHeard).toBe(7);
+    expect(withoutState.bouncebackPartsConverted).toBe(3);
+
+    const round = deriveRoundStats(state).find((entry) => entry.roundId === 'round-1');
+    expect(round?.bouncebacks).toBe(40);
+    expect(round?.bouncebackPartsHeard).toBeNull();
+    expect(round?.bouncebackPartsConverted).toBeNull();
+    expect(round?.bouncebackUnknownGames).toBe(1);
   });
 
   test('irregular bonus rules make parts uncomputable while points stay known', () => {

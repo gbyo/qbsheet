@@ -1,10 +1,11 @@
-import { type DirectorId, type DirectorState, defaultRules, type GameRecord } from './model.js';
+import { type DirectorId, type DirectorState, type GameRecord } from './model.js';
 import { gameDetailedCountsKnown } from './canonicalStats.js';
 import { orderDayItems } from './dayOrder.js';
 import {
   acceptedGameRecords,
   bouncebackPartsHeardForTeam,
   type DirectorStandingsOptions,
+  isPureForfeitPlaceholder,
   rulesForGame,
 } from './stats.js';
 
@@ -127,8 +128,8 @@ export function deriveRoundStats(
           : null;
       const bonusesHeard = count('bonuses');
       const bonusPoints = count('bonusPoints');
-      const bouncebacksKnown = played.every((game) =>
-        game.scores.every((score) => score.bouncebacks !== null),
+      const bouncebacksKnown = played.every(
+        (game) => isPureForfeitPlaceholder(game) || game.scores.every((score) => score.bouncebacks !== null),
       );
       const bouncebacks =
         detailComplete && bouncebacksKnown
@@ -147,23 +148,24 @@ export function deriveRoundStats(
       let bouncebackPartsKnown = true;
       let bouncebackUnknownGames = 0;
       for (const game of played) {
-        if (game.status === 'forfeit' && game.scores.every((score) => score.bouncebacks === null)) {
-          continue;
-        }
-        const rules = rulesForGame(state, game) ?? defaultRules;
+        if (isPureForfeitPlaceholder(game)) continue;
+        const rules = rulesForGame(state, game);
         const [left, right] = game.scores;
         if (!left || !right) {
           bouncebackPartsKnown = false;
           bouncebackUnknownGames += 1;
           continue;
         }
-        const leftHeard = gameDetailedCountsKnown(game)
-          ? bouncebackPartsHeardForTeam(right.bonuses, right.bonusPoints, rules)
-          : null;
-        const rightHeard = gameDetailedCountsKnown(game)
-          ? bouncebackPartsHeardForTeam(left.bonuses, left.bonusPoints, rules)
-          : null;
+        const leftHeard =
+          rules && gameDetailedCountsKnown(game)
+            ? bouncebackPartsHeardForTeam(right.bonuses, right.bonusPoints, rules)
+            : null;
+        const rightHeard =
+          rules && gameDetailedCountsKnown(game)
+            ? bouncebackPartsHeardForTeam(left.bonuses, left.bonusPoints, rules)
+            : null;
         if (
+          !rules ||
           leftHeard === null ||
           rightHeard === null ||
           left.bouncebacks === null ||
