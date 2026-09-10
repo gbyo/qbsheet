@@ -42,6 +42,14 @@
 
 import { DurableObject } from 'cloudflare:workers';
 
+import { utf8ByteLength } from './protocol/bytes';
+import {
+  credentialedCorsHeaders,
+  isOriginAllowed,
+  normalizeOrigin,
+  parseAllowedOrigins,
+  publicCorsHeaders,
+} from './protocol/cors';
 import {
   DEFAULT_MAX_STREAM_FRAME_BYTES,
   isDuplicateFinal,
@@ -487,48 +495,26 @@ export class QbtcpRelay extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private allowedOrigins(): string[] | '*' {
-    const raw = this.env.RELAY_ALLOWED_ORIGINS ?? '';
-    if (raw.trim() === '*') return '*';
-    return raw
-      .split(',')
-      .map((entry) => entry.trim().replace(/\/+$/, ''))
-      .filter((entry) => entry !== '');
+    return parseAllowedOrigins(this.env.RELAY_ALLOWED_ORIGINS);
   }
 
   /**
-   * The CORS headers for this request.
+   * The CORS headers for this request, and the origin check that goes with them.
    *
    * Public, credential-free answers may use `*`. Anything honoring a credential echoes a
    * validated origin instead: a browser `Origin` not on the allowlist is refused outright, while
    * requests without one (native apps, Director sync jobs) are unaffected.
+   *
+   * The header lists themselves live in `./protocol/cors`, shared with the outer Worker, so a
+   * preflight answered anywhere in this deployment allows exactly what the real request accepts.
    */
   private cors(request: Request, credentialed: boolean): Record<string, string> {
-    const origin = (request.headers.get('origin') ?? '').trim().replace(/\/+$/, '');
-    if (!credentialed) {
-      return {
-        'access-control-allow-origin': '*',
-        'access-control-allow-methods': 'GET, OPTIONS',
-        'access-control-allow-headers': 'content-type',
-        'access-control-max-age': '86400',
-      };
+    if (!credentialed) return publicCorsHeaders();
+    const origin = normalizeOrigin(request);
+    if (origin !== '' && !isOriginAllowed(origin, this.allowedOrigins())) {
+      throw new RelayError(403, 'origin_not_allowed', 'This browser origin is not approved.');
     }
-    if (origin !== '') {
-      const allowed = this.allowedOrigins();
-      const ok = allowed === '*' || allowed.includes(origin);
-      if (!ok) throw new RelayError(403, 'origin_not_allowed', 'This browser origin is not approved.');
-      return {
-        'access-control-allow-origin': origin,
-        vary: 'origin',
-        'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'access-control-allow-headers': `authorization, content-type, ${ROOM_TOKEN_HEADER}, ${SESSION_TOKEN_HEADER}, ${DEVICE_ID_HEADER}, ${OPERATOR_NAME_HEADER}`,
-        'access-control-max-age': '86400',
-      };
-    }
-    return {
-      'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'access-control-allow-headers': `authorization, content-type, ${ROOM_TOKEN_HEADER}, ${SESSION_TOKEN_HEADER}, ${DEVICE_ID_HEADER}, ${OPERATOR_NAME_HEADER}`,
-      'access-control-max-age': '86400',
-    };
+    return credentialedCorsHeaders(origin);
   }
 
   private async readJson(request: Request, maxBytes: number): Promise<unknown> {
@@ -537,8 +523,12 @@ export class QbtcpRelay extends DurableObject<Env> {
       throw new RelayError(413, 'body_too_large', 'The request body is too large.');
     }
     const text = await request.text();
-    this.bump('bytes_in', text.length);
-    if (text.length > maxBytes) {
+    // Byte length, not `text.length`: every `*_BYTES` bound in this relay is UTF-8 bytes of the
+    // wire payload, and a body of multibyte text measures up to three times larger than its
+    // UTF-16 code-unit count.
+    const bytes = utf8ByteLength(text);
+    this.bump('bytes_in', bytes);
+    if (bytes > maxBytes) {
       throw new RelayError(413, 'body_too_large', 'The request body is too large.');
     }
     if (text.trim() === '') return {};
@@ -698,49 +688,117 @@ export class QbtcpRelay extends DurableObject<Env> {
   private async route(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const action = url.pathname.replace(/^\/+/, '');
-    const method = request.method;
 
-    if (method === 'GET' && action === 'discovery') return this.getDiscovery(request);
-    if (method === 'GET' && action === 'assignment') return this.getAssignment(request);
-    if (method === 'GET' && action === 'assignment/status') return this.getAssignmentStatus(request);
-    if (method === 'POST' && action === 'pair') return this.postPair(request);
-    if (method === 'POST' && action === 'sessions') return this.postSessions(request);
-    if (method === 'GET' && action === 'stream') return this.openStream(request, url);
-    if (method === 'POST' && action === 'presence') return this.postPresence(request);
-    if (method === 'GET' && action === 'help') return this.getHelp(request);
-    if (method === 'POST' && action === 'help') return this.postHelp(request);
+    if (request.method === 'OPTIONS') return this.preflight(request, url, action);
+
+    const resolved = this.resolveRoute(request, url, action, request.method);
+    if (!resolved) throw new RelayError(404, 'not_found', 'No such relay route.');
+    return resolved.run();
+  }
+
+  /**
+   * Answer a CORS preflight for the route the browser is about to call.
+   *
+   * The policy comes from the route table below — the same table that dispatches the real
+   * request — rather than from a second hand-maintained list of methods and headers. That is the
+   * whole point: a route that starts honoring a token, or a header that gets added to the scorer's
+   * requests, cannot be correct for the request and wrong for its preflight, because there is only
+   * one answer to derive them both from.
+   *
+   * A preflight for a method the route does not serve is a 404, not a permissive 204: the relay
+   * does not advertise routes it will refuse. `Origin` is still validated for credentialed routes,
+   * so a preflight from an unapproved browser origin fails here and the browser never sends the
+   * real request.
+   */
+  private preflight(request: Request, url: URL, action: string): Response {
+    const requested = (request.headers.get('access-control-request-method') ?? '').trim().toUpperCase();
+    // A browser always names the method it intends. A bare OPTIONS (curl, a probe) gets the policy
+    // for every method the path serves.
+    const methods = requested !== '' ? [requested] : ['GET', 'POST', 'PUT', 'DELETE'];
+    let credentialed: boolean | null = null;
+    for (const method of methods) {
+      const resolved = this.resolveRoute(request, url, action, method);
+      if (!resolved) continue;
+      // A path serving both a public and a credentialed method preflights as credentialed: the
+      // stricter policy is the safe one, and `*` must never answer for a token-bearing route.
+      credentialed = (credentialed ?? false) || resolved.credentialed;
+    }
+    if (credentialed === null) throw new RelayError(404, 'not_found', 'No such relay route.');
+    return new Response(null, { status: 204, headers: this.cors(request, credentialed) });
+  }
+
+  /**
+   * The relay's route table: which handler serves `method action`, and whether it honors a
+   * credential.
+   *
+   * `credentialed` is not "requires auth" in the HTTP sense — it is "this route reads a room,
+   * session, or management token, so its response must echo a validated browser origin instead of
+   * `*`". Only discovery is credential-free.
+   *
+   * The handler is returned unevaluated so a preflight can ask what the policy would be without
+   * running it.
+   */
+  private resolveRoute(
+    request: Request,
+    url: URL,
+    action: string,
+    method: string,
+  ): { credentialed: boolean; run: () => Promise<Response> | Response } | null {
+    const credentialed = (run: () => Promise<Response> | Response) => ({ credentialed: true, run });
+    const publicRoute = (run: () => Promise<Response> | Response) => ({ credentialed: false, run });
+
+    if (method === 'GET' && action === 'discovery') return publicRoute(() => this.getDiscovery(request));
+    if (method === 'GET' && action === 'assignment') return credentialed(() => this.getAssignment(request));
+    if (method === 'GET' && action === 'assignment/status')
+      return credentialed(() => this.getAssignmentStatus(request));
+    if (method === 'POST' && action === 'pair') return credentialed(() => this.postPair(request));
+    if (method === 'POST' && action === 'sessions') return credentialed(() => this.postSessions(request));
+    if (method === 'GET' && action === 'stream') return credentialed(() => this.openStream(request, url));
+    if (method === 'POST' && action === 'presence') return credentialed(() => this.postPresence(request));
+    if (method === 'GET' && action === 'help') return credentialed(() => this.getHelp(request));
+    if (method === 'POST' && action === 'help') return credentialed(() => this.postHelp(request));
 
     const sessionMatch = /^sessions\/([^/]+)(?:\/(writer|progress|result|recovery))?$/.exec(action);
     if (sessionMatch) {
       const [, sessionId, sub] = sessionMatch;
-      if (method === 'GET' && !sub) return this.getSession(request, sessionId);
-      if (method === 'POST' && sub === 'writer') return this.postWriter(request, sessionId);
-      if (method === 'POST' && sub === 'progress') return this.postProgress(request, sessionId);
-      if (method === 'POST' && sub === 'result') return this.postResult(request, sessionId);
-      if (method === 'GET' && sub === 'recovery') return this.getRecovery(request, sessionId);
-      throw new RelayError(404, 'not_found', 'No such relay route.');
+      if (method === 'GET' && !sub) return credentialed(() => this.getSession(request, sessionId));
+      if (method === 'POST' && sub === 'writer')
+        return credentialed(() => this.postWriter(request, sessionId));
+      if (method === 'POST' && sub === 'progress')
+        return credentialed(() => this.postProgress(request, sessionId));
+      if (method === 'POST' && sub === 'result')
+        return credentialed(() => this.postResult(request, sessionId));
+      if (method === 'GET' && sub === 'recovery')
+        return credentialed(() => this.getRecovery(request, sessionId));
+      return null;
     }
 
     const helpCancel = /^help\/([^/]+)\/cancel$/.exec(action);
-    if (helpCancel && method === 'POST') return this.postHelpCancel(request, helpCancel[1]);
+    if (helpCancel && method === 'POST')
+      return credentialed(() => this.postHelpCancel(request, helpCancel[1]));
 
-    if (method === 'POST' && action === 'manage/claim') return this.claim(request);
-    if (method === 'PUT' && action === 'manage/mirror') return this.putMirror(request);
-    if (method === 'GET' && action === 'manage/events') return this.getEvents(request, url);
-    if (method === 'GET' && action === 'manage/sessions') return this.getDirectorSessions(request, url);
-    if (method === 'GET' && action === 'manage/results') return this.getDirectorResults(request, url);
-    if (method === 'GET' && action === 'manage/help') return this.getDirectorHelp(request, url);
-    if (method === 'POST' && action === 'manage/acks') return this.postAcks(request);
-    if (method === 'POST' && action === 'manage/revoke') return this.postRevoke(request);
-    if (method === 'POST' && action === 'manage/close') return this.postClose(request);
-    if (method === 'POST' && action === 'manage/chaos') return this.postChaos(request);
-    if (method === 'DELETE' && action === 'manage') return this.destroy(request);
-    if (method === 'GET' && action === 'manage/health') return this.getHealth(request);
+    if (method === 'POST' && action === 'manage/claim') return credentialed(() => this.claim(request));
+    if (method === 'PUT' && action === 'manage/mirror') return credentialed(() => this.putMirror(request));
+    if (method === 'GET' && action === 'manage/events')
+      return credentialed(() => this.getEvents(request, url));
+    if (method === 'GET' && action === 'manage/sessions')
+      return credentialed(() => this.getDirectorSessions(request, url));
+    if (method === 'GET' && action === 'manage/results')
+      return credentialed(() => this.getDirectorResults(request, url));
+    if (method === 'GET' && action === 'manage/help')
+      return credentialed(() => this.getDirectorHelp(request, url));
+    if (method === 'POST' && action === 'manage/acks') return credentialed(() => this.postAcks(request));
+    if (method === 'POST' && action === 'manage/revoke') return credentialed(() => this.postRevoke(request));
+    if (method === 'POST' && action === 'manage/close') return credentialed(() => this.postClose(request));
+    if (method === 'POST' && action === 'manage/chaos') return credentialed(() => this.postChaos(request));
+    if (method === 'DELETE' && action === 'manage') return credentialed(() => this.destroy(request));
+    if (method === 'GET' && action === 'manage/health') return credentialed(() => this.getHealth(request));
 
     const helpResolve = /^manage\/help\/([^/]+)\/resolve$/.exec(action);
-    if (helpResolve && method === 'POST') return this.postHelpResolve(request, helpResolve[1]);
+    if (helpResolve && method === 'POST')
+      return credentialed(() => this.postHelpResolve(request, helpResolve[1]));
 
-    throw new RelayError(404, 'not_found', 'No such relay route.');
+    return null;
   }
 
   // -------------------------------------------------------------------------
@@ -1148,7 +1206,7 @@ export class QbtcpRelay extends DurableObject<Env> {
       throw new RelayError(400, 'invalid_request', 'The progress snapshot is not a valid JSON object.');
     }
     const text = JSON.stringify(rawMatchState);
-    if (text.length > MAX_DOCUMENT_BYTES)
+    if (utf8ByteLength(text) > MAX_DOCUMENT_BYTES)
       throw new RelayError(413, 'body_too_large', 'The progress snapshot is too large.');
     if (session.status !== 'open') {
       throw new RelayError(409, 'conflict', 'This session is not accepting progress.');
@@ -1244,7 +1302,7 @@ export class QbtcpRelay extends DurableObject<Env> {
       throw new RelayError(400, 'invalid_request', 'The result is not a valid QBJ document.');
     }
     const text = JSON.stringify(rawQbj);
-    if (text.length > MAX_DOCUMENT_BYTES)
+    if (utf8ByteLength(text) > MAX_DOCUMENT_BYTES)
       throw new RelayError(413, 'body_too_large', 'The result document is too large.');
     const retryKey = cleanBoundedText(rawRetryKey, 200);
     this.guardWrites();
@@ -1771,7 +1829,7 @@ export class QbtcpRelay extends DurableObject<Env> {
           throw new RelayError(400, 'invalid_request', 'A mirrored assignment must be a valid JSON object.');
         }
         const text = JSON.stringify(entry.assignment_qbj);
-        if (text.length > MAX_ASSIGNMENT_BYTES)
+        if (utf8ByteLength(text) > MAX_ASSIGNMENT_BYTES)
           throw new RelayError(413, 'body_too_large', 'A mirrored assignment is too large.');
         assignmentBody = text;
       }
@@ -2568,10 +2626,11 @@ export class QbtcpRelay extends DurableObject<Env> {
       this.sendError(socket, 'malformed', 'A stream frame must be JSON text.');
       return;
     }
-    if (message.length > DEFAULT_MAX_STREAM_FRAME_BYTES) {
+    const frameBytes = utf8ByteLength(message);
+    if (frameBytes > DEFAULT_MAX_STREAM_FRAME_BYTES) {
       this.failFrame(socket, {
         code: 'too-large',
-        size: message.length,
+        size: frameBytes,
         maxBytes: DEFAULT_MAX_STREAM_FRAME_BYTES,
       });
       return;
