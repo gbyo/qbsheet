@@ -132,7 +132,7 @@ describe('game definition digests', () => {
       const nextRules = { ...rules } as unknown as Record<string, unknown>;
       nextRules[field] = next;
       expect(
-        digestGameDefinition({ ...base, rules: nextRules as typeof rules }),
+        digestGameDefinition({ ...base, rules: nextRules as unknown as typeof rules }),
         `digest ignores ${field}`,
       ).not.toBe(expected);
     }
