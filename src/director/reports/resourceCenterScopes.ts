@@ -285,13 +285,27 @@ export function resourceCenterScopes(state: DirectorState): ResourceCenterScope[
   return scopes;
 }
 
-/** Preset selection matching the HSQuizbowl preparation workflow in #763. */
+/**
+ * Preset selection matching the HSQuizbowl preparation workflow. The default
+ * recommendation includes only phases that already have accepted results,
+ * plus Combined. Configuring tomorrow's playoff/final stage in advance must
+ * never make today's publishable reports fail preflight merely because that
+ * future stage is still empty (#865). Explicit presets/manual selection keep
+ * empty phases available when the director intentionally chooses them.
+ */
 export function resourceCenterPresetScopeKeys(state: DirectorState, preset: ResourceCenterPreset): string[] {
   const scopes = resourceCenterScopes(state);
   if (scopes.length <= 1) return scopes.map((scope) => scope.key);
   if (preset === 'combined-only') return ['combined'];
   if (preset === 'phases-only') return scopes.filter((scope) => scope.kind === 'phase').map((s) => s.key);
-  return scopes.map((scope) => scope.key);
+
+  const combined = scopes.find((scope) => scope.kind === 'combined');
+  if (!combined) return scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0).map((s) => s.key);
+  if (combined.gameCount === 0) return [combined.key];
+  return [
+    ...scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0).map((scope) => scope.key),
+    combined.key,
+  ];
 }
 
 export function resourceCenterRecommendedScopeKeys(state: DirectorState): string[] {
