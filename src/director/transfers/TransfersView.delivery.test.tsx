@@ -1,10 +1,9 @@
 /**
- * Delivery & Results page integration for #702.
+ * Delivery is the room-first work queue for #757.
  *
- * One mixed round renders as room-by-room operational state — never as
- * transport tabs or a round-wide mode. Per-room actions target exactly
- * their game, matched returns are titled by matchup rather than filename,
- * and the review pipeline still ends in Results.
+ * Results and transfer ingestion are intentionally absent from this surface:
+ * Delivery owns current-round readiness, while Results owns returned files and
+ * their decisions.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
@@ -12,7 +11,7 @@ import type { DirectorState, IncomingArtifact } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import { TransfersView } from './TransfersView';
 import type { TransfersRuntime } from './useTransfers';
-import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
+import { acceptedGame, scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 
 const AT = '2026-09-12T12:00:00.000Z';
 
@@ -79,20 +78,23 @@ function mixedState(): DirectorState {
     initialized: true,
     addedAt: AT,
   });
-  const artifact: IncomingArtifact = {
-    id: 'artifact-1',
-    sourceKind: 'qbtcp',
-    sourceLabel: 'Room 102 (QBTCP)',
-    fileName: 'result-abc123.qbj',
-    byteLength: 1024,
-    digest: 'digest-1',
-    detectedAt: AT,
-    classification: 'ready',
-    warnings: [],
-    status: 'staged',
-    scheduledGameId: 'game-102',
-  };
-  state.transfers.artifacts.push(artifact);
+  return state;
+}
+
+function stateWithReviewResult(): DirectorState {
+  const state = mixedState();
+  state.games.push(acceptedGame('record-101', 'game-101', []));
+  state.games[state.games.length - 1]!.status = 'submitted';
+  state.games[state.games.length - 1]!.source = 'qbtcp';
+  state.submissions.push({
+    id: 'submission-101',
+    gameId: 'record-101',
+    receivedAt: AT,
+    fingerprint: 'fingerprint-101',
+    status: 'review',
+    rawSubmission: {},
+    sessionId: 'session-101',
+  });
   return state;
 }
 
@@ -135,127 +137,169 @@ function stubController(overrides: Partial<DirectorController> = {}): DirectorCo
   } as unknown as DirectorController;
 }
 
-function renderPage(state: DirectorState, transfers: TransfersRuntime, controller: DirectorController) {
-  const onNavigate = vi.fn();
-  const onAnnounce = vi.fn();
+function renderPage(
+  state: DirectorState,
+  transfers: TransfersRuntime,
+  controller: DirectorController,
+  onNavigate: (section: string, target?: unknown) => void = vi.fn(),
+) {
   render(
     <TransfersView
       transfers={transfers}
       state={state}
       controller={controller}
       onNavigate={onNavigate}
-      onAnnounce={onAnnounce}
+      onAnnounce={vi.fn()}
     />,
   );
-  return { onNavigate, onAnnounce };
 }
 
-describe('Delivery & Results page (#702)', () => {
-  test('one mixed round renders per-room state, never transport tabs', () => {
-    const transfers = stubRuntime();
-    renderPage(mixedState(), transfers, stubController());
+function deliveryTable(): HTMLElement {
+  return screen.getByRole('table', { name: 'Round 1 delivery by room' });
+}
 
-    expect(screen.getByText('Delivery & Results')).toBeTruthy();
-    expect(screen.queryByText('Incoming')).toBeNull();
-    expect(screen.queryByText('Outgoing')).toBeNull();
-    expect(screen.getByText('Room 101 · Aiken vs Dorman')).toBeTruthy();
-    expect(screen.getByText('Room 102 · Eastside vs Mauldin')).toBeTruthy();
-    expect(screen.getByText('Room 103 · Aiken vs Eastside')).toBeTruthy();
-    expect(screen.getByText('Room 104 · Dorman vs Mauldin')).toBeTruthy();
-    expect(screen.getAllByText('QBTCP connected').length).toBeGreaterThan(0);
+describe('Delivery page (#757)', () => {
+  test('renders one stable room table with no returned-results queue or permanent checkboxes', () => {
+    renderPage(mixedState(), stubRuntime(), stubController());
+
+    expect(screen.getByRole('heading', { name: 'Delivery' })).toBeTruthy();
+    expect(screen.queryByText('Delivery & Results')).toBeNull();
+    expect(screen.queryByText('Returned results')).toBeNull();
+    expect(screen.queryByRole('checkbox')).toBeNull();
+
+    const rows = within(deliveryTable()).getAllByRole('row');
+    expect(rows.slice(1).map((row) => row.getAttribute('data-director-navigation-id'))).toEqual([
+      'game-101',
+      'game-102',
+      'game-103',
+      'game-104',
+    ]);
+    expect(screen.getByText('QBTCP connected')).toBeTruthy();
     expect(screen.getByText('File needed')).toBeTruthy();
     expect(screen.getByText('Manual delivery')).toBeTruthy();
   });
 
-  test('a matched return is titled by matchup with transport as detail', () => {
+  test('attention is an explicit filter and preserves the same room order', () => {
     renderPage(mixedState(), stubRuntime(), stubController());
 
-    const returns = screen.getByRole('list', { name: 'Returned results needing attention' });
-    expect(within(returns).getByText(/Eastside vs Mauldin/)).toBeTruthy();
-    // The QBJ filename survives only inside file details, never as the title.
-    expect(screen.queryByRole('heading', { name: 'result-abc123.qbj' })).toBeNull();
-    expect(within(returns).queryByText('result-abc123.qbj')).toBeNull();
-    fireEvent.click(within(returns).getByRole('button', { name: 'File details' }));
-    expect(within(returns).getByText('result-abc123.qbj')).toBeTruthy();
-    expect(within(returns).getByText(/via QBTCP/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Needs attention (2)' }));
+    const rows = within(deliveryTable()).getAllByRole('row');
+    expect(rows.slice(1).map((row) => row.getAttribute('data-director-navigation-id'))).toEqual([
+      'game-102',
+      'game-103',
+    ]);
   });
 
-  test('reviewing a return navigates to Results, never accepting here', () => {
-    const onNavigate = renderPage(mixedState(), stubRuntime(), stubController()).onNavigate;
-    fireEvent.click(screen.getByRole('button', { name: 'Review results' }));
-    expect(onNavigate).toHaveBeenCalledWith('results');
+  test('the page primary opens bulk preparation; selection exists only in the dialog', () => {
+    renderPage(mixedState(), stubRuntime(), stubController());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare needed files (1)' }));
+
+    expect(screen.getByRole('heading', { name: 'Prepare assignment files' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Room 103, Aiken vs Eastside' })).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: 'Room 101, Aiken vs Dorman' })).toBeTruthy();
   });
 
-  test('preparing one room targets exactly that game', async () => {
+  test('a row prepare action targets exactly that scheduled game', () => {
     const transfers = stubRuntime();
     renderPage(mixedState(), transfers, stubController());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Prepare assignment' }));
-    expect(transfers.prepareTo).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare file for Room 103, Aiken vs Eastside' }));
     expect(transfers.prepareTo).toHaveBeenCalledWith('loc-usb', {
       kind: 'games',
       scheduledGameIds: ['game-103'],
     });
   });
 
-  test('the device card copies exactly the rooms needing files', async () => {
-    const transfers = stubRuntime();
-    renderPage(mixedState(), transfers, stubController());
-
-    fireEvent.click(screen.getByRole('button', { name: 'Copy rooms needing files (1)' }));
-    expect(transfers.prepareTo).toHaveBeenCalledTimes(1);
-    expect(transfers.prepareTo).toHaveBeenCalledWith('loc-usb', {
-      kind: 'needing-files',
-      roundId: 'round-1',
-    });
-  });
-
-  test('the device card checks for returned results through the same pipeline', () => {
-    const transfers = stubRuntime();
-    renderPage(mixedState(), transfers, stubController());
-
-    fireEvent.click(screen.getByRole('button', { name: 'Check for returned results' }));
-    expect(transfers.scanLocation).toHaveBeenCalledWith('loc-usb');
-  });
-
-  test('routing one room calls the per-game intent mutation', () => {
+  test('routing uses the row overflow menu without changing the stable list order', () => {
     const controller = stubController();
     renderPage(mixedState(), stubRuntime(), controller);
 
-    const routes = screen.getAllByRole('button', { name: 'Route' });
-    expect(routes.length).toBeGreaterThan(0);
-    fireEvent.click(routes[0]!);
-    fireEvent.click(screen.getByRole('option', { name: 'Deliver via file' }));
-    // Gaps sort first, so the first row is the disconnected Room 102 game.
-    expect(controller.setGameDeliveryIntent).toHaveBeenCalledWith('game-102', {
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Room 101, Aiken vs Dorman' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Use file' }));
+    expect(controller.setGameDeliveryIntent).toHaveBeenCalledWith('game-101', {
       primary: 'file',
       fallbacks: [],
     });
   });
 
-  test('selecting rows scopes the copy-selected action', () => {
-    const transfers = stubRuntime();
-    const { container } = render(
-      <TransfersView
-        transfers={transfers}
-        state={mixedState()}
-        controller={stubController()}
-        onNavigate={vi.fn()}
-        onAnnounce={vi.fn()}
-      />,
-    );
-    const checkbox = within(container as HTMLElement).getByRole('checkbox', {
-      name: 'Select Room 101, Aiken vs Dorman for file preparation',
+  test('row details are available behind overflow', () => {
+    renderPage(mixedState(), stubRuntime(), stubController());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Room 101, Aiken vs Dorman' }));
+    fireEvent.click(screen.getByRole('option', { name: 'View delivery details' }));
+    expect(screen.getByText('Delivery details')).toBeTruthy();
+    expect(screen.getByText('No assignment transfer recorded')).toBeTruthy();
+  });
+
+  test('review action navigates to the exact returned submission', () => {
+    const onNavigate = vi.fn();
+    renderPage(stateWithReviewResult(), stubRuntime(), stubController(), onNavigate);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review result for Room 101, Aiken vs Dorman' }));
+    expect(onNavigate).toHaveBeenCalledWith('results', {
+      section: 'results',
+      entityType: 'submission',
+      entityId: 'submission-101',
     });
-    fireEvent.click(checkbox);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy selected (1)' }));
-    expect(transfers.prepareTo).toHaveBeenCalledWith('loc-usb', {
-      kind: 'games',
-      scheduledGameIds: ['game-101'],
+  });
+
+  test('session recovery navigates to the exact affected room', () => {
+    const state = mixedState();
+    state.qbtcpHelpRequests.push({
+      id: 'help-101',
+      roomId: 'room-101',
+      roomName: 'Room 101',
+      category: 'connection',
+      message: 'Scorer needs help',
+      status: 'open',
+      createdAt: AT,
+      updatedAt: AT,
+      deviceId: 'device-101',
     });
+    const onNavigate = vi.fn();
+    renderPage(state, stubRuntime(), stubController(), onNavigate);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fix session for Room 101, Aiken vs Dorman' }));
+    expect(onNavigate).toHaveBeenCalledWith('rooms', {
+      section: 'rooms',
+      entityType: 'room',
+      entityId: 'room-101',
+    });
+  });
+
+  test('invalid artifacts do not return to Delivery', () => {
+    const state = mixedState();
+    const artifact: IncomingArtifact = {
+      id: 'artifact-invalid',
+      sourceKind: 'drop',
+      sourceLabel: 'Dropped files',
+      fileName: 'broken.qbj',
+      byteLength: 12,
+      digest: 'digest-invalid',
+      detectedAt: AT,
+      classification: 'invalid',
+      warnings: [],
+      status: 'failed',
+      detail: 'The file is not valid JSON.',
+    };
+    state.transfers.artifacts.push(artifact);
+
+    renderPage(state, stubRuntime(), stubController());
+
+    expect(screen.queryByText('broken.qbj')).toBeNull();
+    expect(screen.queryByText('Import problems')).toBeNull();
   });
 });
 
+/**
+ * Selection freshness (#756) in the rebuilt Delivery queue (#757).
+ *
+ * The page itself carries no persistent selection — checkboxes exist only
+ * inside the prepare dialog — so the stale-selection hazard moved with it: a
+ * round turnover (or game removal) while the dialog is open must not leave
+ * invisible game IDs in the pending preparation run.
+ */
 describe('Delivery selection freshness (#756)', () => {
   function roundTwoState(): DirectorState {
     const state = mixedState();
@@ -272,7 +316,7 @@ describe('Delivery selection freshness (#756)', () => {
     return state;
   }
 
-  function renderMounted(state: DirectorState, transfers: TransfersRuntime) {
+  function renderWithDialog(state: DirectorState, transfers: TransfersRuntime) {
     const controller = stubController();
     const rendered = render(
       <TransfersView
@@ -283,6 +327,8 @@ describe('Delivery selection freshness (#756)', () => {
         onAnnounce={vi.fn()}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare needed files (1)' }));
+    expect(screen.getByRole('heading', { name: 'Prepare assignment files' })).toBeTruthy();
     const remount = (next: DirectorState) => {
       rendered.rerender(
         <TransfersView
@@ -297,48 +343,33 @@ describe('Delivery selection freshness (#756)', () => {
     return { ...rendered, remount };
   }
 
-  test('advancing the current round clears the stale selection', () => {
+  test('advancing the current round mid-dialog excludes the stale selection', () => {
     const transfers = stubRuntime();
-    const mounted = renderMounted(mixedState(), transfers);
-    fireEvent.click(
-      within(mounted.container as HTMLElement).getByRole('checkbox', {
-        name: 'Select Room 101, Aiken vs Dorman for file preparation',
-      }),
-    );
-    expect(screen.getByRole('button', { name: 'Copy selected (1)' })).toBeTruthy();
+    const mounted = renderWithDialog(mixedState(), transfers);
+    // The dialog preselects the one game needing a file; the submit counts it.
+    expect(screen.getByRole('button', { name: 'Prepare 1 file' })).toBeTruthy();
 
     mounted.remount(roundTwoState());
 
-    // The Round 1 rows are gone and nothing may still claim their selection.
-    expect(screen.queryByRole('button', { name: 'Copy selected (1)' })).toBeNull();
-    const copySelected = screen.getByRole('button', { name: 'Copy selected' });
-    expect((copySelected as HTMLButtonElement).disabled).toBe(true);
+    // The Round 1 rows are gone, so nothing may still claim their selection.
+    expect(screen.queryByRole('button', { name: 'Prepare 1 file' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Prepare 0 files' }) as HTMLButtonElement).disabled).toBe(true);
     expect(transfers.prepareTo).not.toHaveBeenCalled();
-    expect(screen.getByText('Room 201 · Aiken vs Dorman')).toBeTruthy();
   });
 
-  test('removing a selected game within the round excludes its stale ID', () => {
+  test('removing a selected game mid-dialog excludes its stale ID', () => {
     const transfers = stubRuntime();
-    const first = mixedState();
-    const mounted = renderMounted(first, transfers);
-    fireEvent.click(
-      within(mounted.container as HTMLElement).getByRole('checkbox', {
-        name: 'Select Room 101, Aiken vs Dorman for file preparation',
-      }),
-    );
-    expect(screen.getByRole('button', { name: 'Copy selected (1)' })).toBeTruthy();
+    const mounted = renderWithDialog(mixedState(), transfers);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Room 101, Aiken vs Dorman' }));
+    expect(screen.getByRole('button', { name: 'Prepare 2 files' })).toBeTruthy();
 
     const next = mixedState();
     next.scheduledGames = next.scheduledGames.filter((game) => game.id !== 'game-101');
     mounted.remount(next);
 
-    expect(
-      within(mounted.container as HTMLElement).queryByRole('checkbox', {
-        name: 'Select Room 101, Aiken vs Dorman for file preparation',
-      }),
-    ).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Copy selected (1)' })).toBeNull();
-    expect((screen.getByRole('button', { name: 'Copy selected' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('checkbox', { name: 'Room 101, Aiken vs Dorman' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Prepare 2 files' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Prepare 1 file' })).toBeTruthy();
     expect(transfers.prepareTo).not.toHaveBeenCalled();
   });
 });

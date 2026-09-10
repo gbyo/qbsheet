@@ -106,12 +106,17 @@ export const runGroup: NavigationGroup = {
       icon: 'calendar',
       description: 'The sequence of rounds and breaks, and the controls to run them.',
     },
-    { id: 'results', label: 'Results', icon: 'inbox', description: 'Submissions, games, and protests.' },
     {
       id: 'transfers',
-      label: 'Delivery & Results',
+      label: 'Delivery',
       icon: 'usb',
-      description: 'How each game reaches its room, and what has come back.',
+      description: 'Room readiness, QBTCP, and assignment files.',
+    },
+    {
+      id: 'results',
+      label: 'Results',
+      icon: 'inbox',
+      description: 'Returned results, decisions, and protests.',
     },
   ],
 };

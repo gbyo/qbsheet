@@ -1,9 +1,9 @@
-# Delivery & Results (transfers subsystem)
+# Delivery and Results (transfers subsystem)
 
-Delivery & Results is the tournament-day page that answers three questions per current-round
-game: how is this game's assignment expected to reach its room, is it actually ready, and has a
-result come back. Underneath it is the transfers subsystem, which moves tournament assignments and
-completed results between QBSheet Director and scoring devices.
+Delivery and Results are the tournament-day work queues. Delivery answers how each current-round
+game's assignment reaches its room and whether it is ready. Results owns returned-file import,
+decisions, and exceptions. Underneath them is the transfers subsystem, which moves tournament
+assignments and completed results between QBSheet Director and scoring devices.
 
 This document describes the subsystem. The file format it moves is ordinary QBJ and is specified in
 [`QBJ_ASSIGNMENT_PROFILE.md`](QBJ_ASSIGNMENT_PROFILE.md); the live protocol is in
@@ -330,14 +330,15 @@ removed from the desktop application to keep that path working.
 
 |                                                             |                                                                   |
 | ----------------------------------------------------------- | ----------------------------------------------------------------- |
-| Page                                                        | **Delivery & Results**, under Run, between Tournament and Results |
+| Page                                                        | **Delivery**, then **Results**, under Run |
 | Internal subsystem name                                     | triage (never user-facing)                                        |
-| Discover, import, stage, prepare, write, watch              | Delivery & Results                                                |
+| Prepare, write, watch, and manage destinations               | Delivery                                                          |
+| Import returned files, stage, diagnose, and decide           | Results                                                           |
 | Inspect, review discrepancies, accept/reject/edit/reconcile | Results                                                           |
 
-Shortcuts elsewhere navigate into Delivery & Results rather than duplicating it: **Prepare
-assignment files** on a round, per-room **Prepare assignment** / **Prepare file fallback** rows,
-**Import returned files** in the page header and the returned-results section.
+Shortcuts elsewhere navigate into Delivery or Results rather than duplicating them: **Prepare
+assignment files** on a round, per-room **Prepare file** / **Prepare file backup** rows, and
+**Import returned files** in the Results page header and drop target.
 
 ## Tests
 

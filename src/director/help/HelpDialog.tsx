@@ -66,7 +66,7 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
             Results / review
           </a>
           <a href="#help-transfers" onClick={scrollToHelpSection}>
-            Delivery &amp; results
+            Delivery
           </a>
           <a href="#help-qbtcp" onClick={scrollToHelpSection}>
             QBTCP troubleshooting
@@ -130,12 +130,13 @@ export function HelpDialog({ open, onClose }: { open: boolean; onClose: () => vo
         </section>
 
         <section id="help-transfers">
-          <h3>Delivery &amp; results</h3>
+          <h3>Delivery</h3>
           <p>
-            Use Delivery &amp; Results to see how each current-round game reaches its room, prepare assignment
-            files for the rooms that need them, and review returned results. Delivery is per game and room:
-            one round can mix QBTCP, file, and manual rooms, and changing one room never changes its siblings.
-            Supported imports: Director .json, QBJ, and portable .qbst archives. Checksum and duplicate
+            Use <strong>Delivery</strong> to see how each current-round game reaches its room and prepare
+            assignment files for the rooms that need them. Delivery is per game and room: one round can mix
+            QBTCP, file, and manual rooms, and changing one room never changes its siblings. Use
+            <strong>Results</strong> to import returned files, review decisions, and handle exceptions.
+            Supported imports are Director .json, QBJ, and portable .qbst archives; checksum and duplicate
             handling is automatic.
           </p>
         </section>

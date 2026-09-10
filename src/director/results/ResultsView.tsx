@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type DragEvent } from 'react';
 import {
   definitionMatchesDefaults,
   planResultCorrectionImpact,
@@ -15,29 +15,41 @@ import {
   ActionMenu,
   Button,
   Callout,
+  DataTable,
   Diagnostics,
   Dialog,
   DialogSection,
   EmptyState,
   Field,
   FieldGrid,
+  FilePicker,
+  IdentityCell,
   MenuItem,
   NumberInput,
   Page,
   PageHeader,
+  Panel,
+  RowDetail,
   Segmented,
   Select,
+  Specs,
   StateLabel,
   SummaryItem,
   SummaryList,
   TextArea,
   useConfirm,
+  type Column,
+  type PickedFile,
 } from '../components';
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { useNavigationHighlight } from '../app/useNavigationHighlight';
 import { describeWarning } from '../transfers/ingest';
 import { errorNotice, type AnnounceInput } from '../notices';
+import { transferArtifactNeedsAttention } from '../transfers/attention';
+import type { IncomingArtifact } from '../transfers/model';
+import { describeSummary, type TransfersRuntime } from '../transfers/useTransfers';
+import type { ImportSummary } from '../transfers/state';
 
 type ResultsViewMode = 'review' | 'games' | 'protests' | 'history';
 type SubmissionAction = 'reject' | 'associate' | 'edit' | 'correct-forfeit' | 'protest';
@@ -57,13 +69,14 @@ export function resultsViewForTarget(
 export function ResultsView({
   state,
   controller,
-  onNavigate,
+  transfers,
   onAnnounce,
   navigationTarget,
   onClearNavigationTarget,
 }: {
   state: DirectorState;
   controller: DirectorController;
+  transfers?: TransfersRuntime;
   onNavigate?: (section: SectionId) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
   navigationTarget?: DirectorNavigationTarget | null;
@@ -82,6 +95,8 @@ export function ResultsView({
   );
   const [roundFilter, setRoundFilter] = useState('');
   const [manualOpen, setManualOpen] = useState(false);
+  const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
+  const [dropActive, setDropActive] = useState(false);
   const targetedRoundId =
     navigationTarget?.section === 'results' && navigationTarget.entityType === 'round'
       ? navigationTarget.entityId
@@ -103,6 +118,36 @@ export function ResultsView({
       onClearNavigationTarget?.();
   };
 
+  const importPickedFiles = useCallback(
+    async (picked: PickedFile[]) => {
+      if (!transfers) {
+        onAnnounce(errorNotice('Returned-file import is unavailable in this Director view.'));
+        return;
+      }
+      const files = picked.map((file) => {
+        const bytes = new ArrayBuffer(file.bytes.byteLength);
+        new Uint8Array(bytes).set(file.bytes);
+        return new File([bytes], file.fileName, {
+          type: 'application/vnd.quizbowl.qbj+json',
+        });
+      });
+      setImportSummary(await transfers.importFiles(files, 'Chosen returned files'));
+    },
+    [onAnnounce, transfers],
+  );
+
+  const importDroppedFiles = useCallback(
+    async (data: DataTransfer | null) => {
+      if (!transfers) {
+        onAnnounce(errorNotice('Returned-file import is unavailable in this Director view.'));
+        return;
+      }
+      const summary = await transfers.importDataTransfer(data);
+      if (summary) setImportSummary(summary);
+    },
+    [onAnnounce, transfers],
+  );
+
   return (
     <Page>
       <PageHeader
@@ -110,11 +155,15 @@ export function ResultsView({
         description={`${reviewCount} need review · ${unresolvedGameCount} unresolved game${unresolvedGameCount === 1 ? '' : 's'} · ${openProtestCount} open protest${openProtestCount === 1 ? '' : 's'}`}
         actions={
           <>
-            {onNavigate && (
-              <Button variant="secondary" icon="upload" onClick={() => onNavigate('transfers')}>
-                Import via Transfers
-              </Button>
-            )}
+            <FilePicker
+              accept=".qbj,application/vnd.quizbowl.qbj+json,application/json"
+              multiple
+              disabled={!transfers}
+              onPick={importPickedFiles}
+              onError={(message) => onAnnounce(errorNotice(message))}
+            >
+              Import returned files
+            </FilePicker>
             <Button variant="primary" icon="plus" onClick={() => setManualOpen(true)}>
               Enter result
             </Button>
@@ -154,6 +203,50 @@ export function ResultsView({
           )}
         />
       </div>
+
+      <div
+        className={`director-results-import-dropzone ${dropActive ? 'is-active' : ''}`.trim()}
+        role="region"
+        aria-label="Import returned files"
+        onDragEnter={(event: DragEvent<HTMLDivElement>) => {
+          event.preventDefault();
+          setDropActive(true);
+        }}
+        onDragOver={(event: DragEvent<HTMLDivElement>) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+        }}
+        onDragLeave={(event: DragEvent<HTMLDivElement>) => {
+          if (event.currentTarget === event.target) setDropActive(false);
+        }}
+        onDrop={(event: DragEvent<HTMLDivElement>) => {
+          event.preventDefault();
+          setDropActive(false);
+          void importDroppedFiles(event.dataTransfer);
+        }}
+      >
+        <strong>Drop returned QBJ files here</strong>
+        <span>They will be matched and staged through the same review pipeline as QBTCP results.</span>
+      </div>
+
+      {importSummary && (
+        <Callout
+          tone={
+            importSummary.invalid > 0
+              ? 'danger'
+              : importSummary.needsReview > 0 || importSummary.assignments > 0
+                ? 'warning'
+                : 'info'
+          }
+          title="Returned files imported"
+          role="status"
+        >
+          {describeSummary(importSummary)}
+          {importSummary.messages.length > 0 ? ` · ${importSummary.messages.join(' ')}` : ''}
+        </Callout>
+      )}
+
+      <ImportProblemsQueue state={state} controller={controller} />
 
       {selectedView === 'review' && (
         <SubmissionQueue
@@ -204,6 +297,162 @@ export function ResultsView({
   );
 }
 
+function ImportProblemsQueue({
+  state,
+  controller,
+}: {
+  state: DirectorState;
+  controller: DirectorController;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => new Set());
+  const problems = useMemo(
+    () =>
+      state.transfers.artifacts.filter((artifact) => {
+        const needsAttention = transferArtifactNeedsAttention(artifact, state.submissions);
+        return (
+          !dismissedIds.has(artifact.id) &&
+          (artifact.status === 'failed' ||
+            artifact.classification === 'invalid' ||
+            artifact.classification === 'assignment' ||
+            artifact.classification === 'not-a-result' ||
+            (needsAttention && !artifact.submissionId))
+        );
+      }),
+    [dismissedIds, state.submissions, state.transfers.artifacts],
+  );
+
+  if (!problems.length) return null;
+
+  const columns: Column<IncomingArtifact>[] = [
+    {
+      key: 'artifact',
+      header: 'File / source',
+      priority: 1,
+      render: (artifact) => <IdentityCell title={artifact.fileName} detail={artifact.sourceLabel} />,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      priority: 2,
+      render: (artifact) => {
+        const problem = importProblemFor(artifact);
+        return <StateLabel state={problem.state} label={problem.label} tone={problem.tone} />;
+      },
+    },
+    {
+      key: 'reason',
+      header: 'What needs attention',
+      priority: 3,
+      render: (artifact) => (
+        <span className="director-text-secondary">
+          {artifact.detail ??
+            (artifact.warnings.length > 0
+              ? artifact.warnings.map(describeWarning).join(' ')
+              : 'No matching scheduled game.')}
+        </span>
+      ),
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      priority: 1,
+      actions: true,
+      render: (artifact) => (
+        <div>
+          <Button
+            variant="quiet"
+            size="sm"
+            onClick={() => {
+              setDismissedIds((current) => new Set(current).add(artifact.id));
+              controller.dismissTransferArtifact(artifact.id);
+            }}
+          >
+            Dismiss
+          </Button>
+          <ActionMenu
+            label={`${artifact.fileName} import actions`}
+            triggerLabel={`${artifact.fileName} import actions`}
+          >
+            {(close) => (
+              <MenuItem
+                icon="info"
+                onSelect={() => {
+                  close();
+                  setExpandedId((current) => (current === artifact.id ? null : artifact.id));
+                }}
+              >
+                {expandedId === artifact.id ? 'Hide import details' : 'View import details'}
+              </MenuItem>
+            )}
+          </ActionMenu>
+        </div>
+      ),
+    },
+  ];
+
+  return (
+    <Panel
+      title="Import problems"
+      description="Files Director could not match or read stay here as diagnostics; they never enter standings."
+      flush
+      className="director-results-import-problems"
+    >
+      <DataTable
+        items={problems}
+        columns={columns}
+        rowKey={(artifact) => artifact.id}
+        ariaLabel="Import problems"
+        rowDetail={(artifact) =>
+          expandedId === artifact.id ? <ImportProblemDetail artifact={artifact} /> : null
+        }
+      />
+    </Panel>
+  );
+}
+
+function importProblemFor(artifact: IncomingArtifact): {
+  state: string;
+  label: string;
+  tone: 'warning' | 'danger';
+} {
+  if (artifact.status === 'failed' || artifact.classification === 'invalid') {
+    return { state: 'error', label: 'Unreadable file', tone: 'danger' };
+  }
+  if (artifact.classification === 'assignment') {
+    return { state: 'warning', label: 'Assignment file', tone: 'warning' };
+  }
+  if (artifact.classification === 'not-a-result') {
+    return { state: 'warning', label: 'Not a result', tone: 'warning' };
+  }
+  return { state: 'unassigned', label: 'Unmatched result', tone: 'warning' };
+}
+
+function ImportProblemDetail({ artifact }: { artifact: IncomingArtifact }) {
+  return (
+    <RowDetail>
+      <div className="director-row-detail-header">
+        <div>
+          <strong>Import diagnostic</strong>
+          <p className="director-text-secondary">{artifact.fileName}</p>
+        </div>
+      </div>
+      <Specs
+        items={[
+          { term: 'Source', value: artifact.sourceLabel },
+          { term: 'Detected', value: formatTime(artifact.detectedAt) },
+          { term: 'Size', value: formatByteCount(artifact.byteLength) },
+          ...(artifact.originalPath ? [{ term: 'Path', value: artifact.originalPath, mono: true }] : []),
+          { term: 'Reason', value: artifact.detail ?? 'No scheduled game matched this artifact.' },
+          ...(artifact.warnings.length > 0
+            ? [{ term: 'Warnings', value: artifact.warnings.map(describeWarning).join(' ') }]
+            : []),
+        ]}
+      />
+    </RowDetail>
+  );
+}
+
 function SubmissionQueue({
   state,
   controller,
@@ -225,188 +474,313 @@ function SubmissionQueue({
     navigationTarget?.section === 'results' && navigationTarget.entityType === 'submission'
       ? navigationTarget.entityId
       : undefined;
-  const submissions = useMemo(() => {
-    return state.submissions
-      .filter((submission) => {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [action, setAction] = useState<{ mode: SubmissionAction; submissionId: string } | null>(null);
+  const highlighted = useNavigationHighlight(
+    navigationTarget,
+    'results',
+    'submission',
+    targetSubmissionId ?? '',
+    onClearNavigationTarget,
+  );
+  const submissions = useMemo(
+    () =>
+      state.submissions.filter((submission) => {
         if (submission.id === targetSubmissionId) return true;
         const inRound =
           !roundId || state.games.some((game) => game.id === submission.gameId && game.roundId === roundId);
         const review = submission.status === 'review' || submission.status === 'received';
         return inRound && (history ? !review : review);
-      })
-      .sort((left, right) => right.receivedAt.localeCompare(left.receivedAt));
-  }, [history, roundId, state.games, state.submissions, targetSubmissionId]);
+      }),
+    [history, roundId, state.games, state.submissions, targetSubmissionId],
+  );
 
-  if (!submissions.length) {
-    return (
-      <EmptyState
-        title={history ? 'No result history in this view' : 'Nothing needs review'}
-        description={
-          history
-            ? 'Accepted, rejected, duplicate, and superseded submissions appear here.'
-            : 'New QBTCP and imported submissions will appear here when they need a decision.'
-        }
-      />
-    );
-  }
-  return (
-    <SummaryList ariaLabel={history ? 'Result history' : 'Results needing review'}>
-      {submissions.map((submission) => (
-        <SubmissionItem
-          key={submission.id}
+  const columns: Column<DirectorState['submissions'][number]>[] = [
+    {
+      key: 'matchup',
+      header: 'Matchup',
+      priority: 1,
+      render: (submission) => {
+        const scheduled = scheduledForSubmission(state, submission);
+        return (
+          <IdentityCell
+            title={scheduled ? matchupLabel(state, scheduled) : 'Unmatched result'}
+            detail={sourceLabelForSubmission(state, submission)}
+          />
+        );
+      },
+    },
+    {
+      key: 'score',
+      header: 'Score',
+      priority: 2,
+      nowrap: true,
+      render: (submission) => (
+        <span className="director-table-state-cell">
+          <strong>{scoreLineForSubmission(state, submission)}</strong>
+          <small>Received {formatTime(submission.receivedAt)}</small>
+        </span>
+      ),
+    },
+    {
+      key: 'round-room',
+      header: 'Round / room',
+      priority: 3,
+      render: (submission) => {
+        const scheduled = scheduledForSubmission(state, submission);
+        const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+        const room = scheduled?.roomId
+          ? state.rooms.find((entry) => entry.id === scheduled.roomId)
+          : undefined;
+        return (
+          <span className="director-text-secondary">
+            {round?.name ?? 'Unmatched'} · {room?.name ?? 'Room unassigned'}
+          </span>
+        );
+      },
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      priority: 2,
+      render: (submission) => (
+        <StateLabel
+          state={submissionState(submission.status)}
+          label={submissionStatusLabel(submission.status)}
+        />
+      ),
+    },
+    {
+      key: 'action',
+      header: 'Action',
+      priority: 1,
+      actions: true,
+      render: (submission) => (
+        <SubmissionActions
           state={state}
           submission={submission}
           controller={controller}
           onAnnounce={onAnnounce}
-          navigationTarget={navigationTarget}
-          onClearNavigationTarget={onClearNavigationTarget}
+          expanded={expandedId === submission.id}
+          onToggleDetails={() =>
+            setExpandedId((current) => (current === submission.id ? null : submission.id))
+          }
+          onAction={(mode) => setAction({ mode, submissionId: submission.id })}
         />
-      ))}
-    </SummaryList>
+      ),
+    },
+  ];
+
+  const actionSubmission = action
+    ? state.submissions.find((submission) => submission.id === action.submissionId)
+    : undefined;
+  const actionGame = actionSubmission
+    ? state.games.find((game) => game.id === actionSubmission.gameId)
+    : undefined;
+  const actionScheduled = actionGame
+    ? state.scheduledGames.find((game) => game.id === actionGame.scheduledGameId)
+    : undefined;
+
+  return (
+    <>
+      {submissions.length === 0 ? (
+        <EmptyState
+          title={history ? 'No result history in this view' : 'Nothing needs review'}
+          description={
+            history
+              ? 'Accepted, rejected, duplicate, and superseded submissions appear here.'
+              : 'New QBTCP and imported submissions will appear here when they need a decision.'
+          }
+        />
+      ) : (
+        <DataTable
+          items={submissions}
+          columns={columns}
+          rowKey={(submission) => submission.id}
+          ariaLabel={history ? 'Result history' : 'Results needing review'}
+          rowProps={(submission) => ({
+            className:
+              highlighted && submission.id === targetSubmissionId ? 'is-navigation-target' : undefined,
+            'data-director-navigation-id': submission.id,
+            'data-director-navigation-focus': true,
+            tabIndex: -1,
+          })}
+          rowDetail={(submission) =>
+            expandedId === submission.id ? (
+              <SubmissionRowDetail
+                state={state}
+                submission={submission}
+                onClose={() => setExpandedId(null)}
+              />
+            ) : null
+          }
+        />
+      )}
+      {action && actionSubmission && actionGame && (
+        <SubmissionActionDialog
+          mode={action.mode}
+          state={state}
+          submission={actionSubmission}
+          game={actionGame}
+          scheduled={actionScheduled}
+          controller={controller}
+          onAnnounce={onAnnounce}
+          onClose={() => setAction(null)}
+        />
+      )}
+    </>
   );
 }
 
-function SubmissionItem({
+function SubmissionActions({
   state,
   submission,
   controller,
   onAnnounce,
-  navigationTarget,
-  onClearNavigationTarget,
+  expanded,
+  onToggleDetails,
+  onAction,
 }: {
   state: DirectorState;
   submission: DirectorState['submissions'][number];
   controller: DirectorController;
   onAnnounce: (announcement: AnnounceInput) => void;
-  navigationTarget?: DirectorNavigationTarget | null;
-  onClearNavigationTarget?: () => void;
+  expanded: boolean;
+  onToggleDetails: () => void;
+  onAction: (mode: SubmissionAction) => void;
 }) {
-  const highlighted = useNavigationHighlight(
-    navigationTarget,
-    'results',
-    'submission',
-    submission.id,
-    onClearNavigationTarget,
-  );
-  const [action, setAction] = useState<SubmissionAction | null>(null);
   const game = state.games.find((entry) => entry.id === submission.gameId);
-  const scheduled = game
-    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
-    : undefined;
-  const left = scheduled ? teamLabel(state, scheduled.leftTeamId) : 'Unmatched result';
-  const right = scheduled ? teamLabel(state, scheduled.rightTeamId) : '';
-  const score = game
-    ? scheduled
-      ? [scheduled.leftTeamId, scheduled.rightTeamId]
-          .map((teamId) => game.scores.find((entry) => entry.teamId === teamId)?.score ?? '—')
-          .join('–')
-      : game.scores.map((entry) => entry.score).join('–') || '—'
-    : '—';
+  const scheduled = scheduledForSubmission(state, submission);
+  const matchup = scheduled ? matchupLabel(state, scheduled) : 'Unmatched result';
   const review = submission.status === 'received' || submission.status === 'review';
   const cancelledGame = scheduled?.status === 'cancelled' || game?.status === 'cancelled';
-  const warnings = submission.warnings ?? [];
-  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
 
   return (
-    <SummaryItem
-      className={highlighted ? 'is-navigation-target' : ''}
-      title={
-        <strong data-director-navigation-id={submission.id} data-director-navigation-focus tabIndex={-1}>
-          {scheduled ? `${left} vs ${right}` : left}
-        </strong>
-      }
-      status={
-        <StateLabel
-          state={submissionState(submission.status)}
-          label={submissionStatusLabel(submission.status)}
-        />
-      }
-      summary={`${score} · ${round?.name ?? 'Unmatched'} · Received ${formatTime(submission.receivedAt)}${game?.source ? ` · ${game.source}` : ''}`}
-      actions={
-        <div className="director-actions">
-          {review && !cancelledGame && (
-            <Button
-              variant="primary"
-              onClick={() => {
-                const accepted = controller.acceptSubmission(submission.id);
-                onAnnounce(
-                  accepted
-                    ? `${left} result accepted.`
-                    : errorNotice(`${left} result remains in review; it was not accepted.`),
-                );
+    <>
+      {review && !cancelledGame && (
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => {
+            const accepted = controller.acceptSubmission(submission.id);
+            onAnnounce(
+              accepted
+                ? `${matchup} result accepted.`
+                : errorNotice(`${matchup} result remains in review; it was not accepted.`),
+            );
+          }}
+        >
+          Accept
+        </Button>
+      )}
+      <ActionMenu
+        label={`${matchup} result actions`}
+        triggerLabel={`${matchup} result actions`}
+        triggerVariant="quiet"
+      >
+        {(close) => (
+          <>
+            <MenuItem
+              icon="info"
+              onSelect={() => {
+                close();
+                onToggleDetails();
               }}
             >
-              Accept
-            </Button>
-          )}
-          {(review || submission.status === 'accepted') && (
-            <ActionMenu label={`${left} result actions`} triggerLabel={`${left} result actions`}>
-              {(close) => (
-                <>
-                  {review && (
-                    <MenuItem
-                      icon="x"
-                      tone="danger"
-                      onSelect={() => {
-                        close();
-                        setAction('reject');
-                      }}
-                    >
-                      Reject result…
-                    </MenuItem>
-                  )}
-                  {review && !scheduled && game && (
-                    <MenuItem
-                      icon="link"
-                      onSelect={() => {
-                        close();
-                        setAction('associate');
-                      }}
-                    >
-                      Associate with scheduled game…
-                    </MenuItem>
-                  )}
-                  {submission.status === 'accepted' && game?.status === 'forfeit' && scheduled && (
-                    <MenuItem
-                      icon="edit"
-                      onSelect={() => {
-                        close();
-                        setAction('correct-forfeit');
-                      }}
-                    >
-                      Correct forfeit…
-                    </MenuItem>
-                  )}
-                  {submission.status === 'accepted' && game && game.status !== 'forfeit' && scheduled && (
-                    <MenuItem
-                      icon="edit"
-                      onSelect={() => {
-                        close();
-                        setAction('edit');
-                      }}
-                    >
-                      Correct accepted result…
-                    </MenuItem>
-                  )}
-                  {submission.status === 'accepted' && game && scheduled?.rightTeamId && (
-                    <MenuItem
-                      icon="flag"
-                      onSelect={() => {
-                        close();
-                        setAction('protest');
-                      }}
-                    >
-                      Open protest…
-                    </MenuItem>
-                  )}
-                </>
-              )}
-            </ActionMenu>
-          )}
+              {expanded ? 'Hide result details' : 'View result details'}
+            </MenuItem>
+            {review && (
+              <MenuItem
+                icon="x"
+                tone="danger"
+                onSelect={() => {
+                  close();
+                  onAction('reject');
+                }}
+              >
+                Reject result…
+              </MenuItem>
+            )}
+            {review && !scheduled && game && (
+              <MenuItem
+                icon="link"
+                onSelect={() => {
+                  close();
+                  onAction('associate');
+                }}
+              >
+                Associate with scheduled game…
+              </MenuItem>
+            )}
+            {submission.status === 'accepted' && game?.status === 'forfeit' && scheduled && (
+              <MenuItem
+                icon="edit"
+                onSelect={() => {
+                  close();
+                  onAction('correct-forfeit');
+                }}
+              >
+                Correct forfeit…
+              </MenuItem>
+            )}
+            {submission.status === 'accepted' && game && game.status !== 'forfeit' && scheduled && (
+              <MenuItem
+                icon="edit"
+                onSelect={() => {
+                  close();
+                  onAction('edit');
+                }}
+              >
+                Correct accepted result…
+              </MenuItem>
+            )}
+            {submission.status === 'accepted' && game && scheduled?.rightTeamId && (
+              <MenuItem
+                icon="flag"
+                onSelect={() => {
+                  close();
+                  onAction('protest');
+                }}
+              >
+                Open protest…
+              </MenuItem>
+            )}
+          </>
+        )}
+      </ActionMenu>
+    </>
+  );
+}
+
+function SubmissionRowDetail({
+  state,
+  submission,
+  onClose,
+}: {
+  state: DirectorState;
+  submission: DirectorState['submissions'][number];
+  onClose: () => void;
+}) {
+  const game = state.games.find((entry) => entry.id === submission.gameId);
+  const scheduled = scheduledForSubmission(state, submission);
+  const warnings = submission.warnings ?? [];
+  const cancelledGame = scheduled?.status === 'cancelled' || game?.status === 'cancelled';
+  const artifact = state.transfers.artifacts.find((entry) => entry.submissionId === submission.id);
+
+  return (
+    <RowDetail>
+      <div className="director-row-detail-header">
+        <div>
+          <strong>Result details</strong>
+          <p className="director-text-secondary">
+            {scheduled ? matchupLabel(state, scheduled) : 'Unmatched result'}
+          </p>
         </div>
-      }
-    >
-      {cancelledGame && review && (
+        <Button variant="quiet" size="sm" onClick={onClose}>
+          Hide details
+        </Button>
+      </div>
+      {cancelledGame && (submission.status === 'received' || submission.status === 'review') && (
         <Callout tone="warning">
           This game is cancelled, so the submission cannot be accepted unless the game state is repaired
           first.
@@ -422,28 +796,63 @@ function SubmissionItem({
           {game.detailedStats === 'unknown' ? 'Detailed stats not recorded.' : 'Detailed stats incomplete.'}
         </p>
       )}
-      <Diagnostics
-        label="Submission details"
-        standalone={false}
+      <Specs
         items={[
+          { term: 'Score', value: scoreLineForSubmission(state, submission) },
+          { term: 'Source', value: sourceLabelForSubmission(state, submission) },
+          { term: 'Received', value: formatTime(submission.receivedAt) },
           { term: 'Submission ID', value: submission.id, mono: true },
+          ...(artifact ? [{ term: 'Returned file', value: artifact.fileName }] : []),
           ...(submission.reason ? [{ term: 'Reason', value: submission.reason }] : []),
         ]}
       />
-      {action && game && (
-        <SubmissionActionDialog
-          mode={action}
-          state={state}
-          submission={submission}
-          game={game}
-          scheduled={scheduled}
-          controller={controller}
-          onAnnounce={onAnnounce}
-          onClose={() => setAction(null)}
-        />
-      )}
-    </SummaryItem>
+      <Diagnostics
+        label="Submission diagnostics"
+        standalone={false}
+        items={[
+          ...(submission.transportResultId
+            ? [{ term: 'Transport result ID', value: submission.transportResultId, mono: true }]
+            : []),
+          ...(submission.sessionId
+            ? [{ term: 'QBTCP session', value: submission.sessionId, mono: true }]
+            : []),
+        ]}
+      />
+    </RowDetail>
   );
+}
+
+function scheduledForSubmission(
+  state: DirectorState,
+  submission: DirectorState['submissions'][number],
+): DirectorState['scheduledGames'][number] | undefined {
+  const game = state.games.find((entry) => entry.id === submission.gameId);
+  return game ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId) : undefined;
+}
+
+function scoreLineForSubmission(
+  state: DirectorState,
+  submission: DirectorState['submissions'][number],
+): string {
+  const game = state.games.find((entry) => entry.id === submission.gameId);
+  if (!game) return '—';
+  const scheduled = scheduledForSubmission(state, submission);
+  if (!scheduled) return game.scores.map((entry) => entry.score).join('–') || '—';
+  return [scheduled.leftTeamId, scheduled.rightTeamId]
+    .filter((teamId): teamId is string => Boolean(teamId))
+    .map((teamId) => game.scores.find((entry) => entry.teamId === teamId)?.score ?? '—')
+    .join('–');
+}
+
+function sourceLabelForSubmission(
+  state: DirectorState,
+  submission: DirectorState['submissions'][number],
+): string {
+  const artifact = state.transfers.artifacts.find((entry) => entry.submissionId === submission.id);
+  if (artifact) return artifact.sourceLabel;
+  if (submission.sessionId) return 'via QBTCP';
+  const game = state.games.find((entry) => entry.id === submission.gameId);
+  return game?.source === 'manual' ? 'Manual entry' : game?.source === 'paper' ? 'Paper' : 'Imported file';
 }
 
 /**
@@ -1531,4 +1940,11 @@ function formatTime(value: string): string {
   return Number.isNaN(date.getTime())
     ? '—'
     : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+function formatByteCount(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  if (value < 1024) return `${value} bytes`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }

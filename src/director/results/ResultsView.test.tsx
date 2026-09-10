@@ -10,12 +10,14 @@ import { StrictMode, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { advancementBasisToken } from '../domain';
-import type { DirectorState, ReissueDefinitionResult } from '../domain';
+import type { DirectorState, IncomingArtifact, ReissueDefinitionResult } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { acceptedGame, playedTournament, scheduledGame, score } from '../../../tests/directorFixtures';
 import { ResultsView } from './ResultsView';
 import { ConfirmProvider, ConfirmTestProvider } from '../components/Dialog';
+import type { ImportSummary } from '../transfers/state';
+import type { TransfersRuntime } from '../transfers/useTransfers';
 
 afterEach(cleanup);
 
@@ -61,6 +63,49 @@ function controllerWith(overrides: Partial<DirectorController> = {}): DirectorCo
     rejectSubmission: vi.fn(() => true),
     ...overrides,
   } as unknown as DirectorController;
+}
+
+function transfersWith(overrides: Partial<TransfersRuntime> = {}): TransfersRuntime {
+  const summary: ImportSummary = {
+    imported: 1,
+    duplicates: 0,
+    needsReview: 0,
+    assignments: 0,
+    invalid: 0,
+    skipped: 0,
+    classifications: ['ready'],
+    messages: [],
+  };
+  return {
+    native: false,
+    notice: null,
+    dismissNotice: vi.fn(),
+    busy: false,
+    isOperationActive: () => false,
+    status: '',
+    addFolder: vi.fn(async () => undefined),
+    removeLocation: vi.fn(),
+    setWatching: vi.fn(),
+    scanLocation: vi.fn(async () => null),
+    prepareTo: vi.fn(async () => null),
+    initializeLocation: vi.fn(async () => undefined),
+    importFiles: vi.fn(async () => summary),
+    importDataTransfer: vi.fn(async () => summary),
+    downloadAssignments: vi.fn(() => 0),
+    cloudAdviceFor: () => undefined,
+    ...overrides,
+  };
+}
+
+function browserFile(fileName: string, contents = '{}'): File {
+  const file = new File([contents], fileName, { type: 'application/json' });
+  // The jsdom File implementation used by this suite does not expose arrayBuffer in every
+  // supported runner, while the production picker deliberately reads bytes before ingesting.
+  Object.defineProperty(file, 'arrayBuffer', {
+    configurable: true,
+    value: vi.fn(async () => new TextEncoder().encode(contents).buffer),
+  });
+  return file;
 }
 
 function NavigationHarness({
@@ -118,7 +163,7 @@ describe('Results navigation target view synchronization', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Navigate to submission' }));
 
     expect(screen.getByRole('button', { name: 'Needs review 1' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('list', { name: 'Results needing review' })).toBeTruthy();
+    expect(screen.getByRole('table', { name: 'Results needing review' })).toBeTruthy();
     await settleNavigation();
     expect(document.activeElement).toHaveAttribute('data-director-navigation-id', 'submission-1');
   });
@@ -139,7 +184,7 @@ describe('Results navigation target view synchronization', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Navigate to submission' }));
 
       expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByRole('list', { name: 'Result history' })).toBeTruthy();
+      expect(screen.getByRole('table', { name: 'Result history' })).toBeTruthy();
       await settleNavigation();
       expect(document.activeElement).toHaveAttribute('data-director-navigation-id', 'submission-1');
     },
@@ -167,12 +212,12 @@ describe('Results navigation target view synchronization', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Navigate to review submission' }));
-    expect(screen.getByRole('list', { name: 'Results needing review' })).toBeTruthy();
+    expect(screen.getByRole('table', { name: 'Results needing review' })).toBeTruthy();
     await settleNavigation();
 
     fireEvent.click(screen.getByRole('button', { name: 'Navigate to historical submission' }));
     expect(screen.getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('list', { name: 'Result history' })).toBeTruthy();
+    expect(screen.getByRole('table', { name: 'Result history' })).toBeTruthy();
     expect(document.querySelector('[data-director-navigation-id="submission-2"]')).toBeTruthy();
   });
 
@@ -237,6 +282,94 @@ describe('Results navigation target view synchronization', () => {
     } finally {
       consoleError.mockRestore();
     }
+  });
+});
+
+describe('returned-file import on Results', () => {
+  function readySummary(): ImportSummary {
+    return {
+      imported: 1,
+      duplicates: 0,
+      needsReview: 0,
+      assignments: 0,
+      invalid: 0,
+      skipped: 0,
+      classifications: ['ready'],
+      messages: [],
+    };
+  }
+
+  test('the header picker sends returned files through the transfers runtime', async () => {
+    const importFiles = vi.fn<TransfersRuntime['importFiles']>(async () => readySummary());
+    const view = renderResults(
+      <ResultsView
+        state={stateForReview()}
+        controller={controllerWith()}
+        transfers={transfersWith({ importFiles })}
+        onAnnounce={vi.fn()}
+      />,
+    );
+    const input = view.container.querySelector('input[type="file"]');
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input!, {
+      target: { files: [browserFile('return.qbj')] },
+    });
+
+    await vi.waitFor(() => expect(importFiles).toHaveBeenCalledTimes(1));
+    expect(importFiles).toHaveBeenCalledWith([expect.any(File)], 'Chosen returned files');
+    await vi.waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 ready'));
+  });
+
+  test('the Results drop zone uses the same import runtime and reports its summary', async () => {
+    const importDataTransfer = vi.fn<TransfersRuntime['importDataTransfer']>(async () => readySummary());
+    const transfers = transfersWith({ importDataTransfer });
+    renderResults(
+      <ResultsView
+        state={stateForReview()}
+        controller={controllerWith()}
+        transfers={transfers}
+        onAnnounce={vi.fn()}
+      />,
+    );
+    const dropZone = screen.getByRole('region', { name: 'Import returned files' });
+    const file = browserFile('dropped.qbj');
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    await vi.waitFor(() => expect(importDataTransfer).toHaveBeenCalledTimes(1));
+    expect(importDataTransfer.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ files: [file] }));
+    await vi.waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('1 ready'));
+  });
+
+  test('invalid returned artifacts appear as Results diagnostics', () => {
+    const state = stateForReview();
+    const artifact: IncomingArtifact = {
+      id: 'artifact-invalid',
+      sourceKind: 'drop',
+      sourceLabel: 'Dropped files',
+      fileName: 'broken.qbj',
+      byteLength: 12,
+      digest: 'digest-invalid',
+      detectedAt: '2026-09-05T15:00:00.000Z',
+      classification: 'invalid',
+      warnings: [],
+      status: 'failed',
+      detail: 'The file is not valid JSON.',
+    };
+    state.transfers.artifacts.push(artifact);
+    const transfers = transfersWith();
+
+    renderResults(
+      <ResultsView state={state} controller={controllerWith()} transfers={transfers} onAnnounce={vi.fn()} />,
+    );
+
+    const table = screen.getByRole('table', { name: 'Import problems' });
+    expect(within(table).getByText('broken.qbj')).toBeTruthy();
+    fireEvent.click(within(table).getByRole('button', { name: 'broken.qbj import actions' }));
+    fireEvent.click(screen.getByRole('option', { name: 'View import details' }));
+    expect(screen.getByText('Import diagnostic')).toBeTruthy();
+    expect(screen.getAllByText(/not valid JSON/)).toHaveLength(2);
   });
 });
 
@@ -445,7 +578,7 @@ describe('per-game definition visibility and reissue (#672)', () => {
     renderResults(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
     showView(/^History/);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ninety Six result actions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ninety Six vs Greenwood result actions' }));
     fireEvent.click(screen.getByRole('option', { name: 'Correct accepted result…' }));
 
     // Untouched scores: nothing downstream depends on an identical rewrite.

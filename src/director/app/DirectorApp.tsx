@@ -26,13 +26,13 @@ import { PacketsView } from '../packets/PacketsView';
 import { ResultsView } from '../results/ResultsView';
 import { useTransfers } from '../transfers/useTransfers';
 import { TransfersView } from '../transfers/TransfersView';
-import { transferArtifactNeedsAttention } from '../transfers/attention';
 import { StandingsView } from '../standings/StandingsView';
 import { downloadArchive, PublishView } from '../publish/PublishView';
 import { LiveView } from '../live/LiveView';
 import { SettingsView } from '../settings/SettingsView';
 import { latestRound } from '../domain';
 import { currentOperationalRound } from '../transfers/assignment';
+import { deriveCurrentRoundDelivery } from '../transfers/deliveryStatus';
 import { isNativeDirector, type NativeServerStatus } from '../platform/native';
 import { useNativeServerStatus } from '../server/useNativeServerStatus';
 import {
@@ -274,8 +274,13 @@ function DirectorAppContent() {
   const resultReviewCount = state.submissions.filter(
     (submission) => submission.status === 'review' || submission.status === 'received',
   ).length;
-  const transferPendingCount = state.transfers.artifacts.filter((artifact) =>
-    transferArtifactNeedsAttention(artifact, state.submissions),
+  const deliveryAttentionCount = deriveCurrentRoundDelivery(state).rows.filter(
+    (row) =>
+      !row.roomId ||
+      row.needsFile ||
+      row.assignment.state === 'problem' ||
+      row.result.state === 'review' ||
+      row.result.state === 'conflict',
   ).length;
 
   const clearTarget = () => setNavigationTarget(null);
@@ -352,6 +357,8 @@ function DirectorAppContent() {
             controller={controller}
             onNavigate={navigate}
             onAnnounce={announce}
+            navigationTarget={navigationTarget}
+            onClearNavigationTarget={clearTarget}
           />
         );
       case 'results':
@@ -359,6 +366,7 @@ function DirectorAppContent() {
           <ResultsView
             state={state}
             controller={controller}
+            transfers={transfers}
             onNavigate={navigate}
             onAnnounce={announce}
             navigationTarget={navigationTarget}
@@ -427,8 +435,8 @@ function DirectorAppContent() {
           results: resultReviewCount
             ? { count: resultReviewCount, tone: 'warning', label: 'awaiting review' }
             : undefined,
-          transfers: transferPendingCount
-            ? { count: transferPendingCount, tone: 'info', label: 'staged transfers' }
+          transfers: deliveryAttentionCount
+            ? { count: deliveryAttentionCount, tone: 'warning', label: 'delivery attention' }
             : undefined,
         }}
         nowChips={nowChips(state, qbtcpOperationalHealth, nativeDirector, navigate)}
