@@ -4,6 +4,7 @@ mod commands;
 mod live;
 mod live_server;
 mod relay;
+mod relay_probe;
 mod server;
 mod sleep;
 mod store;
@@ -78,6 +79,7 @@ pub fn run() {
             commands::director_probe_relay_credential_store,
             commands::director_read_relay_credential,
             commands::director_forget_relay_credential,
+            relay_probe::director_probe_relay_scorer_origin,
             commands::director_live_status,
             commands::director_start_live_server,
             commands::director_stop_live_server,
