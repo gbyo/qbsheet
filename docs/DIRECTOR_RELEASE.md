@@ -45,8 +45,25 @@ optional: the checks in CI cannot see removable media, OS permissions, write cac
 
 4. **Watch the three bundle jobs.** They create a *draft* release and upload into it. The draft
    becomes visible only after all three succeed — so a Windows bundling failure cannot leave a
-   published release that directors on Windows can see and cannot download. If one platform fails,
-   the other two bundles are already in the draft: fix the cause, delete the tag, and push it again.
+   published release that directors on Windows can see and cannot download. Before publishing, the
+   `publish` job additionally asserts the draft carries exactly the documented platform set
+   (macOS `.dmg`, Windows `-setup.exe` + `.msi`, Linux `.AppImage` + `.deb` + `.rpm`, plus
+   `latest.json` when updates are signed): a green job that uploaded nothing fails the release
+   instead of publishing a promise the platform cannot download.
+
+   If one platform fails, the other two bundles are already in the draft. Two ways back:
+
+   - **Resume:** fix the cause, delete the tag (`git push origin :director-v0.2.0`), and push it
+     again. The workflow reuses the same draft, so the platforms that already uploaded keep their
+     bundles and only the fixed platform rebuilds.
+   - **Clean redo:** additionally delete the draft release itself (Releases page → delete the
+     draft for the tag). Do this when the fix changes artifact names or you no longer trust what
+     is in the draft: reusing a draft never removes stale assets, and a corrected rebuild must
+     not publish alongside files from the abandoned attempt.
+
+   Never publish the incomplete draft by hand to "get something out". An incomplete draft is not
+   a release; the updater's `releases/latest` endpoint ignores drafts, and hand-publishing one
+   would offer tournament machines a build that was never gated.
 
 ## Try the release build without releasing
 
@@ -58,6 +75,10 @@ failure is specific to the bundler and the runner — the AppImage tooling, the 
 cross-architecture build of `rusqlite`'s bundled SQLite — and ordinary CI never bundles, so CI
 cannot tell you about it. A dispatch run is the only check that exists for it, and it does not cost
 a tag you would then have to delete.
+
+The `verify-dispatch` job fails the run unless every platform produced an inspectable workflow
+artifact, so a dispatch run that silently uploads nothing — which is how the 0.1.0 macOS breakage
+escaped — reads as red, not green.
 
 ## What gets published
 
@@ -74,6 +95,13 @@ The Linux bundles link against the glibc of the runner they were built on, so th
 the workflow matrix decides the oldest distribution Director supports. It is pinned to
 `ubuntu-22.04` for that reason rather than tracking `ubuntu-latest`, and moving it forward raises
 the floor — worth a line in the release notes when it happens.
+
+Every path in every `bundle.icon` list (`tauri.conf.json` and the per-platform overlays) must be a
+raster image file that exists in the repository. The abandoned 0.1.0 macOS release died in Xcode's
+`actool` — one opaque line, after a full compile — because the macOS overlay listed
+`icons/icon.icon`, which is an Xcode Icon Composer *source directory*, not an image. The
+`bundleConfig.test.ts` check fails that in milliseconds instead. Keep Icon Composer sources in the
+tree as design inputs, but never in a `bundle.icon` list.
 
 ## Code signing is not configured
 

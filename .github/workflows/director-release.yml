@@ -267,13 +267,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The macOS failure behind the abandoned 0.1.0 draft was an Xcode asset-catalog step
+      # (`actool`), which Tauri reports as one opaque line. Versions of the Xcode toolchain decide
+      # whether that step can run at all, so record them before spending half an hour compiling.
+      - name: Record the packaging toolchain
+        if: runner.os == 'macOS'
+        run: |
+          xcodebuild -version
+          xcrun --find actool
+
       # tauri-action installs nothing itself, which is why the step above exists. What it does is
       # run `tauri build` through the app's own `tauri` script, upload every bundle it produced into
       # the draft, and — when updater artifacts were built — merge this platform's signature into
       # the release's shared `latest.json`. The frontend is built by `beforeBuildCommand` in
       # `tauri.conf.json`, as it is in a local build.
+      #
+      # Pinned to v1 on purpose, not the v0 major tag. The 0.1.0 release ran against a v0 that no
+      # longer accepted `uploadUpdaterJson`/`uploadWorkflowArtifacts`, so both were silently
+      # ignored with only a warning: dispatch runs uploaded no artifacts to inspect, and updater
+      # merging was off without saying so. A floating major tag must never again be allowed to
+      # change what a release contains.
       - name: Build and upload the Director bundles
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -292,6 +307,41 @@ jobs:
           releaseId: ${{ needs.draft.outputs.release-id }}
           uploadUpdaterJson: ${{ needs.guard.outputs.updater == 'true' }}
           uploadWorkflowArtifacts: ${{ github.ref_type != 'tag' }}
+
+  # -----------------------------------------------------------------------------------------------
+  # Dispatch runs upload no release, so without this job nobody looks at what they produced.
+  # The 0.1.0 macOS breakage would have been caught here: a dispatch run is the documented
+  # pre-tag check, and a check nobody asserts is not a check.
+  # -----------------------------------------------------------------------------------------------
+  verify-dispatch:
+    name: Verify dispatch bundles
+    needs: bundle
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    steps:
+      - name: Require one bundle artifact per platform
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          names=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/artifacts" --paginate \
+            --jq '.artifacts[] | .name')
+          echo "Workflow artifacts:"
+          echo "$names"
+          # tauri-action names them `{platform}-{arch}-{bundle}`, e.g. `macos-universal-dmg`.
+          for platform in macos windows linux; do
+            count=$(echo "$names" | grep -c -- "^${platform}-" || true)
+            if [ "$count" -lt 1 ]; then
+              echo "::error::no workflow artifact from the ${platform} bundle job to inspect"
+              exit 1
+            fi
+          done
+          echo "All three platforms produced inspectable bundles."
 
   # -----------------------------------------------------------------------------------------------
   # Make the draft visible, once every platform is in it.
@@ -322,8 +372,32 @@ jobs:
           set -euo pipefail
 
           echo "Assets in the draft:"
-          gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
-            --jq '.[] | "  \(.name)  \(.size) bytes"'
+          names=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | "  \(.name)  \(.size) bytes"')
+          echo "$names"
+
+          # The all-platform gate, made explicit. Job dependencies already keep a failed platform
+          # from reaching this step, but a green job that uploaded nothing — the 0.1.0 macOS run
+          # produced no `.dmg` at all — must fail here rather than publish a release the notes
+          # promise and the platform cannot download.
+          assets=$(echo "$names" | sed 's/^ *//; s/  .*//')
+          require_one() {
+            count=$(echo "$assets" | grep -c -- "$1" || true)
+            if [ "$count" -ne 1 ]; then
+              echo "::error::expected exactly one draft asset matching '$1', found ${count}"
+              exit 1
+            fi
+          }
+          require_one '\.dmg$'
+          require_one 'setup\.exe$'
+          require_one '\.msi$'
+          require_one '\.AppImage$'
+          require_one '\.deb$'
+          require_one '\.rpm$'
+          if [ "$UPDATER" = "true" ]; then
+            require_one '^latest\.json$'
+          fi
+          echo "Draft carries the full documented platform set."
 
           gh api --method PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" \
             -F draft=false \
