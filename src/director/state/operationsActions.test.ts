@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { deriveOperationalRoom, type DirectorState } from '../domain';
-import { operationsFixture, session } from '../domain/operations.test';
+import { operationsFixture, session } from '../domain/operations.fixtures';
 import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import {
   applyAssignmentChanges,
@@ -269,5 +269,96 @@ describe('reconcileSessionStaffIdentity', () => {
     state.qbtcpSessions = [session({ roomId: 'room-201', operatorName: 'Bob Smith' })];
     reconcileSessionStaffIdentity(state);
     expect(reconcileSessionStaffIdentity(state)).toBe(false);
+  });
+});
+
+describe('reconcileSessionStaffIdentity room-only scope (#790)', () => {
+  /** Current round (round-1, released) expects Bob in Room 201; next round expects Dan there. */
+  function twoRoundSameRoomState(): DirectorState {
+    const state = operationsFixture();
+    const future = state.scheduledGames.find((entry) => entry.id === 'game-2a')!;
+    future.roomId = 'room-201';
+    state.operationalAssignments.push({
+      id: 'assignment-2a',
+      roundId: 'round-2',
+      kind: 'room',
+      scheduledGameId: 'game-2a',
+      roomId: 'room-201',
+      moderatorId: 'staff-alice',
+      scorekeeperId: 'staff-dan',
+      equipmentIds: [],
+    });
+    // Future game first in persistence order: the old array-order fallback picked Dan.
+    state.scheduledGames.sort((left, right) => {
+      if (left.id === 'game-2a') return -1;
+      if (right.id === 'game-2a') return 1;
+      return 0;
+    });
+    return state;
+  }
+
+  test('a room-only session resolves the current round, not the future game first in array order', () => {
+    const state = twoRoundSameRoomState();
+    expect(state.scheduledGames[0]?.id).toBe('game-2a');
+    state.qbtcpSessions = [session({ roomId: 'room-201', operatorName: 'Bob Smith' })];
+    reconcileSessionStaffIdentity(state);
+    expect(state.qbtcpSessions[0]?.expectedStaffId).toBe('staff-bob');
+    expect(state.qbtcpSessions[0]?.staffId).toBe('staff-bob');
+    // No false mismatch: Bob is correctly assigned to the room for the round being operated.
+    expect(
+      deriveOperationalRoom(state, 'room-201')?.warnings.some(
+        (issue) => issue.id === 'scorer-mismatch-room-201',
+      ),
+    ).toBe(false);
+  });
+
+  test('changing scheduledGames array order does not change the answer', () => {
+    const forward = twoRoundSameRoomState();
+    forward.qbtcpSessions = [session({ roomId: 'room-201' })];
+    reconcileSessionStaffIdentity(forward);
+
+    const reversed = twoRoundSameRoomState();
+    reversed.scheduledGames.reverse();
+    reversed.qbtcpSessions = [session({ roomId: 'room-201' })];
+    reconcileSessionStaffIdentity(reversed);
+
+    expect(forward.qbtcpSessions[0]?.expectedStaffId).toBe('staff-bob');
+    expect(reversed.qbtcpSessions[0]?.expectedStaffId).toBe('staff-bob');
+  });
+
+  test('an explicit matchId remains authoritative over the operational round', () => {
+    const state = twoRoundSameRoomState();
+    state.qbtcpSessions = [session({ roomId: 'room-201', matchId: 'game-2a', operatorName: 'Dan Lee' })];
+    reconcileSessionStaffIdentity(state);
+    expect(state.qbtcpSessions[0]?.expectedStaffId).toBe('staff-dan');
+  });
+
+  test('no current-round game for the room leaves the expectation unset, not pointed at the future', () => {
+    const state = twoRoundSameRoomState();
+    // Room 203 has no game in the current round but the future round could host it; the
+    // reconciler must not borrow that future assignment.
+    const future = state.scheduledGames.find((entry) => entry.id === 'game-2b')!;
+    future.roomId = 'room-203';
+    state.operationalAssignments.push({
+      id: 'assignment-2b',
+      roundId: 'round-2',
+      kind: 'room',
+      scheduledGameId: 'game-2b',
+      roomId: 'room-203',
+      moderatorId: 'staff-alice',
+      scorekeeperId: 'staff-dan',
+      equipmentIds: [],
+    });
+    state.qbtcpSessions = [session({ roomId: 'room-203', operatorName: 'Dan Lee' })];
+    reconcileSessionStaffIdentity(state);
+    expect(state.qbtcpSessions[0]?.expectedStaffId).toBeUndefined();
+  });
+
+  test('an accepted current-round game leaves the expectation unset rather than falling through', () => {
+    const state = twoRoundSameRoomState();
+    state.scheduledGames.find((entry) => entry.id === 'game-1a')!.status = 'accepted';
+    state.qbtcpSessions = [session({ roomId: 'room-201', operatorName: 'Bob Smith' })];
+    reconcileSessionStaffIdentity(state);
+    expect(state.qbtcpSessions[0]?.expectedStaffId).toBeUndefined();
   });
 });

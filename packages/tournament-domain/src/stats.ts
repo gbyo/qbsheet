@@ -31,6 +31,10 @@ export interface TeamStanding {
   tossupsHeardKnown: boolean;
   bonuses: number;
   bonusPoints: number;
+  /** Sum of known per-game lightning points. Games with unknown lightning contribute nothing. */
+  lightningPoints: number;
+  /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
+  lightningKnown: boolean;
   gamesPlayed: number;
   headToHead: number;
 }
@@ -225,6 +229,8 @@ export function deriveTeamStandings(
       tossupsHeardKnown: true,
       bonuses: 0,
       bonusPoints: 0,
+      lightningPoints: 0,
+      lightningKnown: true,
       gamesPlayed: 0,
       headToHead: 0,
     });
@@ -259,6 +265,7 @@ export function deriveTeamStandings(
     leftStanding.negs += left.negs;
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
+    addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
@@ -272,6 +279,7 @@ export function deriveTeamStandings(
     if (rightOutcome === 'win') rightStanding.wins += 1;
     else if (rightOutcome === 'loss') rightStanding.losses += 1;
     else if (rightOutcome === 'tie') rightStanding.ties += 1;
+    addTeamLightning(rightStanding, right.lightningPoints);
   }
 
   for (const standing of byTeam.values()) {
@@ -516,6 +524,18 @@ export function derivePlayerStandings(
   return [...byPlayer.values()].sort(
     (a, b) => b.ppg - a.ppg || b.powers - a.powers || a.playerId.localeCompare(b.playerId),
   );
+}
+
+/**
+ * Lightning points are known only when the result supplies the breakdown.
+ * A missing value marks the aggregate unknown rather than contributing zero.
+ */
+function addTeamLightning(standing: TeamStanding, lightningPoints: number | null | undefined): void {
+  if (lightningPoints === null || lightningPoints === undefined) {
+    standing.lightningKnown = false;
+    return;
+  }
+  standing.lightningPoints += lightningPoints;
 }
 
 /**

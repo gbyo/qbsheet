@@ -39,7 +39,8 @@ export interface TeamStatsRow {
   powers: number;
   gets: number;
   negs: number;
-  tossupsHeard: number;
+  /** Null when any contributing scoresheet omitted tossups-heard; never a partial-sum zero. */
+  tossupsHeard: number | null;
   /** False when any contributing scoresheet omitted tossups-heard. */
   tossupsHeardKnown: boolean;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
@@ -48,6 +49,10 @@ export interface TeamStatsRow {
   bonusesHeard: number;
   /** Null when no bonuses were heard: PPB is undefined, not zero. */
   ppb: number | null;
+  /** Sum of known per-game lightning points; null when any game lacked the breakdown. */
+  lightningPoints: number | null;
+  /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
+  lightningKnown: boolean;
 }
 
 export interface PlayerStatsRow {
@@ -157,8 +162,8 @@ function resultTeam(result: GameTeamResult | undefined): GameTeamResult | undefi
   return result;
 }
 
-function valueOrZero(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) ? value : 0;
+function valueOrZero(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 /** Tri-state eligibility: only a real boolean is known, everything else is unknown (#749). */
@@ -239,7 +244,8 @@ function rankRows<T>(rows: T[], compare: (left: T, right: T) => number): T[] {
 
 function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
-  const tossups = mutable.tossupsHeardKnown ? mutable.tossupsHeard : 0;
+  const tossups =
+    mutable.tossupsHeardKnown && typeof mutable.tossupsHeard === 'number' ? mutable.tossupsHeard : 0;
   const bonuses = mutable.bonusesHeard;
   return {
     rank: 0,
@@ -247,8 +253,11 @@ function teamRow(mutable: MutableTeamStats): TeamStatsRow {
     winPercentage: games > 0 ? mutable.wins / games : 0,
     ppg: games > 0 ? mutable.pointsFor / games : 0,
     papg: games > 0 ? mutable.pointsAgainst / games : 0,
+    // Unknown TUH is null like the player rows, never the partial sum (#754).
+    tossupsHeard: mutable.tossupsHeardKnown ? mutable.tossupsHeard : null,
     pptuh: tossups > 0 ? mutable.pointsFor / tossups : null,
     ppb: bonuses > 0 ? mutable.bonusPoints / bonuses : null,
+    lightningPoints: mutable.lightningKnown ? mutable.lightningPoints : null,
   };
 }
 
@@ -302,6 +311,8 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       bonusPoints: 0,
       bonusesHeard: 0,
+      lightningPoints: 0,
+      lightningKnown: true,
     };
     teamStats.set(teamId, created);
     return created;
@@ -404,6 +415,8 @@ export function buildStatsSnapshot(
       else team.tossupsHeard = valueOrZero(team.tossupsHeard) + result.tossupsHeard;
       team.bonusPoints = valueOrZero(team.bonusPoints) + valueOrZero(result.bonusPoints);
       team.bonusesHeard = valueOrZero(team.bonusesHeard) + valueOrZero(result.bonusesHeard);
+      if (result.lightningPoints === undefined) team.lightningKnown = false;
+      else team.lightningPoints = valueOrZero(team.lightningPoints ?? undefined) + result.lightningPoints;
     };
     updateTeamStats(firstTeam, first);
     updateTeamStats(secondTeam, second);
