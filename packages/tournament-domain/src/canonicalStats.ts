@@ -29,6 +29,18 @@ export function invalidTeamGameScoreCountField(
 }
 
 /**
+ * Overtime points are unknown when the source supplied no overtime-buzz breakdown, but when
+ * supplied they must be a finite number (#746). Whole in practice; negativity is legal data
+ * (an overtime neg with no conversion), so only non-finite values are rejected.
+ */
+export function invalidTeamGameScoreOvertimePoints(score: TeamGameScore): 'overtimePoints' | null {
+  const value = score.overtimePoints;
+  return value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value))
+    ? null
+    : 'overtimePoints';
+}
+
+/**
  * Bounceback points are optional (unknown when the source supplied no breakdown), but when
  * supplied they must be a canonical count (#748).
  */

@@ -21,7 +21,12 @@
  * rows the screen is drawing; only the escaping is borrowed.
  */
 import { serializeCsv } from '@qbsheet/tournament-formats';
-import { derivePlayerStandings, deriveTeamStandings, type DirectorState } from '../domain';
+import {
+  derivePlayerStandings,
+  deriveTeamStandings,
+  playerHasAppearance,
+  type DirectorState,
+} from '../domain';
 
 export const teamStandingsCsvHeaders = [
   'rank',
@@ -110,9 +115,11 @@ export function teamStandingsCsv(state: DirectorState): string {
  *
  * `tossups_heard` is blank rather than a number when a contributing scoresheet did not report TUH.
  * A total that silently counted the games that did report it would read as a real figure.
+ * `games_played` is likewise blank when participation cannot be expressed fractionally (#746).
  */
 export function playerStatsCsv(state: DirectorState): string {
-  const players = derivePlayerStandings(state).filter((standing) => standing.gamesPlayed > 0);
+  // Anyone with any appearance qualifies; bare GP > 0 would drop lined players on unknown TUH (#746).
+  const players = derivePlayerStandings(state).filter(playerHasAppearance);
   return serializeCsv(
     playerStatsCsvHeaders,
     players.map((standing, index) => [
@@ -121,7 +128,8 @@ export function playerStatsCsv(state: DirectorState): string {
       state.players.find((player) => player.id === standing.playerId)?.name ?? 'Unknown',
       standing.teamId,
       teamName(state, standing.teamId),
-      standing.gamesPlayed,
+      // Unknown GP is blank like unknown TUH; fractional GP trims to two decimals (#746).
+      standing.gamesPlayedKnown === false ? '' : Number(standing.gamesPlayed.toFixed(2)),
       standing.tossupsHeardKnown === false ? '' : standing.tossupsHeard,
       standing.powers,
       standing.gets,

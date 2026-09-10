@@ -604,6 +604,28 @@ describe('derived statistics exports', () => {
     ).toContain('&lt;Unsafe&gt;');
   });
 
+  test('leaves GP and PPG blank in exports when the game supplies no TUH denominator', () => {
+    const withoutTuh = structuredClone(tournament);
+    for (const game of withoutTuh.games) delete game.result.tossupsRead;
+    const stats = buildStatsSnapshot(withoutTuh, { generatedAt: '2026-04-11T16:00:00.000Z' });
+    expect(stats.ok).toBe(true);
+    if (!stats.ok) return;
+    const sarah = stats.value.players.find((player) => player.playerName === "Sarah O'Brien");
+    expect(sarah).toEqual(expect.objectContaining({ gamesPlayedKnown: false, points: 115 }));
+    // CSV leaves unknown cells empty rather than printing a fabricated zero.
+    const parsed = parseCsvTable(exportPlayerStatsCsv(stats.value));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const header = parsed.value.headers ?? [];
+    const row = parsed.value.rows.find((cells) => cells.includes("Sarah O'Brien")) ?? [];
+    expect(row[header.indexOf('games_played')]).toBe('');
+    expect(row[header.indexOf('ppg')]).toBe('');
+    // The points column still carries what she scored.
+    expect(row[header.indexOf('points')]).toBe('115');
+    // HTML renders the unknown marker instead.
+    expect(exportStatsHtml(stats.value)).toContain('—');
+  });
+
   test('carries roster UG/D2 eligibility onto player rows, unknown stays null (#749)', () => {
     const input = structuredClone(tournament);
     const roster = input.players.find((player) => player.id === 'p-sarah');

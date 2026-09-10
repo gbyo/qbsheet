@@ -55,6 +55,7 @@ import {
   unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
+  invalidTeamGameScoreOvertimePoints,
   isCanonicalCount,
   applyTournamentStatusTransition,
   planTournamentStatusTransition,
@@ -5288,6 +5289,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
         targetGame.packetId = effectivePacketId(draft, targetScheduled);
         if (parsed?.scores.length === 2) targetGame.scores = structuredClone(parsed.scores);
         if (parsed) targetGame.playerStats = structuredClone(parsed.playerStats);
+        // Reassociation re-reads the canonical match TUH exactly like scores (#746).
+        if (parsed) {
+          targetGame.tossupsRead = parsed.tossupsRead;
+          targetGame.overtimeTossupsRead = parsed.overtimeTossupsRead;
+        }
         targetGame.status = 'submitted';
         targetSubmission.status = 'review';
         targetSubmission.warnings = [...warnings];
@@ -7922,6 +7928,9 @@ export function validateResultForScheduledGame(
     }
     const invalidCountField = invalidTeamGameScoreCountField(score);
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
+    if (invalidTeamGameScoreOvertimePoints(score)) {
+      return 'overtimePoints must be a finite number when supplied.';
+    }
     // YellowFruit parity (#747): lightning is optional (unknown when absent) but when
     // supplied it must be a canonical count.
     if (

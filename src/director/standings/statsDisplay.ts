@@ -111,6 +111,28 @@ export function formatTuh(standing: TossupsHeardKnown): string {
   return standing.tossupsHeardKnown === false ? UNKNOWN_STAT : String(standing.tossupsHeard);
 }
 
+/**
+ * Fractional games played renders trimmed (1, 0.5, never 1.00); unknown participation
+ * renders "—" rather than a partial sum (#746).
+ */
+export function formatGamesPlayed(
+  standing: Pick<PlayerStanding, 'gamesPlayed' | 'gamesPlayedKnown'>,
+): string | number {
+  if (standing.gamesPlayedKnown === false) return UNKNOWN_STAT;
+  return Number.isInteger(standing.gamesPlayed)
+    ? standing.gamesPlayed
+    : Number(standing.gamesPlayed.toFixed(2));
+}
+
+/**
+ * Points per game needs a known games denominator. A scorer with result lines
+ * but no game TUH renders "—" rather than 0.0 (#746).
+ */
+export function formatPlayerPpg(standing: Pick<PlayerStanding, 'gamesPlayedKnown' | 'ppg'>): string {
+  if (standing.gamesPlayedKnown === false) return UNKNOWN_STAT;
+  return standing.ppg.toFixed(1);
+}
+
 /** Points per tossup heard needs a known, nonzero denominator; otherwise "—". */
 export function formatPptuh(points: number, standing: TossupsHeardKnown): string {
   if (standing.tossupsHeardKnown === false || standing.tossupsHeard === 0) return UNKNOWN_STAT;
@@ -293,11 +315,11 @@ export function teamStatCell(columnId: string, standing: TeamStanding): string {
 export function playerStatCell(columnId: string, standing: PlayerStanding): string {
   switch (columnId) {
     case 'games':
-      return String(standing.gamesPlayed);
+      return String(formatGamesPlayed(standing));
     case 'points':
       return String(standing.points);
     case 'ppg':
-      return standing.ppg.toFixed(1);
+      return formatPlayerPpg(standing);
     case 'tuh':
       return formatTuh(standing);
     case 'pptuh':

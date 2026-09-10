@@ -265,7 +265,9 @@ jobs:
       - name: Start the relay in workerd
         working-directory: apps/qbtcp-relay-backend-cloudflare
         run: |
-          npx wrangler dev --port 8789 --ip 127.0.0.1 --var RELAY_SETUP_TOKEN:ci-setup-token > /tmp/relay.log 2>&1 &
+          npx wrangler dev --port 8789 --ip 127.0.0.1 \
+            --var RELAY_SETUP_TOKEN:ci-setup-token \
+            --var RELAY_ALLOWED_ORIGINS:https://qbsheet.com > /tmp/relay.log 2>&1 &
           WRANGLER_PID=$!
           for _ in $(seq 1 40); do
             if ! kill -0 "$WRANGLER_PID" 2>/dev/null; then
@@ -282,14 +284,46 @@ jobs:
             exit 1
           fi
           curl -sf http://127.0.0.1:8789/health || { cat /tmp/relay.log; exit 1; }
+      - name: Preflight the outer Worker the way a browser does
+        # The relay's HTTP surface is answered by two things: a router Worker and a Durable
+        # Object. A preflight that never leaves the Worker is exactly the failure this step
+        # exists for, and it is invisible to any check that talks to the object directly or
+        # sends only real requests. curl, deliberately: no test harness in the way.
+        run: |
+          set -euo pipefail
+          probe() {
+            curl -sS -o /dev/null -D - -X OPTIONS "$1" \
+              -H 'Origin: https://qbsheet.com' \
+              -H "Access-Control-Request-Method: $2" \
+              -H "Access-Control-Request-Headers: $3" \
+              | tr -d '\r'
+          }
+          TID=$(node -e 'const a="0123456789bcdfghjklmnpqrstvwxyz";let s="";for(let i=0;i<24;i+=1)s+=a[Math.floor(Math.random()*a.length)];console.log(s)')
+          curl -sf -X POST http://127.0.0.1:8789/qbtcp/v1/manage/claim \
+            -H 'content-type: application/json' \
+            -d "{\"setupToken\":\"ci-setup-token\",\"tournamentId\":\"$TID\"}" > /dev/null
+          HEADERS=$(probe "http://127.0.0.1:8789/qbtcp/v1/tournaments/$TID/sessions" POST 'x-yf-room-token,content-type,x-yf-device-id')
+          echo "$HEADERS"
+          echo "$HEADERS" | grep -qi '^access-control-allow-origin: https://qbsheet.com$' \
+            || { echo 'A credentialed preflight did not echo the approved origin.'; exit 1; }
+          echo "$HEADERS" | grep -i '^access-control-allow-origin:' | grep -q '\*' \
+            && { echo 'A credentialed preflight answered with a wildcard origin.'; exit 1; }
+          echo "$HEADERS" | grep -qi '^access-control-allow-headers:.*x-yf-room-token' \
+            || { echo 'A credentialed preflight did not allow the room token header.'; exit 1; }
+          echo "$HEADERS" | grep -qi '^access-control-allow-methods:.*POST' \
+            || { echo 'A credentialed preflight did not allow POST.'; exit 1; }
+          PUBLIC=$(probe "http://127.0.0.1:8789/qbtcp/v1/tournaments/$TID/discovery" GET 'content-type')
+          echo "$PUBLIC" | grep -qi '^access-control-allow-origin: \*$' \
+            || { echo 'Credential-free discovery should be readable by any origin.'; exit 1; }
       - name: Run the relay conformance suite
         # Claims its own tournament with the setup token and checks the full contract —
-        # discovery, stream, receipts, replay, ack, scope — over real HTTP and WebSockets.
+        # discovery, stream, receipts, replay, ack, scope, CORS — over real HTTP and WebSockets.
         run: |
           npm run build --workspace=@qbsheet/qbtcp-relay-conformance
           node packages/qbtcp-relay-conformance/dist/cli.js \
             --origin http://127.0.0.1:8789 \
-            --setup-token ci-setup-token
+            --setup-token ci-setup-token \
+            --browser-origin https://qbsheet.com
       - name: Relay log on failure
         if: failure()
         run: cat /tmp/relay.log

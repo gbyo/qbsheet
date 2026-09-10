@@ -93,6 +93,11 @@ export interface IScorerHostProps {
   /** Overrides the word in the header when the game's standing is not a network fact. See `Scorer`. */
   statusLabel?: string;
   degradedMessage?: string;
+  /**
+   * Which path serves the game, in troubleshooting words for the connection dialog.
+   * Passed straight through to `Scorer`. Absent for games with no tournament control.
+   */
+  scoringPath?: string;
   onSubmit: (qbj: object) => Promise<IScorerSubmitResult>;
   onDownload: (qbj: object) => void;
   /** Passed through for an exact, credential-free QBSheet recovery export. */
@@ -187,6 +192,7 @@ export default function ScorerHost(props: IScorerHostProps) {
     connection,
     statusLabel,
     degradedMessage,
+    scoringPath,
     onSubmit,
     onDownload,
     onDownloadQbsheetBackup,
@@ -403,6 +409,7 @@ export default function ScorerHost(props: IScorerHostProps) {
       connection={connection}
       statusLabel={statusLabel}
       degradedMessage={degradedMessage}
+      scoringPath={scoringPath}
       saved={events.saved}
       onSubmit={onSubmit}
       onDownload={onDownload}

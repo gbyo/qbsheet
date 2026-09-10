@@ -580,6 +580,17 @@ export interface TeamGameScore {
    */
   bouncebacks?: number | null;
   /**
+   * Tossup points converted in overtime, YellowFruit parity field (#746 follow-up).
+   *
+   * Valued from the result's own overtime-buzz detail (each entry carries its answer value),
+   * so the figure is exact in both directions — never estimated from counts times live rules.
+   * Null/undefined means the source supplied no overtime-buzz breakdown (MODAQ exports and
+   * manual results lose it; the scorer omits the breakdown when nobody converted in overtime),
+   * not zero: only the scoring definition's lack of an overtime period makes it a known zero,
+   * resolved at derivation time.
+   */
+  overtimePoints?: number | null;
+  /**
    * Known lightning-round points for this team game, YellowFruit-parity field (#747).
    *
    * Null/undefined means the source result did not supply a lightning breakdown: a legacy or
@@ -616,6 +627,22 @@ export interface GameRecord {
   forfeitedTeamId?: DirectorId;
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  /**
+   * Exact tossups read in the match, YellowFruit parity field (#746).
+   *
+   * Both teams hear the same tossups, so this is a game fact, not a sum over player lines:
+   * several players hear the same tossup and substitutions change summed exposure. Team TUH
+   * aggregates this value, never player exposure. Null/undefined means the source result did
+   * not supply an exact count (legacy/manual detail), not zero.
+   */
+  tossupsRead?: number | null;
+  /**
+   * Overtime tossups read within `tossupsRead`, YellowFruit parity field (#746).
+   *
+   * Null/undefined means unknown, not zero: only an explicit zero (which the scorer writes)
+   * or a game played under rules without overtime is a known zero.
+   */
+  overtimeTossupsRead?: number | null;
   source: 'qbtcp' | 'manual' | 'qbj' | 'paper';
   /**
    * Which accepted truth this record carries (#673). The first accepted result is

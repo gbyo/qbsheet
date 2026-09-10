@@ -23,6 +23,10 @@ function usage(message: string): never {
   console.error('Usage:');
   console.error('  qbtcp-relay-conformance --origin <url> --setup-token <token> [--tournament-id <id>]');
   console.error('  qbtcp-relay-conformance --origin <url> --tournament-id <id> --management-token <token>');
+  console.error('');
+  console.error('Optional:');
+  console.error('  --browser-origin <origin>   Check the CORS preflight contract for this approved origin.');
+  console.error('  --stream-timeout-ms <ms>    How long to wait for a stream frame.');
   process.exit(2);
 }
 
@@ -37,6 +41,7 @@ const setupToken = get('--setup-token');
 const tournamentId = get('--tournament-id');
 const managementToken = get('--management-token');
 const streamTimeoutMs = get('--stream-timeout-ms');
+const browserOrigin = get('--browser-origin');
 
 if (!origin) usage('Missing --origin.');
 if (setupToken && managementToken) usage('Pass --setup-token or --management-token, not both.');
@@ -51,6 +56,7 @@ try {
     ...(setupToken ? { setupToken } : {}),
     ...(managementToken ? { managementToken } : {}),
     ...(streamTimeoutMs ? { streamTimeoutMs: Number(streamTimeoutMs) } : {}),
+    ...(browserOrigin ? { browserOrigin } : {}),
   });
   console.log(formatReport(report));
   process.exit(report.conforming ? 0 : 1);

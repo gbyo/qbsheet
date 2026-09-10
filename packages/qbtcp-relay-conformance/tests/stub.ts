@@ -18,6 +18,16 @@ export interface StubOptions {
   acceptStaleMirror?: boolean;
   scopeConfusion?: boolean;
   notDuplicate?: boolean;
+  /**
+   * Answer every preflight with the public `GET, OPTIONS` / `content-type` policy.
+   *
+   * This is the bug the Cloudflare relay shipped with: correct for discovery, and quietly fatal
+   * for every credentialed route, because a browser refuses to send the real request while curl
+   * never notices.
+   */
+  publicPreflight?: boolean;
+  /** Answer credentialed preflights with `*`, which must never authorize a credential. */
+  wildcardPreflight?: boolean;
 }
 
 interface OpenSocket {
@@ -27,6 +37,9 @@ interface OpenSocket {
 }
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+/** The one browser origin this stub is configured to approve. */
+export const STUB_ALLOWED_ORIGIN = 'https://qbsheet.com';
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -105,10 +118,55 @@ export class StubRelay {
     return request.headers.authorization === `Bearer ${this.managementToken}`;
   }
 
+  /**
+   * The CORS policy for a path, derived from whether that path honours a credential.
+   *
+   * Only the root, health, and discovery are credential-free. Everything else reads a room token,
+   * a session token, or a management `Authorization`, and so must echo an approved origin.
+   */
+  private corsFor(path: string, origin: string): Record<string, string> {
+    const credentialFree = path === '/' || path === '/health' || path.endsWith('/discovery');
+    if (this.options.publicPreflight || credentialFree) {
+      return {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, OPTIONS',
+        'access-control-allow-headers': 'content-type',
+        'access-control-max-age': '86400',
+      };
+    }
+    const allowHeaders =
+      'authorization, content-type, x-yf-room-token, x-yf-session-token, x-yf-device-id, x-yf-operator-name';
+    if (this.options.wildcardPreflight) {
+      return {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+        'access-control-allow-headers': allowHeaders,
+        'access-control-max-age': '86400',
+      };
+    }
+    if (origin !== STUB_ALLOWED_ORIGIN) {
+      return { 'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS' };
+    }
+    return {
+      'access-control-allow-origin': origin,
+      vary: 'origin',
+      'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'access-control-allow-headers': allowHeaders,
+      'access-control-max-age': '86400',
+    };
+  }
+
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://stub');
     const path = url.pathname;
     const method = request.method ?? 'GET';
+
+    if (method === 'OPTIONS') {
+      response.writeHead(204, this.corsFor(path, request.headers.origin ?? ''));
+      response.end();
+      return;
+    }
+
     const body = await this.readBody(request);
 
     if (path === '/health' && method === 'GET') {

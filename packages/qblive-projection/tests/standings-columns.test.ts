@@ -59,6 +59,16 @@ function liveState(): DirectorState {
       createdAt: at,
       updatedAt: at,
     },
+    {
+      id: 'team-d',
+      organizationId: null,
+      displayName: 'Barnwell',
+      teamLetter: 'A',
+      seed: null,
+      status: 'confirmed',
+      createdAt: at,
+      updatedAt: at,
+    },
   ];
   state.rounds = [
     {
@@ -89,6 +99,17 @@ function liveState(): DirectorState {
       status: 'accepted',
       assignmentRevision: 1,
     },
+    {
+      id: 'scheduled-2',
+      roundId: 'round-1',
+      roomId: null,
+      packetId: null,
+      leftTeamId: 'team-b',
+      rightTeamId: 'team-d',
+      bye: false,
+      status: 'accepted',
+      assignmentRevision: 1,
+    },
   ];
   const teamScore = (teamId: string, score: number, extra: Record<string, number> = {}) => ({
     teamId,
@@ -109,6 +130,8 @@ function liveState(): DirectorState {
       roundId: 'round-1',
       packetId: null,
       status: 'accepted',
+      // Exact match denominator (#746): team TUH comes from this count, not player lines.
+      tossupsRead: 20,
       scores: [
         teamScore('team-a', 320, { powers: 4, gets: 8, negs: 1, bonuses: 12, bonusPoints: 130 }),
         teamScore('team-b', 110, { powers: 1, gets: 5, negs: 2, bonuses: 6, bonusPoints: 40 }),
@@ -135,6 +158,22 @@ function liveState(): DirectorState {
           tossupsHeard: null,
         },
       ],
+      source: 'manual',
+      detailedStats: 'complete',
+    },
+    {
+      // No match denominator: team-b's aggregate stays unknown even though game-1
+      // contributed an exact count (#746 honest-unknown TUH).
+      id: 'game-2',
+      scheduledGameId: 'scheduled-2',
+      roundId: 'round-1',
+      packetId: null,
+      status: 'accepted',
+      scores: [
+        teamScore('team-b', 100, { powers: 1, gets: 4, bonuses: 5, bonusPoints: 60 }),
+        teamScore('team-d', 50, { gets: 5, bonuses: 5, bonusPoints: 0 }),
+      ],
+      playerStats: [],
       source: 'manual',
       detailedStats: 'complete',
     },

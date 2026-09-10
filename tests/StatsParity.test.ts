@@ -139,6 +139,11 @@ describe('one tournament, every surface (#754)', () => {
   test('an unknown TUH is null/— on every surface, never a zero', () => {
     const state = playedTournament();
     for (const line of state.games[0]!.playerStats) line.tossupsHeard = null;
+    // Team TUH is canonical from the match tossups-read count (#746), not from
+    // summed player exposure, so the honest-unknown setup clears the exact
+    // match count itself.
+    state.games[0]!.tossupsRead = null;
+    state.games[0]!.overtimeTossupsRead = null;
 
     const standing = deriveTeamStandings(state).find((entry) => entry.teamId === 'team-a')!;
     expect(standing.tossupsHeardKnown).toBe(false);

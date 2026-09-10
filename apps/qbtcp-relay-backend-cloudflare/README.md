@@ -55,14 +55,22 @@ The full operator path — guided setup, claim security, pairing, validation, fa
 guidance, safe teardown, and diagnostics — is documented in
 [`docs/QBTCP-RELAY-DEPLOY.md`](../../docs/QBTCP-RELAY-DEPLOY.md).
 
-Optional: restrict which browser origins may call authenticated endpoints and open the stream:
+Which browser origins may call authenticated endpoints and open the stream:
 
 ```bash
-wrangler secret put RELAY_ALLOWED_ORIGINS  # e.g. https://scorer.example,https://director.example
+wrangler secret put RELAY_ALLOWED_ORIGINS  # e.g. https://qbsheet.com
 ```
 
 Requests without an `Origin` (native apps, Director sync jobs) are unaffected. There is no
-implicit wildcard.
+implicit wildcard — so this is optional only for a relay no browser will ever call. **A browser
+scorer needs its own origin listed here**, or every credentialed request it makes is refused 403
+`origin_not_allowed` at the preflight, before the real request is ever sent.
+
+Credential-free routes (the root, `/health`, and discovery) are readable by any origin and
+advertise only `GET, OPTIONS` with `content-type`. Every other route reads a room token, a session
+token, or a management `Authorization`, so it never answers `Access-Control-Allow-Origin: *`: it
+echoes an approved origin and nothing else. Preflights for those routes are answered by the same
+route table that serves the real request, so the two cannot disagree about what a browser may send.
 
 ## Endpoints
 

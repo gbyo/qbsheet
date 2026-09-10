@@ -61,6 +61,14 @@ export interface ConformanceOptions {
   webSocketImpl?: typeof WebSocket;
   /** How long to wait for a stream frame before calling it absent. */
   streamTimeoutMs?: number;
+  /**
+   * A browser origin the relay is configured to allow, e.g. `https://qbsheet.com`.
+   *
+   * Supply it to check the CORS preflight contract. Without it the preflight checks skip: whether
+   * an origin is approved is the operator's configuration, and a suite that guessed would report
+   * a correct relay as broken.
+   */
+  browserOrigin?: string;
 }
 
 export interface ConformanceReport {
@@ -92,6 +100,19 @@ export function randomTournamentId(): string {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   return [...bytes].map((byte) => TOURNAMENT_ALPHABET[byte % TOURNAMENT_ALPHABET.length]).join('');
+}
+
+/**
+ * Drop trailing `/` characters, without a regular expression.
+ *
+ * `replace(/\/+$/, '')` backtracks: on a value of many slashes the engine retries the anchored
+ * `+` from every start position, which is quadratic in the length of a caller-supplied origin. A
+ * character scan is linear with no worst case.
+ */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -240,7 +261,7 @@ export async function runRelayConformance(options: ConformanceOptions): Promise<
   const fetchImpl: FetchImpl = options.fetchImpl ?? fetch;
   const WebSocketClass: WebSocketImpl | undefined = options.webSocketImpl ?? globalThis.WebSocket;
   const timeoutMs = options.streamTimeoutMs ?? 5000;
-  const origin = options.origin.replace(/\/+$/, '');
+  const origin = trimTrailingSlashes(options.origin);
   const recorder = new Recorder();
 
   const tournamentId = options.tournamentId ?? randomTournamentId();
@@ -336,6 +357,35 @@ export async function runRelayConformance(options: ConformanceOptions): Promise<
     sessionToken = opened.body.token as string;
   }
 
+  /**
+   * Send a browser-shaped CORS preflight and return the raw response.
+   *
+   * Not routed through `http`: a preflight answers 204 with no body, and the whole point is the
+   * headers. A relay that answers a credentialed preflight with a public policy is broken in a way
+   * that is invisible to any check that only ever sends the real request from a non-browser — the
+   * server is happy, and only the browser refuses.
+   */
+  const preflight = async (
+    path: string,
+    method: string,
+    requestHeaders: string,
+    browserOrigin: string,
+  ): Promise<Response> =>
+    fetchImpl(path, {
+      method: 'OPTIONS',
+      headers: {
+        origin: browserOrigin,
+        'access-control-request-method': method,
+        'access-control-request-headers': requestHeaders,
+      },
+    });
+
+  const headerList = (response: Response, name: string): string[] =>
+    (response.headers.get(name) ?? '')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry !== '');
+
   // -- Basic: discovery and the pairing contract ---------------------------------------------------
   await recorder.run('root', 'basic', 'The root names the service without naming tournaments', async () => {
     const response = await http(`${origin}/health`);
@@ -420,6 +470,119 @@ export async function runRelayConformance(options: ConformanceOptions): Promise<
       return 'Unknown tournaments are indistinguishable from unclaimed ones.';
     },
   );
+
+  await recorder.run(
+    'cors-public',
+    'basic',
+    'Credential-free routes are readable by any origin',
+    async () => {
+      const response = await preflight(`${base}/discovery`, 'GET', 'content-type', 'https://example.invalid');
+      if (response.status >= 400) fail(`A discovery preflight answered ${response.status}.`);
+      const allowOrigin = response.headers.get('access-control-allow-origin');
+      if (allowOrigin !== '*') {
+        fail(`Discovery is credential-free and should allow any origin; got ${String(allowOrigin)}.`);
+      }
+      return 'Discovery preflights allow any origin, as a credential-free route may.';
+    },
+  );
+
+  const browserOrigin = options.browserOrigin ? trimTrailingSlashes(options.browserOrigin) : undefined;
+  if (!browserOrigin) {
+    recorder.skip(
+      'cors-preflight',
+      'basic',
+      'Credentialed routes preflight for a real browser scorer',
+      'No --browser-origin supplied; the relay operator decides which origins are approved.',
+    );
+  } else if (!sessionId) {
+    recorder.skip(
+      'cors-preflight',
+      'basic',
+      'Credentialed routes preflight for a real browser scorer',
+      'Setup did not produce a session; cannot preflight the session routes.',
+    );
+  } else {
+    const session = sessionId;
+    await recorder.run(
+      'cors-preflight',
+      'basic',
+      'Credentialed routes preflight for a real browser scorer',
+      async () => {
+        // Exactly what a page at `browserOrigin` sends before each request. A relay that answers
+        // these with the public `GET, OPTIONS` / `content-type` policy is unusable from a browser
+        // even though every one of these routes works perfectly from curl.
+        const cases: { path: string; method: string; headers: string }[] = [
+          { path: `${base}/pair`, method: 'POST', headers: 'content-type' },
+          {
+            path: `${base}/sessions`,
+            method: 'POST',
+            headers: 'x-yf-room-token,content-type,x-yf-device-id',
+          },
+          { path: `${base}/assignment`, method: 'GET', headers: 'x-yf-room-token' },
+          {
+            path: `${base}/sessions/${session}/progress`,
+            method: 'POST',
+            headers: 'x-yf-session-token,content-type',
+          },
+          {
+            path: `${base}/sessions/${session}/result`,
+            method: 'POST',
+            headers: 'x-yf-session-token,content-type',
+          },
+          { path: `${base}/sessions/${session}/recovery`, method: 'GET', headers: 'x-yf-session-token' },
+          {
+            path: `${base}/help`,
+            method: 'POST',
+            headers: 'x-yf-room-token,content-type,x-yf-device-id,x-yf-operator-name',
+          },
+          { path: `${manage}/mirror`, method: 'PUT', headers: 'authorization,content-type' },
+          { path: `${manage}/results`, method: 'GET', headers: 'authorization' },
+        ];
+        for (const item of cases) {
+          const response = await preflight(item.path, item.method, item.headers, browserOrigin);
+          const where = `${item.method} ${new URL(item.path).pathname}`;
+          if (response.status >= 400) fail(`The preflight for ${where} answered ${response.status}.`);
+          const allowOrigin = response.headers.get('access-control-allow-origin');
+          if (allowOrigin === '*') {
+            fail(`${where} honours a credential and must not allow *.`);
+          }
+          if (allowOrigin !== browserOrigin) {
+            fail(`${where} did not echo the approved origin; got ${String(allowOrigin)}.`);
+          }
+          const methods = headerList(response, 'access-control-allow-methods');
+          if (!methods.includes(item.method.toLowerCase())) {
+            fail(`${where} preflight does not allow ${item.method}: ${methods.join(', ') || 'nothing'}.`);
+          }
+          const allowed = headerList(response, 'access-control-allow-headers');
+          for (const requested of item.headers.split(',')) {
+            if (!allowed.includes(requested.trim())) {
+              fail(`${where} preflight does not allow ${requested.trim()}.`);
+            }
+          }
+        }
+        return `All ${cases.length} credentialed routes preflight for ${browserOrigin} with the headers a browser sends.`;
+      },
+    );
+
+    await recorder.run(
+      'cors-origin-refusal',
+      'basic',
+      'An unapproved browser origin is refused, not allowed',
+      async () => {
+        const response = await preflight(
+          `${base}/sessions`,
+          'POST',
+          'x-yf-room-token,content-type',
+          'https://not-approved.invalid',
+        );
+        const allowOrigin = response.headers.get('access-control-allow-origin');
+        if (allowOrigin === '*' || allowOrigin === 'https://not-approved.invalid') {
+          fail(`An unapproved origin was allowed on a credentialed route: ${String(allowOrigin)}.`);
+        }
+        return 'A credentialed preflight from an unapproved origin is not granted.';
+      },
+    );
+  }
 
   // -- Realtime: the stream ------------------------------------------------------------------------
   const canStream =

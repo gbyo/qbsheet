@@ -12,7 +12,7 @@
 import { afterEach, describe, expect, test } from 'vitest';
 
 import { runRelayConformance } from '../src/suite.js';
-import { StubRelay } from './stub.js';
+import { STUB_ALLOWED_ORIGIN, StubRelay } from './stub.js';
 
 let running: StubRelay | null = null;
 
@@ -35,10 +35,23 @@ function outcome(report: Awaited<ReturnType<typeof runRelayConformance>>, id: st
 describe('a conforming relay', () => {
   test('passes every check', async () => {
     const origin = await serve();
-    const report = await runRelayConformance({ origin, setupToken: 'good-token', streamTimeoutMs: 2000 });
+    const report = await runRelayConformance({
+      origin,
+      setupToken: 'good-token',
+      streamTimeoutMs: 2000,
+      browserOrigin: STUB_ALLOWED_ORIGIN,
+    });
     expect(report.failed).toBe(0);
     expect(report.conforming).toBe(true);
     expect(report.passed).toBeGreaterThan(10);
+  }, 30000);
+
+  test('skips the preflight checks rather than guessing an operator allowlist', async () => {
+    const origin = await serve();
+    const report = await runRelayConformance({ origin, setupToken: 'good-token', streamTimeoutMs: 2000 });
+    expect(outcome(report, 'cors-preflight')).toBe('skip');
+    expect(outcome(report, 'cors-public')).toBe('pass');
+    expect(report.conforming).toBe(true);
   }, 30000);
 });
 
@@ -66,6 +79,33 @@ describe('each check actually catches its violation', () => {
     const origin = await serve({ scopeConfusion: true });
     const report = await runRelayConformance({ origin, setupToken: 'good-token', streamTimeoutMs: 2000 });
     expect(outcome(report, 'scope')).toBe('fail');
+  }, 30000);
+
+  test('a public-only preflight fails the credentialed CORS check', async () => {
+    // The exact shape of the shipped bug: every OPTIONS answered with the public GET-only policy.
+    const origin = await serve({ publicPreflight: true });
+    const report = await runRelayConformance({
+      origin,
+      setupToken: 'good-token',
+      streamTimeoutMs: 2000,
+      browserOrigin: STUB_ALLOWED_ORIGIN,
+    });
+    expect(report.conforming).toBe(false);
+    expect(outcome(report, 'cors-preflight')).toBe('fail');
+    // Discovery is genuinely public, so that check still passes: the finding is specific.
+    expect(outcome(report, 'cors-public')).toBe('pass');
+  }, 30000);
+
+  test('a wildcard preflight on a credentialed route fails', async () => {
+    const origin = await serve({ wildcardPreflight: true });
+    const report = await runRelayConformance({
+      origin,
+      setupToken: 'good-token',
+      streamTimeoutMs: 2000,
+      browserOrigin: STUB_ALLOWED_ORIGIN,
+    });
+    expect(outcome(report, 'cors-preflight')).toBe('fail');
+    expect(outcome(report, 'cors-origin-refusal')).toBe('fail');
   }, 30000);
 
   test('a non-idempotent relay fails the cross-transport retry', async () => {

@@ -79,6 +79,16 @@ export interface IPairingLaunchIntent {
   code: string;
   /** Optional. The server remains authoritative for the room it actually pairs. */
   roomId?: string;
+  /**
+   * Optional LAN fallback for the same room authority. Normalized, no trailing slash.
+   *
+   * A tournament-owned Internet endpoint is the normal primary; when the tournament also
+   * supplies its Director address on the venue network, the scorer keeps it as a secondary
+   * path under the same pairing rather than a second pairing. Carries no authority — both
+   * paths still authenticate with the room and session capabilities — so it arrives at the
+   * unchanged launch version and older builds ignore it per the forward-compatibility rule.
+   */
+  lanServer?: string;
 }
 
 export type PairingLaunchResult =
@@ -192,6 +202,22 @@ export function parsePairingLaunch(fragment: string): PairingLaunchResult {
     }
   }
 
+  // An optional LAN fallback for the same authority. Same shape rules as the primary:
+  // explicit scheme, bounded, printable, normalizable — and refused outright when malformed,
+  // because a generator that sends a broken fallback must be fixed rather than half-trusted.
+  // Absent is normal: most links carry the primary alone.
+  const lan = parameters.get('lan');
+  let lanServer: string | undefined;
+  if (lan !== undefined) {
+    if (lan === '' || lan.length > maxServerLength || unprintable.test(lan)) {
+      return problem(invalidPairingLaunchMessage);
+    }
+    if (!/^https?:\/\//i.test(lan)) return problem(invalidPairingLaunchMessage);
+    const lanNormalized = normalizeBaseUrl(lan);
+    if (!lanNormalized.ok) return problem(invalidPairingLaunchMessage);
+    if (lanNormalized.value !== normalized.value) lanServer = lanNormalized.value;
+  }
+
   // Unknown parameters are ignored, which is QBTCP's forward-compatibility rule for every other
   // document it defines. Ignoring is only safe because the version above is exact: a future field
   // that carries authority arrives with a version this build refuses outright.
@@ -202,6 +228,7 @@ export function parsePairingLaunch(fragment: string): PairingLaunchResult {
       server: normalized.value,
       code,
       ...(room === undefined ? {} : { roomId: room.trim() }),
+      ...(lanServer === undefined ? {} : { lanServer }),
     },
   };
 }
