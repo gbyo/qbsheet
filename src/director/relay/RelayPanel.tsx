@@ -148,8 +148,12 @@ export function RelayPanel({
   onAnnounce: (announcement: AnnounceInput) => void;
 }) {
   const [panelStore] = useState<RelayPanelStore>(() => store ?? localStorageRelayPanelStore());
+  // Mount-time snapshot for the automatic health check below. Depending on the live
+  // `config` object re-runs the check after every refresh, because refresh persists a
+  // new `lastContactAt` (hence a new object identity) — an infinite render loop.
   // The pointer (address and id — never the credential) loads synchronously with the panel.
-  const [config, setConfig] = useState<RelayConfig | null>(() => panelStore.load());
+  const [initialConfig] = useState<RelayConfig | null>(() => panelStore.load());
+  const [config, setConfig] = useState<RelayConfig | null>(initialConfig);
   const [baseUrl, setBaseUrl] = useState('');
   const [tournamentId, setTournamentId] = useState('');
   const [setupToken, setSetupToken] = useState('');
@@ -202,17 +206,16 @@ export function RelayPanel({
   // (setup, Check now, rotate). The check runs inside a closure — never as a synchronous
   // setState in the effect body — following the native server status poll.
   useEffect(() => {
-    if (!config?.enabled) return;
-    const active = config;
+    if (!initialConfig?.enabled) return;
     let cancelled = false;
     const check = () => {
-      if (!cancelled) void refresh(active);
+      if (!cancelled) void refresh(initialConfig);
     };
     check();
     return () => {
       cancelled = true;
     };
-  }, [config, refresh]);
+  }, [initialConfig, refresh]);
 
   const submitSetup = async () => {
     if (busy) return;
@@ -278,6 +281,9 @@ export function RelayPanel({
       panelStore.save(next);
       onPointerChange?.(next);
       setLastSyncAt(next.lastContactAt);
+      // Explicit first check: the mount effect above does not re-run for a relay that was
+      // claimed after mount, so setup loads the status surface itself.
+      await refresh(next);
       onAnnounce('Internet QBTCP is ready. Pairing links now use the tournament relay.');
     } catch (reason) {
       setError(
