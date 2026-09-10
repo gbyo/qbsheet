@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { deriveOperationalRoom, type DirectorState } from '../domain';
-import { operationsFixture, session } from '../domain/operations.test';
+import { operationsFixture, session } from '../domain/operations.fixtures';
 import { scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import {
   applyAssignmentChanges,
