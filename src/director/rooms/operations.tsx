@@ -588,11 +588,13 @@ export function DutyPanel({
     >
       <FieldGrid>
         {kinds.map(({ kind, role, label }) => {
-          const options = eligible(role);
-          if (options.length === 0) return null;
           const assigned =
             state.operationalAssignments.find((entry) => entry.roundId === roundId && entry.kind === kind)
               ?.staffIds ?? [];
+          // Like the room selectors: unavailable staff are only shown when already
+          // assigned, never offered as fresh candidates the controller must refuse.
+          const options = eligible(role).filter((member) => member.available || assigned.includes(member.id));
+          if (options.length === 0) return null;
           return (
             <Field key={kind} label={label} optional>
               <MultiSelect
