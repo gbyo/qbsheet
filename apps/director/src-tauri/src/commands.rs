@@ -1506,6 +1506,136 @@ pub fn director_forget_live_credential(
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Internet QBTCP relay
+// ---------------------------------------------------------------------------
+
+/// The credential store for relay management credentials.
+///
+/// A separate state from [`LiveCredentials`] on purpose: the two credentials authorize
+/// different backends, and forgetting one must never revoke the other.
+pub struct RelayCredentials {
+    store: Box<dyn crate::relay::CredentialStore>,
+}
+
+impl Default for RelayCredentials {
+    fn default() -> Self {
+        Self {
+            store: Box::new(crate::relay::KeychainCredentialStore),
+        }
+    }
+}
+
+/// Prove secure persistence is available before Director consumes a one-time setup secret.
+#[tauri::command]
+pub fn director_probe_relay_credential_store(
+    credentials: State<'_, RelayCredentials>,
+) -> Result<(), CommandError> {
+    credentials.store.probe()?;
+    Ok(())
+}
+
+impl RelayCredentials {
+    #[cfg(test)]
+    pub fn with_store(store: Box<dyn crate::relay::CredentialStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl From<crate::relay::RelayError> for CommandError {
+    fn from(value: crate::relay::RelayError) -> Self {
+        CommandError {
+            code: "relay",
+            message: value.to_string(),
+        }
+    }
+}
+
+/// Store a relay management credential.
+///
+/// The tournament id is validated before it becomes a keychain account name: it arrives over
+/// the bridge, and an unvalidated value would name an arbitrary keychain entry.
+#[tauri::command]
+pub fn director_store_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+    token: String,
+) -> Result<(), CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    credentials.store.store(&tournament_id, &token)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn director_read_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+) -> Result<Option<String>, CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    Ok(credentials.store.read(&tournament_id)?)
+}
+
+#[tauri::command]
+pub fn director_forget_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+) -> Result<(), CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    credentials.store.forget(&tournament_id)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+    use crate::relay::MemoryCredentialStore;
+
+    #[test]
+    fn a_relay_credential_round_trips_through_the_store() {
+        let credentials = RelayCredentials::with_store(Box::new(MemoryCredentialStore::default()));
+        let tournament = "bcdfghjkmnpqrstvwxyz1234";
+        assert!(crate::relay::is_tournament_id(tournament));
+        assert_eq!(credentials.store.read(tournament).expect("read"), None);
+        credentials
+            .store
+            .store(tournament, "management-token")
+            .expect("store");
+        assert_eq!(
+            credentials.store.read(tournament).expect("read").as_deref(),
+            Some("management-token")
+        );
+        credentials.store.forget(tournament).expect("forget");
+        assert_eq!(credentials.store.read(tournament).expect("read"), None);
+    }
+
+    #[test]
+    fn relay_and_live_credentials_are_independent_states() {
+        let relay = RelayCredentials::with_store(Box::new(MemoryCredentialStore::default()));
+        let live = LiveCredentials::with_store(Box::new(crate::live::MemoryCredentialStore::default()));
+        relay
+            .store
+            .store("bcdfghjkmnpqrstvwxyz1234", "relay-token")
+            .expect("store relay");
+        // Forgetting the live credential cannot touch the relay one: different state, different
+        // keychain service.
+        live.store.forget("bcdfghjkmnpqrstvwxyz1234").expect("forget live");
+        assert_eq!(
+            relay
+                .store
+                .read("bcdfghjkmnpqrstvwxyz1234")
+                .expect("read")
+                .as_deref(),
+            Some("relay-token")
+        );
+    }
+}
+
 /// The publication as the normalized tables see it.
 ///
 /// Read from the rows rather than from the document, so that after a crash this answers "what had

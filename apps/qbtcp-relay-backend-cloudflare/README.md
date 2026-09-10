@@ -51,6 +51,10 @@ Director exchanges the setup token for a durable management credential, stores t
 the operating system keychain, and the setup token becomes worthless. It cannot be exchanged
 twice. No QBSheet-operated service or credential is involved at any point.
 
+The full operator path — guided setup, claim security, pairing, validation, failure-budget
+guidance, safe teardown, and diagnostics — is documented in
+[`docs/QBTCP-RELAY-DEPLOY.md`](../../docs/QBTCP-RELAY-DEPLOY.md).
+
 Optional: restrict which browser origins may call authenticated endpoints and open the stream:
 
 ```bash
@@ -95,6 +99,7 @@ GET    /qbtcp/v1/manage/tournaments/{id}/help[?state=open|all]
 POST   /qbtcp/v1/manage/tournaments/{id}/acks
 POST   /qbtcp/v1/manage/tournaments/{id}/help/{helpId}/resolve
 POST   /qbtcp/v1/manage/tournaments/{id}/revoke
+POST   /qbtcp/v1/manage/tournaments/{id}/rotate
 POST   /qbtcp/v1/manage/tournaments/{id}/close
 POST   /qbtcp/v1/manage/tournaments/{id}/chaos      drills only, never production
 DELETE /qbtcp/v1/manage/tournaments/{id}
@@ -119,6 +124,21 @@ never changes its idempotency.
 
 It never sees anything else: no standings, no schedule beyond mirrored assignments, no QBLive or
 collaboration data.
+
+## Rotating the management credential
+
+`POST manage/rotate` requires the current management credential and returns a fresh one. Only
+the new hash is stored: the old credential stops working immediately, mirrored state, retained
+finals, and the replay cursor are untouched, and the plaintext leaves the relay exactly once, in
+that response. Director stores the new credential in the OS keychain before discarding the old
+one.
+
+There is deliberately no "recover with the setup token" path — the setup token is consumed by
+the first claim, so a leaked token stays worthless. A Director that has lost its management
+credential recovers by exporting any unacknowledged finals (`GET manage/results?state=unacked`),
+destroying the tournament (`DELETE manage`), and claiming again with the setup token. Director's
+teardown planner refuses a silent destroy while unacknowledged finals remain; see
+`docs/QBTCP-RELAY-DEPLOY.md`.
 
 ## Failure behaviour and degradation
 
