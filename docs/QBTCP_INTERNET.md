@@ -39,7 +39,7 @@ credentials or an authorization domain with QBLive or Director Collaboration.
 
 ## Primary and fallback routing
 
-```
+```text
 preferred: tournament workers.dev relay
      ↓ unavailable / degraded
 fallback: Director LAN QBTCP
@@ -131,10 +131,15 @@ corruption. These are covered as failure modes, not aspirations
 
 ## Resource model and measured usage
 
-Free-tier limits as of September 2026: 100,000 Worker requests/day and 100,000 DO
-requests/day per account, 100,000 SQLite rows written/day, 5M rows read/day, 5 GB
-storage; incoming DO WebSocket messages meter 20:1; exhaustion surfaces as Error 1027. `GET manage/health` reports relay-measured counters, storage pressure, and
-headroom shares as labeled estimates — never a pretended exact quota.
+Free-tier limits as of September 2026: Workers Free allows 100,000 Worker
+requests/day per account; exceeding that daily Worker request limit surfaces as
+Error 1027. Durable Objects have separate Free quotas: 100,000 requests/day,
+100,000 SQLite rows written/day, 5M rows read/day, and 5 GB stored data. Incoming
+DO WebSocket messages meter 20:1 against the DO request quota; exceeding a Durable
+Object compute or storage quota causes operations of that quota type to fail rather
+than surfacing Error 1027. `GET manage/health` reports relay-measured counters,
+storage pressure, and headroom shares as labeled estimates — never a pretended exact
+quota.
 
 Measured (`test/load-profile.test.ts`, workerd, CI logs carry the current
 `[load-profile]` line): marginal progress cost **1.00 row per snapshot**; the
