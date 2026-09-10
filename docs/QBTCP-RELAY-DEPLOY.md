@@ -74,6 +74,41 @@ account is guidance about the actual failure budget, not a mathematical requirem
 paid plans change the arithmetic, and the relay's `manage/health` estimates show the burn
 rate either way.
 
+## Measured load profiles
+
+`test/load-profile.test.ts` in `apps/qbtcp-relay-backend-cloudflare` runs a scaled
+tournament day against the real relay in workerd and projects it to the supported
+**medium profile: 24 rooms, 10-hour day, 8 games per room, 40 progress snapshots per
+game**. Measured September 2026 (see CI logs for the current `[load-profile]` line):
+
+- marginal progress cost: **1.00 row per snapshot**, zero events (coalescing holds);
+- projected medium day: **~11,040 rows written (11% of Free)** and **~1,078 metered
+  requests (1.1% of Free)** — well under half of every Free limit, with room for
+  retries, setup, diagnostics, and accounting changes;
+- the binding dimension is SQLite rows written, driven by progress cadence × live
+  rooms; requests, reads, and storage are not close to their limits.
+
+Watch `rows_written_share` in `manage/health` through the morning; if it climbs past
+~0.3 by lunch, lengthen the scorer progress cadence in Director. Provider limits can
+change; the fallback semantics below do not depend on them.
+
+## Incident checklist
+
+- **Quota exhaustion (Cloudflare Error 1027 / `storage-unavailable`):** treat as
+  transport failure, not game corruption. Scorers keep scoring locally; completed
+  results stay retryable on the device. Restore headroom (new day window, separate
+  account, or paid capacity), then let Director reconnect and replay — unacknowledged
+  finals were never trimmed.
+- **Relay unreachable, LAN available:** scoring continues on the same game over the
+  local network; no re-pairing, no new session.
+- **Internet and LAN both down:** scoring continues from the persisted assignment;
+  finals remain exportable via Results.
+- **Director restarts mid-tournament:** on reconnect it replays everything after its
+  durable cursor and reports `Reconnected · received N results …`. Acks only clear
+  items Director durably ingested, so a crash between ingest and ack replays safely.
+- **Never destroy the relay tournament** to "clean up" before every final is ingested
+  or safely recorded elsewhere; teardown is fenced while unacknowledged finals remain.
+
 ## Disabling and teardown
 
 **Disable** stops Director publication and sync; local and LAN QBTCP keep serving the same
