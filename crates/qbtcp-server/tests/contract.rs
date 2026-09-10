@@ -1253,6 +1253,44 @@ async fn results_missing_definition_identity_are_flagged_never_silent() {
     assert!(warnings_in(&receipt).contains(&"missing-definition-identity".to_owned()));
 }
 
+/// The digest string TypeScript stamps into a real assignment must survive Rust
+/// parsing byte-identically (#674): the cross-language contract is exact string
+/// equality of `definition_digest`, enforced on both sides. The vector is real
+/// TypeScript `buildAssignment` output (see `generatedBy` in the fixture).
+#[tokio::test]
+async fn typescript_issued_definition_digest_survives_rust_parsing() {
+    let vector: Value =
+        serde_json::from_str(include_str!("fixtures/ts-assignment-with-digest.json"))
+            .expect("checked-in TypeScript vector parses");
+    let vector_match = vector["qbj"]["objects"]
+        .as_array()
+        .expect("vector has objects")
+        .iter()
+        .find(|object| object["type"] == "Match")
+        .expect("vector has a Match");
+    let embedded_digest = vector_match["_qbtcp"]["definition_digest"]
+        .as_str()
+        .expect("vector carries a definition digest");
+    assert_eq!(embedded_digest, vector["snapshotDigest"].as_str().unwrap());
+    assert_eq!(vector_match["_qbtcp"]["definition_revision"], 1);
+
+    let (server, _) = fixture_with_assignment(vector["qbj"].clone());
+    let (_, room_token) = pair(&server, "ts-vector-source").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-ts-vector").await;
+
+    let (status, _, recovery) = request(
+        &server,
+        Method::GET,
+        &format!("/qbtcp/v1/sessions/{session_id}/recovery"),
+        &[(SESSION_TOKEN_HEADER, &token)],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(recovery["definition_revision"], 1);
+    assert_eq!(recovery["definition_digest"], embedded_digest);
+}
+
 #[tokio::test]
 async fn legacy_assignments_without_definition_identity_keep_working() {
     // Assignments cut before definition identity existed carry no identity, and sessions

@@ -1,0 +1,222 @@
+{
+  "generatedBy": "src/director/transfers/tsFixtureGen.test.ts (deleted after generation) — regenerate with the same pin+build if the transfer fixtures change",
+  "snapshotRevision": 1,
+  "snapshotDigest": "061860dea074bc34",
+  "qbj": {
+    "version": "2.1.1",
+    "objects": [
+      {
+        "type": "Tournament",
+        "id": "tournament-fixture",
+        "name": "Saturday Invitational",
+        "scoring_rules": {
+          "$ref": "scoring-rules-tournament-fixture"
+        },
+        "registrations": [
+          {
+            "$ref": "registration-team-1"
+          },
+          {
+            "$ref": "registration-team-2"
+          }
+        ],
+        "phases": [
+          {
+            "$ref": "phase-1"
+          }
+        ]
+      },
+      {
+        "type": "ScoringRules",
+        "id": "scoring-rules-tournament-fixture",
+        "name": "Director scoring rules",
+        "teams_per_match": 2,
+        "maximum_players_per_team": 4,
+        "regulation_tossup_count": 20,
+        "maximum_regulation_tossup_count": 20,
+        "minimum_overtime_question_count": 1,
+        "overtime_includes_bonuses": true,
+        "total_divisor": 5,
+        "answer_types": [
+          {
+            "type": "AnswerType",
+            "id": "answer-power",
+            "value": 15,
+            "label": "Power",
+            "short_label": "P",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-correct",
+            "value": 10,
+            "label": "Correct",
+            "short_label": "C",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-neg",
+            "value": -5,
+            "label": "Neg",
+            "short_label": "N",
+            "awards_bonus": false
+          }
+        ],
+        "maximum_bonus_score": 30,
+        "bonus_divisor": 10,
+        "minimum_parts_per_bonus": 3,
+        "maximum_parts_per_bonus": 3,
+        "points_per_bonus_part": 10,
+        "bonuses_bounce_back": false
+      },
+      {
+        "type": "Registration",
+        "id": "registration-team-1",
+        "name": "Ninety Six A",
+        "teams": [
+          {
+            "$ref": "team-1"
+          }
+        ]
+      },
+      {
+        "type": "Registration",
+        "id": "registration-team-2",
+        "name": "Greenwood A",
+        "teams": [
+          {
+            "$ref": "team-2"
+          }
+        ]
+      },
+      {
+        "type": "Team",
+        "id": "team-1",
+        "name": "Ninety Six A",
+        "registration": {
+          "$ref": "registration-team-1"
+        },
+        "players": [
+          {
+            "type": "Player",
+            "id": "team-1-player-1",
+            "name": "Ninety Six A player 1",
+            "captain": true
+          },
+          {
+            "type": "Player",
+            "id": "team-1-player-2",
+            "name": "Ninety Six A player 2",
+            "captain": false
+          },
+          {
+            "type": "Player",
+            "id": "team-1-player-3",
+            "name": "Ninety Six A player 3",
+            "captain": false
+          },
+          {
+            "type": "Player",
+            "id": "team-1-player-4",
+            "name": "Ninety Six A player 4",
+            "captain": false
+          }
+        ]
+      },
+      {
+        "type": "Team",
+        "id": "team-2",
+        "name": "Greenwood A",
+        "registration": {
+          "$ref": "registration-team-2"
+        },
+        "players": [
+          {
+            "type": "Player",
+            "id": "team-2-player-1",
+            "name": "Greenwood A player 1",
+            "captain": true
+          },
+          {
+            "type": "Player",
+            "id": "team-2-player-2",
+            "name": "Greenwood A player 2",
+            "captain": false
+          },
+          {
+            "type": "Player",
+            "id": "team-2-player-3",
+            "name": "Greenwood A player 3",
+            "captain": false
+          },
+          {
+            "type": "Player",
+            "id": "team-2-player-4",
+            "name": "Greenwood A player 4",
+            "captain": false
+          }
+        ]
+      },
+      {
+        "type": "Phase",
+        "id": "phase-1",
+        "name": "Preliminary phase",
+        "rounds": [
+          {
+            "$ref": "round-5"
+          }
+        ]
+      },
+      {
+        "type": "Round",
+        "id": "round-5",
+        "name": "Round 5",
+        "number": 5,
+        "matches": [
+          {
+            "$ref": "game-5-1"
+          }
+        ],
+        "packet": {
+          "type": "Packet",
+          "id": "packet-5",
+          "name": "Packet 5"
+        }
+      },
+      {
+        "type": "Match",
+        "id": "game-5-1",
+        "location": "Room 101",
+        "match_teams": [
+          {
+            "team": {
+              "$ref": "team-1"
+            }
+          },
+          {
+            "team": {
+              "$ref": "team-2"
+            }
+          }
+        ],
+        "_qbtcp": {
+          "version": 1,
+          "round_revision": 1,
+          "assignment_revision": 1,
+          "definition_revision": 1,
+          "definition_digest": "061860dea074bc34",
+          "room_id": "room-101",
+          "scorekeeper": {
+            "timed": false
+          }
+        }
+      },
+      {
+        "type": "Packet",
+        "id": "packet-5",
+        "name": "Packet 5"
+      }
+    ]
+  }
+}

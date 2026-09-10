@@ -28,6 +28,11 @@ import {
   resolveHistoricalDefinition,
   scoringDefaultsImpact,
   advancementBasisToken,
+  auditCheckpointRestored,
+  invalidateDependentAdvancementBases,
+  reconcileRestoredCheckpoint,
+  resultRevisionOf,
+  resultRevisionsForPhase,
   roundCloseBlockers,
   roomAssignmentConflicts,
   planRoundOperations,
@@ -2475,6 +2480,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: teamId,
           details: { reason },
         });
+        // Eligibility is part of every advancement basis (#673).
+        invalidateDependentAdvancementBases(snapshot, draft, 'team-dropped', { teamId });
       });
     },
     [commit],
@@ -2535,6 +2542,9 @@ export function useDirectorController(repository = createDirectorRepository()): 
           summary: `${team.displayName} restored to the active field.`,
           entityId: teamId,
         });
+        // A restored team rejoins the competitive field (#673): dependent bases
+        // must be recommitted, never left reading current under a new field.
+        invalidateDependentAdvancementBases(snapshot, draft, 'team-restored', { teamId });
       });
     },
     [commit],
@@ -4027,6 +4037,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
             // token afterwards, so any later change to the qualifying games, teams,
             // pools, rule, or tiebreakers reads as stale instead of silently current.
             basisToken: preview.basisToken,
+            // The accepted-result revisions the token was verified against, so a
+            // later correction is provably newer than this basis even when the
+            // token alone cannot tell which revision it saw.
+            resultRevisions: resultRevisionsForPhase(snapshot, source),
             qualifierTeamIds: preview.qualifiers.map((team) => team.id),
             assignments: input.assignments,
             overridden,
@@ -4397,6 +4411,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           type: 'tournament-updated',
           summary: 'Tiebreaker order updated. Standings only: issued scorer definitions are unchanged.',
           entityId: draft.tournament.id,
+        });
+        // Tiebreakers are part of every advancement basis (#673): a reorder after
+        // a commit retires the dependent basis instead of silently moving cutoffs.
+        invalidateDependentAdvancementBases(snapshot, draft, 'tiebreaker-change', {
+          tiebreakers: [...tiebreakers],
         });
       });
     },
@@ -5399,6 +5418,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
           note,
           operatorDisplayName(loadOperatorProfile()),
           'accepted-result-correction',
+          snapshot,
         );
       });
     },
@@ -5500,6 +5520,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
             scheduledGameId: targetScheduled.id,
             roundId: targetScheduled.roundId,
             packetId: effectivePacketId(draft, targetScheduled),
+            // The replacement is the next accepted truth for this scheduled game (#673).
+            resultRevision: resultRevisionOf(previous) + 1,
             status: replacement.kind === 'forfeit' ? 'forfeit' : 'accepted',
             ...(replacement.kind === 'forfeit' ? { forfeitedTeamId: replacement.forfeitedTeamId } : {}),
             scores,
@@ -5549,9 +5571,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
             correctionKind: replacement.kind,
             reason: normalizedReason,
             supersededGameId: previous.id,
+            supersededResultRevision: resultRevisionOf(previous),
             replacementSubmissionId,
             reconciledDependentGameIds: correctionPlan.updates.map((update) => update.scheduledGameId),
           },
+        });
+        invalidateDependentAdvancementBases(snapshot, draft, 'administrative-correction', {
+          scheduledGameId,
+          correctionKind: replacement.kind,
         });
       });
     },
@@ -5688,6 +5715,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
             `Protest ${protestId}: ${ruling.trim()}`,
             operatorDisplayName(loadOperatorProfile()),
             'protest-score-correction',
+            snapshot,
           );
           if (!correctionSubmissionId) return;
         }
@@ -5972,6 +6000,10 @@ export function useDirectorController(repository = createDirectorRepository()): 
           await clearLocalLive(false).catch(() => undefined);
           await stopLocalLiveServer().catch(() => undefined);
         }
+        // A restore can invalidate sessions, results, and assignments issued after
+        // the checkpoint (#673). Rotate that authority and audit the impact so no
+        // post-restore stale result or session can look current.
+        auditCheckpointRestored(restored, checkpointId, reconcileRestoredCheckpoint(current, restored));
         stateRevisionRef.current += 1;
         durableRevisionRef.current = stateRevisionRef.current;
         setPersistence({
@@ -7607,7 +7639,7 @@ function validateTimelineEventInput(state: DirectorState, input: NewTimelineEven
   return null;
 }
 
-function validateResultForScheduledGame(
+export function validateResultForScheduledGame(
   state: DirectorState,
   scheduled: ScheduledGame | undefined,
   scores: TeamGameScore[],
@@ -7922,6 +7954,7 @@ function applyAcceptedResultCorrection(
   note: string | undefined,
   actor: string,
   reason: string,
+  before?: DirectorState,
 ): DirectorId | undefined {
   const game = state.games.find((entry) => entry.id === gameId);
   if (!game || game.status !== 'accepted') return undefined;
@@ -7945,6 +7978,8 @@ function applyAcceptedResultCorrection(
   game.scores = structuredClone(scores);
   game.status = 'accepted';
   game.acceptedAt = now;
+  // A new accepted truth supersedes the retained prior revision (#673).
+  game.resultRevision = resultRevisionOf(previous) + 1;
   game.note = note ?? game.note;
   game.packetId = effectivePacketId(state, scheduled);
   game.detailedStats ??= game.playerStats.length > 0 ? 'incomplete' : 'unknown';
@@ -7988,9 +8023,17 @@ function applyAcceptedResultCorrection(
       replacementSubmissionId: replacementId,
       previousScores: previous.scores,
       correctedScores: scores,
+      supersededResultRevision: resultRevisionOf(previous),
+      resultRevision: game.resultRevision,
       reconciledDependentGameIds: bracketPlan.updates.map((update) => update.scheduledGameId),
     },
   });
+  if (before) {
+    invalidateDependentAdvancementBases(before, state, 'result-correction', {
+      gameId,
+      scheduledGameId: scheduled.id,
+    });
+  }
   return replacementId;
 }
 

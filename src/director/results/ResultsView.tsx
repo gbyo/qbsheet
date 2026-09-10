@@ -3,12 +3,14 @@ import {
   definitionMatchesDefaults,
   planResultCorrectionImpact,
   resultDecisionIssue,
+  resultRevisionOf,
   type DirectorState,
   type ProtestScoreAdjustment,
   type ResultCorrectionImpact,
   type TeamGameScore,
 } from '../domain';
 import type { AdministrativeResultReplacement, DirectorController } from '../state/useDirectorController';
+import { advancementCorrectionBlocker, classifyResultCorrectionTier } from '../state/tournamentSafety';
 import {
   ActionMenu,
   Button,
@@ -450,11 +452,28 @@ function SubmissionItem({
  * Advisory: the correction path re-verifies guards at commit, so a race with an
  * arriving result still refuses safely. A blocking issue disables Save outright.
  */
-function CorrectionImpactNote({ impact }: { impact: ResultCorrectionImpact }) {
+function CorrectionImpactNote({
+  impact,
+  tier,
+  revision,
+  tierBlocker,
+}: {
+  impact: ResultCorrectionImpact;
+  tier: 1 | 2 | 3 | 4;
+  revision: number;
+  tierBlocker: string | null;
+}) {
   if (impact.issue) {
     return (
       <Callout tone="warning" title="This correction cannot be saved as entered">
         {impact.issue}
+      </Callout>
+    );
+  }
+  if (tierBlocker) {
+    return (
+      <Callout tone="warning" title="This correction needs tournament recovery first">
+        {tierBlocker}
       </Callout>
     );
   }
@@ -477,6 +496,12 @@ function CorrectionImpactNote({ impact }: { impact: ResultCorrectionImpact }) {
         {impact.bracketUpdates.map((update) => (
           <li key={update.scheduledGameId}>Bracket game {update.scheduledGameId} would be re-seeded</li>
         ))}
+        {tier === 2 && (
+          <li>
+            The saved result becomes revision {revision + 1}; committed advancement reads stale until it is
+            recommitted.
+          </li>
+        )}
       </ul>
     </Callout>
   );
@@ -540,6 +565,13 @@ function SubmissionActionDialog({
       ),
     );
   }, [mode, scheduled, state, game, left, right]);
+  // The downstream lifecycle tier is state, not input: Tier 3/4 corrections are
+  // refused at commit, so the dialog says so and disables Save up front (#673).
+  const correctionTier = useMemo(() => classifyResultCorrectionTier(state, game.id), [state, game.id]);
+  const correctionTierBlocker =
+    mode === 'edit' && scheduled && correctionTier.tier >= 3
+      ? advancementCorrectionBlocker(state, game.id)
+      : null;
 
   if (mode === 'reject') {
     return (
@@ -742,9 +774,16 @@ function SubmissionActionDialog({
           if (saved) onClose();
         }}
         submitLabel="Save correction"
-        submitDisabled={Boolean(correctionImpact?.issue)}
+        submitDisabled={Boolean(correctionImpact?.issue) || Boolean(correctionTierBlocker)}
       >
-        {correctionImpact && !correctionImpact.empty && <CorrectionImpactNote impact={correctionImpact} />}
+        {correctionImpact && !correctionImpact.empty && (
+          <CorrectionImpactNote
+            impact={correctionImpact}
+            tier={correctionTier.tier}
+            revision={resultRevisionOf(game)}
+            tierBlocker={correctionTierBlocker}
+          />
+        )}
         <FieldGrid>
           <Field label={teamLabel(state, scheduled.leftTeamId)}>
             <NumberInput step={1} value={left} onChange={(event) => setLeft(event.target.value)} />
