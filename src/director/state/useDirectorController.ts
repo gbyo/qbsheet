@@ -67,6 +67,7 @@ import {
   type OperationalAssignmentKind,
   type PlanRoundOptions,
   type FormatKind,
+  type GameDeliveryIntent,
   type TournamentPlanRecommendation,
   type DetailedStatsStatus,
   type GameRecord,
@@ -169,6 +170,7 @@ import {
   type RecordPreparedInput,
 } from '../transfers/state';
 import type { TransferVolume } from '../transfers/ports';
+import { describeDeliveryIntent, matchupForGame, sanitizeDeliveryIntent } from '../transfers/deliveryStatus';
 import {
   applyQbtcpHealthUpdate,
   type QbtcpHealthCursor,
@@ -649,7 +651,19 @@ export interface DirectorController {
     reason?: string,
   ): boolean | Promise<boolean>;
   addManualResult(input: ManualResultInput): boolean | Promise<boolean>;
+  /**
+   * Round delivery default (#702). Sets the fallback intent for games without
+   * explicit per-game intent or stronger per-game evidence — never
+   * authoritative per-game truth. Only before release/close.
+   */
   setRoundDeliveryMode(roundId: DirectorId, mode: RoundDeliveryMode): boolean;
+  /**
+   * Explicit per-game delivery intent (#702). Persists routing for exactly
+   * one scheduled game — siblings, other rounds, and transfer history are
+   * untouched. Pass undefined to clear back to derived intent. Allowed
+   * mid-round: this is the emergency-fallback path.
+   */
+  setGameDeliveryIntent(scheduledGameId: DirectorId, intent?: GameDeliveryIntent): boolean;
   associateSubmission(submissionId: DirectorId, scheduledGameId: DirectorId): boolean;
   acceptSubmission(submissionId: DirectorId, actor?: string): boolean;
   rejectSubmission(submissionId: DirectorId, reason?: string): boolean;
@@ -6302,7 +6316,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const snapshot = stateRef.current;
       const round = snapshot.rounds.find((entry) => entry.id === roundId);
       if (!round || round.status === 'released' || round.status === 'closed') {
-        setError('Delivery mode can only be changed before a round is released.');
+        setError('The round delivery default can only be changed before a round is released.');
         return false;
       }
       if (round.deliveryMode === mode) return true;
@@ -6316,9 +6330,48 @@ export function useDirectorController(repository = createDirectorRepository()): 
           at: isoNow(),
           actor: operatorDisplayName(loadOperatorProfile()),
           type: 'schedule-repaired',
-          summary: `Set ${target.name} delivery mode to ${mode}.`,
+          summary: `Set ${target.name} default delivery to ${mode}.`,
           entityId: roundId,
           details: { deliveryMode: mode },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const setGameDeliveryIntent = useCallback(
+    (scheduledGameId: DirectorId, intent?: GameDeliveryIntent): boolean => {
+      const clean = intent === undefined ? undefined : sanitizeDeliveryIntent(intent);
+      if (intent !== undefined && clean === undefined) {
+        setError('That delivery route is not valid; the game keeps its current route.');
+        return false;
+      }
+      const snapshot = stateRef.current;
+      const game = snapshot.scheduledGames.find((entry) => entry.id === scheduledGameId);
+      if (!game || game.bye || game.status === 'cancelled') {
+        setError('Delivery intent can only be set on a live scheduled game.');
+        return false;
+      }
+      return commit((draft) => {
+        const target = draft.scheduledGames.find((entry) => entry.id === scheduledGameId);
+        if (!target || target.bye || target.status === 'cancelled') return;
+        if (clean === undefined) {
+          delete target.deliveryIntent;
+        } else {
+          target.deliveryIntent = clean;
+        }
+        // Routing only: the assignment content is unchanged, so prepared
+        // files stay current and history is never rewritten.
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: operatorDisplayName(loadOperatorProfile()),
+          type: 'delivery-intent-changed',
+          summary:
+            clean === undefined
+              ? `Cleared the explicit delivery route for ${matchupForGame(snapshot, target)}.`
+              : `Set the delivery route for ${matchupForGame(snapshot, target)} to ${describeDeliveryIntent(clean)}.`,
+          entityId: scheduledGameId,
         });
       });
     },
@@ -7580,6 +7633,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     setRoundScheduledStart,
     setRoundPacket,
     setRoundDeliveryMode,
+    setGameDeliveryIntent,
     assignRoundRooms,
     moveReleasedGame,
     addImportedTeams,

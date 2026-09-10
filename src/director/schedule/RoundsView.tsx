@@ -730,7 +730,9 @@ function RoundRoomsDialog({
       onSubmit={() => {
         const mode = Object.values(draft).some((roomId) => roomId !== null) ? 'qbtcp' : 'manual';
         if (!controller.setRoundDeliveryMode(round.id, mode)) {
-          onAnnounce(errorNotice('The round delivery mode could not be changed; review the Director error.'));
+          onAnnounce(
+            errorNotice('The round delivery default could not be changed; review the Director error.'),
+          );
           return;
         }
         void controller.assignRoundRooms(round.id, draft).then((saved) => {
@@ -918,7 +920,7 @@ function RoundUsbDialog({
   return (
     <Dialog
       title={`Put ${round.name} on USB`}
-      description="Choose the connected writable drive for this round's assignment files."
+      description="Copy this round's assignment files to the drive. Games already routed elsewhere keep their own routes."
       onClose={onClose}
       onSubmit={() => {
         if (!driveId) return;

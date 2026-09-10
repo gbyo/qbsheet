@@ -395,13 +395,33 @@ function normalizeRounds(value: unknown): DirectorState['rounds'] {
   }));
 }
 
+/**
+ * Fail-closed validation for persisted per-game delivery intent (#702).
+ * Corrupt intent loads as absent (derived intent), never as invented routing.
+ */
+function normalizeDeliveryIntent(value: unknown): DirectorState['scheduledGames'][number]['deliveryIntent'] {
+  const valid = (entry: unknown): entry is 'qbtcp' | 'file' | 'manual' =>
+    entry === 'qbtcp' || entry === 'file' || entry === 'manual';
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const primary = valid(record.primary) ? record.primary : undefined;
+  const fallbacks = Array.isArray(record.fallbacks)
+    ? [...new Set(record.fallbacks.filter((entry) => valid(entry) && entry !== primary))]
+    : [];
+  if (!primary && fallbacks.length === 0) return undefined;
+  return { ...(primary ? { primary } : {}), fallbacks };
+}
+
 function normalizeScheduledGames(value: unknown): DirectorState['scheduledGames'] {
   return arrayOrEmpty<DirectorState['scheduledGames'][number]>(value, 'scheduledGames').map((game) => {
     const cancellation = asRecord(game.cancellation);
     const reasonKind = cancellation?.reasonKind;
+    const { deliveryIntent: rawIntent, ...rest } = game;
+    const deliveryIntent = normalizeDeliveryIntent(rawIntent);
     return {
-      ...game,
+      ...rest,
       scheduledStart: typeof game.scheduledStart === 'string' ? game.scheduledStart : null,
+      ...(deliveryIntent ? { deliveryIntent } : {}),
       ...(cancellation &&
       (reasonKind === 'team-dropped' || reasonKind === 'manual' || reasonKind === 'administrative') &&
       typeof cancellation.reason === 'string' &&

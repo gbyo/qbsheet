@@ -29,15 +29,16 @@ import {
   activeDefinitionSnapshot,
   definitionRulesFor,
   deriveDefinitionSnapshot,
-  orderDayItems,
   type DirectorId,
   type DirectorState,
-  type Round,
   type ScheduledGame,
   type TournamentRules,
 } from '../domain';
 import { stripSecrets } from './canonical';
+import { currentOperationalRound, gameNeedsFiles } from './deliveryStatus';
 import { assignmentFileName } from './filenames';
+
+export { currentOperationalRound };
 
 /** The QBJ serialization version Director writes. Matches the scorer and the QBTCP server. */
 export const qbjSerializationVersion = '2.1.1';
@@ -498,7 +499,13 @@ export type AssignmentSelection =
   | { kind: 'round'; roundId: DirectorId }
   | { kind: 'released' }
   | { kind: 'games'; scheduledGameIds: DirectorId[] }
-  | { kind: 'unconnected-rooms'; roundId?: DirectorId };
+  | { kind: 'unconnected-rooms'; roundId?: DirectorId }
+  /**
+   * Per-game delivery truth (#702): only games whose readiness says a file
+   * is the next action (`file-needed`, `needs-reprepare`). Preparing this
+   * selection never implies a round-wide mode change.
+   */
+  | { kind: 'needing-files'; roundId?: DirectorId };
 
 export function selectScheduledGameCandidates(
   state: DirectorState,
@@ -533,20 +540,11 @@ export function selectScheduledGameCandidates(
         (game) => game.roundId === roundId && (!game.roomId || !connectedRoomIds.has(game.roomId)),
       );
     }
+    case 'needing-files': {
+      const roundId = selection.roundId ?? currentOperationalRound(state)?.id;
+      return state.scheduledGames.filter((game) => game.roundId === roundId && gameNeedsFiles(state, game));
+    }
   }
-}
-
-export function currentOperationalRound(state: DirectorState): Round | undefined {
-  const rounds = orderDayItems(state.rounds, state.timeline).flatMap((item) =>
-    item.round ? [item.round] : [],
-  );
-  const selected = rounds.find((round) => round.id === state.tournament?.currentRoundId);
-  // An actively running round wins. Otherwise the next round in the persisted day
-  // order is useful; generating all nine rounds must not make Round 9 current.
-  if (selected?.status === 'released') return selected;
-  return (
-    rounds.find((round) => round.status === 'released') ?? rounds.find((round) => round.status !== 'closed')
-  );
 }
 
 /**
