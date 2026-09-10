@@ -242,6 +242,12 @@ function rebaseReportLinks(
  * from Director/Live/CSV. Accepted/current results only, supersession, cancelled-game
  * exclusion, forfeits, ties/overtime, final-placement ranks, honest unknown-vs-zero, and
  * scoring definitions all arrive via the snapshot; nothing is recalculated here.
+ *
+ * Navigation is scoped to the six verified Resource Center upload slots: required pages
+ * link only among destinations that exist after those six files are uploaded. The optional
+ * `_statkey.html` companion is still emitted by default for SQBS interoperability but is
+ * never a navigation destination of a required page (and carries the same six-link nav
+ * itself so every uploadable link resolves within the published set).
  */
 export function buildResourceCenterReport(
   snapshot: StatsSnapshot,
@@ -271,7 +277,7 @@ export function buildResourceCenterReport(
     kind,
     requiredForResourceCenter: kind !== 'statKey',
     fileName: fileNames[kind],
-    content: rebaseReportLinks(rendered[kind] as string, fileNames, kinds),
+    content: rebaseReportLinks(rendered[kind] as string, fileNames, resourceCenterRequiredKinds),
   }));
   const warnings: FormatWarning[] = [];
   const errors: FormatError[] = [];

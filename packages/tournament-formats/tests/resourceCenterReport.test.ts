@@ -475,13 +475,60 @@ describe('resource center document structure', () => {
     const artifact = buildResourceCenterReport(standardSnapshot());
     const names = resourceCenterFileNames(artifact.baseName);
     const standings = fileOf(artifact, 'standings').content;
-    for (const kind of resourceCenterAllKinds) {
+    for (const kind of resourceCenterRequiredKinds) {
       expect(standings).toContain(`href="${names[kind]}">${resourceCenterRoleLabels[kind]}</a>`);
     }
     expect(standings).toContain('>Scoreboard</a>');
     expect(standings).toContain('>Team Detail</a>');
     expect(standings).toContain('>Round Report</a>');
     expect(standings).not.toContain('>Games</a>');
+  });
+
+  test('required upload pages never navigate to the optional stat-key companion', () => {
+    const artifact = buildResourceCenterReport(standardSnapshot());
+    expect(artifact.files).toHaveLength(7);
+    expect(fileOf(artifact, 'statKey').requiredForResourceCenter).toBe(false);
+    const names = resourceCenterFileNames(artifact.baseName);
+    for (const kind of resourceCenterRequiredKinds) {
+      const content = fileOf(artifact, kind).content;
+      expect(content).not.toContain('_statkey.html');
+      expect(content).not.toContain('>Stat Key</a>');
+      for (const target of resourceCenterRequiredKinds) {
+        expect(content).toContain(`href="${names[target]}">${resourceCenterRoleLabels[target]}</a>`);
+      }
+    }
+    // The optional companion still ships with the same six-link upload navigation.
+    const statKey = fileOf(artifact, 'statKey').content;
+    expect(statKey).not.toContain('_statkey.html">Stat Key</a>');
+    for (const target of resourceCenterRequiredKinds) {
+      expect(statKey).toContain(`href="${names[target]}">${resourceCenterRoleLabels[target]}</a>`);
+    }
+  });
+
+  test('required-page links resolve within the six uploadable files', () => {
+    const artifact = buildResourceCenterReport(standardSnapshot());
+    const requiredNames = new Map(
+      artifact.files
+        .filter((file) => file.requiredForResourceCenter)
+        .map((file) => [file.fileName, file.content]),
+    );
+    expect(requiredNames.size).toBe(6);
+    for (const file of artifact.files.filter((entry) => entry.requiredForResourceCenter)) {
+      const links = [...file.content.matchAll(/href="([^"#]+\.html)(#[^"]*)?"/g)];
+      expect(links.length).toBeGreaterThan(0);
+      for (const [, target, anchor] of links) {
+        expect(requiredNames.has(target), `${file.fileName} links outside the upload set: ${target}`).toBe(
+          true,
+        );
+        if (anchor) {
+          const id = anchor.slice(1);
+          expect(
+            requiredNames.get(target)!.includes(`id="${id}"`),
+            `${file.fileName} links to missing anchor ${anchor} in ${target}`,
+          ).toBe(true);
+        }
+      }
+    }
   });
 
   test('escapes special characters and Unicode safely in every file', () => {
