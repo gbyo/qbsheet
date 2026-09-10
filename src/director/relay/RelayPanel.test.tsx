@@ -50,6 +50,13 @@ function installKeychain() {
       case 'director_forget_relay_credential':
         secrets.delete(args?.tournamentId as string);
         return null;
+      case 'director_probe_relay_scorer_origin':
+        return {
+          status: 204,
+          allowOrigin: 'https://qbsheet.com',
+          allowMethods: 'GET, POST, OPTIONS',
+          allowHeaders: 'content-type, x-yf-room-token, x-yf-device-id',
+        };
       default:
         throw new Error(`unexpected command ${command}`);
     }

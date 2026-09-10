@@ -122,6 +122,7 @@ const stepLabels: Record<string, string> = {
   reachable: 'Relay reachable over HTTPS',
   discovery: 'Protocol and capabilities',
   management: 'Management connection',
+  origin: 'Scorer browser origin',
   publication: 'Initial state publication',
   stream: 'Realtime endpoint',
 };

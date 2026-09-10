@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  probeRelayScorerOrigin,
   probeRelayStream,
   readRelayDiscoveryView,
   runRelaySetupValidation,
@@ -86,6 +87,7 @@ describe('setup validation', () => {
       'reachable',
       'discovery',
       'management',
+      'origin',
       'publication',
       'stream',
     ]);
@@ -104,6 +106,7 @@ describe('setup validation', () => {
       'reachable',
       'discovery',
       'management',
+      'origin',
       'publication',
     ]);
     expect(report.steps.at(-1)).toMatchObject({ key: 'publication', ok: false });
@@ -210,6 +213,40 @@ describe('stream probe', () => {
     expect(vi.mocked(fetchImpl).mock.calls[0]?.[0]).toBe(
       `${baseUrl}/qbtcp/v1/tournaments/${tournamentId}/stream`,
     );
+  });
+});
+
+describe('scorer-origin probe', () => {
+  const originUrl = `${baseUrl}/qbtcp/v1/manage/tournaments/${tournamentId}/health`;
+
+  function originRefusingFetch(): typeof fetch {
+    const base = healthyFetch();
+    return (async (url: string, init?: RequestInit) => {
+      if (url === originUrl) {
+        const headers = new Headers(init?.headers);
+        if (headers.get('origin') === 'https://qbsheet.com' && !headers.get('authorization')) {
+          return jsonResponse(403, {
+            error: 'origin_not_allowed',
+            message: 'This browser origin is not approved.',
+          });
+        }
+      }
+      return (base as (url: string, init?: RequestInit) => Promise<Response>)(url, init);
+    }) as unknown as typeof fetch;
+  }
+
+  it('fails closed when the relay refuses the scorer browser origin', async () => {
+    const report = await runRelaySetupValidation(input(originRefusingFetch()));
+    expect(report.ready).toBe(false);
+    expect(report.steps.map((step) => step.key)).toEqual(['reachable', 'discovery', 'management', 'origin']);
+    expect(report.steps.at(-1)).toMatchObject({ key: 'origin', ok: false });
+    expect(report.steps.at(-1)?.message).toMatch(/RELAY_ALLOWED_ORIGINS/);
+  });
+
+  it('passes when the origin falls through to the expected credential refusal', async () => {
+    const fetchImpl = vi.fn(async (_url: string) => jsonResponse(401, { error: 'invalid_credential' }));
+    const step = await probeRelayScorerOrigin(baseUrl, tournamentId, fetchImpl as unknown as typeof fetch);
+    expect(step).toMatchObject({ key: 'origin', ok: true });
   });
 });
 
