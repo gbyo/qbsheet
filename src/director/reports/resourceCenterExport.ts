@@ -1,10 +1,12 @@
 import {
   buildResourceCenterReport,
   defaultReportOptions,
+  preflightResourceCenterReport,
   reportPageOrder,
   sanitizeResourceCenterBaseName,
   zipStatReportBundle,
   type ReportOptions,
+  type ResourceCenterPreflight,
   type ResourceCenterReportFile,
 } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
@@ -17,6 +19,12 @@ export interface CanonicalResourceCenterArtifact {
   scopeLabel: string;
   files: ResourceCenterReportFile[];
   bytes: Uint8Array;
+  /**
+   * Explicit preflight (issue #764): blocking errors vs warnings, reconciled against
+   * the same canonical snapshot the files render. Callers must refuse the download
+   * while `preflight.ok` is false and surface warnings alongside a successful one.
+   */
+  preflight: ResourceCenterPreflight;
 }
 
 /**
@@ -48,5 +56,6 @@ export function buildCanonicalResourceCenterReport(
     bytes: zipStatReportBundle(
       artifact.files.map((file) => ({ name: file.fileName, content: file.content })),
     ),
+    preflight: preflightResourceCenterReport(artifact, snapshot),
   };
 }

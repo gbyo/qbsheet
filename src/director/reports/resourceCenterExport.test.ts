@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
 import { defaultReportOptions } from '@qbsheet/tournament-formats';
-import { playedTournament } from '../../../tests/directorFixtures';
+import { playedTournament, tournamentState } from '../../../tests/directorFixtures';
 import { buildCanonicalResourceCenterReport } from './resourceCenterExport';
 
 const generatedAt = '2026-09-09T18:00:00.000Z';
@@ -58,5 +58,17 @@ describe('canonical resource center export', () => {
     const first = buildCanonicalResourceCenterReport(playedTournament(), generatedAt);
     const second = buildCanonicalResourceCenterReport(playedTournament(), generatedAt);
     expect(second.files).toEqual(first.files);
+  });
+
+  test('a played tournament attaches a passing preflight', () => {
+    const artifact = buildCanonicalResourceCenterReport(playedTournament(), generatedAt);
+    expect(artifact.preflight.ok).toBe(true);
+    expect(artifact.preflight.blocking).toEqual([]);
+  });
+
+  test('a tournament with no accepted games is flagged before download', () => {
+    const artifact = buildCanonicalResourceCenterReport(tournamentState(), generatedAt);
+    expect(artifact.preflight.ok).toBe(false);
+    expect(artifact.preflight.blocking.map((entry) => entry.code)).toContain('no-accepted-games');
   });
 });

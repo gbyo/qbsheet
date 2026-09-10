@@ -80,7 +80,7 @@ export function PublishView({
             />
             <ExportAction
               title="Resource Center report"
-              description="Six upload-ready HTML files with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus an optional stat-key companion, all from the canonical snapshot."
+              description="Preflighted HTML files with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus an optional stat-key companion, all from the canonical snapshot, for manual upload to the Resource Center. The set downloads only after its structural preflight passes; live-upload compatibility is verified manually per the release checklist."
               action="Download ZIP"
               onClick={() => void downloadResourceCenterReport(state, onAnnounce, reportOptions)}
             />
@@ -247,6 +247,13 @@ export async function downloadResourceCenterReport(
 ): Promise<void> {
   try {
     const artifact = buildCanonicalResourceCenterReport(state, new Date().toISOString(), options);
+    // Issue #764: an inconsistent set must never reach the uploader. Blocking
+    // diagnostics refuse the download; warnings ride along with it.
+    if (!artifact.preflight.ok) {
+      const details = artifact.preflight.blocking.map((entry) => entry.message).join(' ');
+      onAnnounce(errorNotice(`Resource Center preflight failed: ${details}`));
+      return;
+    }
     await saveOrDownloadBytes(
       artifact.bytes,
       artifact.fileName,
@@ -255,6 +262,7 @@ export async function downloadResourceCenterReport(
       'Resource Center report exported',
       'Resource Center report save cancelled.',
     );
+    for (const entry of artifact.preflight.warnings) onAnnounce(warningNotice(entry.message));
   } catch (reason: unknown) {
     onAnnounce(
       errorNotice(reason instanceof Error ? reason.message : 'Resource Center report could not be exported.'),

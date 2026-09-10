@@ -60,6 +60,20 @@ and is not an upload slot.
 Structure is tested against the reference contract (document shell, per-role content,
 escaping, link integrity, suffixes), **not** byte-for-byte against SQBS/YellowFruit output.
 
-> The “Resource Center compatible” label awaits the real-upload smoke test in **#764**,
-> which proves generated files are accepted. Network upload itself is an explicit non-goal
-> of #762 and is not implemented here.
+Issue **#764** added the validation layer that makes “ready” a checked state:
+
+- `preflightResourceCenterReport`
+  (`packages/tournament-formats/src/resourceCenterPreflight.ts`) runs blocking errors
+  vs warnings over every export; Director refuses the download while anything blocks
+  and announces warnings alongside a successful one.
+- Genuine YellowFruit 4.0.18 output plus an honestly-labeled SQBS structural reference
+  live under `packages/tournament-formats/tests/fixtures/resource-center/` with
+  provenance; `resourceCenterCompatibility.test.ts` pins parser-relevant structure
+  across all three generators without brittle snapshots.
+- `resourceCenterCompatibility.liveUploadVerified` stays `false` and the Exports UI
+  says “preflighted … for manual upload” — never “compatible/ready” — until the
+  manual live-upload smoke test in `docs/RESOURCE_CENTER_SMOKE_TEST.md` succeeds.
+
+> The “Resource Center compatible” label still awaits that real-upload smoke test,
+> which proves generated files are accepted. Network upload itself is an explicit
+> non-goal of #762/#764 and is not implemented here (see #767).
