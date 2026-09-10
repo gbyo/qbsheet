@@ -89,7 +89,7 @@ export function assignmentChangeBlocker(
       (entry) =>
         entry.roundId === game.roundId &&
         (entry.kind === 'hq' || entry.kind === 'runner') &&
-        entry.staffIds.includes(staffId),
+        (entry.staffIds?.includes(staffId) ?? false),
     );
     if (!duty) return null;
     return duty.kind === 'hq' ? 'HQ' : 'runner';
