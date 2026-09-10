@@ -9,12 +9,12 @@
 import { StrictMode, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { DirectorState } from '../domain';
+import type { DirectorState, ReissueDefinitionResult } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { acceptedGame, playedTournament, scheduledGame, score } from '../../../tests/directorFixtures';
 import { ResultsView } from './ResultsView';
-import { ConfirmProvider } from '../components/Dialog';
+import { ConfirmProvider, ConfirmTestProvider } from '../components/Dialog';
 
 afterEach(cleanup);
 
@@ -334,6 +334,96 @@ describe('the scheduled games panel', () => {
     // And back again, so the default is a filter rather than a one-way door.
     fireEvent.click(screen.getByRole('button', { name: 'Hide settled games' }));
     expect(scheduleRowIds()).toHaveLength(1);
+  });
+});
+
+describe('per-game definition visibility and reissue (#672)', () => {
+  function stateWithIssuedGame(): DirectorState {
+    const state = playedTournament();
+    state.scheduledGames[0].status = 'released';
+    state.scheduledGames[0].definitionRevision = 1;
+    state.scheduledGames[0].definitionSnapshotId = 'snapshot-1';
+    state.gameDefinitions.push({
+      id: 'snapshot-1',
+      scheduledGameId: state.scheduledGames[0].id,
+      revision: 1,
+      createdAt: '2026-09-05T10:00:00.000Z',
+      rules: structuredClone(state.tournament!.rules),
+      roundId: 'round-1',
+      packetId: null,
+      leftTeamId: state.scheduledGames[0].leftTeamId,
+      rightTeamId: state.scheduledGames[0].rightTeamId ?? 'team-b',
+      leftRoster: [],
+      rightRoster: [],
+      assignmentRevision: 1,
+      digest: 'digest-revision-1',
+    });
+    return state;
+  }
+
+  function openGameActions(): void {
+    showView(/^Games/);
+    fireEvent.click(screen.getByRole('button', { name: /game actions$/i }));
+  }
+
+  test('an issued game shows its rules revision and offers an explicit reissue', async () => {
+    const controller = controllerWith({
+      reissueGameDefinition: vi.fn(
+        () => ({ ok: true, created: false }) as unknown as ReissueDefinitionResult,
+      ),
+    });
+    const onAnnounce = vi.fn();
+    render(
+      <ConfirmTestProvider response>
+        <ResultsView state={stateWithIssuedGame()} controller={controller} onAnnounce={onAnnounce} />
+      </ConfirmTestProvider>,
+    );
+    openGameActions();
+
+    fireEvent.click(screen.getByRole('option', { name: 'Reissue with current defaults…' }));
+    await vi.waitFor(() => {
+      expect(controller.reissueGameDefinition).toHaveBeenCalledWith(
+        stateWithIssuedGame().scheduledGames[0].id,
+      );
+    });
+    await vi.waitFor(() => {
+      expect(onAnnounce).toHaveBeenCalledWith(expect.stringMatching(/already matches current defaults/));
+    });
+  });
+
+  test('a game on older rules says so as a historical fact, not an error', () => {
+    const state = stateWithIssuedGame();
+    state.tournament!.rules.tossupValue = 99;
+    renderResults(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    showView(/^Games/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Game details' }));
+    expect(screen.getByText(/Revision 1/)).toBeVisible();
+    expect(screen.getByText(/differs from current defaults/)).toBeVisible();
+  });
+
+  test('a live game keeps its definition: no reissue shortcut', () => {
+    const state = playedTournament();
+    state.scheduledGames[0].status = 'live';
+    state.scheduledGames[0].definitionRevision = 1;
+    state.scheduledGames[0].definitionSnapshotId = 'snapshot-1';
+    renderResults(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    showView(/^Games/);
+
+    // The live game has an actions menu (forfeit/cancel) but no reissue item.
+    fireEvent.click(screen.getByRole('button', { name: /game actions$/i }));
+    expect(screen.queryByRole('option', { name: 'Reissue with current defaults…' })).toBeNull();
+  });
+
+  test('an unissued game has no scoring-rules line and no reissue shortcut', () => {
+    const state = playedTournament();
+    state.scheduledGames[0].status = 'released';
+    renderResults(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    showView(/^Games/);
+
+    expect(screen.queryByText(/Scoring rules/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /game actions$/i }));
+    expect(screen.queryByRole('option', { name: 'Reissue with current defaults…' })).toBeNull();
   });
 });
 

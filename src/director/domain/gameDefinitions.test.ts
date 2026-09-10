@@ -21,6 +21,7 @@ import {
   issuedRosterFor,
   pinAcceptedGameEvidence,
   pinIssuedDefinitions,
+  definitionMatchesDefaults,
   reissueGameDefinition,
   resolveDefinitionSnapshot,
   scoringDefaultsImpact,
@@ -431,6 +432,15 @@ describe('prospective scoring defaults (#672)', () => {
     expect(game.definitionDigest).toBe(issuedDigest);
     expect(game.definitionSource).toBe('issued');
     expect(scoringValuesForGameRecord(state, game)?.tossupValue).not.toBe(99);
+  });
+
+  test('definitionMatchesDefaults compares the issued truth to current defaults', () => {
+    const state = releasableTournament();
+    expect(definitionMatchesDefaults(state, 'scheduled-1')).toBeNull();
+    pinIssuedDefinitions(state, ['scheduled-1'], '2026-09-10T00:00:00.000Z');
+    expect(definitionMatchesDefaults(state, 'scheduled-1')).toBe(true);
+    state.tournament!.rules.tossupValue = 99;
+    expect(definitionMatchesDefaults(state, 'scheduled-1')).toBe(false);
   });
 
   test('pinning is idempotent and never touches embedded-rule games', () => {
