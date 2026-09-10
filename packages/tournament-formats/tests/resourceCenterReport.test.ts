@@ -462,14 +462,18 @@ describe('resource center document structure', () => {
   test('required-page links resolve within the six uploadable files', () => {
     const artifact = buildResourceCenterReport(standardSnapshot());
     const requiredNames = new Map(
-      artifact.files.filter((file) => file.requiredForResourceCenter).map((file) => [file.fileName, file.content]),
+      artifact.files
+        .filter((file) => file.requiredForResourceCenter)
+        .map((file) => [file.fileName, file.content]),
     );
     expect(requiredNames.size).toBe(6);
     for (const file of artifact.files.filter((entry) => entry.requiredForResourceCenter)) {
       const links = [...file.content.matchAll(/href="([^"#]+\.html)(#[^"]*)?"/g)];
       expect(links.length).toBeGreaterThan(0);
       for (const [, target, anchor] of links) {
-        expect(requiredNames.has(target), `${file.fileName} links outside the upload set: ${target}`).toBe(true);
+        expect(requiredNames.has(target), `${file.fileName} links outside the upload set: ${target}`).toBe(
+          true,
+        );
         if (anchor) {
           const id = anchor.slice(1);
           expect(
