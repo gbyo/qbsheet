@@ -49,9 +49,13 @@ The one-page answer to "what did this add, and where does it live".
                                   APNs
 ```
 
-**No tournament byte passes through QBSheet infrastructure.** `live.qbsheet.com` is static; it
-tells a client where the tournament's backend is and gets out of the way. `push.qbsheet.com` exists
-only because an APNs provider key cannot be distributed.
+**No tournament byte passes through QBSheet infrastructure.** `live.qbsheet.com` is an assets-only
+Cloudflare Worker: Workers Static Assets serves the Vite build, and its SPA fallback maps `/t/*` to
+`index.html` while preserving the bootstrap URL. It has no request handler and only tells a client
+where the tournament's backend is before getting out of the way. `push.qbsheet.com` is the separate
+dynamic APNs Worker and exists only because an APNs provider key cannot be distributed. Tournament
+QBLive backends are also separate Workers, owned and operated in tournament/director-controlled
+infrastructure.
 
 ---
 

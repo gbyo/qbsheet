@@ -1,9 +1,23 @@
 # Apple association files
 
+`live.qbsheet.com` is a static bootstrap and spectator client deployed as a Cloudflare Workers
+Static Assets project. There is no Worker request handler: Cloudflare serves `apps/live-web/dist`
+directly, and the `single-page-application` fallback returns Vite's `index.html` for `/t/*` while
+preserving the bootstrap URL for the browser parser. Tournament data continues to travel directly
+between the browser or iOS client and the tournament's own QBLive backend.
+
+Cloudflare's Git integration owns production deployment. From the repository root, configure:
+
+```text
+Build command:  npm run test --workspace=@qbsheet/live-web && npm run build --workspace=@qbsheet/live-web
+Deploy command: npx wrangler deploy --config apps/live-web/wrangler.jsonc
+```
+
 `apple-app-site-association` must be served from `https://live.qbsheet.com/.well-known/` as
-`application/json`, over HTTPS, **without a redirect**, and without a file extension. Apple's CDN
-fetches it; a redirect or the wrong content type makes universal links and the App Clip both fail,
-and the failure looks like "the link opens Safari instead of the app".
+`application/json`, with a `200` response, over HTTPS, **without a redirect**, and without a file
+extension. Apple's CDN fetches it; a redirect or the wrong content type makes universal links and
+the App Clip both fail, and the failure looks like "the link opens Safari instead of the app".
+`public/_headers` preserves that content type when Vite copies these files into `dist`.
 
 ## Before shipping
 
@@ -19,6 +33,10 @@ curl -sI https://live.qbsheet.com/.well-known/apple-app-site-association | head 
 # HTTP/2 200
 # content-type: application/json
 ```
+
+This static deployment is separate from both kinds of dynamic Worker: `push.qbsheet.com` remains
+QBSheet's APNs gateway, while each tournament's QBLive backend remains in infrastructure controlled
+by its tournament or director.
 
 ## Why `/t/*` and not `*`
 

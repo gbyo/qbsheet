@@ -80,9 +80,11 @@ applinks:live.qbsheet.com     (full app — claims the link)
 appclips:live.qbsheet.com     (both — allows App Clip invocation)
 ```
 
-AASA at `https://live.qbsheet.com/.well-known/apple-app-site-association`, `application/json`, no
-redirect, no extension. It authorizes **`/t/*` only** — `live.qbsheet.com` also serves Live Web and
-pages meant to open in a browser, and claiming `*` would route all of them into the app.
+AASA at `https://live.qbsheet.com/.well-known/apple-app-site-association` must return `200` with
+`Content-Type: application/json`, no redirect, and no extension. It authorizes **`/t/*` only** —
+`live.qbsheet.com` is a static Cloudflare Workers Static Assets deployment whose SPA fallback serves
+Vite's `index.html` for those routes while preserving the bootstrap URL. Claiming `*` would route
+every page on the domain into the app.
 
 Source: [`apps/live-web/public/.well-known/`](../apps/live-web/public/.well-known/). Replace `TEAMID`
 before shipping; it has to match the entitlements or nothing works and the failure is silent.
