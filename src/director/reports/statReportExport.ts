@@ -29,7 +29,9 @@ function buildCanonicalReportPages(
     buildCanonicalRoundStatsSnapshot(state, undefined, generatedAt),
     options,
   );
-  const standings = renderStageAwareStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
+  const standings = renderStageAwareStandingsReport(
+    buildCanonicalStandingsReport(state, generatedAt, options),
+  );
   const rounds = buildRoundAwareStatReportBundle(snapshot).find((page) => page.name === 'rounds.html');
   return buildExtendedStatReportBundle(snapshot).map((page) => {
     if (page.name === 'standings.html') return { ...page, content: standings };

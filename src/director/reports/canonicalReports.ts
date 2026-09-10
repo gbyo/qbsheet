@@ -227,7 +227,9 @@ export function buildCanonicalSnapshot(
       powers: standing.powers,
       gets: standing.gets,
       negs: standing.negs,
-      tossupsHeard: standing.tossupsHeard,
+      // Unknown TUH is null, matching the player rows below: a partial sum must not
+      // masquerade as a whole-scope zero for consumers that do not check the flag (#754).
+      tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
       tossupsHeardKnown: standing.tossupsHeardKnown,
       pptuh:
         standing.tossupsHeardKnown && standing.tossupsHeard > 0
@@ -236,6 +238,11 @@ export function buildCanonicalSnapshot(
       bonusPoints: standing.bonusPoints,
       bonusesHeard: standing.bonuses,
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
+      bouncebackPoints: standing.bouncebackPoints,
+      bouncebacksKnown: standing.bouncebacksKnown,
+      // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
+      lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
+      lightningKnown: standing.lightningKnown,
     };
   });
 
@@ -253,6 +260,11 @@ export function buildCanonicalSnapshot(
         teamId: standing.teamId,
         teamName: teamName(standing.teamId),
         ...(typeof player?.schoolYear === 'number' ? { schoolYear: player.schoolYear } : {}),
+        // YellowFruit parity (#749): tri-state eligibility; unknown stays null, never false.
+        undergraduateEligible:
+          typeof player?.undergraduateEligible === 'boolean' ? player.undergraduateEligible : null,
+        divisionTwoEligible:
+          typeof player?.divisionTwoEligible === 'boolean' ? player.divisionTwoEligible : null,
         gamesPlayed: standing.gamesPlayed,
         tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
         superpowers: standing.superpowers,
@@ -299,7 +311,7 @@ export function buildCanonicalSnapshot(
         bonusesHeard: detailedCountsKnown ? score.bonuses : null,
         bonusPoints: detailedCountsKnown ? score.bonusPoints : null,
         ppb: detailedCountsKnown && score.bonuses > 0 ? score.bonusPoints / score.bonuses : null,
-        bouncebacks: detailedCountsKnown ? score.bouncebacks : null,
+        bouncebacks: detailedCountsKnown ? (score.bouncebacks ?? null) : null,
       };
     });
     const playerStats: GamePlayerStatsRow[] = game.playerStats.map((stat) => ({

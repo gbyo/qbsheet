@@ -100,8 +100,8 @@ const stages: { number: string; name: string; idea: string; detail: ReactNode }[
     detail: (
       <>
         Standings and player statistics are derived from accepted results and the tournament&apos;s tiebreak
-        configuration. Export printable standings, CSV, QBJ, an SQBS roster, or a portable archive — or
-        publish the tournament to <a href={qbliveUrl}>QBLive</a> for participants.
+        configuration. Export printable standings, CSV, QBJ, a full SQBS tournament file or SQBS roster, or a
+        portable archive — or publish the tournament to <a href={qbliveUrl}>QBLive</a> for participants.
       </>
     ),
   },

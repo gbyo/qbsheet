@@ -46,6 +46,11 @@ pub struct QbtcpConfig {
     pub max_body_bytes: usize,
     pub name: String,
     pub capabilities: Vec<String>,
+    /// The realtime/relay descriptor, when this host serves the `stream` capability (#770).
+    ///
+    /// `None` by default: the reference server is HTTP-only, and discovery must not advertise
+    /// a transport the host does not serve. A relay host sets this alongside the capability.
+    pub stream: Option<crate::stream::StreamDescriptor>,
     /// Exact browser origins allowed to make cross-origin requests.
     ///
     /// An empty list still permits native/non-browser requests with no `Origin` header, but it
@@ -77,6 +82,7 @@ impl Default for QbtcpConfig {
                 .iter()
                 .map(|value| (*value).to_owned())
                 .collect(),
+            stream: None,
             allowed_origins: Vec::new(),
             pairing_code_ttl: Duration::from_secs(15 * 60),
             pairing_rate_limit: PairingRateLimit::default(),

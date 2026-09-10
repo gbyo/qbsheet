@@ -127,6 +127,10 @@ describe('shared cell values', () => {
       tossupsHeardKnown: true,
       bonuses: 12,
       bonusPoints: 130,
+      bouncebackPoints: 0,
+      bouncebacksKnown: true,
+      lightningPoints: 0,
+      lightningKnown: true,
       gamesPlayed: 1,
       headToHead: 0,
     };

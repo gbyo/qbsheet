@@ -22,6 +22,8 @@ export interface RoundStatsRow {
   bonusesHeard: number | null;
   bonusPoints: number | null;
   ppb: number | null;
+  /** Bounceback points converted in the round; null unless every eligible game known (#748). */
+  bouncebacks: number | null;
   /** Exact tossups read are not yet persisted on Director GameRecord. */
   tossupsRead: number | null;
   /** Reserved for the normalized metric once exact per-game tossup denominators are canonical. */
@@ -42,7 +44,7 @@ function hasRecordedPlayDetail(game: GameRecord): boolean {
       score.negs > 0 ||
       score.bonuses > 0 ||
       score.bonusPoints > 0 ||
-      score.bouncebacks > 0,
+      (score.bouncebacks ?? 0) > 0,
   );
 }
 
@@ -103,6 +105,17 @@ export function deriveRoundStats(
           : null;
       const bonusesHeard = count('bonuses');
       const bonusPoints = count('bonusPoints');
+      const bouncebacksKnown = played.every((game) =>
+        game.scores.every((score) => score.bouncebacks !== null),
+      );
+      const bouncebacks =
+        detailComplete && bouncebacksKnown
+          ? played.reduce(
+              (sum, game) =>
+                sum + game.scores.reduce((gameSum, score) => gameSum + (score.bouncebacks ?? 0), 0),
+              0,
+            )
+          : null;
       const packetIds = [
         ...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null)),
       ];
@@ -121,6 +134,7 @@ export function deriveRoundStats(
         negs: count('negs'),
         bonusesHeard,
         bonusPoints,
+        bouncebacks,
         ppb:
           bonusesHeard !== null && bonusPoints !== null && bonusesHeard > 0
             ? bonusPoints / bonusesHeard

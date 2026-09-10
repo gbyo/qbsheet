@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "type": "receipt",
+  "sequence": 134,
+  "session_id": "sess-9f13",
+  "payload": {
+    "received": true,
+    "review_required": true,
+    "accepted_by_director": false,
+    "duplicate": false,
+    "match_id": "sm-4471",
+    "fingerprint": "9f2ac411…",
+    "result_id": "result-31"
+  }
+}

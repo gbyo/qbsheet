@@ -96,6 +96,27 @@ export function TransfersView({
   const [dropActive, setDropActive] = useState(false);
   const [selected, setSelected] = useState<DirectorId[]>([]);
 
+  // Selections address current-round rows only. When the operational round
+  // changes, previously visible rows disappear and their IDs must not linger
+  // where the operator can no longer see or uncheck them (#756). This is the
+  // render-phase adjustment pattern (no effect): the reset applies before the
+  // new round's rows commit, so no stale selection is ever actionable.
+  const roundId = delivery.round?.id;
+  const [selectionRoundId, setSelectionRoundId] = useState(roundId);
+  if (selectionRoundId !== roundId) {
+    setSelectionRoundId(roundId);
+    setSelected([]);
+  }
+
+  // Defense in depth: the effective selection is the intersection of the
+  // stored selection and the currently displayed rows, so a game removed or
+  // regenerated within the same round is also excluded from counts and
+  // device actions (#756).
+  const effectiveSelected = useMemo(() => {
+    const visible = new Set(delivery.rows.map((row) => row.scheduledGameId));
+    return selected.filter((gameId) => visible.has(gameId));
+  }, [delivery, selected]);
+
   const toggleSelected = useCallback((gameId: string) => {
     setSelected((previous) =>
       previous.includes(gameId) ? previous.filter((entry) => entry !== gameId) : [...previous, gameId],
@@ -191,7 +212,7 @@ export function TransfersView({
         transfers={transfers}
         state={state}
         delivery={delivery}
-        selected={selected}
+        selected={effectiveSelected}
         onAnnounce={onAnnounce}
       />
 

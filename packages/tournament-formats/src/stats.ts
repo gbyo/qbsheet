@@ -39,7 +39,8 @@ export interface TeamStatsRow {
   powers: number;
   gets: number;
   negs: number;
-  tossupsHeard: number;
+  /** Null when any contributing scoresheet omitted tossups-heard; never a partial-sum zero. */
+  tossupsHeard: number | null;
   /** False when any contributing scoresheet omitted tossups-heard. */
   tossupsHeardKnown: boolean;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
@@ -48,6 +49,17 @@ export interface TeamStatsRow {
   bonusesHeard: number;
   /** Null when no bonuses were heard: PPB is undefined, not zero. */
   ppb: number | null;
+  /**
+   * Bounceback points earned. Unknown (not zero) when any contributing result supplied no
+   * bounceback breakdown; see bouncebacksKnown (#748).
+   */
+  bouncebackPoints: number;
+  /** False when any contributing result lacked a bounceback breakdown. */
+  bouncebacksKnown: boolean;
+  /** Sum of known per-game lightning points; null when any game lacked the breakdown. */
+  lightningPoints: number | null;
+  /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
+  lightningKnown: boolean;
 }
 
 export interface PlayerStatsRow {
@@ -57,6 +69,10 @@ export interface PlayerStatsRow {
   teamId: string;
   teamName: string;
   schoolYear?: number | null;
+  /** Player-level UG eligibility; null when unknown or not supplied (#749). */
+  undergraduateEligible: boolean | null;
+  /** Player-level D2 eligibility; null when unknown or not supplied (#749). */
+  divisionTwoEligible: boolean | null;
   gamesPlayed: number;
   /** Null when any contributing scoresheet omitted tossups-heard. */
   tossupsHeard: number | null;
@@ -153,8 +169,36 @@ function resultTeam(result: GameTeamResult | undefined): GameTeamResult | undefi
   return result;
 }
 
-function valueOrZero(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) ? value : 0;
+function valueOrZero(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** Tri-state eligibility: only a real boolean is known, everything else is unknown (#749). */
+function eligibilityOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+/**
+ * Roster eligibility from extensions, with a YellowFruit YfData sidecar fallback (#749).
+ *
+ * Mirrors the Director interchange rule so a snapshot built directly from YFT-derived input
+ * agrees with the imported canonical state: QBSheet's own vocabulary wins, YfData fills gaps.
+ */
+function rosterEligibility(
+  extensions:
+    { undergraduateEligible?: unknown; divisionTwoEligible?: unknown; YfData?: unknown } | undefined,
+  key: 'undergraduateEligible' | 'divisionTwoEligible',
+  sidecarKey: 'isUG' | 'isD2',
+): boolean | null {
+  const own = eligibilityOrNull(extensions?.[key]);
+  if (own !== null) return own;
+  const sidecar =
+    extensions?.YfData !== null &&
+    typeof extensions?.YfData === 'object' &&
+    !Array.isArray(extensions?.YfData)
+      ? (extensions.YfData as Record<string, unknown>)
+      : undefined;
+  return eligibilityOrNull(sidecar?.[sidecarKey]);
 }
 
 function configTiebreakers(
@@ -207,7 +251,8 @@ function rankRows<T>(rows: T[], compare: (left: T, right: T) => number): T[] {
 
 function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
-  const tossups = mutable.tossupsHeardKnown ? mutable.tossupsHeard : 0;
+  const tossups =
+    mutable.tossupsHeardKnown && typeof mutable.tossupsHeard === 'number' ? mutable.tossupsHeard : 0;
   const bonuses = mutable.bonusesHeard;
   return {
     rank: 0,
@@ -215,8 +260,11 @@ function teamRow(mutable: MutableTeamStats): TeamStatsRow {
     winPercentage: games > 0 ? mutable.wins / games : 0,
     ppg: games > 0 ? mutable.pointsFor / games : 0,
     papg: games > 0 ? mutable.pointsAgainst / games : 0,
+    // Unknown TUH is null like the player rows, never the partial sum (#754).
+    tossupsHeard: mutable.tossupsHeardKnown ? mutable.tossupsHeard : null,
     pptuh: tossups > 0 ? mutable.pointsFor / tossups : null,
     ppb: bonuses > 0 ? mutable.bonusPoints / bonuses : null,
+    lightningPoints: mutable.lightningKnown ? mutable.lightningPoints : null,
   };
 }
 
@@ -270,6 +318,10 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       bonusPoints: 0,
       bonusesHeard: 0,
+      bouncebackPoints: 0,
+      bouncebacksKnown: true,
+      lightningPoints: 0,
+      lightningKnown: true,
     };
     teamStats.set(teamId, created);
     return created;
@@ -278,11 +330,16 @@ export function buildStatsSnapshot(
     const existing = playerStats.get(result.playerId);
     if (existing) return existing;
     const team = teamById.get(result.teamId);
+    const roster = data.players.find((player) => player.id === result.playerId);
     const created: MutablePlayerStats = {
       playerId: result.playerId,
-      playerName: data.players.find((player) => player.id === result.playerId)?.name ?? result.playerId,
+      playerName: roster?.name ?? result.playerId,
       teamId: result.teamId,
       teamName: team?.name ?? result.teamId,
+      // YellowFruit parity (#749): roster-level eligibility rides the snapshot row; a
+      // player with no roster entry keeps both flags unknown rather than false.
+      undergraduateEligible: rosterEligibility(roster?.extensions, 'undergraduateEligible', 'isUG'),
+      divisionTwoEligible: rosterEligibility(roster?.extensions, 'divisionTwoEligible', 'isD2'),
       gamesPlayed: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
@@ -367,6 +424,14 @@ export function buildStatsSnapshot(
       else team.tossupsHeard = valueOrZero(team.tossupsHeard) + result.tossupsHeard;
       team.bonusPoints = valueOrZero(team.bonusPoints) + valueOrZero(result.bonusPoints);
       team.bonusesHeard = valueOrZero(team.bonusesHeard) + valueOrZero(result.bonusesHeard);
+      // An omitted breakdown is a legacy zero shorthand; an explicit null is an unknown
+      // manual/imported result, never a verified zero (#748).
+      if (result.bonusBouncebackPoints === null) team.bouncebacksKnown = false;
+      else
+        team.bouncebackPoints =
+          valueOrZero(team.bouncebackPoints) + valueOrZero(result.bonusBouncebackPoints);
+      if (result.lightningPoints === undefined) team.lightningKnown = false;
+      else team.lightningPoints = valueOrZero(team.lightningPoints ?? undefined) + result.lightningPoints;
     };
     updateTeamStats(firstTeam, first);
     updateTeamStats(secondTeam, second);
@@ -462,6 +527,7 @@ const teamStatHeaders = [
   'bonus_points',
   'bonuses_heard',
   'ppb',
+  'bounceback_points',
 ] as const;
 
 const playerStatHeaders = [
@@ -471,6 +537,8 @@ const playerStatHeaders = [
   'team_id',
   'team_name',
   'school_year',
+  'undergraduate_eligible',
+  'division_2_eligible',
   'games_played',
   'tossups_heard',
   'superpowers',
@@ -530,6 +598,7 @@ export function exportTeamStandingsCsv(snapshot: StatsSnapshot): string {
       row.bonusPoints,
       row.bonusesHeard,
       row.ppb,
+      row.bouncebacksKnown ? row.bouncebackPoints : null,
     ]),
   );
 }
@@ -544,6 +613,8 @@ export function exportPlayerStatsCsv(snapshot: StatsSnapshot): string {
       row.teamId,
       row.teamName,
       row.schoolYear ?? null,
+      row.undergraduateEligible ?? null,
+      row.divisionTwoEligible ?? null,
       row.gamesPlayed,
       row.tossupsHeard,
       row.superpowers,
@@ -648,6 +719,7 @@ export function exportStatsHtml(snapshot: StatsSnapshot): string {
     row.bonusPoints,
     row.bonusesHeard,
     fixedStatText(row.ppb, 2),
+    row.bouncebacksKnown ? row.bouncebackPoints : '—',
   ]);
   const playerTable = tableHtml('Player statistics', playerStatHeaders, snapshot.players, (row) => [
     row.rank,

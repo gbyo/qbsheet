@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "type": "hello",
+  "sequence": 128,
+  "payload": {
+    "server": "Greenwood Fall Invitational",
+    "protocol": "QBTCP",
+    "protocol_version": 1,
+    "frames": 1,
+    "retains_finals": true,
+    "mirrors_assignment": true,
+    "replay": ["sequence", "resync"]
+  }
+}
