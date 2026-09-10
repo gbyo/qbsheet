@@ -455,4 +455,73 @@ describe('bounded result-delivery ledger and private retry capability', () => {
     expect(capabilities.remember(record.id, capability, record.completedAt!)).toBe(false);
     expect((await store.get(record.id))?.finalQbj).toEqual(record.finalQbj);
   });
+
+  test('a pending primary retries over LAN with the LAN-minted session capability', async () => {
+    const { store, record } = await completedStore();
+    const storage = new MemoryStorage();
+    const capabilities = new ResultDeliveryCapabilityStore(storage, capabilityClock);
+    capabilities.remember(
+      record.id,
+      {
+        ...capability,
+        lanBaseUrl: 'http://lan.test',
+        lanSessionId: 'lan-session',
+        lanSessionToken: 'lan-secret',
+      },
+      record.completedAt!,
+    );
+    const primaryPost = vi.fn(async () => ({ ok: false as const, error: 'fetch failed' }));
+    const lanPost = vi.fn(async () => accepted({ duplicate: true }));
+    const service = new ResultDeliveryService(store, capabilities, (baseUrl) =>
+      fakeClient(baseUrl === 'http://lan.test' ? lanPost : primaryPost),
+    );
+
+    const result = await service.retry(record.id, new Date('2026-08-11T14:01:00.000Z'));
+    expect(result).toMatchObject({ delivery: 'sent', duplicate: true });
+    expect(primaryPost).toHaveBeenCalledWith(
+      { sessionId: 'session-1', token: 'session-secret' },
+      record.finalQbj,
+    );
+    expect(lanPost).toHaveBeenCalledWith({ sessionId: 'lan-session', token: 'lan-secret' }, record.finalQbj);
+    expect((await store.get(record.id))?.serverDelivery).toBe('sent');
+
+    const reloaded = new ResultDeliveryCapabilityStore(storage, capabilityClock);
+    expect(reloaded.get(record.id)).toBeNull();
+  });
+
+  test('a refused primary never spends a LAN attempt', async () => {
+    const { store, record } = await completedStore();
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
+    capabilities.remember(
+      record.id,
+      {
+        ...capability,
+        lanBaseUrl: 'http://lan.test',
+        lanSessionId: 'lan-session',
+        lanSessionToken: 'lan-secret',
+      },
+      record.completedAt!,
+    );
+    const primaryPost = vi.fn(async () => ({ ok: true as const, value: { accepted: false } }));
+    const lanPost = vi.fn(async () => accepted());
+    const service = new ResultDeliveryService(store, capabilities, (baseUrl) =>
+      fakeClient(baseUrl === 'http://lan.test' ? lanPost : primaryPost),
+    );
+
+    expect(await service.retry(record.id)).toMatchObject({ delivery: 'rejected' });
+    expect(primaryPost).toHaveBeenCalledOnce();
+    expect(lanPost).not.toHaveBeenCalled();
+  });
+
+  test('incomplete LAN credentials are rejected instead of creating a false fallback', async () => {
+    const { record } = await completedStore();
+    const capabilities = new ResultDeliveryCapabilityStore(new MemoryStorage(), capabilityClock);
+    expect(
+      capabilities.remember(
+        record.id,
+        { ...capability, lanBaseUrl: 'http://lan.test', lanSessionId: 'lan-session' },
+        record.completedAt!,
+      ),
+    ).toBe(false);
+  });
 });

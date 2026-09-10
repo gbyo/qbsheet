@@ -201,6 +201,21 @@ export class ResultDeliveryService {
       { sessionId: capability.sessionId, token: capability.sessionToken },
       record.finalQbj,
     );
+    if (
+      delivery.delivery === 'pending' &&
+      capability.lanBaseUrl !== undefined &&
+      capability.lanSessionId !== undefined &&
+      capability.lanSessionToken !== undefined &&
+      capability.lanBaseUrl !== capability.baseUrl
+    ) {
+      const lanDelivery = await deliverFinalResult(
+        this.makeClient(capability.lanBaseUrl),
+        { sessionId: capability.lanSessionId, token: capability.lanSessionToken },
+        record.finalQbj,
+      );
+      await this.recordOutcome(recordId, lanDelivery, now);
+      return lanDelivery;
+    }
     await this.recordOutcome(recordId, delivery, now);
     return delivery;
   }
