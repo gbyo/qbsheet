@@ -1,4 +1,4 @@
-name: Deploy QBSheet Live Web
+name: Validate QBSheet Live Web
 
 # `live.qbsheet.com` is a separate deployment from the scorer, and that separation is the point.
 #
@@ -7,8 +7,9 @@ name: Deploy QBSheet Live Web
 # service worker at all. Sharing a deployment would put a spectator asset in a scorekeeper's offline
 # shell — see `vite.config.ts` and `tests/ServiceWorkerIsolation.test.ts`.
 #
-# `live.qbsheet.com` serves only: this bundle, the Apple association files, and a fallback page. It
-# never proxies tournament data; every byte of that comes from the tournament's own backend.
+# `live.qbsheet.com` is deployed through Cloudflare's Git integration as an assets-only Worker.
+# Its SPA fallback serves the Vite index for `/t/*` without changing the bootstrap URL. It never
+# proxies tournament data; every byte of that comes from the tournament's own backend.
 
 on:
   push:
@@ -46,6 +47,14 @@ jobs:
         run: |
           aasa=apps/live-web/dist/.well-known/apple-app-site-association
           test -f "$aasa" || { echo "::error::$aasa is missing from the build"; exit 1; }
+          headers=apps/live-web/dist/_headers
+          test -f "$headers" || { echo "::error::$headers is missing from the build"; exit 1; }
+          grep -Fx '/.well-known/apple-app-site-association' "$headers" >/dev/null || {
+            echo "::error::$headers does not configure the AASA path"; exit 1;
+          }
+          grep -Fx '  Content-Type: application/json' "$headers" >/dev/null || {
+            echo "::error::$headers does not set the AASA content type"; exit 1;
+          }
           node -e '
             const file = ".well-known/apple-app-site-association";
             const data = JSON.parse(require("node:fs").readFileSync("apps/live-web/dist/" + file, "utf8"));
@@ -87,11 +96,7 @@ jobs:
           path: apps/live-web/dist
           if-no-files-found: error
 
-      # The deploy step is deliberately not wired up here.
-      #
-      # `live.qbsheet.com` needs a hosting account and a token that this repository does not have,
-      # and inventing one would produce a workflow that fails on every push. Whoever owns the
-      # domain adds one step — Cloudflare Pages, Netlify, S3, another GitHub Pages site — pointing
-      # at the `live-web` artifact above. The requirements it has to satisfy are in
-      # `apps/live-web/public/.well-known/README.md`: the association file must be served as
-      # `application/json`, over HTTPS, with no redirect and no file extension.
+      # Production deployment is owned by Cloudflare's Git integration, using the assets-only
+      # configuration in `apps/live-web/wrangler.jsonc`. GitHub Actions intentionally validates and
+      # uploads the same build without deploying it a second time. See
+      # `apps/live-web/public/.well-known/README.md` for the dashboard commands and AASA checks.
