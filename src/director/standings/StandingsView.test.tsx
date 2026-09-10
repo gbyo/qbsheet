@@ -268,9 +268,7 @@ test('a second stage adds a scope selector that re-derives both tables', () => {
   render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
 
   fireEvent.click(screen.getByRole('button', { name: 'Playoffs' }));
-  expect(
-    within(teamTable()).getByText('No accepted results in Playoffs yet.'),
-  ).toBeTruthy();
+  expect(within(teamTable()).getByText('No accepted results in Playoffs yet.')).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: 'Preliminary' }));
   expect(within(teamTable()).getByText('Ninety Six')).toBeTruthy();

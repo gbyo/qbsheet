@@ -99,23 +99,18 @@ function teamTableColumns(
       priority: 1,
       render: (standing) => <IdentityCell title={teamName(state, standing.teamId)} />,
     },
-    ...schema.map(
-      (column): Column<TeamStanding> => ({
-        key: column.id,
-        header: <span title={column.description}>{column.label}</span>,
-        priority: column.priority,
-        align: 'right',
-        optional: column.priority === 3,
-        render: (standing) => statCell(teamStatCell(column.id, standing), column),
-      }),
-    ),
+    ...schema.map((column): Column<TeamStanding> => ({
+      key: column.id,
+      header: <span title={column.description}>{column.label}</span>,
+      priority: column.priority,
+      align: 'right',
+      optional: column.priority === 3,
+      render: (standing) => statCell(teamStatCell(column.id, standing), column),
+    })),
   ];
 }
 
-function playerTableColumns(
-  state: DirectorState,
-  schema: StatsColumn[],
-): Column<PlayerStanding>[] {
+function playerTableColumns(state: DirectorState, schema: StatsColumn[]): Column<PlayerStanding>[] {
   return [
     {
       key: 'player',
@@ -128,16 +123,14 @@ function playerTableColumns(
         />
       ),
     },
-    ...schema.map(
-      (column): Column<PlayerStanding> => ({
-        key: column.id,
-        header: <span title={column.description}>{column.label}</span>,
-        priority: column.priority,
-        align: 'right',
-        optional: column.priority === 3,
-        render: (standing) => statCell(playerStatCell(column.id, standing), column),
-      }),
-    ),
+    ...schema.map((column): Column<PlayerStanding> => ({
+      key: column.id,
+      header: <span title={column.description}>{column.label}</span>,
+      priority: column.priority,
+      align: 'right',
+      optional: column.priority === 3,
+      render: (standing) => statCell(playerStatCell(column.id, standing), column),
+    })),
   ];
 }
 
@@ -165,9 +158,7 @@ function ColumnChooser({
           label={column.label}
           hint={column.description}
           onChange={(checked) => {
-            onChange(
-              checked ? [...enabled, column.id] : enabled.filter((id) => id !== column.id),
-            );
+            onChange(checked ? [...enabled, column.id] : enabled.filter((id) => id !== column.id));
           }}
         />
       ))}
@@ -191,7 +182,8 @@ export function StandingsView({
   const teamSchema = teamColumnsForState(state);
   const playerSchema = individualColumnsForState(state);
   const { scopes, showSelector } = buildStatsScopes(state);
-  const scope = scopes.find((entry) => entry.id === scopeId) ?? scopes[0] ?? { id: 'overall', label: 'Overall' };
+  const scope = scopes.find((entry) => entry.id === scopeId) ??
+    scopes[0] ?? { id: 'overall', label: 'Overall' };
   const scopeOptions = scopeOptionsFor(scope);
   // Both tables derive from the same canonical scope selector: Director never
   // re-scopes or re-derives statistics locally (#750).

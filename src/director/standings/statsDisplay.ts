@@ -141,8 +141,20 @@ export const TEAM_COLUMNS: StatsColumn[] = [
   { id: 'pa', label: 'PA', description: 'Points against', priority: 3, defaultVisible: false },
   { id: 'ppg', label: 'PPG', description: 'Points per game', priority: 2, defaultVisible: true },
   { id: 'papg', label: 'PAPG', description: 'Points against per game', priority: 3, defaultVisible: false },
-  { id: 'superpowers', label: 'Superpowers', description: 'Superpower tossups answered', priority: 3, defaultVisible: false },
-  { id: 'powers', label: 'Powers', description: 'Power tossups answered', priority: 3, defaultVisible: false },
+  {
+    id: 'superpowers',
+    label: 'Superpowers',
+    description: 'Superpower tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  {
+    id: 'powers',
+    label: 'Powers',
+    description: 'Power tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
   { id: 'gets', label: 'Gets', description: 'Regular tossups answered', priority: 3, defaultVisible: false },
   { id: 'negs', label: 'Negs', description: 'Incorrect interrupts', priority: 3, defaultVisible: false },
   { id: 'tuh', label: 'TUH', description: 'Tossups heard', priority: 2, defaultVisible: true },
@@ -158,8 +170,20 @@ export const INDIVIDUAL_COLUMNS: StatsColumn[] = [
   { id: 'ppg', label: 'PPG', description: 'Points per game', priority: 2, defaultVisible: true },
   { id: 'tuh', label: 'TUH', description: 'Tossups heard', priority: 2, defaultVisible: true },
   { id: 'pptuh', label: 'PPTUH', description: 'Points per tossup heard', priority: 3, defaultVisible: true },
-  { id: 'superpowers', label: 'Superpowers', description: 'Superpower tossups answered', priority: 3, defaultVisible: false },
-  { id: 'powers', label: 'Powers', description: 'Power tossups answered', priority: 3, defaultVisible: false },
+  {
+    id: 'superpowers',
+    label: 'Superpowers',
+    description: 'Superpower tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
+  {
+    id: 'powers',
+    label: 'Powers',
+    description: 'Power tossups answered',
+    priority: 3,
+    defaultVisible: false,
+  },
   { id: 'gets', label: 'Gets', description: 'Regular tossups answered', priority: 3, defaultVisible: false },
   { id: 'negs', label: 'Negs', description: 'Incorrect interrupts', priority: 3, defaultVisible: false },
   { id: 'bonus', label: 'Bonus pts', description: 'Bonus points', priority: 3, defaultVisible: false },
@@ -174,9 +198,7 @@ export const INDIVIDUAL_COLUMNS: StatsColumn[] = [
 export function bonusesInUse(state: DirectorState): boolean {
   if (state.tournament?.rules.useBonuses) return true;
   if (state.gameDefinitions.some((entry) => entry.rules.useBonuses)) return true;
-  return state.games.some((game) =>
-    game.scores.some((score) => score.bonuses > 0 || score.bonusPoints > 0),
-  );
+  return state.games.some((game) => game.scores.some((score) => score.bonuses > 0 || score.bonusPoints > 0));
 }
 
 const TEAM_BONUS_COLUMN_IDS = new Set(['bonuses', 'bonuspoints', 'ppb']);
@@ -187,9 +209,7 @@ export function teamColumnsForState(state: DirectorState): StatsColumn[] {
   const bonus = bonusesInUse(state);
   const tiers = superpowersInUse(state);
   return TEAM_COLUMNS.filter(
-    (column) =>
-      (bonus || !TEAM_BONUS_COLUMN_IDS.has(column.id)) &&
-      (tiers || column.id !== 'superpowers'),
+    (column) => (bonus || !TEAM_BONUS_COLUMN_IDS.has(column.id)) && (tiers || column.id !== 'superpowers'),
   );
 }
 
@@ -199,8 +219,7 @@ export function individualColumnsForState(state: DirectorState): StatsColumn[] {
   const tiers = superpowersInUse(state);
   return INDIVIDUAL_COLUMNS.filter(
     (column) =>
-      (bonus || !INDIVIDUAL_BONUS_COLUMN_IDS.has(column.id)) &&
-      (tiers || column.id !== 'superpowers'),
+      (bonus || !INDIVIDUAL_BONUS_COLUMN_IDS.has(column.id)) && (tiers || column.id !== 'superpowers'),
   );
 }
 
