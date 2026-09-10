@@ -64,8 +64,12 @@ tournaments alike:
 
 1. **Report sets.** Simple tournaments show their one set with team/game/round
    counts and no configuration. Multi-phase tournaments default to the
-   recommended preset (every phase plus combined, per ACF guidance) with
-   phases-only and combined-only available, and each scope shows teams /
+   recommended preset: each phase that currently has accepted results plus
+   `Combined`. Future configured phases with no accepted games remain visible
+   but unselected, so planning playoffs/finals ahead of time cannot block the
+   current after-round export. The director can still select an empty phase
+   explicitly; preflight then reports that it has no accepted games. Phase-only
+   and combined-only presets remain available, and every scope shows teams /
    accepted games / rounds before anything is written.
 2. **Report names.** Each set defaults to its scope label (`Prelims`,
    `Playoffs`, `Combined`, `Overall` for single-stage) and the director may
@@ -102,10 +106,15 @@ explicit phase model (never round-number ranges):
 - a `Combined` set for the entire tournament (`Overall` for single-stage);
 - single-stage tournaments expose only the combined scope — no phase chooser.
 
-The recommended preset (**every phase + combined**) matches current ACF guidance;
-`selected phases only` and `combined only` are also available. The dialog previews
-the number of report sets and files before export, and one operation writes a single
-ZIP containing every selected set under its own stable base prefix:
+The recommended preset selects **played phases + Combined**. This produces the
+usual per-phase + combined Resource Center package as stages acquire results while
+avoiding a tournament-day footgun where an already-configured future playoff/final
+with zero accepted games blocks otherwise-valid current reports. Empty phases remain
+visible/selectable; intentionally selecting one still triggers the existing
+`no-accepted-games` preflight blocker. `Selected phases only` and `Combined only`
+are also available. The dialog previews the number of report sets and files before
+export, and one operation writes a single ZIP containing every selected set under
+its own stable base prefix:
 
 - `my-tournament-prelims_standings.html`
 - `my-tournament-playoffs_standings.html`
