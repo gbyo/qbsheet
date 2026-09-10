@@ -474,12 +474,7 @@ export interface IssuedRosterPlayer {
  *   definition cannot be proven; current defaults are used and flagged as inference.
  * - `current`: no snapshot history and no prior records; current defaults are the only truth.
  */
-export type HistoricalDefinitionSource =
-  | 'issued'
-  | 'corrected'
-  | 'qbj'
-  | 'legacy-inferred'
-  | 'current';
+export type HistoricalDefinitionSource = 'issued' | 'corrected' | 'qbj' | 'legacy-inferred' | 'current';
 
 /**
  * An immutable competitive definition issued to a scorer for one scheduled game (#667).
