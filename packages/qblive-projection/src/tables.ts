@@ -41,6 +41,14 @@ function integer(value: number): QbliveCell {
 }
 
 /**
+ * An unknown is a null value with an em-dash display, never a zero: clients render what they
+ * are given, so a fabricated zero here would publish a false statistic to every installed app.
+ */
+function unknown(): QbliveCell {
+  return { value: null, display: '—' };
+}
+
+/**
  * A win-loss(-tie) record as one cell.
  *
  * Rendered here rather than on the client because the tie half is conditional: a format without
@@ -70,6 +78,24 @@ const teamStandingsColumns: QbliveColumn[] = [
     description: 'Points per game',
   },
   { id: 'margin', label: 'Marg', kind: 'integer', alignment: 'trailing', description: 'Point differential' },
+  { id: 'games', label: 'G', kind: 'integer', alignment: 'trailing', description: 'Games played' },
+  { id: 'tuh', label: 'TUH', kind: 'integer', alignment: 'trailing', description: 'Tossups heard' },
+  { id: 'bonuses', label: 'Bonuses', kind: 'integer', alignment: 'trailing', description: 'Bonuses heard' },
+  {
+    id: 'bonuspoints',
+    label: 'Bonus pts',
+    kind: 'integer',
+    alignment: 'trailing',
+    description: 'Bonus points',
+  },
+  {
+    id: 'pptuh',
+    label: 'PPTUH',
+    kind: 'decimal',
+    precision: 2,
+    alignment: 'trailing',
+    description: 'Points per tossup heard',
+  },
 ];
 
 /**
@@ -196,11 +222,19 @@ export function buildStandingsTable(
       integer(index + 1),
       { value: naming.teamName(standing.teamId), entityId: standing.teamId },
       record(standing),
-      decimal(standing.winPercentage, 3),
+      // A team that has not played has no win rate: 0.000 would read as three decimals of losing.
+      standing.gamesPlayed > 0 ? decimal(standing.winPercentage, 3) : unknown(),
       integer(standing.pointsFor),
       integer(standing.pointsAgainst),
       decimal(standing.gamesPlayed > 0 ? standing.pointsFor / standing.gamesPlayed : 0, 1),
       integer(standing.margin),
+      integer(standing.gamesPlayed),
+      standing.tossupsHeardKnown ? integer(standing.tossupsHeard) : unknown(),
+      integer(standing.bonuses),
+      integer(standing.bonusPoints),
+      standing.tossupsHeardKnown && standing.tossupsHeard > 0
+        ? decimal(standing.pointsFor / standing.tossupsHeard, 2)
+        : unknown(),
     ],
   }));
   return {

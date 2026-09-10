@@ -119,6 +119,42 @@
                 "kind": "integer",
                 "alignment": "trailing",
                 "description": "Point differential"
+              },
+              {
+                "id": "games",
+                "label": "G",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Games played"
+              },
+              {
+                "id": "tuh",
+                "label": "TUH",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Tossups heard"
+              },
+              {
+                "id": "bonuses",
+                "label": "Bonuses",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonuses heard"
+              },
+              {
+                "id": "bonuspoints",
+                "label": "Bonus pts",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonus points"
+              },
+              {
+                "id": "pptuh",
+                "label": "PPTUH",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per tossup heard"
               }
             ],
             "rows": [
@@ -157,6 +193,26 @@
                   {
                     "value": 95,
                     "display": "95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 13,
+                    "display": "13"
+                  },
+                  {
+                    "value": 150,
+                    "display": "150"
+                  },
+                  {
+                    "value": 14.25,
+                    "display": "14.25"
                   }
                 ]
               },
@@ -195,6 +251,26 @@
                   {
                     "value": 35,
                     "display": "35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 12,
+                    "display": "12"
+                  },
+                  {
+                    "value": 120,
+                    "display": "120"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -233,6 +309,26 @@
                   {
                     "value": -35,
                     "display": "-35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 10,
+                    "display": "10"
+                  },
+                  {
+                    "value": 100,
+                    "display": "100"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -271,6 +367,26 @@
                   {
                     "value": -95,
                     "display": "-95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 8,
+                    "display": "8"
+                  },
+                  {
+                    "value": 90,
+                    "display": "90"
+                  },
+                  {
+                    "value": 9.5,
+                    "display": "9.50"
                   }
                 ]
               }
@@ -335,6 +451,42 @@
                 "kind": "integer",
                 "alignment": "trailing",
                 "description": "Point differential"
+              },
+              {
+                "id": "games",
+                "label": "G",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Games played"
+              },
+              {
+                "id": "tuh",
+                "label": "TUH",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Tossups heard"
+              },
+              {
+                "id": "bonuses",
+                "label": "Bonuses",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonuses heard"
+              },
+              {
+                "id": "bonuspoints",
+                "label": "Bonus pts",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonus points"
+              },
+              {
+                "id": "pptuh",
+                "label": "PPTUH",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per tossup heard"
               }
             ],
             "rows": [
@@ -373,6 +525,26 @@
                   {
                     "value": 95,
                     "display": "95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 13,
+                    "display": "13"
+                  },
+                  {
+                    "value": 150,
+                    "display": "150"
+                  },
+                  {
+                    "value": 14.25,
+                    "display": "14.25"
                   }
                 ]
               },
@@ -411,6 +583,26 @@
                   {
                     "value": 35,
                     "display": "35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 12,
+                    "display": "12"
+                  },
+                  {
+                    "value": 120,
+                    "display": "120"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -449,6 +641,26 @@
                   {
                     "value": -35,
                     "display": "-35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 10,
+                    "display": "10"
+                  },
+                  {
+                    "value": 100,
+                    "display": "100"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -487,6 +699,26 @@
                   {
                     "value": -95,
                     "display": "-95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 8,
+                    "display": "8"
+                  },
+                  {
+                    "value": 90,
+                    "display": "90"
+                  },
+                  {
+                    "value": 9.5,
+                    "display": "9.50"
                   }
                 ]
               }
@@ -551,6 +783,42 @@
                 "kind": "integer",
                 "alignment": "trailing",
                 "description": "Point differential"
+              },
+              {
+                "id": "games",
+                "label": "G",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Games played"
+              },
+              {
+                "id": "tuh",
+                "label": "TUH",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Tossups heard"
+              },
+              {
+                "id": "bonuses",
+                "label": "Bonuses",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonuses heard"
+              },
+              {
+                "id": "bonuspoints",
+                "label": "Bonus pts",
+                "kind": "integer",
+                "alignment": "trailing",
+                "description": "Bonus points"
+              },
+              {
+                "id": "pptuh",
+                "label": "PPTUH",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per tossup heard"
               }
             ],
             "rows": [
@@ -589,6 +857,26 @@
                   {
                     "value": 95,
                     "display": "95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 13,
+                    "display": "13"
+                  },
+                  {
+                    "value": 150,
+                    "display": "150"
+                  },
+                  {
+                    "value": 14.25,
+                    "display": "14.25"
                   }
                 ]
               },
@@ -627,6 +915,26 @@
                   {
                     "value": 35,
                     "display": "35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 12,
+                    "display": "12"
+                  },
+                  {
+                    "value": 120,
+                    "display": "120"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -665,6 +973,26 @@
                   {
                     "value": -35,
                     "display": "-35"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
+                    "value": 10,
+                    "display": "10"
+                  },
+                  {
+                    "value": 100,
+                    "display": "100"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   }
                 ]
               },
@@ -703,6 +1031,26 @@
                   {
                     "value": -95,
                     "display": "-95"
+                  },
+                  {
+                    "value": 1,
+                    "display": "1"
+                  },
+                  {
+                    "value": 20,
+                    "display": "20"
+                  },
+                  {
+                    "value": 8,
+                    "display": "8"
+                  },
+                  {
+                    "value": 90,
+                    "display": "90"
+                  },
+                  {
+                    "value": 9.5,
+                    "display": "9.50"
                   }
                 ]
               }
