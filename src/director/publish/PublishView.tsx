@@ -84,7 +84,7 @@ export function PublishView({
             />
             <ExportAction
               title="Resource Center report"
-              description="Preflighted, upload-ready HTML sets with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus a stat-key companion, all from the canonical snapshot. The set downloads only after its structural preflight passes; multi-phase tournaments offer every phase plus combined; live-upload compatibility is verified manually per the release checklist."
+              description="Preflighted HTML sets with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus a stat-key companion, all from the canonical snapshot. The set downloads only after its structural preflight passes; multi-phase tournaments offer every phase plus combined; live-upload compatibility is verified manually per the release checklist."
               action="Download ZIP"
               onClick={() => {
                 if (resourceCenterScopeCount > 1) {
