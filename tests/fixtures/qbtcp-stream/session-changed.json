@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "type": "session-changed",
+  "sequence": 130,
+  "session_id": "sess-9f13",
+  "payload": {
+    "status": "open",
+    "writer": true
+  }
+}
