@@ -114,6 +114,14 @@ pub struct RecoveryDocument {
     pub round_revision: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub assignment_revision: Option<u64>,
+    /// The competitive-definition revision the session is bound to (#670). A state refresh
+    /// must never silently replace the definition beneath a session with progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition_revision: Option<u64>,
+    /// Digest over the canonical competitive semantics the session is bound to. The revision
+    /// is convenient and auditable; the digest proves equality.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition_digest: Option<String>,
     pub final_received: bool,
     pub latest_qbj: Option<Value>,
     pub roster_amendments: Vec<RosterAmendment>,
@@ -148,6 +156,8 @@ struct SessionRecord {
     right_team: Option<String>,
     round_revision: Option<u64>,
     assignment_revision: Option<u64>,
+    definition_revision: Option<u64>,
+    definition_digest: Option<String>,
     assignment_fingerprint: String,
     status: SessionStatus,
     updated_at: String,
@@ -225,6 +235,8 @@ struct PersistedSession {
     right_team: Option<String>,
     round_revision: Option<u64>,
     assignment_revision: Option<u64>,
+    definition_revision: Option<u64>,
+    definition_digest: Option<String>,
     assignment_fingerprint: String,
     status: SessionStatus,
     updated_at: String,
@@ -605,6 +617,13 @@ impl QbtcpServer {
             let session_id = random_id("sess");
             let token = random_secret();
             let token_hash = digest_secret(&token);
+            // The session binds to the definition identity carried by the assignment document
+            // itself (#670): once the session has progress, a Director refresh that reissues
+            // the game under a new definition must not silently replace the truth beneath it.
+            // A new definition requires explicit reissue and a new session; the old session
+            // remains bound to the old revision until abandoned, recovered, or settled.
+            let (definition_revision, definition_digest) =
+                qbtcp_definition_identity(&assignment.qbj);
             let record = SessionRecord {
                 session_id: session_id.clone(),
                 room_id: room_id.clone(),
@@ -614,6 +633,8 @@ impl QbtcpServer {
                 right_team: assignment.right_team.clone(),
                 round_revision: assignment.meta.round_revision,
                 assignment_revision: assignment.meta.assignment_revision,
+                definition_revision,
+                definition_digest,
                 assignment_fingerprint: result_fingerprint(&assignment.qbj),
                 status: SessionStatus::Open,
                 updated_at: now_iso(),
@@ -916,6 +937,8 @@ impl QbtcpServer {
         let fingerprint = result_fingerprint(&qbj);
         let (submitted_tournament_id, submitted_match_id) = qbj_identity(&qbj);
         let submitted_round_revision = qbtcp_round_revision(&qbj);
+        let (submitted_definition_revision, submitted_definition_digest) =
+            qbtcp_definition_identity(&qbj);
         let now = Instant::now();
         let expected_tournament_id = self.tournament_info()?.id;
 
@@ -938,9 +961,13 @@ impl QbtcpServer {
             expected_tournament_id,
             expected_match_id: session.match_id.clone(),
             expected_round_revision: session.round_revision,
+            expected_definition_revision: session.definition_revision,
+            expected_definition_digest: session.definition_digest.clone(),
             submitted_tournament_id: submitted_tournament_id.clone(),
             submitted_match_id: submitted_match_id.clone(),
             submitted_round_revision,
+            submitted_definition_revision,
+            submitted_definition_digest,
             fingerprint: fingerprint.clone(),
             qbj: qbj.clone(),
             raw,
@@ -1014,6 +1041,8 @@ impl QbtcpServer {
             status: session.status,
             round_revision: session.round_revision,
             assignment_revision: session.assignment_revision,
+            definition_revision: session.definition_revision,
+            definition_digest: session.definition_digest.clone(),
             final_received: session.final_result_id.is_some(),
             latest_qbj: session.latest_qbj.clone(),
             roster_amendments: session.roster_amendments.clone(),
@@ -1557,6 +1586,8 @@ fn snapshot_from_runtime(
                 right_team: session.right_team.clone(),
                 round_revision: session.round_revision,
                 assignment_revision: session.assignment_revision,
+                definition_revision: session.definition_revision,
+                definition_digest: session.definition_digest.clone(),
                 assignment_fingerprint: session.assignment_fingerprint.clone(),
                 status: session.status,
                 updated_at: session.updated_at.clone(),
@@ -1654,6 +1685,8 @@ fn runtime_from_snapshot(
                 right_team: persisted.right_team,
                 round_revision: persisted.round_revision,
                 assignment_revision: persisted.assignment_revision,
+                definition_revision: persisted.definition_revision,
+                definition_digest: persisted.definition_digest,
                 assignment_fingerprint: persisted.assignment_fingerprint,
                 status: persisted.status,
                 updated_at: persisted.updated_at,
@@ -1678,9 +1711,17 @@ fn runtime_from_snapshot(
 }
 
 fn session_matches_assignment(session: &SessionRecord, assignment: &AssignedAssignment) -> bool {
+    // The assignment fingerprint deliberately excludes the `_qbtcp` transport block, so a
+    // definition-only reissue compares equal on fingerprint alone. The bound definition
+    // identity is the comparison that notices it (#670): same match and same assignment
+    // revision under a different competitive definition is a different authority, and the
+    // old session stays bound to the old definition rather than being adopted by the new.
+    let (definition_revision, definition_digest) = qbtcp_definition_identity(&assignment.qbj);
     session.match_id == assignment.match_id
         && session.round_revision == assignment.meta.round_revision
         && session.assignment_revision == assignment.meta.assignment_revision
+        && session.definition_revision == definition_revision
+        && session.definition_digest == definition_digest
         && session.assignment_fingerprint == result_fingerprint(&assignment.qbj)
 }
 

@@ -89,6 +89,12 @@ pub struct MemoryRetainedResult {
     pub review_required: bool,
     pub warnings: Vec<String>,
     pub conflict_with: Option<String>,
+    /// The session-bound definition the submission was checked against (#670).
+    pub expected_definition_revision: Option<u64>,
+    pub expected_definition_digest: Option<String>,
+    /// The identity the room actually scored under.
+    pub submitted_definition_revision: Option<u64>,
+    pub submitted_definition_digest: Option<String>,
 }
 
 pub struct RosterAmendmentRecord {
@@ -175,6 +181,10 @@ impl MemoryState {
                         review_required: result.review_required,
                         warnings: result.warnings.clone(),
                         conflict_with: result.conflict_with.clone(),
+                        expected_definition_revision: result.expected_definition_revision,
+                        expected_definition_digest: result.expected_definition_digest.clone(),
+                        submitted_definition_revision: result.submitted_definition_revision,
+                        submitted_definition_digest: result.submitted_definition_digest.clone(),
                     })
                     .collect()
             })
@@ -366,6 +376,29 @@ impl QbtcpState for MemoryState {
                 warnings.push("stale-assignment".to_owned());
             }
         }
+        // Definition comparison happens before any statistics consumer can normalize the
+        // result under current tournament defaults (#670). Same match and assignment
+        // identity under different competitive semantics is never silently equivalent.
+        match (
+            &submission.expected_definition_digest,
+            &submission.submitted_definition_digest,
+        ) {
+            (Some(expected), Some(submitted)) if expected != submitted => {
+                if let (Some(expected_revision), Some(submitted_revision)) = (
+                    submission.expected_definition_revision,
+                    submission.submitted_definition_revision,
+                ) {
+                    if submitted_revision < expected_revision {
+                        warnings.push("stale-definition-revision".to_owned());
+                    }
+                }
+                warnings.push("definition-mismatch".to_owned());
+            }
+            (Some(_), None) => {
+                warnings.push("missing-definition-identity".to_owned());
+            }
+            _ => {}
+        }
         if submission.late_after_abandon {
             warnings.push("late-after-abandon".to_owned());
         }
@@ -395,6 +428,10 @@ impl QbtcpState for MemoryState {
             review_required,
             warnings: warnings.clone(),
             conflict_with: conflict_with.clone(),
+            expected_definition_revision: submission.expected_definition_revision,
+            expected_definition_digest: submission.expected_definition_digest.clone(),
+            submitted_definition_revision: submission.submitted_definition_revision,
+            submitted_definition_digest: submission.submitted_definition_digest.clone(),
         });
 
         Ok(ResultDisposition {

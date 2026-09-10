@@ -227,6 +227,12 @@ function serializePackage(value: IGamePackage): IGamePackage {
     ...(definition.origin !== undefined ? { origin: definition.origin } : {}),
     ...(definition.assumptions ? { assumptions: definition.assumptions.slice() } : {}),
     ...(definition.qbjIdentity ? { qbjIdentity: cloneIdentity(definition.qbjIdentity) } : {}),
+    // The issued competitive-definition identity travels with the frozen definition (#670):
+    // a backup that contains event history must carry the reference that says which truth
+    // those events were scored under, never bare events for whatever rules are current.
+    ...(value.definition
+      ? { definition: { revision: value.definition.revision, digest: value.definition.digest } }
+      : {}),
     ...(definition.procedureOverride
       ? {
           procedureOverride: {

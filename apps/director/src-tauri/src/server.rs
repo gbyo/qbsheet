@@ -231,6 +231,12 @@ pub struct ServerResultSnapshot {
     pub review_required: bool,
     pub warnings: Vec<String>,
     pub conflict_with: Option<String>,
+    /// The session-bound definition the submission was checked against (#670).
+    pub expected_definition_revision: Option<u64>,
+    pub expected_definition_digest: Option<String>,
+    /// The identity the room actually scored under.
+    pub submitted_definition_revision: Option<u64>,
+    pub submitted_definition_digest: Option<String>,
     pub qbj: Option<Value>,
     /// The exact request body, retained separately from the parsed QBJ for audit/reconciliation.
     pub raw_base64: Option<String>,
@@ -814,6 +820,14 @@ impl DirectorQbtcpState {
                     review_required: result.review_required,
                     warnings: result.warnings.clone(),
                     conflict_with: result.conflict_with,
+                    expected_definition_revision: result
+                        .expected_definition_revision
+                        .and_then(|revision| u64::try_from(revision).ok()),
+                    expected_definition_digest: result.expected_definition_digest,
+                    submitted_definition_revision: result
+                        .submitted_definition_revision
+                        .and_then(|revision| u64::try_from(revision).ok()),
+                    submitted_definition_digest: result.submitted_definition_digest,
                 });
             if let Ok(mut sessions) = self.session_snapshots.lock() {
                 sessions
@@ -1058,6 +1072,10 @@ impl DirectorQbtcpState {
                     review_required: summary.review_required,
                     warnings: summary.warnings,
                     conflict_with: summary.conflict_with,
+                    expected_definition_revision: summary.expected_definition_revision,
+                    expected_definition_digest: summary.expected_definition_digest,
+                    submitted_definition_revision: summary.submitted_definition_revision,
+                    submitted_definition_digest: summary.submitted_definition_digest,
                     qbj: raw
                         .as_deref()
                         .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok()),

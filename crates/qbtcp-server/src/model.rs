@@ -453,9 +453,13 @@ pub struct ResultSubmission {
     pub expected_tournament_id: String,
     pub expected_match_id: String,
     pub expected_round_revision: Option<u64>,
+    pub expected_definition_revision: Option<u64>,
+    pub expected_definition_digest: Option<String>,
     pub submitted_tournament_id: Option<String>,
     pub submitted_match_id: Option<String>,
     pub submitted_round_revision: Option<u64>,
+    pub submitted_definition_revision: Option<u64>,
+    pub submitted_definition_digest: Option<String>,
     pub fingerprint: String,
     pub qbj: Value,
     pub raw: Vec<u8>,
@@ -483,6 +487,10 @@ pub struct RetainedResultSummary {
     pub review_required: bool,
     pub warnings: Vec<String>,
     pub conflict_with: Option<String>,
+    pub expected_definition_revision: Option<u64>,
+    pub expected_definition_digest: Option<String>,
+    pub submitted_definition_revision: Option<u64>,
+    pub submitted_definition_digest: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -665,6 +673,32 @@ pub fn qbtcp_round_revision(value: &Value) -> Option<u64> {
             .and_then(|extension| extension.get("round_revision"))
             .and_then(Value::as_u64)
     })
+}
+
+/// Return the definition identity carried by a QBJ Match's QBTCP extension (#670).
+///
+/// The revision is convenient and auditable; the digest proves equality. Both are optional:
+/// an assignment cut before definition identity existed carries neither, and such a legacy
+/// document must never be asserted exactly equivalent to a definition-bound one.
+pub fn qbtcp_definition_identity(value: &Value) -> (Option<u64>, Option<String>) {
+    let found = top_level_objects(value).into_iter().find_map(|object| {
+        if object.get("type").and_then(Value::as_str) != Some("Match") {
+            return None;
+        }
+        object
+            .get("_qbtcp")
+            .and_then(Value::as_object)
+            .map(|extension| {
+                (
+                    extension.get("definition_revision").and_then(Value::as_u64),
+                    extension
+                        .get("definition_digest")
+                        .and_then(Value::as_str)
+                        .map(ToOwned::to_owned),
+                )
+            })
+    });
+    found.unwrap_or((None, None))
 }
 
 /// Return the optional assignment revision carried by a QBJ Match's QBTCP extension.

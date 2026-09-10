@@ -10,7 +10,7 @@ import deriveGame, { IGameSetup } from '../src/scoring/deriveGame';
 import { IScorekeeperFormat } from '../src/scoring/ScorekeeperFormat';
 import { ScoreEvent } from '../src/scoring/ScoreEvents';
 import { event } from './events';
-import { openGameText, chooseGame } from '../src/game/OpenGameDefinition';
+import { openGameText, openGameValue, chooseGame } from '../src/game/OpenGameDefinition';
 import { playerIdentityKey } from '../src/game/GameDefinition';
 import { defineGame, orderCandidates, readQbjSource } from '../src/qbj/ParseQbjAssignment';
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
@@ -893,5 +893,65 @@ describe('definition identity', () => {
     const extension = readQbtcpExtension(match);
     expect(extension?.definitionRevision).toBeUndefined();
     expect(extension?.definitionDigest).toBeUndefined();
+  });
+
+  test('unknown future extension keys never break the assignment open', () => {
+    const { definition } = openOne(
+      assignmentDocument({
+        matches: [
+          definedMatch({
+            definition_revision: 2,
+            definition_digest: 'digest-two',
+            future_rule: 'new-format',
+          }),
+        ],
+      }),
+    );
+
+    expect(definition.definition).toEqual({ revision: 2, digest: 'digest-two' });
+  });
+
+  test('an extension version from the future is ignored, never silently assumed', () => {
+    expect(readQbtcpExtension({ [qbtcpExtensionKey]: { version: 999, round_revision: 1 } })).toBeNull();
+    const opened = openGameValue(
+      assignmentDocument({
+        matches: [
+          matchObject({
+            id: 'Match_sm-4471',
+            left: ninetySix,
+            right: greenwood,
+            qbtcp: { version: 999, round_revision: 1, scorekeeper: { timed: false } },
+          }),
+        ],
+      }),
+    );
+
+    // The unreadable block takes the timed flag down with it, so the game asks instead of
+    // assuming untimed: ignoring the future never becomes a permissive default.
+    expect(opened).toMatchObject({ ok: false, needsScoringRules: true });
+  });
+
+  test('the scorer never re-emits operational keys it does not understand', () => {
+    const { definition } = openOne(
+      assignmentDocument({
+        matches: [
+          definedMatch({
+            definition_revision: 2,
+            definition_digest: 'digest-two',
+            future_rule: 'new-format',
+          }),
+        ],
+      }),
+    );
+    const format = definition.scorekeeperFormat;
+    const game = deriveGame(format, setupFor(definition), representativeEvents(format));
+
+    const match = objectOfType(buildResultDocument({ definition, format, game }), 'Match');
+    const block = (match[qbtcpExtensionKey] ?? {}) as Record<string, unknown>;
+    expect(block).not.toHaveProperty('future_rule');
+    expect(readQbtcpExtension(match)).toMatchObject({
+      definitionRevision: 2,
+      definitionDigest: 'digest-two',
+    });
   });
 });

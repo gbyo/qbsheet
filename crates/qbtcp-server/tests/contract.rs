@@ -12,6 +12,31 @@ use std::time::Duration;
 use tower::ServiceExt;
 
 fn fixture() -> (Arc<QbtcpServer>, Arc<MemoryState>) {
+    fixture_with_assignment(assignment_qbj())
+}
+
+fn assigned(qbj: Value) -> AssignmentState {
+    AssignmentState::Assigned(AssignedAssignment {
+        match_id: "match-1".to_owned(),
+        qbj,
+        round_number: 1,
+        round_name: Some("Round 1".to_owned()),
+        left_team: Some("Northview A".to_owned()),
+        right_team: Some("Riverside A".to_owned()),
+        label: Some("Round 1 · Northview A vs Riverside A".to_owned()),
+        meta: AssignmentMeta {
+            round_revision: Some(1),
+            assignment_revision: Some(1),
+            next: Some(qbtcp_server::AssignmentLabel {
+                label: "Round 2".to_owned(),
+            }),
+            released_round: Some(1),
+            ..AssignmentMeta::default()
+        },
+    })
+}
+
+fn fixture_with_assignment(qbj: Value) -> (Arc<QbtcpServer>, Arc<MemoryState>) {
     let state = Arc::new(MemoryState::new(
         TournamentInfo {
             id: "tournament-1".to_owned(),
@@ -25,27 +50,7 @@ fn fixture() -> (Arc<QbtcpServer>, Arc<MemoryState>) {
             enabled: true,
         }],
     ));
-    state.set_assignment(
-        "room-1",
-        AssignmentState::Assigned(AssignedAssignment {
-            match_id: "match-1".to_owned(),
-            qbj: assignment_qbj(),
-            round_number: 1,
-            round_name: Some("Round 1".to_owned()),
-            left_team: Some("Northview A".to_owned()),
-            right_team: Some("Riverside A".to_owned()),
-            label: Some("Round 1 · Northview A vs Riverside A".to_owned()),
-            meta: AssignmentMeta {
-                round_revision: Some(1),
-                assignment_revision: Some(1),
-                next: Some(qbtcp_server::AssignmentLabel {
-                    label: "Round 2".to_owned(),
-                }),
-                released_round: Some(1),
-                ..AssignmentMeta::default()
-            },
-        }),
-    );
+    state.set_assignment("room-1", assigned(qbj));
 
     let mut config = QbtcpConfig {
         allowed_origins: vec!["https://qbsheet.com".to_owned()],
@@ -85,6 +90,28 @@ impl RuntimeCredentialPersistence for CapturedCredentials {
         *self.0.lock().map_err(|_| "poisoned".to_owned())? = Some(snapshot.clone());
         Ok(())
     }
+}
+
+/// An assignment carrying the definition identity Director pins at issue time (#670).
+fn assignment_qbj_with_definition(revision: u64, digest: &str) -> Value {
+    let mut value = assignment_qbj();
+    value["objects"][2]["_qbtcp"]["definition_revision"] = json!(revision);
+    value["objects"][2]["_qbtcp"]["definition_digest"] = json!(digest);
+    value
+}
+
+/// A result echoing the definition identity the room actually scored under (#670).
+fn result_qbj_with_definition(left_points: u64, revision: u64, digest: &str) -> Value {
+    let mut value = result_qbj(left_points, false);
+    value["objects"][1]["_qbtcp"] = json!({
+        "version": 1,
+        "round_revision": 1,
+        "assignment_revision": 1,
+        "definition_revision": revision,
+        "definition_digest": digest,
+        "room_id": "room-1",
+    });
+    value
 }
 
 fn result_qbj(left_points: u64, extra_transport: bool) -> Value {
@@ -1088,4 +1115,197 @@ fn fixture_with_timeout_and_state(timeout: Duration) -> (Arc<QbtcpServer>, Arc<M
         Arc::new(QbtcpServer::new(state.clone(), config).unwrap()),
         state,
     )
+}
+
+/// POST a QBJ result for a session and return the receipt.
+async fn submit_result(
+    server: &Arc<QbtcpServer>,
+    session_id: &str,
+    token: &str,
+    qbj: Value,
+) -> Value {
+    let path = format!("/qbtcp/v1/sessions/{session_id}/result");
+    let (status, _, receipt) = request(
+        server,
+        Method::POST,
+        &path,
+        &[
+            (SESSION_TOKEN_HEADER, token),
+            ("content-type", qbtcp_server::QBJ_MEDIA_TYPE),
+        ],
+        Some(serde_json::to_vec(&qbj).unwrap()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    receipt
+}
+
+fn warnings_in(receipt: &Value) -> Vec<String> {
+    receipt["warnings"]
+        .as_array()
+        .map(|warnings| {
+            warnings
+                .iter()
+                .filter_map(|warning| warning.as_str().map(ToOwned::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[tokio::test]
+async fn sessions_bind_to_the_issued_definition_identity() {
+    let (server, _) =
+        fixture_with_assignment(assignment_qbj_with_definition(2, "digest-definition-b"));
+    let (_, room_token) = pair(&server, "definition-source").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-definition").await;
+
+    let (status, _, recovery) = request(
+        &server,
+        Method::GET,
+        &format!("/qbtcp/v1/sessions/{session_id}/recovery"),
+        &[(SESSION_TOKEN_HEADER, &token)],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(recovery["definition_revision"], 2);
+    assert_eq!(recovery["definition_digest"], "digest-definition-b");
+}
+
+#[tokio::test]
+async fn a_definition_reissue_starts_a_new_session_and_keeps_the_old_binding() {
+    let (server, state) =
+        fixture_with_assignment(assignment_qbj_with_definition(2, "digest-definition-b"));
+    let (_, room_token) = pair(&server, "reissue-source").await;
+    let (old_session, old_token, _) = open_session(&server, &room_token, "device-reissue").await;
+
+    // Same match and same assignment revision, but a new competitive definition: Director
+    // changed the tournament defaults for future games and reissued this room's game.
+    state.set_assignment(
+        "room-1",
+        assigned(assignment_qbj_with_definition(3, "digest-definition-c")),
+    );
+    let (new_session, _, _) = open_session(&server, &room_token, "device-reissue").await;
+    assert_ne!(new_session, old_session);
+
+    // The old session stays bound to the old definition until it is abandoned, recovered,
+    // or settled — a refresh must never silently replace the truth beneath it.
+    let (status, _, recovery) = request(
+        &server,
+        Method::GET,
+        &format!("/qbtcp/v1/sessions/{old_session}/recovery"),
+        &[(SESSION_TOKEN_HEADER, &old_token)],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(recovery["definition_revision"], 2);
+    assert_eq!(recovery["definition_digest"], "digest-definition-b");
+}
+
+#[tokio::test]
+async fn results_scored_under_a_different_definition_are_reviewable() {
+    let (server, _) =
+        fixture_with_assignment(assignment_qbj_with_definition(2, "digest-definition-b"));
+    let (_, room_token) = pair(&server, "mismatch-source").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-mismatch").await;
+
+    // The exact definition the session is bound to stays auto-processable: the digest
+    // proves equality, so no definition warning is raised.
+    let receipt = submit_result(
+        &server,
+        &session_id,
+        &token,
+        result_qbj_with_definition(120, 2, "digest-definition-b"),
+    )
+    .await;
+    assert_eq!(receipt["review_required"], false);
+    assert!(!warnings_in(&receipt)
+        .iter()
+        .any(|warning| warning.contains("definition")));
+
+    // Same match and assignment identity, but scored under an older retained definition:
+    // never auto-ready, always review-required with the definition vocabulary.
+    let receipt = submit_result(
+        &server,
+        &session_id,
+        &token,
+        result_qbj_with_definition(100, 1, "digest-definition-a"),
+    )
+    .await;
+    assert_eq!(receipt["review_required"], true);
+    let warnings = warnings_in(&receipt);
+    assert!(warnings.contains(&"stale-definition-revision".to_owned()));
+    assert!(warnings.contains(&"definition-mismatch".to_owned()));
+}
+
+#[tokio::test]
+async fn results_missing_definition_identity_are_flagged_never_silent() {
+    let (server, _) =
+        fixture_with_assignment(assignment_qbj_with_definition(2, "digest-definition-b"));
+    let (_, room_token) = pair(&server, "missing-source").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-missing").await;
+
+    // An older scorer that cannot echo the issued identity must not be silently treated
+    // as equivalent to a room enforcing the issued competitive definition.
+    let receipt = submit_result(&server, &session_id, &token, result_qbj(100, false)).await;
+    assert_eq!(receipt["review_required"], true);
+    assert!(warnings_in(&receipt).contains(&"missing-definition-identity".to_owned()));
+}
+
+#[tokio::test]
+async fn legacy_assignments_without_definition_identity_keep_working() {
+    // Assignments cut before definition identity existed carry no identity, and sessions
+    // bound to them must keep matching across reissues exactly as before.
+    let (server, state) = fixture();
+    let (_, room_token) = pair(&server, "legacy-source").await;
+    let (session_id, token, _) = open_session(&server, &room_token, "device-legacy").await;
+
+    state.set_assignment("room-1", assigned(assignment_qbj()));
+    let (adopted, _, _) = open_session(&server, &room_token, "device-legacy").await;
+    assert_eq!(adopted, session_id);
+
+    let receipt = submit_result(&server, &session_id, &token, result_qbj(100, false)).await;
+    assert_eq!(receipt["review_required"], false);
+    assert!(!warnings_in(&receipt)
+        .iter()
+        .any(|warning| warning.contains("definition")));
+}
+
+#[test]
+fn definition_binding_survives_a_same_tournament_restart() {
+    let (server, state) =
+        fixture_with_assignment(assignment_qbj_with_definition(2, "digest-definition-b"));
+    let invitation = server.issue_pairing("room-1").unwrap();
+    let paired = server
+        .pair(
+            &invitation.code,
+            Some("room-1"),
+            "restart-definition-client",
+        )
+        .unwrap();
+    let session = server
+        .open_session(
+            Some(&paired.token),
+            "match-1",
+            Some("device-restart-definition"),
+        )
+        .unwrap();
+    let snapshot = server.credential_snapshot().unwrap();
+    let restored = QbtcpServer::new_with_credentials(
+        state,
+        QbtcpConfig::default(),
+        Some(snapshot),
+        Arc::new(CapturedCredentials::default()),
+    )
+    .unwrap();
+
+    let recovery = restored
+        .recovery(&session.session_id, Some(&session.token))
+        .unwrap();
+    assert_eq!(recovery.definition_revision, Some(2));
+    assert_eq!(
+        recovery.definition_digest.as_deref(),
+        Some("digest-definition-b")
+    );
 }
