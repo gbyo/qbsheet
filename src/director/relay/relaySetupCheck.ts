@@ -19,6 +19,9 @@
  * relay's `(director_epoch, revision)` fencing.
  */
 
+import { scoresheetOrigin } from './relayConfig';
+import { probeNativeRelayScorerOrigin } from './relayNativeProbe';
+
 export type RelaySetupStepKey =
   | 'reachable'
   | 'discovery'
@@ -178,40 +181,95 @@ export async function probeRelayManagement(
   return { key, ok: true, message: 'Management connection confirmed.' };
 }
 
+function headerHasToken(value: string | undefined, token: string): boolean {
+  const wanted = token.toLowerCase();
+  return (
+    value
+      ?.split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .includes(wanted) ?? false
+  );
+}
+
 /**
- * Step 4: the relay accepts the scorer browser origin.
+ * Step 4: the deployed relay accepts the scorer browser's real CORS preflight shape.
  *
- * Director setup runs without an `Origin` header, which the relay deliberately
- * exempts from the allowlist check — so a relay missing `https://qbsheet.com`
- * passes every other step while real scorer browsers get `403 origin_not_allowed`
- * on all credentialed routes. This probe sends the scorer origin without a
- * credential: a refused origin still refuses (proving the bug), while an accepted
- * origin falls through to the expected credential refusal (proving the path).
+ * Production uses a privileged Tauri command because WebView Fetch owns the `Origin` header and
+ * therefore cannot prove which origin it transmitted. Tests may inject fetch explicitly; that
+ * fallback keeps this pure setup module testable without pretending the injected path models a
+ * browser security boundary.
  */
 export async function probeRelayScorerOrigin(
   baseUrl: string,
   tournamentId: string,
-  fetchImpl: typeof fetch = fetch,
-  scorerOrigin = 'https://qbsheet.com',
+  fetchImpl?: typeof fetch,
+  scorerOrigin = scoresheetOrigin,
 ): Promise<RelaySetupStep> {
   const key: RelaySetupStepKey = 'origin';
-  let response: Response;
-  try {
-    response = await fetchImpl(`${manageBase(baseUrl, tournamentId)}/health`, {
-      headers: { origin: scorerOrigin },
-    });
-  } catch {
-    return { key, ok: false, message: 'The scorer-origin check could not be reached.' };
+
+  if (fetchImpl) {
+    let response: Response;
+    try {
+      response = await fetchImpl(`${manageBase(baseUrl, tournamentId)}/health`, {
+        headers: { origin: scorerOrigin },
+      });
+    } catch {
+      return { key, ok: false, message: 'The scorer-origin check could not be reached.' };
+    }
+    const body = (await readJsonSafe(response)) as { error?: string } | null;
+    if (response.status === 403 && body?.error === 'origin_not_allowed') {
+      return {
+        key,
+        ok: false,
+        message: `The relay refuses browser origin ${scorerOrigin}. Add it to RELAY_ALLOWED_ORIGINS and re-run setup.`,
+      };
+    }
+    return { key, ok: true, message: 'Scorer browser origin accepted.' };
   }
-  const body = (await readJsonSafe(response)) as { error?: string } | null;
-  if (response.status === 403 && body?.error === 'origin_not_allowed') {
+
+  let response;
+  try {
+    response = await probeNativeRelayScorerOrigin(baseUrl, tournamentId);
+  } catch {
+    return { key, ok: false, message: 'The scorer browser preflight could not be completed.' };
+  }
+  if (!response) {
     return {
       key,
       ok: false,
-      message: `The relay refuses browser origin ${scorerOrigin}. Add it to RELAY_ALLOWED_ORIGINS and re-run setup.`,
+      message: 'Open the Director desktop app to verify the scorer browser origin before using Internet QBTCP.',
     };
   }
-  return { key, ok: true, message: 'Scorer browser origin accepted.' };
+  if (response.status !== 204) {
+    return {
+      key,
+      ok: false,
+      message:
+        response.status === 403
+          ? `The relay refuses browser origin ${scorerOrigin}. Add it to RELAY_ALLOWED_ORIGINS and re-run setup.`
+          : `The scorer browser preflight failed (${response.status}).`,
+    };
+  }
+  if (response.allowOrigin !== scorerOrigin) {
+    return {
+      key,
+      ok: false,
+      message: `The relay did not authorize browser origin ${scorerOrigin}. Check RELAY_ALLOWED_ORIGINS and re-run setup.`,
+    };
+  }
+  if (!headerHasToken(response.allowMethods, 'POST')) {
+    return { key, ok: false, message: 'The relay preflight does not allow scorer POST requests.' };
+  }
+  for (const header of ['content-type', 'x-yf-room-token', 'x-yf-device-id']) {
+    if (!headerHasToken(response.allowHeaders, header)) {
+      return {
+        key,
+        ok: false,
+        message: `The relay preflight does not allow the scorer header ${header}.`,
+      };
+    }
+  }
+  return { key, ok: true, message: 'Scorer browser preflight confirmed.' };
 }
 
 export interface SetupMirrorDocument {
@@ -348,7 +406,11 @@ export async function runRelaySetupValidation(input: RelaySetupValidationInput):
   steps.push(management);
   if (!management.ok) return { ready: false, steps };
 
-  const origin = await probeRelayScorerOrigin(input.baseUrl, input.tournamentId, doFetch);
+  const origin = await probeRelayScorerOrigin(
+    input.baseUrl,
+    input.tournamentId,
+    input.fetchImpl,
+  );
   steps.push(origin);
   if (!origin.ok) return { ready: false, steps };
 
