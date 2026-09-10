@@ -1580,8 +1580,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -1600,8 +1600,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -1619,8 +1619,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -1639,8 +1639,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2263,8 +2263,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2283,8 +2283,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2302,8 +2302,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -2322,8 +2322,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2946,8 +2946,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2966,8 +2966,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2985,8 +2985,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -3005,8 +3005,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
