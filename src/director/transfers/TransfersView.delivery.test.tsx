@@ -353,7 +353,9 @@ describe('Delivery selection freshness (#756)', () => {
 
     // The Round 1 rows are gone, so nothing may still claim their selection.
     expect(screen.queryByRole('button', { name: 'Prepare 1 file' })).toBeNull();
-    expect((screen.getByRole('button', { name: 'Prepare 0 files' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Prepare 0 files' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(transfers.prepareTo).not.toHaveBeenCalled();
   });
 
