@@ -1617,14 +1617,17 @@ mod relay_tests {
     #[test]
     fn relay_and_live_credentials_are_independent_states() {
         let relay = RelayCredentials::with_store(Box::new(MemoryCredentialStore::default()));
-        let live = LiveCredentials::with_store(Box::new(crate::live::MemoryCredentialStore::default()));
+        let live =
+            LiveCredentials::with_store(Box::new(crate::live::MemoryCredentialStore::default()));
         relay
             .store
             .store("bcdfghjkmnpqrstvwxyz1234", "relay-token")
             .expect("store relay");
         // Forgetting the live credential cannot touch the relay one: different state, different
         // keychain service.
-        live.store.forget("bcdfghjkmnpqrstvwxyz1234").expect("forget live");
+        live.store
+            .forget("bcdfghjkmnpqrstvwxyz1234")
+            .expect("forget live");
         assert_eq!(
             relay
                 .store

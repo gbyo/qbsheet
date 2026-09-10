@@ -174,7 +174,10 @@ mod tests {
             "bcdfghjkmnpqrstvwxyz123!",
             "../etc/../etc/../etc/..",
         ] {
-            assert!(!is_tournament_id(bad), "{bad:?} must not name a keychain entry");
+            assert!(
+                !is_tournament_id(bad),
+                "{bad:?} must not name a keychain entry"
+            );
         }
     }
 
@@ -193,7 +196,9 @@ mod tests {
         // A restart over the same store keeps the secret: clone shares the map.
         let after_restart = store.clone();
         assert_eq!(
-            after_restart.read("bcdfghjkmnpqrstvwxyz1234").expect("read"),
+            after_restart
+                .read("bcdfghjkmnpqrstvwxyz1234")
+                .expect("read"),
             Some("management-credential".to_string())
         );
         after_restart
