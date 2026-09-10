@@ -85,6 +85,10 @@ export interface IQbtcpEndpoints {
 export function normalizeEndpoint(input: string): { ok: true; value: string } | { ok: false } {
   const trimmed = input.trim();
   if (trimmed === '') return { ok: false };
+  // A non-HTTP scheme must be refused, not prefixed into a mangled http URL.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    return { ok: false };
+  }
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   let url: URL;
   try {
@@ -141,8 +145,7 @@ export function transportForContractState(
   lanActive: boolean,
 ): QbtcpTransport {
   if (state === 'offline-local') return { kind: 'none' };
-  if (state === 'stream-live' && !lanActive)
-    return { kind: 'internet-stream', endpoint: endpoints.primary };
+  if (state === 'stream-live' && !lanActive) return { kind: 'internet-stream', endpoint: endpoints.primary };
   if (lanActive && endpoints.lan) return { kind: 'lan', endpoint: endpoints.lan };
   return { kind: 'internet-http', endpoint: endpoints.primary };
 }
@@ -155,9 +158,7 @@ export function transportForContractState(
  * including while degraded, when a push may have been missed.
  */
 export function selectTransportPollIntervalMs(transport: QbtcpTransport): number {
-  return transport.kind === 'internet-stream'
-    ? STREAM_HEALTHY_POLL_INTERVAL_MS
-    : STANDARD_POLL_INTERVAL_MS;
+  return transport.kind === 'internet-stream' ? STREAM_HEALTHY_POLL_INTERVAL_MS : STANDARD_POLL_INTERVAL_MS;
 }
 
 export { STANDARD_POLL_INTERVAL_MS, STREAM_HEALTHY_POLL_INTERVAL_MS };
