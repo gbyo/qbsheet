@@ -19,6 +19,21 @@ export interface GameTeamStatsRow {
   bonusPoints: number | null;
   ppb: number | null;
   bouncebacks: number | null;
+  /** Lightning points for this team-game; null when the result lacks the breakdown. */
+  lightningPoints: number | null;
+  /**
+   * Bounceback parts heard off this game's opponent (canonical #748 arithmetic,
+   * resolved by the adapter under the game's own definition). Null when the
+   * opponent bonus detail is missing or the game's bonuses are irregular — never
+   * a fabricated zero.
+   */
+  bouncebackPartsHeard: number | null;
+  /** Bounceback parts converted off this game's opponent; null under the same conditions. */
+  bouncebackPartsConverted: number | null;
+  /** Own converted bonus parts in this game; null when detail or regularity is missing. */
+  bonusPartsConverted: number | null;
+  /** Own bonus parts heard in this game; null when detail or regularity is missing. */
+  bonusPartsHeard: number | null;
 }
 
 /**

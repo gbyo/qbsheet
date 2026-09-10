@@ -108,6 +108,26 @@ export function reportNumberCell(value: number | null | undefined, digits?: numb
   return `<td class="num">${digits === undefined ? String(value) : value.toFixed(digits)}</td>`;
 }
 
+/**
+ * Fractional games played as Director renders it: whole games stay whole, partial
+ * games round to two decimals. Callers gate unknown GP to null first; this shapes
+ * known values only, so every printable page shares one GP vocabulary (#746).
+ */
+export function reportGamesPlayedCell(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return `<td class="num">${reportUnknown}</td>`;
+  return `<td class="num">${Number.isInteger(value) ? String(value) : value.toFixed(2)}</td>`;
+}
+
+/**
+ * Tri-state eligibility cells (#749): an explicit Yes/No never masquerades unknown
+ * metadata as a claim, and unknown never renders as a negative.
+ */
+export function reportEligibilityCell(value: boolean | null | undefined): string {
+  if (value === true) return '<td class="num">Yes</td>';
+  if (value === false) return '<td class="num">No</td>';
+  return `<td class="num">${reportUnknown}</td>`;
+}
+
 export function reportAnswerHeaders(presentation: ReportPresentation): string {
   return presentation.answerColumns
     .map((column) => {

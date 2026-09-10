@@ -1,5 +1,5 @@
 import type { GamePlayerStatsRow, GameTeamStatsRow } from './reportDetail.js';
-import { reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
+import { reportPercent, reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
 import {
   buildStatReportBundle,
   type GameStatsRow,
@@ -35,7 +35,9 @@ function detailKnown(team: GameTeamStatsRow | undefined): boolean {
       team.bonusesHeard,
       team.bonusPoints,
       team.bouncebacks,
-    ].some((value) => value !== null),
+      team.lightningPoints,
+      // A known number is detail; an omitted field (legacy/imported rows) is not.
+    ].some((value) => typeof value === 'number'),
   );
 }
 
@@ -57,12 +59,29 @@ function teamBox(game: GameStatsRow, team: GameTeamStatsRow, presentation: Repor
     players.length > 0
       ? playerRows(players, presentation)
       : `<tr><td colspan="${columns}" class="meta">Player-level statistics unavailable.</td></tr>`;
+  const partsHeard = typeof team.bouncebackPartsHeard === 'number' ? team.bouncebackPartsHeard : null;
+  const partsConverted =
+    typeof team.bouncebackPartsConverted === 'number' ? team.bouncebackPartsConverted : null;
+  const bouncebackSummary =
+    presentation.applicability.bonuses && presentation.applicability.bouncebacks
+      ? `${typeof team.bouncebacks === 'number' ? `<span>Bounceback points: <strong>${team.bouncebacks}</strong></span>` : ''}` +
+        `${partsHeard !== null ? `<span>Bounceback parts heard: <strong>${partsHeard}</strong></span>` : ''}` +
+        `${
+          partsHeard !== null && partsConverted !== null && partsHeard > 0
+            ? `<span>BB %: <strong>${reportPercent(partsConverted / partsHeard, 1)}</strong></span>`
+            : ''
+        }`
+      : '';
+  const lightningSummary =
+    typeof team.lightningPoints === 'number'
+      ? `<span>Lightning points: <strong>${team.lightningPoints}</strong></span>`
+      : '';
   const bonusSummary = presentation.applicability.bonuses
     ? `<div class="bonus-summary"><span>Bonuses heard: <strong>${reportEscape(team.bonusesHeard ?? '—')}</strong></span>` +
       `<span>Bonus points: <strong>${reportEscape(team.bonusPoints ?? '—')}</strong></span>` +
       `<span>PPB: <strong>${typeof team.ppb === 'number' ? team.ppb.toFixed(presentation.precision.ppb) : '—'}</strong></span>` +
-      `${presentation.applicability.bouncebacks && team.bouncebacks !== null ? `<span>Bounceback points: <strong>${team.bouncebacks}</strong></span>` : ''}</div>`
-    : '';
+      `${bouncebackSummary}${lightningSummary}</div>`
+    : `${lightningSummary ? `<div class="bonus-summary">${lightningSummary}</div>` : ''}`;
 
   return (
     `<section class="team-box" aria-label="${reportEscape(team.teamName)} box score"><h3>${reportEscape(team.teamName)}</h3>` +

@@ -64,6 +64,21 @@ export interface TeamStatsRow {
   bouncebackPoints: number;
   /** False when any contributing result lacked a bounceback breakdown. */
   bouncebacksKnown: boolean;
+  /**
+   * Bounceback parts heard (opponents' unconverted bonus value in parts, #748).
+   * Null when any contributing game lacks the opponent bonus detail or the
+   * regular rules the denominator requires; never a fabricated zero.
+   */
+  bouncebackPartsHeard: number | null;
+  /** Bounceback parts converted; null when any contributing breakdown is unknown. */
+  bouncebackPartsConverted: number | null;
+  /** Bounceback conversion as a fraction of parts heard; null unless parts are known and heard. */
+  bouncebackConversion: number | null;
+  /**
+   * Total bonus conversion as a fraction (own plus bounceback converted parts over
+   * own plus bounceback parts heard); null unless every part is known.
+   */
+  totalBonusConversion: number | null;
   /** Sum of known per-game lightning points; null when any game lacked the breakdown. */
   lightningPoints: number | null;
   /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
@@ -319,6 +334,14 @@ function rankRows<T>(rows: T[], compare: (left: T, right: T) => number): T[] {
     .map((row, index) => ({ ...row, rank: index + 1 }));
 }
 
+/** Null rate (unknown or zero denominator) sorts after every known rate. */
+function comparePlayerRate(left: number | null, right: number | null): number {
+  if (left !== null && right !== null) return right - left;
+  if (left !== null) return -1;
+  if (right !== null) return 1;
+  return 0;
+}
+
 function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
   const tossups =
@@ -394,6 +417,13 @@ export function buildStatsSnapshot(
       bonusesHeard: 0,
       bouncebackPoints: 0,
       bouncebacksKnown: true,
+      // The interchange snapshot declines parts derivation: it cannot prove
+      // per-game bonus regularity, and the canonical adapter is the parity path
+      // that fills these from the domain engine (#748, #751).
+      bouncebackPartsHeard: null,
+      bouncebackPartsConverted: null,
+      bouncebackConversion: null,
+      totalBonusConversion: null,
       lightningPoints: 0,
       lightningKnown: true,
     };
@@ -556,13 +586,14 @@ export function buildStatsSnapshot(
   const teams = rankRows([...teamStats.values()].map(teamRow), (left, right) =>
     compareTeams(left, right, tiebreakers),
   );
+  // YellowFruit parity (#751): individuals order by PPTUH descending with unknown
+  // rates last, matching the canonical domain engine; powers then player id break ties.
   const players = rankRows(
     [...playerStats.values()].map(playerRow),
     (left, right) =>
-      (right.ppg ?? Number.NEGATIVE_INFINITY) - (left.ppg ?? Number.NEGATIVE_INFINITY) ||
+      comparePlayerRate(left.pptuh, right.pptuh) ||
       right.powers - left.powers ||
-      right.gets - left.gets ||
-      left.playerName.localeCompare(right.playerName),
+      left.playerId.localeCompare(right.playerId),
   );
   return ok(
     {
@@ -609,11 +640,17 @@ const teamStatHeaders = [
   'gets',
   'negs',
   'tossups_heard',
+  'tossups_heard_regulation',
   'pptuh',
   'bonus_points',
   'bonuses_heard',
   'ppb',
   'bounceback_points',
+  'bounceback_parts_heard',
+  'bounceback_parts_converted',
+  'bounceback_conversion_pct',
+  'total_bonus_conversion_pct',
+  'lightning_points',
 ] as const;
 
 const playerStatHeaders = [
@@ -680,11 +717,17 @@ export function exportTeamStandingsCsv(snapshot: StatsSnapshot): string {
       row.gets,
       row.negs,
       row.tossupsHeardKnown ? row.tossupsHeard : null,
+      row.tossupsHeardRegulation,
       row.pptuh,
       row.bonusPoints,
       row.bonusesHeard,
       row.ppb,
       row.bouncebacksKnown ? row.bouncebackPoints : null,
+      row.bouncebackPartsHeard,
+      row.bouncebackPartsConverted,
+      row.bouncebackConversion !== null ? `${(row.bouncebackConversion * 100).toFixed(1)}%` : null,
+      row.totalBonusConversion !== null ? `${(row.totalBonusConversion * 100).toFixed(1)}%` : null,
+      row.lightningKnown ? row.lightningPoints : null,
     ]),
   );
 }

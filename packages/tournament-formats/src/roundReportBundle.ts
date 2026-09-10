@@ -82,6 +82,13 @@ function metricHeaders(report: RoundStatsReport): string {
     (report.showBonusConversion
       ? '<th scope="col" class="num"><abbr title="Bonus points divided by the maximum possible points on the bonuses heard, using each game’s own bonus definition.">Bonus Conv %</abbr></th>'
       : '') +
+    (report.showBouncebacks
+      ? '<th scope="col" class="num"><abbr title="Bounceback parts converted divided by bounceback parts heard.">BB %</abbr></th>' +
+        '<th scope="col" class="num"><abbr title="Own plus bounceback converted parts divided by own plus bounceback parts heard.">Total Bonus %</abbr></th>'
+      : '') +
+    (report.showLightning
+      ? '<th scope="col" class="num"><abbr title="Lightning points per team per game.">Lightning/G</abbr></th>'
+      : '') +
     (report.rows.some((row) => row.packetName !== null) ? '<th scope="col">Packet</th>' : '')
   );
 }
@@ -98,6 +105,10 @@ function statsCells(row: RoundReportRow, report: RoundStatsReport): string {
     numberCell(row.negRatePerXTuh, 2) +
     (report.showBonuses ? numberCell(row.ppb, 2) : '') +
     (report.showBonusConversion ? percentCell(row.bonusConversionRate) : '') +
+    (report.showBouncebacks
+      ? percentCell(row.bouncebackConversion) + percentCell(row.totalBonusConversion)
+      : '') +
+    (report.showLightning ? numberCell(row.lightningRate, 1) : '') +
     (report.rows.some((entry) => entry.packetName !== null) ? packetCell(row) : '')
   );
 }
@@ -115,6 +126,10 @@ function totalCells(report: RoundStatsReport): string {
     numberCell(row.negRatePerXTuh, 2) +
     (report.showBonuses ? numberCell(row.ppb, 2) : '') +
     (report.showBonusConversion ? percentCell(row.bonusConversionRate) : '') +
+    (report.showBouncebacks
+      ? percentCell(row.bouncebackConversion) + percentCell(row.totalBonusConversion)
+      : '') +
+    (report.showLightning ? numberCell(row.lightningRate, 1) : '') +
     (report.rows.some((entry) => entry.packetName !== null) ? '<td>—</td>' : '')
   );
 }

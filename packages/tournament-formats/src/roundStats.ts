@@ -53,6 +53,24 @@ export interface RoundReportRow {
   ppb: number | null;
   /** Bonus points divided by the maximum possible points on bonuses heard. */
   bonusConversionRate: number | null;
+  /**
+   * Bounceback parts heard in the row (opponents' unconverted bonus value, #748).
+   * Null unless every competitively played game supplies both sides' parts.
+   */
+  bouncebackPartsHeard: number | null;
+  /** Bounceback parts converted in the row; null under the same conditions. */
+  bouncebackPartsConverted: number | null;
+  /** Bounceback conversion as a fraction of parts heard; null unless parts are known and heard. */
+  bouncebackConversion: number | null;
+  /**
+   * Total bonus conversion as a fraction (own plus bounceback converted parts over
+   * own plus bounceback parts heard); null unless every part is known.
+   */
+  totalBonusConversion: number | null;
+  /** Sum of known per-game lightning points; null when any included game lacks the breakdown. */
+  lightningPoints: number | null;
+  /** Lightning points per team per game; null unless the total is known and games exist. */
+  lightningRate: number | null;
   /** Games whose detailed tossup/bonus counts are complete enough for ratio work. */
   detailGames: number;
   /** Pure forfeits retained as results but excluded from scoring denominators. */
@@ -70,6 +88,10 @@ export interface RoundStatsReport {
   showPowers: boolean;
   showBonuses: boolean;
   showBonusConversion: boolean;
+  /** True when some row computes bounceback parts (own plus opponent detail present). */
+  showBouncebacks: boolean;
+  /** True when some row carries known lightning points. */
+  showLightning: boolean;
   hasMixedRegulation: boolean;
 }
 
@@ -329,6 +351,37 @@ function aggregate(
       ? bonusPoints / maximumBonusPoints
       : null;
 
+  // Bounceback/total-bonus parts come precomputed per team-game from the canonical
+  // adapter under each game's own definition; the aggregate only sums them (#748).
+  // A single uncomputable side unknowns the whole row, never a known-subset value.
+  const bouncebackPartsHeard = sumKnown(played, (team) => team.bouncebackPartsHeard);
+  const bouncebackPartsConverted = sumKnown(played, (team) => team.bouncebackPartsConverted);
+  const bonusPartsHeard = sumKnown(played, (team) => team.bonusPartsHeard);
+  const bonusPartsConverted = sumKnown(played, (team) => team.bonusPartsConverted);
+  const bouncebackConversion =
+    bouncebackPartsHeard !== null && bouncebackPartsHeard > 0 && bouncebackPartsConverted !== null
+      ? bouncebackPartsConverted / bouncebackPartsHeard
+      : null;
+  const totalBonusConversion =
+    bonusPartsHeard !== null &&
+    bonusPartsConverted !== null &&
+    bouncebackPartsHeard !== null &&
+    bouncebackPartsConverted !== null &&
+    bonusPartsHeard + bouncebackPartsHeard > 0
+      ? (bonusPartsConverted + bouncebackPartsConverted) / (bonusPartsHeard + bouncebackPartsHeard)
+      : null;
+  const partsPresent = played.some((game) => {
+    const teams = allKnownTeamStats(game);
+    return teams !== null && teams.every((team) => finite(team.bouncebackPartsHeard));
+  });
+  const lightningPoints = sumKnown(played, (team) => team.lightningPoints);
+  const lightningRate =
+    lightningPoints !== null && played.length > 0 ? lightningPoints / (played.length * 2) : null;
+  const lightningPresent = played.some((game) => {
+    const teams = allKnownTeamStats(game);
+    return teams !== null && teams.every((team) => finite(team.lightningPoints));
+  });
+
   let normalizedPointsSum: number | null = regulationTossups === null || played.length === 0 ? null : 0;
   if (normalizedPointsSum !== null && regulationTossups !== null) {
     for (let index = 0; index < played.length; index += 1) {
@@ -387,6 +440,8 @@ function aggregate(
     ...(hasSuperpowers ? [superpowerRate] : []),
     ...(hasBonuses ? [ppb] : []),
     ...(bonusConversionApplicable ? [bonusConversionRate] : []),
+    ...(partsPresent ? [bouncebackConversion, totalBonusConversion] : []),
+    ...(lightningPresent ? [lightningRate] : []),
   ];
   const partial =
     excludedForfeits > 0 ||
@@ -414,6 +469,12 @@ function aggregate(
       negRatePerXTuh,
       ppb,
       bonusConversionRate,
+      bouncebackPartsHeard,
+      bouncebackPartsConverted,
+      bouncebackConversion,
+      totalBonusConversion,
+      lightningPoints,
+      lightningRate,
       detailGames,
       excludedForfeits,
       partial,
@@ -437,6 +498,11 @@ function aggregate(
  * - Negs/X: negs / tossups read * regulation X.
  * - PPB: total bonus points / total bonuses heard.
  * - Bonus Conv %: total bonus points / sum(BH * that game's max bonus score).
+ * - BB %: bounceback parts converted / parts heard, summed from the adapter's
+ *   per-team-game parts (#748); null unless every included side is computable.
+ * - Total Bonus %: (own + bounceback converted parts) / (own + bounceback parts
+ *   heard) under the same whole-row knownness.
+ * - Lightning: summed known lightning points; rate is points per team per game.
  *
  * Any metric whose required denominator/detail is missing for one included game
  * is null for the whole row. The overall row runs these same formulas across
@@ -454,6 +520,7 @@ export function deriveRoundStats(games: readonly GameStatsRow[]): RoundStatsRepo
     aggregates.map(({ row }) => row.phaseId).filter((value): value is string => Boolean(value)),
   );
 
+  const allRows = [...aggregates.map(({ row }) => row), total.row];
   return {
     rows: aggregates.map(({ row }) => row),
     total: total.row,
@@ -463,6 +530,8 @@ export function deriveRoundStats(games: readonly GameStatsRow[]): RoundStatsRepo
     showBonuses: aggregates.some((value) => value.hasBonuses) || total.hasBonuses,
     showBonusConversion:
       aggregates.some((value) => value.bonusConversionApplicable) || total.bonusConversionApplicable,
+    showBouncebacks: allRows.some((row) => row.bouncebackPartsHeard !== null),
+    showLightning: allRows.some((row) => row.lightningPoints !== null),
     hasMixedRegulation:
       total.row.regulationTossups === null && aggregates.some(({ row }) => row.regulationTossups !== null),
   };

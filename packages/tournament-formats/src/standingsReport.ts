@@ -95,19 +95,20 @@ function advancementText(cell: StandingsAdvancementCell | undefined): string {
   return 'Did not advance';
 }
 
-function resultLine(game: StandingsContextGame): string {
+function resultLine(game: StandingsContextGame, gamesIncluded: boolean): string {
   const left = game.teamOnePoints === undefined ? '—' : String(game.teamOnePoints);
   const right = game.teamTwoPoints === undefined ? '—' : String(game.teamTwoPoints);
   const forfeit = game.forfeitedTeamName ? ` · ${escapeHtml(game.forfeitedTeamName)} forfeited` : '';
+  const result = `${escapeHtml(game.teamOneName)} ${left}–${right} ${escapeHtml(game.teamTwoName)}`;
   return (
     `<li><strong>${escapeHtml(game.label)}</strong>${game.roundName ? ` · ${escapeHtml(game.roundName)}` : ''}: ` +
-    `<a href="games.html#${standingsGameAnchor(game.gameId)}">${escapeHtml(game.teamOneName)} ${left}–${right} ${escapeHtml(game.teamTwoName)}</a>${forfeit}</li>`
+    `${gamesIncluded ? `<a href="games.html#${standingsGameAnchor(game.gameId)}">${result}</a>` : result}${forfeit}</li>`
   );
 }
 
-function contextBlock(title: string, games: readonly StandingsContextGame[]): string {
+function contextBlock(title: string, games: readonly StandingsContextGame[], gamesIncluded: boolean): string {
   if (games.length === 0) return '';
-  return `<div class="context"><h3>${escapeHtml(title)}</h3><ul>${games.map(resultLine).join('')}</ul></div>`;
+  return `<div class="context"><h3>${escapeHtml(title)}</h3><ul>${games.map((game) => resultLine(game, gamesIncluded)).join('')}</ul></div>`;
 }
 
 /**
@@ -134,6 +135,7 @@ function legacyAnswerHeaders(showSuperpowers: boolean): string {
 
 function sectionTable(report: CanonicalStandingsReport, section: StandingsReportSection): string {
   const presentation = report.presentation;
+  const teamDetailIncluded = presentation?.options.pages.includes('teamDetail') ?? true;
   const showCalculated = section.teams.some(
     (row) => row.calculatedRank !== undefined && row.calculatedRank !== row.rank,
   );
@@ -141,7 +143,18 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
   // Bounceback points appear only when some team actually converted them: an unknown
   // breakdown (manual/imported results) renders "—", never a fabricated zero (#748).
   const showBouncebacks = section.teams.some((row) => row.bouncebacksKnown && row.bouncebackPoints > 0);
+  // Parts-derived rates and lightning appear when some row computes them; unknown rows
+  // render "—" under the same gates (#748, #751).
+  // A known number computes the column; an omitted field (legacy/imported rows)
+  // never flips it on by itself.
+  const showBouncebackParts = section.teams.some((row) => typeof row.bouncebackPartsHeard === 'number');
+  const showLightning = section.teams.some((row) => typeof row.lightningPoints === 'number');
   const showAdvancement = section.advancement !== undefined;
+  const rankCounts = new Map<number, number>();
+  for (const row of section.teams) {
+    const displayRank = report.displayRanks?.[`${section.id}:${row.teamId}`] ?? row.rank;
+    rankCounts.set(displayRank, (rankCounts.get(displayRank) ?? 0) + 1);
+  }
   // Without a presentation contract the table keeps its legacy fixed vocabulary; with one,
   // PF/PA/Margin follow the shared report option and tiers/metric follow the schema (#751).
   const showExtras = presentation ? presentation.options.showPointsForAgainstMargin : true;
@@ -156,10 +169,15 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
   const rows = section.teams
     .map((row) => {
       const displayRank = report.displayRanks?.[`${section.id}:${row.teamId}`] ?? row.rank;
+      const tied = (rankCounts.get(displayRank) ?? 0) > 1;
+      const teamName = escapeHtml(row.teamName);
+      const teamCell = teamDetailIncluded
+        ? `<a href="teamdetail.html#${reportTeamAnchor(row)}">${teamName}</a>`
+        : teamName;
       return (
-        `<tr><td class="num">${displayRank}</td>` +
+        `<tr><td class="num"${tied ? ' title="Tied rank"' : ''}>${displayRank}${tied ? '=' : ''}</td>` +
         `${showCalculated ? `<td class="num">${row.calculatedRank ?? ''}</td>` : ''}` +
-        `<td><a href="teamdetail.html#${reportTeamAnchor(row)}">${escapeHtml(row.teamName)}</a></td>` +
+        `<td>${teamCell}</td>` +
         `${showClassifications ? `<td>${escapeHtml((row.classifications ?? []).join('; ') || '—')}</td>` : ''}` +
         `<td class="num">${escapeHtml(recordText(row))}</td><td class="num">${reportPercent(row.winPercentage, 1)}</td>` +
         `${showExtras ? `<td class="num">${row.pointsFor}</td><td class="num">${row.pointsAgainst}</td><td class="num">${row.margin}</td>` : ''}` +
@@ -169,6 +187,8 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
         `<td class="num">${reportNumber(row.pptuh, 2)}</td>` +
         `<td class="num">${reportNumber(row.ppb, 2)}</td>` +
         `${showBouncebacks ? `<td class="num">${row.bouncebacksKnown ? row.bouncebackPoints : '—'}</td>` : ''}` +
+        `${showBouncebackParts ? `<td class="num">${reportNumber(row.bouncebackPartsHeard, 0)}</td><td class="num">${reportPercent(row.bouncebackConversion, 1)}</td><td class="num">${reportPercent(row.totalBonusConversion, 1)}</td>` : ''}` +
+        `${showLightning ? `<td class="num">${reportNumber(row.lightningPoints, 0)}</td>` : ''}` +
         `${showAdvancement ? `<td>${escapeHtml(advancementText(section.advancement?.[row.teamId]))}</td>` : ''}</tr>`
       );
     })
@@ -183,6 +203,8 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
     `${presentation ? reportAnswerHeaders(presentation) : legacyAnswerHeaders(showSuperpowers)}` +
     `<th scope="col" class="num">TUH</th><th scope="col" class="num">PPTUH</th><th scope="col" class="num">PPB</th>` +
     `${showBouncebacks ? '<th scope="col" class="num">BB</th>' : ''}` +
+    `${showBouncebackParts ? '<th scope="col" class="num">BB heard</th><th scope="col" class="num">BB %</th><th scope="col" class="num">Total bonus</th>' : ''}` +
+    `${showLightning ? '<th scope="col" class="num">Lightning</th>' : ''}` +
     `${showAdvancement ? '<th scope="col">Advancement</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`
   );
 }
@@ -191,9 +213,13 @@ function renderSection(report: CanonicalStandingsReport, section: StandingsRepor
   const carryover = section.carryover
     ? '<p class="meta">Includes canonical prior-stage carryover games for this field; each physical game is counted once.</p>'
     : '';
+  // Omitted pages produce no dead links: context results render as text when games.html is out.
+  const gamesIncluded = report.presentation?.options.pages.includes('games') ?? true;
   const finalContext =
-    section.kind === 'final' ? contextBlock('Finals & placement results', report.finalResults ?? []) : '';
-  const tiebreakers = contextBlock('Tiebreaker results', section.contextGames ?? []);
+    section.kind === 'final'
+      ? contextBlock('Finals & placement results', report.finalResults ?? [], gamesIncluded)
+      : '';
+  const tiebreakers = contextBlock('Tiebreaker results', section.contextGames ?? [], gamesIncluded);
   return (
     `<section id="${escapeHtml(section.id)}"><h2>${escapeHtml(section.title)}</h2>` +
     `<p class="meta">Scope: ${escapeHtml(section.scopeLabel)} · ${section.teams.length} teams</p>${carryover}` +

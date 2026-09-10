@@ -224,6 +224,52 @@ describe('stage-aware standings report HTML', () => {
     expect(html).toContain('<th scope="col" class="num">PPG</th>');
   });
 
+  test('bounceback-parts and lightning columns render canonical rates when computed', () => {
+    const scoped = presentedReport(
+      buildReportPresentation({
+        metadata: {
+          tournamentName: 'T',
+          scopeLabel: 'Overall',
+          generatedAt: '2026-09-09T20:00:00.000Z',
+        },
+        definitions: [{ ...standardDefinition, bouncebacks: true, lightning: true }],
+        capabilities: { bouncebacksRecorded: true, lightningRecorded: true },
+      }),
+    );
+    scoped.sections[0]!.teams = scoped.sections[0]!.teams.map((row) => ({
+      ...row,
+      bouncebackPoints: 30,
+      bouncebacksKnown: true,
+      bouncebackPartsHeard: 6,
+      bouncebackPartsConverted: 3,
+      bouncebackConversion: 0.5,
+      totalBonusConversion: 0.75,
+      lightningPoints: 40,
+      lightningKnown: true,
+    }));
+    const html = renderStageAwareStandingsReport(scoped);
+
+    expect(html).toContain('<th scope="col" class="num">BB heard</th>');
+    expect(html).toContain('<th scope="col" class="num">BB %</th>');
+    expect(html).toContain('<th scope="col" class="num">Total bonus</th>');
+    expect(html).toContain('<th scope="col" class="num">Lightning</th>');
+    expect(html).toContain('<td class="num">6</td>');
+    expect(html).toContain('<td class="num">50.0%</td>');
+    expect(html).toContain('<td class="num">75.0%</td>');
+    expect(html).toContain('<td class="num">40</td>');
+  });
+
+  test('omitted parts/lightning fields never flip those columns on by themselves', () => {
+    // Legacy/imported rows carry no parts or lightning properties at all: the
+    // columns stay out instead of rendering a table of em dashes.
+    const html = renderStageAwareStandingsReport(report());
+
+    expect(html).not.toContain('BB heard');
+    expect(html).not.toContain('BB %');
+    expect(html).not.toContain('Total bonus');
+    expect(html).not.toContain('Lightning');
+  });
+
   test('adds one stable anchor to each legacy games-table row', () => {
     const page =
       '<html><body><table><tbody><tr><td>one</td></tr><tr><td>two</td></tr></tbody></table></body></html>';

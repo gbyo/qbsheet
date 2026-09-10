@@ -12,15 +12,20 @@
 import {
   acceptedGameRecords,
   applyFinalPlacement,
+  bonusPartsAreRegular,
+  bouncebackPartsHeardForTeam,
+  defaultRules,
   derivePlayerStandings,
   deriveTeamStandings,
   gameDetailedCountsKnown,
   orderDayItems,
   playerHasAppearance,
   playerPoints,
+  rulesForGame,
   scoringValuesForGameRecord,
   type DirectorState,
   type GameRecord,
+  type TeamGameScore,
 } from '../domain';
 import {
   deriveRoundStats,
@@ -165,6 +170,41 @@ function historicalGameDefinition(game: GameRecord): HistoricalGameDefinition {
 }
 
 /**
+ * Per-team per-game bonus parts under the game's own historical definition
+ * (#748, #751). The adapter resolves the definition once per game through the
+ * domain engine; formats code only sums these facts, never re-derives them.
+ * Every field is null when the game's detail is missing, its bonuses are
+ * irregular, or its bounceback breakdown is unknown — never a fabricated zero.
+ */
+function teamGameParts(
+  state: DirectorState,
+  game: GameRecord,
+  own: TeamGameScore,
+  opponent: TeamGameScore | undefined,
+): Pick<
+  GameTeamStatsRow,
+  'bouncebackPartsHeard' | 'bouncebackPartsConverted' | 'bonusPartsConverted' | 'bonusPartsHeard'
+> {
+  const declined = {
+    bouncebackPartsHeard: null,
+    bouncebackPartsConverted: null,
+    bonusPartsConverted: null,
+    bonusPartsHeard: null,
+  };
+  if (!gameDetailedCountsKnown(game) || !opponent || own.bouncebacks === null) return declined;
+  const rules = rulesForGame(state, game) ?? defaultRules;
+  if (!bonusPartsAreRegular(rules) || !(rules.bonusValue > 0)) return declined;
+  const heard = bouncebackPartsHeardForTeam(opponent.bonuses, opponent.bonusPoints, rules);
+  if (heard === null) return declined;
+  return {
+    bouncebackPartsHeard: heard,
+    bouncebackPartsConverted: (own.bouncebacks ?? 0) / rules.bonusValue,
+    bonusPartsConverted: own.bonusPoints / rules.bonusValue,
+    bonusPartsHeard: own.bonuses * rules.bonusParts,
+  };
+}
+
+/**
  * Project the per-game historical definition resolved from the game's own
  * evidence onto the round-stat derivation input. Fields the evidence cannot
  * prove stay null so the derivation declines the metric instead of guessing.
@@ -252,6 +292,10 @@ export function buildCanonicalSnapshot(
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
       bouncebackPoints: standing.bouncebackPoints,
       bouncebacksKnown: standing.bouncebacksKnown,
+      bouncebackPartsHeard: standing.bouncebackPartsHeard,
+      bouncebackPartsConverted: standing.bouncebackPartsConverted,
+      bouncebackConversion: standing.bouncebackConversion,
+      totalBonusConversion: standing.totalBonusConversion,
       // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
       lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
       lightningKnown: standing.lightningKnown,
@@ -312,6 +356,8 @@ export function buildCanonicalSnapshot(
     const historical = historicalGameDefinition(game);
     const teamStats: GameTeamStatsRow[] = game.scores.map((score) => {
       const tossupsHeard = teamTossupsHeard(game);
+      const opponent = game.scores.find((entry) => entry.teamId !== score.teamId);
+      const parts = teamGameParts(state, game, score, opponent);
       return {
         teamId: score.teamId,
         teamName: teamName(score.teamId),
@@ -325,6 +371,8 @@ export function buildCanonicalSnapshot(
         bonusPoints: detailedCountsKnown ? score.bonusPoints : null,
         ppb: detailedCountsKnown && score.bonuses > 0 ? score.bonusPoints / score.bonuses : null,
         bouncebacks: detailedCountsKnown ? (score.bouncebacks ?? null) : null,
+        lightningPoints: detailedCountsKnown ? (score.lightningPoints ?? null) : null,
+        ...parts,
       };
     });
     const playerStats: GamePlayerStatsRow[] = game.playerStats.map((stat) => ({
