@@ -127,25 +127,59 @@ function roundDefault(state: DirectorState, game: ScheduledGame): DeliveryTransp
   return round.deliveryMode === 'usb' ? 'file' : round.deliveryMode;
 }
 
-/** Live (non-abandoned) QBTCP sessions for a room, newest activity first. */
-export function liveRoomSessions(state: DirectorState, roomId: DirectorId | null): QbtcpRoomSession[] {
+function qbtcpSessionBelongsToGame(
+  state: DirectorState,
+  session: QbtcpRoomSession,
+  gameId: DirectorId,
+): boolean {
+  if (session.matchId) return session.matchId === gameId;
+  const target = state.scheduledGames.find((game) => game.id === gameId);
+  if (!target?.roomId || target.roomId !== session.roomId) return false;
+  const operational = state.scheduledGames.filter(
+    (game) =>
+      !game.bye && game.roomId === session.roomId && ['released', 'live', 'submitted'].includes(game.status),
+  );
+  if (operational.length > 0) return operational.length === 1 && operational[0]?.id === gameId;
+  const unresolved = state.scheduledGames.filter(
+    (game) => !game.bye && game.roomId === session.roomId && !['accepted', 'cancelled'].includes(game.status),
+  );
+  return unresolved.length === 1 && unresolved[0]?.id === gameId;
+}
+
+/** Live (non-abandoned) QBTCP sessions for a room/game, newest activity first. */
+export function liveRoomSessions(
+  state: DirectorState,
+  roomId: DirectorId | null,
+  gameId?: DirectorId,
+): QbtcpRoomSession[] {
   if (!roomId) return [];
   return state.qbtcpSessions
-    .filter((session) => session.roomId === roomId && session.state !== 'abandoned')
+    .filter(
+      (session) =>
+        session.roomId === roomId &&
+        session.state !== 'abandoned' &&
+        (gameId === undefined || qbtcpSessionBelongsToGame(state, session, gameId)),
+    )
     .sort((a, b) => (a.lastSeenAt < b.lastSeenAt ? 1 : -1));
 }
 
 /** Every session Director has ever seen for a room, including abandoned ones. */
-function roomSessions(state: DirectorState, roomId: DirectorId | null): QbtcpRoomSession[] {
+function roomSessions(
+  state: DirectorState,
+  roomId: DirectorId | null,
+  gameId: DirectorId,
+): QbtcpRoomSession[] {
   if (!roomId) return [];
-  return state.qbtcpSessions.filter((session) => session.roomId === roomId);
+  return state.qbtcpSessions.filter(
+    (session) => session.roomId === roomId && qbtcpSessionBelongsToGame(state, session, gameId),
+  );
 }
 
 export function deriveGameDeliveryIntent(state: DirectorState, game: ScheduledGame): DerivedDeliveryIntent {
   const explicit = sanitizeDeliveryIntent(game.deliveryIntent);
   const hasExplicit =
     explicit !== undefined && (explicit.primary !== undefined || (explicit.fallbacks?.length ?? 0) > 0);
-  const live = liveRoomSessions(state, game.roomId);
+  const live = liveRoomSessions(state, game.roomId, game.id);
   const fallback = roundDefault(state, game);
   return {
     primary: explicit?.primary ?? (live.length > 0 ? 'qbtcp' : (fallback ?? 'manual')),
@@ -165,18 +199,21 @@ function fileTransfersForGame(state: DirectorState, gameId: DirectorId): Assignm
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
-function qbtcpDelivered(state: DirectorState, gameId: DirectorId): boolean {
+function qbtcpDelivered(state: DirectorState, game: ScheduledGame): boolean {
   if (
     state.transfers.assignments.some(
-      (transfer) => transfer.scheduledGameId === gameId && transfer.transportKind === 'qbtcp',
+      (transfer) =>
+        transfer.scheduledGameId === game.id &&
+        transfer.transportKind === 'qbtcp' &&
+        transfer.status === 'written' &&
+        transfer.assignmentRevision === game.assignmentRevision,
     )
   ) {
     return true;
   }
   // A session that reached the room proves the assignment escaped Director
   // over QBTCP even without a separate transfer record.
-  const game = state.scheduledGames.find((entry) => entry.id === gameId);
-  return roomSessions(state, game?.roomId ?? null).some(
+  return roomSessions(state, game.roomId, game.id).some(
     (session) =>
       session.state === 'assigned' || session.state === 'live' || session.state === 'result-received',
   );
@@ -195,7 +232,7 @@ export function deriveAssignmentReadiness(
     intent.primary !== 'file' &&
     latestFile !== undefined &&
     latestFile.assignmentRevision !== game.assignmentRevision;
-  const live = liveRoomSessions(state, game.roomId);
+  const live = liveRoomSessions(state, game.roomId, game.id);
 
   if (intent.primary === 'manual') {
     return { state: 'manual', backupCurrent, backupStale };
@@ -235,7 +272,7 @@ export function deriveAssignmentReadiness(
       backupStale,
     };
   }
-  if (qbtcpDelivered(state, game.id)) {
+  if (qbtcpDelivered(state, game)) {
     return {
       state: 'qbtcp-delivered',
       message: backupCurrent
