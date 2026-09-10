@@ -153,6 +153,7 @@
       "type": "lunch",
       "title": "Lunch",
       "description": "Cafeteria, first floor.",
+      "sequence": null,
       "scheduledStart": "2026-09-05T12:00:00-04:00",
       "scheduledEnd": "2026-09-05T12:45:00-04:00",
       "teamIds": [],
@@ -166,6 +167,7 @@
       "roundId": "round-1",
       "roundName": "Round 1",
       "roundNumber": 1,
+      "sequence": null,
       "phaseId": "phase-prelim",
       "phaseName": "Preliminary",
       "poolId": "pool-1",
@@ -183,6 +185,7 @@
       "roundId": "round-1",
       "roundName": "Round 1",
       "roundNumber": 1,
+      "sequence": null,
       "phaseId": "phase-prelim",
       "phaseName": "Preliminary",
       "poolId": "pool-1",
@@ -200,6 +203,7 @@
       "roundId": "round-2",
       "roundName": "Round 2",
       "roundNumber": 2,
+      "sequence": null,
       "phaseId": "phase-prelim",
       "phaseName": "Preliminary",
       "poolId": "pool-1",
@@ -329,6 +333,42 @@
           "kind": "integer",
           "alignment": "trailing",
           "description": "Point differential"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         }
       ],
       "rows": [
@@ -367,6 +407,26 @@
             {
               "value": 95,
               "display": "95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -405,6 +465,26 @@
             {
               "value": 35,
               "display": "35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -443,6 +523,26 @@
             {
               "value": -35,
               "display": "-35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -481,6 +581,26 @@
             {
               "value": -95,
               "display": "-95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -545,6 +665,42 @@
           "kind": "integer",
           "alignment": "trailing",
           "description": "Point differential"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         }
       ],
       "rows": [
@@ -583,6 +739,26 @@
             {
               "value": 95,
               "display": "95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -621,6 +797,26 @@
             {
               "value": 35,
               "display": "35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -659,6 +855,26 @@
             {
               "value": -35,
               "display": "-35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -697,6 +913,26 @@
             {
               "value": -95,
               "display": "-95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -761,6 +997,42 @@
           "kind": "integer",
           "alignment": "trailing",
           "description": "Point differential"
+        },
+        {
+          "id": "games",
+          "label": "G",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Games played"
+        },
+        {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         }
       ],
       "rows": [
@@ -799,6 +1071,26 @@
             {
               "value": 95,
               "display": "95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -837,6 +1129,26 @@
             {
               "value": 35,
               "display": "35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -875,6 +1187,26 @@
             {
               "value": -35,
               "display": "-35"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -913,6 +1245,26 @@
             {
               "value": -95,
               "display": "-95"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -969,6 +1321,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1006,6 +1365,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1038,6 +1401,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1074,6 +1441,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1106,6 +1477,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,
@@ -1164,6 +1539,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1201,6 +1583,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1233,6 +1619,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1269,6 +1659,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1301,6 +1695,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,
@@ -1359,6 +1757,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1396,6 +1801,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1428,6 +1837,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1464,6 +1877,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1496,6 +1913,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,
@@ -1533,19 +1954,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
@@ -1576,8 +2000,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -1596,8 +2020,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -1615,8 +2039,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -1635,8 +2059,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2216,19 +2640,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
@@ -2259,8 +2686,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2279,8 +2706,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2298,8 +2725,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -2318,8 +2745,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2899,19 +3326,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
@@ -2942,8 +3372,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2962,8 +3392,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2981,8 +3411,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -3001,8 +3431,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
