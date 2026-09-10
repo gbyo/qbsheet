@@ -10,8 +10,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { exportArchiveBytes, exportQbj, importArchiveBytes, importQbjText } from './interchange';
+import {
+  exportArchiveBytes,
+  exportQbj,
+  importArchiveBytes,
+  importDirectorTournament,
+  importQbjText,
+  toInterchange,
+} from './interchange';
 import { directorFixture } from '../transfers/testFixtures';
+import { acceptedGame } from '../../../tests/directorFixtures';
 
 function classifiedFixture() {
   const state = directorFixture({ games: 1 });
@@ -102,5 +110,64 @@ describe('classifications, school year, and final placement round-trip', () => {
     for (const player of restored.players) {
       expect(player.schoolYear).toBeUndefined();
     }
+  });
+});
+
+describe('exact match TUH round-trip (#746)', () => {
+  function tuhFixture() {
+    const state = directorFixture({ games: 1 });
+    state.games.push(
+      acceptedGame(
+        'game-tuh-1',
+        'game-5-1',
+        [
+          {
+            teamId: 'team-1',
+            score: 200,
+            superpowers: 0,
+            powers: 0,
+            gets: 0,
+            negs: 0,
+            bonuses: 0,
+            bonusPoints: 0,
+            bouncebacks: 0,
+          },
+          {
+            teamId: 'team-2',
+            score: 100,
+            superpowers: 0,
+            powers: 0,
+            gets: 0,
+            negs: 0,
+            bonuses: 0,
+            bonusPoints: 0,
+            bouncebacks: 0,
+          },
+        ],
+        [],
+        { tossupsRead: 22, overtimeTossupsRead: 2 },
+      ),
+    );
+    return state;
+  }
+
+  it('archive interchange preserves exact match TUH', () => {
+    const restored = importDirectorTournament(toInterchange(tuhFixture()));
+    const game = restored.games.find((entry) => entry.id === 'game-tuh-1');
+    expect(game?.tossupsRead).toBe(22);
+    expect(game?.overtimeTossupsRead).toBe(2);
+  });
+
+  it('QBJ export carries exact match TUH back onto the game record', () => {
+    const report = importQbjText(exportQbj(tuhFixture()));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    const game = restored.games.find((entry) =>
+      entry.scores.some((score) => score.teamId === 'team-1' && score.score === 200),
+    );
+    if (!game) throw new Error('qbj import produced no matching game');
+    expect(game.tossupsRead).toBe(22);
+    expect(game.overtimeTossupsRead).toBe(2);
   });
 });

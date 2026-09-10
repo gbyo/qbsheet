@@ -100,6 +100,9 @@ function game(
       },
     ],
     source: 'manual',
+    // Canonical team TUH and fractional GP need the exact match count (#746).
+    tossupsRead: 20,
+    overtimeTossupsRead: 0,
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ import {
   deriveTeamStandings,
   gameDetailedCountsKnown,
   orderDayItems,
+  playerHasAppearance,
   playerPoints,
   scoringValuesForGameRecord,
   type DirectorState,
@@ -41,10 +42,20 @@ export interface CanonicalReportScope {
 
 export const overallReportScope: CanonicalReportScope = { label: 'Overall' };
 
-function teamTossupsHeard(game: GameRecord, teamId: string): number | null {
-  const lines = game.playerStats.filter((stat) => stat.teamId === teamId);
-  if (lines.length === 0 || lines.some((stat) => stat.tossupsHeard === null)) return null;
-  return lines.reduce((sum, stat) => sum + (stat.tossupsHeard ?? 0), 0);
+/**
+ * Canonical per-game team TUH: the exact match tossups-read count (#746).
+ *
+ * Both sides hear the same tossups, so this is a game fact. Summing player exposure here
+ * would double-count shared tossups and shift with substitutions; a game without an exact
+ * count reports null (unknown), never a fabricated partial sum.
+ */
+function teamTossupsHeard(game: GameRecord): number | null {
+  return typeof game.tossupsRead === 'number' &&
+    Number.isInteger(game.tossupsRead) &&
+    Number.isFinite(game.tossupsRead) &&
+    game.tossupsRead >= 0
+    ? game.tossupsRead
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -229,6 +240,7 @@ export function buildCanonicalSnapshot(
       negs: standing.negs,
       tossupsHeard: standing.tossupsHeard,
       tossupsHeardKnown: standing.tossupsHeardKnown,
+      tossupsHeardRegulation: standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
       pptuh:
         standing.tossupsHeardKnown && standing.tossupsHeard > 0
           ? standing.pointsFor / standing.tossupsHeard
@@ -240,7 +252,7 @@ export function buildCanonicalSnapshot(
   });
 
   const players: PlayerStatsRow[] = derivePlayerStandings(state, scoped)
-    .filter((standing) => standing.gamesPlayed > 0)
+    .filter(playerHasAppearance)
     .map((standing, index) => {
       const player = state.players.find((entry) => entry.id === standing.playerId);
       // Valued per game under each game's own definition inside derivePlayerStandings (#671);
@@ -254,6 +266,7 @@ export function buildCanonicalSnapshot(
         teamName: teamName(standing.teamId),
         ...(typeof player?.schoolYear === 'number' ? { schoolYear: player.schoolYear } : {}),
         gamesPlayed: standing.gamesPlayed,
+        gamesPlayedKnown: standing.gamesPlayedKnown,
         tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
         superpowers: standing.superpowers,
         powers: standing.powers,
@@ -286,7 +299,7 @@ export function buildCanonicalSnapshot(
     const resolvedPacketId = game.packetId ?? scheduled?.packetId ?? undefined;
     const historical = historicalGameDefinition(game);
     const teamStats: GameTeamStatsRow[] = game.scores.map((score) => {
-      const tossupsHeard = teamTossupsHeard(game, score.teamId);
+      const tossupsHeard = teamTossupsHeard(game);
       return {
         teamId: score.teamId,
         teamName: teamName(score.teamId),
@@ -344,8 +357,12 @@ export function buildCanonicalSnapshot(
       status: game.status,
       detail:
         game.detailedStats === 'incomplete' || game.detailedStats === 'unknown' ? 'partial' : 'complete',
-      tossupsRead: historical.tossupsRead,
-      overtimeTossupsRead: historical.overtimeTossupsRead,
+      // Canonical match TUH lives on the game record; raw-QBJ mining covers legacy records (#746).
+      tossupsRead: teamTossupsHeard(game) ?? historical.tossupsRead,
+      overtimeTossupsRead:
+        typeof game.overtimeTossupsRead === 'number'
+          ? game.overtimeTossupsRead
+          : historical.overtimeTossupsRead,
       teamStats,
       playerStats,
     };

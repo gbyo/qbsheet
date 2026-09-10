@@ -40,8 +40,13 @@ export interface TeamStatsRow {
   gets: number;
   negs: number;
   tossupsHeard: number;
-  /** False when any contributing scoresheet omitted tossups-heard. */
+  /** False when any contributing non-forfeit game lacked an exact tossups-read count. */
   tossupsHeardKnown: boolean;
+  /**
+   * Regulation tossups heard (total minus known overtime); null when not exactly derivable.
+   * Normalized PPX-style display divides by this denominator, never by summed player exposure.
+   */
+  tossupsHeardRegulation: number | null;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
   pptuh: number | null;
   bonusPoints: number;
@@ -57,7 +62,10 @@ export interface PlayerStatsRow {
   teamId: string;
   teamName: string;
   schoolYear?: number | null;
+  /** Fractional GP (player TUH / game TUH); see the canonical domain engine (#746). */
   gamesPlayed: number;
+  /** False when some appearance cannot be expressed fractionally (#746). */
+  gamesPlayedKnown: boolean;
   /** Null when any contributing scoresheet omitted tossups-heard. */
   tossupsHeard: number | null;
   superpowers: number;
@@ -124,9 +132,12 @@ export interface StatsOptions {
 
 interface MutableTeamStats extends Omit<
   TeamStatsRow,
-  'rank' | 'winPercentage' | 'ppg' | 'papg' | 'pptuh' | 'ppb'
+  'rank' | 'winPercentage' | 'ppg' | 'papg' | 'pptuh' | 'ppb' | 'tossupsHeardRegulation'
 > {
   organizationId?: string;
+  tossupsHeardRegulation: number;
+  /** Tracks regulation known-ness while aggregating; the row exposes a nullable value instead. */
+  tossupsHeardRegulationKnown: boolean;
 }
 
 type MutablePlayerStats = Omit<PlayerStatsRow, 'rank' | 'ppg' | 'pptuh' | 'ppb' | 'tossupsHeard'> & {
@@ -147,6 +158,55 @@ const defaultTiebreakers: readonly TeamTiebreaker[] = [
 
 function acceptedGame(game: GameRecord, statuses: readonly string[]): boolean {
   return statuses.includes(game.status ?? (game.result ? 'complete' : 'scheduled'));
+}
+
+function isForfeitGame(game: GameRecord): boolean {
+  return game.status === 'forfeit' || game.result?.forfeit === true;
+}
+
+function validGameTuh(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Game-level TUH for both teams from the exact result count (#746).
+ *
+ * Forfeits contribute W/L but no denominator; a non-forfeit game without an exact count marks
+ * both teams unknown rather than summing player exposure. Regulation TUH subtracts known
+ * overtime; an absent overtime count is a known zero only when the tournament rules have no
+ * overtime period.
+ */
+function addGameResultTuh(
+  data: DirectorTournament,
+  firstTeam: MutableTeamStats,
+  secondTeam: MutableTeamStats,
+  game: GameRecord,
+): void {
+  const tossupsRead = game.result?.tossupsRead;
+  if (isForfeitGame(game) || !validGameTuh(tossupsRead)) {
+    if (!isForfeitGame(game)) {
+      firstTeam.tossupsHeardKnown = false;
+      secondTeam.tossupsHeardKnown = false;
+      firstTeam.tossupsHeardRegulationKnown = false;
+      secondTeam.tossupsHeardRegulationKnown = false;
+    }
+    return;
+  }
+  firstTeam.tossupsHeard += tossupsRead;
+  secondTeam.tossupsHeard += tossupsRead;
+  const overtime = game.result?.overtimeTossupsRead;
+  const overtimeKnown = validGameTuh(overtime)
+    ? overtime
+    : (data.rules as { overtime?: unknown } | undefined)?.overtime === false
+      ? 0
+      : null;
+  if (overtimeKnown === null || overtimeKnown > tossupsRead) {
+    firstTeam.tossupsHeardRegulationKnown = false;
+    secondTeam.tossupsHeardRegulationKnown = false;
+    return;
+  }
+  firstTeam.tossupsHeardRegulation += tossupsRead - overtimeKnown;
+  secondTeam.tossupsHeardRegulation += tossupsRead - overtimeKnown;
 }
 
 function resultTeam(result: GameTeamResult | undefined): GameTeamResult | undefined {
@@ -184,7 +244,7 @@ function configTiebreakers(
   return accepted.length > 0 ? accepted : defaultTiebreakers;
 }
 
-function compareTeams(a: MutableTeamStats, b: MutableTeamStats, order: readonly TeamTiebreaker[]): number {
+function compareTeams(a: TeamStatsRow, b: TeamStatsRow, order: readonly TeamTiebreaker[]): number {
   for (const key of order) {
     if (key === 'teamName') {
       const comparison = a.teamName.localeCompare(b.teamName);
@@ -209,14 +269,16 @@ function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
   const tossups = mutable.tossupsHeardKnown ? mutable.tossupsHeard : 0;
   const bonuses = mutable.bonusesHeard;
+  const { tossupsHeardRegulationKnown, ...rest } = mutable;
   return {
     rank: 0,
-    ...mutable,
+    ...rest,
     winPercentage: games > 0 ? mutable.wins / games : 0,
     ppg: games > 0 ? mutable.pointsFor / games : 0,
     papg: games > 0 ? mutable.pointsAgainst / games : 0,
     pptuh: tossups > 0 ? mutable.pointsFor / tossups : null,
     ppb: bonuses > 0 ? mutable.bonusPoints / bonuses : null,
+    tossupsHeardRegulation: tossupsHeardRegulationKnown ? mutable.tossupsHeardRegulation : null,
   };
 }
 
@@ -268,6 +330,8 @@ export function buildStatsSnapshot(
       negs: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
+      tossupsHeardRegulation: 0,
+      tossupsHeardRegulationKnown: true,
       bonusPoints: 0,
       bonusesHeard: 0,
     };
@@ -284,6 +348,7 @@ export function buildStatsSnapshot(
       teamId: result.teamId,
       teamName: team?.name ?? result.teamId,
       gamesPlayed: 0,
+      gamesPlayedKnown: true,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
       superpowers: 0,
@@ -355,25 +420,34 @@ export function buildStatsSnapshot(
       secondTeam.ties += 1;
     }
     const updateTeamStats = (team: MutableTeamStats, result: GameTeamResult | undefined) => {
-      if (!result) {
-        team.tossupsHeardKnown = false;
-        return;
-      }
+      if (!result) return;
       team.superpowers = valueOrZero(team.superpowers) + valueOrZero(result.superpowers);
       team.powers = valueOrZero(team.powers) + valueOrZero(result.powers);
       team.gets = valueOrZero(team.gets) + valueOrZero(result.gets);
       team.negs = valueOrZero(team.negs) + valueOrZero(result.negs);
-      if (result.tossupsHeard === undefined) team.tossupsHeardKnown = false;
-      else team.tossupsHeard = valueOrZero(team.tossupsHeard) + result.tossupsHeard;
       team.bonusPoints = valueOrZero(team.bonusPoints) + valueOrZero(result.bonusPoints);
       team.bonusesHeard = valueOrZero(team.bonusesHeard) + valueOrZero(result.bonusesHeard);
     };
     updateTeamStats(firstTeam, first);
     updateTeamStats(secondTeam, second);
+    // Team TUH comes from the game's exact tossups-read count, never summed player exposure;
+    // forfeits contribute W/L but no denominator (#746).
+    addGameResultTuh(data, firstTeam, secondTeam, game);
+    const gameTuh =
+      typeof game.result.tossupsRead === 'number' &&
+      Number.isInteger(game.result.tossupsRead) &&
+      game.result.tossupsRead > 0 &&
+      !isForfeitGame(game)
+        ? game.result.tossupsRead
+        : null;
     const resultPlayers = game.result.players ?? [];
     resultPlayers.forEach((result) => {
       const player = ensurePlayer(result);
-      player.gamesPlayed += 1;
+      if (result.tossupsHeard !== undefined && gameTuh !== null) {
+        player.gamesPlayed += result.tossupsHeard / gameTuh;
+      } else {
+        player.gamesPlayedKnown = false;
+      }
       if (result.tossupsHeard === undefined) player.tossupsHeardKnown = false;
       else player.tossupsHeard += result.tossupsHeard;
       player.superpowers += valueOrZero(result.superpowers);

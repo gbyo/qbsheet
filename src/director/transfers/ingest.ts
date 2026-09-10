@@ -181,6 +181,13 @@ export interface ResultAssessment {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   /**
+   * Exact match tossups-read counts for the canonical game record (#746). Present whenever
+   * statistics were derived; absent on early returns that derive none. Null means the source
+   * result supplied no exact count — unknown, not zero.
+   */
+  tossupsRead?: number | null;
+  overtimeTossupsRead?: number | null;
+  /**
    * Which scoring truth the statistics above were derived under (#671). Present whenever
    * statistics were derived; absent on early returns that derive none.
    */
@@ -321,6 +328,35 @@ function teamAggregate(
 }
 
 /**
+ * Exact match tossups-read counts from a result document (#746).
+ *
+ * Both teams hear the same tossups, so team TUH aggregates this match fact, never player
+ * lines. A present-but-malformed count warns and reads as unknown rather than zero; an
+ * absent count is silently unknown (legacy/manual detail).
+ */
+function readMatchTossups(
+  match: Record<string, unknown> | undefined,
+  warnings: string[],
+): { tossupsRead: number | null; overtimeTossupsRead: number | null } {
+  const valid = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' &&
+    Number.isInteger(candidate) &&
+    Number.isFinite(candidate) &&
+    candidate >= 0;
+  let tossupsRead: number | null = null;
+  let overtimeTossupsRead: number | null = null;
+  if (match?.tossups_read !== undefined) {
+    if (valid(match.tossups_read)) tossupsRead = match.tossups_read;
+    else warnings.push(ingestWarnings.invalidStatisticCount);
+  }
+  if (match?.overtime_tossups_read !== undefined) {
+    if (valid(match.overtime_tossups_read)) overtimeTossupsRead = match.overtime_tossups_read;
+    else warnings.push(ingestWarnings.invalidStatisticCount);
+  }
+  return { tossupsRead, overtimeTossupsRead };
+}
+
+/**
  * The statistical content of a result document.
  *
  * Moved here out of the state controller, where it was reachable only from the QBTCP path. A USB
@@ -334,6 +370,8 @@ export function readResultStatistics(
 ): {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  tossupsRead: number | null;
+  overtimeTossupsRead: number | null;
   warnings: string[];
   definition: HistoricalDefinition;
 } {
@@ -347,6 +385,7 @@ export function readResultStatistics(
     ...(embeddedAnswerValues(value) ? { embeddedAnswerValues: embeddedAnswerValues(value) } : {}),
   });
   const match = matchObject(value);
+  const { tossupsRead, overtimeTossupsRead } = readMatchTossups(match, warnings);
   const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
   const scores = entries
     .map((entry) => {
@@ -393,7 +432,7 @@ export function readResultStatistics(
       return [stat];
     });
   });
-  return { scores, playerStats, warnings, definition };
+  return { scores, playerStats, tossupsRead, overtimeTossupsRead, warnings, definition };
 }
 
 /**
@@ -412,6 +451,8 @@ export function readResultStatisticsForAssociation(
 ): {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  tossupsRead: number | null;
+  overtimeTossupsRead: number | null;
   warnings: string[];
   definition: HistoricalDefinition;
   positionalAssociation: boolean;
@@ -710,6 +751,8 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
       ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
       scores: statistics.scores,
       playerStats: statistics.playerStats,
+      tossupsRead: statistics.tossupsRead,
+      overtimeTossupsRead: statistics.overtimeTossupsRead,
       definition: statistics.definition,
       duplicateOfSubmissionId: duplicate.id,
       existingGameId: duplicate.gameId,
@@ -732,6 +775,8 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
     scores: statistics.scores,
     playerStats: statistics.playerStats,
+    tossupsRead: statistics.tossupsRead,
+    overtimeTossupsRead: statistics.overtimeTossupsRead,
     definition: statistics.definition,
     ...(conflict ? { conflictWithSubmissionId: conflict.id, existingGameId: conflict.gameId } : {}),
   };
@@ -881,6 +926,11 @@ export function stageIncomingDocument(
     status: 'submitted',
     scores: assessment.scores,
     playerStats: assessment.playerStats,
+    // Exact match TUH persists on the canonical record; corrections replace it like scores (#746).
+    ...(assessment.tossupsRead === undefined ? {} : { tossupsRead: assessment.tossupsRead }),
+    ...(assessment.overtimeTossupsRead === undefined
+      ? {}
+      : { overtimeTossupsRead: assessment.overtimeTossupsRead }),
     source: document.sourceKind === 'qbtcp' ? 'qbtcp' : 'qbj',
     ...(document.transportResultId ? { transportResultId: document.transportResultId } : {}),
     // Provenance echoed by the room; absent on legacy/generic documents (#670). Statistics

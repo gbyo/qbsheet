@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   derivePlayerStandings,
   deriveTeamStandings,
+  playerHasAppearance,
   totalAcceptedResults,
   type DirectorState,
 } from '../domain';
@@ -20,7 +21,7 @@ import {
   type Column,
 } from '../components';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
-import { formatWinPct } from './statsDisplay';
+import { formatGamesPlayed, formatWinPct } from './statsDisplay';
 import { csvMediaType, downloadText } from '../format/downloadFile';
 import type { AnnounceInput } from '../notices';
 
@@ -43,7 +44,8 @@ export function StandingsView({
   const [view, setView] = useState<StatsView>('teams');
   const [showDetailed, setShowDetailed] = useState(false);
   const teamStandings = deriveTeamStandings(state);
-  const playerStandings = derivePlayerStandings(state).filter((standing) => standing.gamesPlayed > 0);
+  // Anyone with any appearance qualifies; bare GP > 0 would drop lined players on unknown TUH (#746).
+  const playerStandings = derivePlayerStandings(state).filter(playerHasAppearance);
 
   if (state.teams.length === 0) {
     return (
@@ -155,7 +157,7 @@ export function StandingsView({
       header: 'Games',
       priority: 1,
       align: 'right',
-      render: (standing) => standing.gamesPlayed,
+      render: (standing) => formatGamesPlayed(standing),
     },
     { key: 'ppg', header: 'PPG', priority: 1, align: 'right', render: (standing) => standing.ppg.toFixed(1) },
     {

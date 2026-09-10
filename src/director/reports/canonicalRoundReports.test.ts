@@ -69,6 +69,9 @@ function multiScopeState(): DirectorState {
   state.scheduledGames[0]!.packetId = 'packet-18';
   state.games[0]!.packetId = 'packet-18';
   state.games[0]!.rawQbj = historicalQbj(18, 18);
+  // The canonical record is the normalized truth: ingest would have stored this QBJ's 18/0 (#746).
+  state.games[0]!.tossupsRead = 18;
+  state.games[0]!.overtimeTossupsRead = 0;
 
   state.pools.push({
     id: 'pool-a',

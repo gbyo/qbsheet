@@ -585,6 +585,22 @@ export interface GameRecord {
   forfeitedTeamId?: DirectorId;
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  /**
+   * Exact tossups read in the match, YellowFruit parity field (#746).
+   *
+   * Both teams hear the same tossups, so this is a game fact, not a sum over player lines:
+   * several players hear the same tossup and substitutions change summed exposure. Team TUH
+   * aggregates this value, never player exposure. Null/undefined means the source result did
+   * not supply an exact count (legacy/manual detail), not zero.
+   */
+  tossupsRead?: number | null;
+  /**
+   * Overtime tossups read within `tossupsRead`, YellowFruit parity field (#746).
+   *
+   * Null/undefined means unknown, not zero: only an explicit zero (which the scorer writes)
+   * or a game played under rules without overtime is a known zero.
+   */
+  overtimeTossupsRead?: number | null;
   source: 'qbtcp' | 'manual' | 'qbj' | 'paper';
   /**
    * Which accepted truth this record carries (#673). The first accepted result is

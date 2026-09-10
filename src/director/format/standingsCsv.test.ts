@@ -115,6 +115,7 @@ describe('the player statistics CSV', () => {
           `extra-scheduled-${index}`,
           [score(teamId, 100 + index), score('team-b', 50)],
           [playerStat(`extra-player-${index}`, teamId, { gets: index + 1 })],
+          { tossupsRead: 20, overtimeTossupsRead: 0 },
         ),
       );
     }
