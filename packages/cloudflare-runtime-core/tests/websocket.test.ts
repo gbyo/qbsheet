@@ -13,6 +13,12 @@ describe('hibernating socket attachments', () => {
     expect(decodeSocketAttachment(raw)).toEqual({ session_id: 'sess-1', room_id: 'room-1' });
   });
 
+  it('does not let attachment data override the version marker', () => {
+    const raw = encodeSocketAttachment({ v: 999, session_id: 'sess-1' });
+    expect(JSON.parse(raw).v).toBe(SOCKET_ATTACHMENT_VERSION);
+    expect(decodeSocketAttachment(raw)).toEqual({ session_id: 'sess-1' });
+  });
+
   it('survives hibernation reconstruction: garbage and wrong versions decode to null', () => {
     expect(decodeSocketAttachment('not json')).toBeNull();
     expect(decodeSocketAttachment(JSON.stringify({ v: 999, session_id: 'x' }))).toBeNull();
