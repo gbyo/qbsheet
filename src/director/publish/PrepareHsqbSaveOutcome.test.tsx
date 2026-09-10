@@ -3,13 +3,8 @@
  * an async function returning. Native cancellation/unavailability/failure must
  * never render the same confirmation as a completed write (#829).
  */
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { playedTournament } from '../../../tests/directorFixtures';
 import type { AnnounceInput } from '../notices';
@@ -25,7 +20,7 @@ const mockedIsNativeDirector = vi.mocked(isNativeDirector);
 const mockedSaveNativeFile = vi.mocked(saveNativeFile);
 
 function renderDialog(
-  onAnnounce: (announcement: AnnounceInput) => void = vi.fn(),
+  onAnnounce: (announcement: AnnounceInput) => void,
 ): void {
   render(
     <PrepareHsqbDialog
@@ -37,21 +32,17 @@ function renderDialog(
   );
 }
 
+function saveButton(): HTMLElement {
+  return screen.getByRole('button', { name: /Save .*resource-center\.zip/ });
+}
+
 function clickSave(): void {
-  fireEvent.click(
-    screen.getByRole('button', {
-      name: /Save Ninety-Six-Invitational-resource-center\.zip/,
-    }),
-  );
+  fireEvent.click(saveButton());
 }
 
 async function expectSaveEnabled(): Promise<void> {
   await waitFor(() => {
-    expect(
-      screen
-        .getByRole('button', { name: /Save .*\.zip/ })
-        .hasAttribute('disabled'),
-    ).toBe(false);
+    expect(saveButton().hasAttribute('disabled')).toBe(false);
   });
 }
 
@@ -68,9 +59,9 @@ afterEach(() => {
 test('successful native write shows the saved confirmation', async () => {
   mockedSaveNativeFile.mockResolvedValue({
     status: 'saved',
-    path: '/tmp/Ninety-Six-Invitational-resource-center.zip',
+    path: '/tmp/report.zip',
   });
-  renderDialog();
+  renderDialog(vi.fn());
 
   clickSave();
 
@@ -93,7 +84,7 @@ test('cancelled native save leaves the package unsaved', async () => {
 
 test('unavailable native save leaves the package unsaved', async () => {
   mockedSaveNativeFile.mockResolvedValue({ status: 'unavailable' });
-  renderDialog();
+  renderDialog(vi.fn());
 
   clickSave();
 
