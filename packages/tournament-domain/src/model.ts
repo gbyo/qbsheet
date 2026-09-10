@@ -556,6 +556,17 @@ export interface TeamGameScore {
   bonuses: number;
   bonusPoints: number;
   bouncebacks: number;
+  /**
+   * Tossup points converted in overtime, YellowFruit parity field (#746 follow-up).
+   *
+   * Valued from the result's own overtime-buzz detail (each entry carries its answer value),
+   * so the figure is exact in both directions — never estimated from counts times live rules.
+   * Null/undefined means the source supplied no overtime-buzz breakdown (MODAQ exports and
+   * manual results lose it; the scorer omits the breakdown when nobody converted in overtime),
+   * not zero: only the scoring definition's lack of an overtime period makes it a known zero,
+   * resolved at derivation time.
+   */
+  overtimePoints?: number | null;
 }
 
 export interface PlayerGameStat {

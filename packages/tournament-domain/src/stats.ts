@@ -44,6 +44,15 @@ export interface TeamStanding {
   tossupsHeardRegulation: number;
   /** False when regulation TUH cannot be derived exactly for some contributing game. */
   tossupsHeardRegulationKnown: boolean;
+  /**
+   * Overtime tossup points across contributing games (#746).
+   *
+   * Unknown when any contributing game's source supplied no overtime-buzz breakdown — except
+   * games played under rules without overtime, which contribute a known zero.
+   */
+  overtimePoints: number;
+  /** False when any contributing game left overtime points unknown. */
+  overtimePointsKnown: boolean;
   bonuses: number;
   bonusPoints: number;
   gamesPlayed: number;
@@ -248,6 +257,8 @@ export function deriveTeamStandings(
       tossupsHeardKnown: true,
       tossupsHeardRegulation: 0,
       tossupsHeardRegulationKnown: true,
+      overtimePoints: 0,
+      overtimePointsKnown: true,
       bonuses: 0,
       bonusPoints: 0,
       gamesPlayed: 0,
@@ -279,6 +290,8 @@ export function deriveTeamStandings(
     }
     addTeamGameTuh(state, leftStanding, game);
     addTeamGameTuh(state, rightStanding, game);
+    addTeamGameOvertimePoints(state, leftStanding, left.teamId, game);
+    addTeamGameOvertimePoints(state, rightStanding, right.teamId, game);
     leftStanding.powers += left.powers;
     leftStanding.gets += left.gets;
     leftStanding.negs += left.negs;
@@ -611,6 +624,92 @@ function addTeamGameTuh(state: DirectorState, standing: TeamStanding, game: Game
     return;
   }
   standing.tossupsHeardRegulation += total - overtime;
+}
+
+/**
+ * Exact overtime tossup points for one team in a game, or null when unknown (#746).
+ *
+ * An absent breakdown is a known zero only when that game's own rules have no overtime
+ * period — mirroring gameOvertimeTuh: otherwise the game may simply predate overtime
+ * tracking. A forfeit played no overtime, so it contributes a known zero.
+ */
+function gameOvertimePointsForTeam(
+  state: DirectorState,
+  game: GameRecord,
+  teamId: DirectorId,
+): number | null {
+  if (game.status === 'forfeit') return 0;
+  const score = game.scores.find((entry) => entry.teamId === teamId);
+  if (
+    typeof score?.overtimePoints === 'number' &&
+    Number.isFinite(score.overtimePoints)
+  ) {
+    return score.overtimePoints;
+  }
+  if (rulesForGame(state, game)?.overtime === false) return 0;
+  return null;
+}
+
+function addTeamGameOvertimePoints(
+  state: DirectorState,
+  standing: TeamStanding,
+  teamId: DirectorId,
+  game: GameRecord,
+): void {
+  const overtime = gameOvertimePointsForTeam(state, game, teamId);
+  if (overtime === null) {
+    standing.overtimePointsKnown = false;
+    return;
+  }
+  standing.overtimePoints += overtime;
+}
+
+export interface TeamRegulationDerivation {
+  /**
+   * Overtime tossup points, or null when any contributing game left them unknown (never a
+   * verified zero).
+   */
+  overtimePoints: number | null;
+  /**
+   * Regulation points: total points minus known overtime points. Null when overtime is
+   * unknown, or when the split contradicts the total (overtime exceeding points means the
+   * source data disagrees with itself — fail closed, never a negative).
+   */
+  regulationPoints: number | null;
+  /**
+   * Points per regulation tossup heard. Null unless regulation points and regulation TUH are
+   * both fully known and at least one regulation tossup was heard.
+   */
+  pointsPerRegulationTossup: number | null;
+}
+
+/**
+ * Per-team regulation/overtime points splits with the normalized denominator facts (#746).
+ *
+ * Regulation points are a residual (total minus overtime), so adjustments and other
+ * period-less scoring stay in the regulation bucket by construction.
+ */
+export function regulationDerivationForTeam(standing: Pick<
+  TeamStanding,
+  | 'pointsFor'
+  | 'overtimePoints'
+  | 'overtimePointsKnown'
+  | 'tossupsHeardRegulation'
+  | 'tossupsHeardRegulationKnown'
+>): TeamRegulationDerivation {
+  const overtime = standing.overtimePointsKnown ? standing.overtimePoints : null;
+  const regulationPoints =
+    overtime !== null && overtime <= standing.pointsFor ? standing.pointsFor - overtime : null;
+  const regulationTuh =
+    standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null;
+  return {
+    overtimePoints: overtime,
+    regulationPoints,
+    pointsPerRegulationTossup:
+      regulationPoints !== null && regulationTuh !== null && regulationTuh > 0
+        ? regulationPoints / regulationTuh
+        : null,
+  };
 }
 
 /**

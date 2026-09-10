@@ -34,7 +34,7 @@ import {
   type ResultSubmission,
   type TeamGameScore,
 } from '../domain/model';
-import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, isCanonicalCount } from '../domain';
+import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, invalidTeamGameScoreOvertimePoints, isCanonicalCount } from '../domain';
 import {
   activeDefinitionSnapshot,
   embeddedAnswerValuesFromRawQbj,
@@ -324,7 +324,50 @@ function teamAggregate(
     bonuses: finiteNumber(entry.bonuses_heard) ?? finiteNumber(entry.bonuses) ?? 0,
     bonusPoints: finiteNumber(entry.bonus_points) ?? points - tossupPoints - bouncebacks - lightning,
     bouncebacks,
+    overtimePoints: readOvertimePoints(entry, warnings),
   };
+}
+
+/**
+ * Per-team overtime tossup points from the result's own overtime-buzz breakdown (#746).
+ *
+ * Each breakdown entry carries its answer value, so the figure is exact in both directions —
+ * never estimated from counts times live rules. An absent breakdown is silently unknown
+ * (MODAQ exports and manual results lose it; the scorer omits it when nobody converted in
+ * overtime); a present-but-malformed one warns and reads as unknown rather than partial.
+ */
+function readOvertimePoints(entry: Record<string, unknown>, warnings: string[]): number | null {
+  const data = entry.YfData;
+  if (!isRecord(data)) return null;
+  const buzzes = data.overTimeBuzzes;
+  if (buzzes === undefined) return null;
+  const validCount = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' &&
+    Number.isInteger(candidate) &&
+    Number.isFinite(candidate) &&
+    candidate >= 0;
+  const validValue = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' && Number.isFinite(candidate);
+  if (!Array.isArray(buzzes)) {
+    warnings.push(ingestWarnings.invalidStatisticCount);
+    return null;
+  }
+  let total = 0;
+  for (const buzz of buzzes) {
+    if (!isRecord(buzz)) {
+      warnings.push(ingestWarnings.invalidStatisticCount);
+      return null;
+    }
+    const answerType = buzz.answer_type;
+    const count = buzz.number;
+    const value = isRecord(answerType) ? answerType.value : undefined;
+    if (!validCount(count) || !validValue(value)) {
+      warnings.push(ingestWarnings.invalidStatisticCount);
+      return null;
+    }
+    total += count * value;
+  }
+  return total;
 }
 
 /**
@@ -395,6 +438,7 @@ export function readResultStatistics(
       if (!teamId || score === undefined) return null;
       const candidate = { teamId, score, ...teamAggregate(entry, definition, warnings) };
       if (invalidTeamGameScoreCountField(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
+      if (invalidTeamGameScoreOvertimePoints(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
       return candidate;
     })
     .filter((entry): entry is TeamGameScore => entry !== null);

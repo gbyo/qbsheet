@@ -55,6 +55,7 @@ import {
   unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
+  invalidTeamGameScoreOvertimePoints,
   applyTournamentStatusTransition,
   planTournamentStatusTransition,
   type TimelineEventType,
@@ -7858,6 +7859,9 @@ export function validateResultForScheduledGame(
     }
     const invalidCountField = invalidTeamGameScoreCountField(score);
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
+    if (invalidTeamGameScoreOvertimePoints(score)) {
+      return 'overtimePoints must be a finite number when supplied.';
+    }
   }
   const decisionIssue = resultDecisionIssue(state, scheduled, scores);
   if (decisionIssue) return decisionIssue.message;

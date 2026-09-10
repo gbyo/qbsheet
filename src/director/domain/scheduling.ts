@@ -1272,6 +1272,8 @@ function emptyStanding(teamId: DirectorId): TeamStanding {
     tossupsHeardKnown: true,
     tossupsHeardRegulation: 0,
     tossupsHeardRegulationKnown: true,
+    overtimePoints: 0,
+    overtimePointsKnown: true,
     powers: 0,
     powersKnown: true,
     gets: 0,
