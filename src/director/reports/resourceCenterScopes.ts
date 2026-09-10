@@ -299,9 +299,7 @@ export function resourceCenterPresetScopeKeys(state: DirectorState, preset: Reso
   if (preset === 'combined-only') return ['combined'];
   if (preset === 'phases-only') return scopes.filter((scope) => scope.kind === 'phase').map((s) => s.key);
 
-  const playedPhases = scopes.filter(
-    (scope) => scope.kind === 'phase' && scope.gameCount > 0,
-  );
+  const playedPhases = scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0);
   const combined = scopes.find((scope) => scope.kind === 'combined');
   if (!combined) return playedPhases.map((scope) => scope.key);
   if (combined.gameCount === 0) return [combined.key];
