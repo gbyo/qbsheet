@@ -1,11 +1,62 @@
 import { describe, expect, test } from 'vitest';
 import {
   addGameRowAnchors,
+  buildReportPresentation,
+  defaultReportOptions,
   renderStageAwareStandingsReport,
   standingsGameAnchor,
   type CanonicalStandingsReport,
+  type ReportOptions,
+  type ReportPresentation,
+  type ReportScoringDefinition,
   type TeamStatsRow,
 } from '../src';
+
+const standardDefinition: ReportScoringDefinition = {
+  tossupValue: 10,
+  superpowerValue: null,
+  powerValue: 15,
+  negValue: -5,
+  useBonuses: true,
+  tossupCount: 20,
+  bouncebacks: false,
+  lightning: false,
+  overtime: false,
+};
+
+function presentationFor(
+  definitions: ReportScoringDefinition[],
+  options: Partial<ReportOptions> = {},
+): ReportPresentation {
+  return buildReportPresentation({
+    metadata: { tournamentName: 'T', scopeLabel: 'Overall', generatedAt: '2026-09-09T20:00:00.000Z' },
+    definitions,
+    options: { ...defaultReportOptions, ...options },
+  });
+}
+
+/** The fixture report with a presentation contract and enriched rows, as the composer provides. */
+function presentedReport(presentation: ReportPresentation): CanonicalStandingsReport {
+  const base = report();
+  const x = presentation.pointsNormalization?.tossups ?? null;
+  return {
+    ...base,
+    presentation,
+    sections: base.sections.map((section) => ({
+      ...section,
+      teams: section.teams.map((row) => ({
+        ...row,
+        answerCounts: {
+          superpower: row.superpowers,
+          power: row.powers,
+          get: row.gets,
+          neg: row.negs,
+        },
+        pointsPerX: row.pptuh !== null && x !== null ? row.pptuh * x : null,
+      })),
+    })),
+  };
+}
 
 function teamRow(rank: number, teamId: string, teamName: string): TeamStatsRow {
   return {
@@ -112,6 +163,70 @@ describe('stage-aware standings report HTML', () => {
 
     const sharedRankCells = html.match(/<td class="num">1<\/td>/g) ?? [];
     expect(sharedRankCells.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('a points-per-X option replaces PPG on the canonical Standings page', () => {
+    const html = renderStageAwareStandingsReport(
+      presentedReport(presentationFor([standardDefinition], { pointsMetric: 'pointsPerX' })),
+    );
+
+    expect(html).toContain('<th scope="col" class="num">Pts/20</th>');
+    expect(html).not.toContain('<th scope="col" class="num">PPG</th>');
+    // pptuh 15 over a 20-tossup normalization prints 300.00, not the 300.0 PPG.
+    expect(html).toContain('<td class="num">300.00</td>');
+  });
+
+  test('answer tiers come from the definitions, with point values in the headers', () => {
+    const html = renderStageAwareStandingsReport(
+      presentedReport(
+        presentationFor([
+          { ...standardDefinition, superpowerValue: 20, tossupValue: 10, powerValue: 15 },
+        ]),
+      ),
+    );
+
+    expect(html).toContain('Super (20)');
+    expect(html).toContain('Power (15)');
+    expect(html).toContain('Get (10)');
+    expect(html).not.toContain('<th scope="col" class="num">Superpowers</th>');
+  });
+
+  test('an enabled-but-scoreless tier still prints its column', () => {
+    const scoped = presentedReport(presentationFor([standardDefinition]));
+    scoped.sections[0]!.teams = scoped.sections[0]!.teams.map((row) => ({
+      ...row,
+      powers: 0,
+      answerCounts: { superpower: 0, power: 0, get: row.gets, neg: row.negs },
+    }));
+    const html = renderStageAwareStandingsReport(scoped);
+
+    expect(html).toContain('Power (15)');
+  });
+
+  test('mixed definitions print one tier column plus the shared mixed-definition note', () => {
+    const html = renderStageAwareStandingsReport(
+      presentedReport(
+        presentationFor([
+          standardDefinition,
+          { ...standardDefinition, powerValue: 20, tossupCount: 24 },
+        ]),
+      ),
+    );
+
+    expect(html).toContain('Power (20/15)');
+    expect(html).toContain('class="report-note"');
+    expect(html).toContain('points-per-X is omitted');
+  });
+
+  test('hiding PF/PA/Margin removes exactly those columns', () => {
+    const html = renderStageAwareStandingsReport(
+      presentedReport(presentationFor([standardDefinition], { showPointsForAgainstMargin: false })),
+    );
+
+    expect(html).not.toContain('<th scope="col" class="num">PF</th>');
+    expect(html).not.toContain('<th scope="col" class="num">Margin</th>');
+    expect(html).toContain('<th scope="col" class="num">Record</th>');
+    expect(html).toContain('<th scope="col" class="num">PPG</th>');
   });
 
   test('adds one stable anchor to each legacy games-table row', () => {

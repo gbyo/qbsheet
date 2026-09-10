@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'vitest';
+import {
+  defaultReportOptions,
+  renderStageAwareStandingsReport,
+} from '@qbsheet/tournament-formats';
 import type { DirectorState, Phase } from '../domain';
 import { acceptedGame, playedTournament, scheduledGame, score, team } from '../../../tests/directorFixtures';
 import { buildCanonicalStandingsReport } from './standingsReport';
@@ -402,5 +406,48 @@ describe('canonical standings report composition', () => {
     expect(stageOnly.teams.find((row) => row.teamId === 'team-a')?.gamesPlayed).toBe(1);
     expect(stageOnly.teams.find((row) => row.teamId === 'team-b')?.gamesPlayed).toBe(1);
     expect(report.sections.indexOf(stageOnly)).toBeGreaterThan(report.sections.indexOf(playoff));
+  });
+});
+
+describe('standings presentation contract (#751)', () => {
+  test('the composer attaches the shared presentation and enriches rows', () => {
+    const report = buildCanonicalStandingsReport(playedTournament(), generatedAt);
+
+    expect(report.presentation).toBeDefined();
+    expect(report.presentation?.answerColumns.map((column) => column.key)).toEqual([
+      'power',
+      'get',
+      'neg',
+    ]);
+    expect(report.presentation?.pointsNormalization).toEqual({ tossups: 20, label: 'Pts/20' });
+    const row = report.sections[0]!.teams[0]!;
+    expect(row.answerCounts).toEqual({ superpower: 0, power: 4, get: 8, neg: 1 });
+    // pptuh comes from the canonical snapshot rows, so pointsPerX is derived, not invented.
+    expect(row.pointsPerX).toBeCloseTo((row.pptuh ?? 0) * 20, 10);
+  });
+
+  test('a superpower format promotes the tier into the standings contract', () => {
+    const state = playedTournament();
+    state.tournament!.rules.superpowerValue = 20;
+
+    const report = buildCanonicalStandingsReport(state, generatedAt);
+
+    expect(report.presentation?.answerColumns.map((column) => column.key)).toContain('superpower');
+  });
+
+  test('the selected points metric reaches the rendered standings page', () => {
+    const ppg = renderStageAwareStandingsReport(
+      buildCanonicalStandingsReport(playedTournament(), generatedAt),
+    );
+    expect(ppg).toContain('<th scope="col" class="num">PPG</th>');
+
+    const perX = renderStageAwareStandingsReport(
+      buildCanonicalStandingsReport(playedTournament(), generatedAt, {
+        ...defaultReportOptions,
+        pointsMetric: 'pointsPerX',
+      }),
+    );
+    expect(perX).toContain('<th scope="col" class="num">Pts/20</th>');
+    expect(perX).not.toContain('<th scope="col" class="num">PPG</th>');
   });
 });
