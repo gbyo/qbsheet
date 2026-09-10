@@ -122,6 +122,11 @@ export const RULES = [
     why: 'a standalone crate; nothing else depends on it',
   },
   {
+    glob: 'crates/qblive-server/**',
+    domains: ['rust-director'],
+    why: 'apps/director/src-tauri/Cargo.toml path-depends on crates/qblive-server; its own fmt/clippy/tests run in the qblive.yml rust job',
+  },
+  {
     glob: 'apps/director/src-tauri/**',
     domains: ['rust-director'],
     why: 'the Director native crate',
