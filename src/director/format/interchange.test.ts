@@ -11,6 +11,8 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  directorOvertimePointsExtension,
+  directorStateArchiveExtension,
   exportArchiveBytes,
   exportQbj,
   importArchiveBytes,
@@ -160,6 +162,29 @@ describe('exact match TUH round-trip (#746)', () => {
     expect(game?.overtimeTossupsRead).toBe(2);
   });
 
+  it('invalid imported counts never reach DirectorState', () => {
+    for (const counts of [
+      { tossupsRead: -1, overtimeTossupsRead: 0 },
+      { tossupsRead: 2.5, overtimeTossupsRead: 0 },
+      { tossupsRead: Number.NaN, overtimeTossupsRead: 0 },
+      { tossupsRead: 20, overtimeTossupsRead: 21 },
+    ]) {
+      const payload = toInterchange(tuhFixture());
+      // Exercise the non-archive path: the embedded archive would restore state verbatim.
+      if (payload.extensions && typeof payload.extensions === 'object') {
+        delete (payload.extensions as Record<string, unknown>)[directorStateArchiveExtension];
+      }
+      const game = payload.games.find((entry) => entry.id === 'game-tuh-1');
+      if (!game?.result) throw new Error('interchange produced no game result');
+      game.result.tossupsRead = counts.tossupsRead;
+      game.result.overtimeTossupsRead = counts.overtimeTossupsRead;
+      const restored = importDirectorTournament(payload);
+      const restoredGame = restored.games.find((entry) => entry.id === 'game-tuh-1');
+      expect(restoredGame?.tossupsRead).toBeUndefined();
+      expect(restoredGame?.overtimeTossupsRead).toBeUndefined();
+    }
+  });
+
   it('QBJ export carries exact match TUH back onto the game record', () => {
     const report = importQbjText(exportQbj(tuhFixture()));
     expect(report.errors).toEqual([]);
@@ -171,6 +196,75 @@ describe('exact match TUH round-trip (#746)', () => {
     if (!game) throw new Error('qbj import produced no matching game');
     expect(game.tossupsRead).toBe(22);
     expect(game.overtimeTossupsRead).toBe(2);
+  });
+});
+
+describe('overtime points round-trip (#746 follow-up)', () => {
+  function overtimeFixture() {
+    const state = directorFixture({ games: 1 });
+    state.games.push(
+      acceptedGame(
+        'game-ot-1',
+        'game-5-1',
+        [
+          {
+            teamId: 'team-1',
+            score: 250,
+            superpowers: 0,
+            powers: 1,
+            gets: 10,
+            negs: 0,
+            bonuses: 8,
+            bonusPoints: 90,
+            bouncebacks: 0,
+            overtimePoints: 30,
+          },
+          {
+            teamId: 'team-2',
+            score: 230,
+            superpowers: 0,
+            powers: 0,
+            gets: 12,
+            negs: 1,
+            bonuses: 9,
+            bonusPoints: 100,
+            bouncebacks: 0,
+          },
+        ],
+        [],
+        { tossupsRead: 24, overtimeTossupsRead: 4 },
+      ),
+    );
+    return state;
+  }
+
+  it('non-archive interchange preserves known per-team overtime points', () => {
+    const payload = toInterchange(overtimeFixture());
+    // Non-archive: drop the embedded archive so the game-level fields do the work.
+    if (payload.extensions && typeof payload.extensions === 'object') {
+      delete (payload.extensions as Record<string, unknown>)[directorStateArchiveExtension];
+    }
+    const restored = importDirectorTournament(payload);
+    const game = restored.games.find((entry) => entry.id === 'game-ot-1');
+    expect(game?.scores.find((score) => score.teamId === 'team-1')?.overtimePoints).toBe(30);
+    expect(game?.scores.find((score) => score.teamId === 'team-2')?.overtimePoints).toBeUndefined();
+  });
+
+  it('an absent overtime extension restores unknown, never zero', () => {
+    const payload = toInterchange(overtimeFixture());
+    // Exercise the non-archive path: the embedded archive would restore state verbatim.
+    if (payload.extensions && typeof payload.extensions === 'object') {
+      delete (payload.extensions as Record<string, unknown>)[directorStateArchiveExtension];
+    }
+    const game = payload.games.find((entry) => entry.id === 'game-ot-1');
+    if (game?.extensions && typeof game.extensions === 'object') {
+      delete (game.extensions as Record<string, unknown>)[directorOvertimePointsExtension];
+    }
+    const restored = importDirectorTournament(payload);
+    const restoredGame = restored.games.find((entry) => entry.id === 'game-ot-1');
+    for (const score of restoredGame?.scores ?? []) {
+      expect(score.overtimePoints).toBeUndefined();
+    }
   });
 });
 

@@ -63,6 +63,14 @@ export interface IQbtcpSocket {
 
 export type QbtcpSocketFactory = (url: string, protocols: string[]) => IQbtcpSocket;
 
+/**
+ * How long a submitted final waits for its receipt before giving up on the stream.
+ *
+ * Matches the HTTP trust window (`requestTimeoutMs`): an answer slower than a plain
+ * request is not coming, and the runtime must fall through to HTTP rather than hang.
+ */
+export const finalSettlementTimeoutMs = 8000;
+
 /** Credentials for the opening `authenticate` frame. Never logged, never in the URL. */
 export interface IStreamCredentials {
   roomToken?: string;
@@ -165,6 +173,7 @@ export class QbtcpStreamClient {
   private view: IQbtcpStreamView = { ...initialStreamView };
   private pendingProgress: { sequence: number; match: unknown } | null = null;
   private pendingFinal = false;
+  private finalSettlementTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly random: () => number;
 
   constructor(private readonly options: IQbtcpStreamClientOptions) {
@@ -243,9 +252,23 @@ export class QbtcpStreamClient {
       return Promise.resolve({ delivered: false });
     }
     this.pendingFinal = true;
+    // A sent final with no answer must still settle: without this the runtime would
+    // await forever instead of falling through to HTTP. Firing answers `false`, never
+    // a delivery — the server dedupes by retry key if it did retain the frame.
+    this.finalSettlementTimer = setTimeout(() => {
+      this.finalSettlementTimer = null;
+      this.failPendingFinal(null);
+    }, finalSettlementTimeoutMs);
     return new Promise((resolve) => {
       this.resolveFinal = resolve;
     });
+  }
+
+  private clearFinalSettlementTimer(): void {
+    if (this.finalSettlementTimer !== null) {
+      clearTimeout(this.finalSettlementTimer);
+      this.finalSettlementTimer = null;
+    }
   }
 
   private resolveFinal: ((answer: { delivered: boolean; receipt?: Record<string, unknown> }) => void) | null =
@@ -356,6 +379,7 @@ export class QbtcpStreamClient {
   private failPendingFinal(error: IStreamError | null): void {
     if (!this.pendingFinal) return;
     this.pendingFinal = false;
+    this.clearFinalSettlementTimer();
     this.resolveFinal?.({ delivered: false });
     this.resolveFinal = null;
     this.options.events?.onFinalUnanswered?.(error);
@@ -423,6 +447,7 @@ export class QbtcpStreamClient {
       case 'receipt': {
         if (this.pendingFinal) {
           this.pendingFinal = false;
+          this.clearFinalSettlementTimer();
           const receipt = frame.payload ?? {};
           this.resolveFinal?.({ delivered: true, receipt });
           this.resolveFinal = null;

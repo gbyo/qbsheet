@@ -856,7 +856,9 @@ export function playerPoints(
  * A bench player with no line gains nothing.
  */
 function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat, gameTuh: number | null): void {
-  if (stat.tossupsHeard !== null && gameTuh !== null && gameTuh > 0) {
+  // A line claiming more exposure than the game read is corrupt data, not overtime: crediting
+  // it would publish more than one GP for a single game, so GP goes unknown instead.
+  if (stat.tossupsHeard !== null && gameTuh !== null && gameTuh > 0 && stat.tossupsHeard <= gameTuh) {
     standing.gamesPlayed += stat.tossupsHeard / gameTuh;
   } else {
     standing.gamesPlayedKnown = false;

@@ -62,6 +62,17 @@ describe('normalizeEndpoint', () => {
     expect(normalizeEndpoint('ws://example.com/')).toEqual({ ok: false });
     expect(normalizeEndpoint('ftp://example.com/')).toEqual({ ok: false });
   });
+
+  test('rejects bare schemes without slashes instead of prefixing them into http URLs', () => {
+    // `mailto:a@b.c` must not become `http://b.c`; `localhost:3000` stays a host:port pair.
+    expect(normalizeEndpoint('mailto:foo@bar.com')).toEqual({ ok: false });
+    expect(normalizeEndpoint('tel:+123')).toEqual({ ok: false });
+    expect(normalizeEndpoint('localhost:3000')).toEqual({ ok: true, value: 'http://localhost:3000' });
+    expect(normalizeEndpoint('example.com:8080/path')).toEqual({
+      ok: true,
+      value: 'http://example.com:8080/path',
+    });
+  });
 });
 
 describe('transport mapping', () => {

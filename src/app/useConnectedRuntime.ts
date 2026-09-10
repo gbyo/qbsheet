@@ -1186,6 +1186,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       stream?.close();
       if (stream !== null && streamRef.current === stream) streamRef.current = null;
     };
+    // The identity object is intentionally narrowed to its scalars: ScoringScreen rebuilds
+    // the object when the connection record changes (e.g. progressSequence), and restarting
+    // the stream on those churns would drop a live connection for no behavioral reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
     client,
@@ -1268,8 +1272,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         }
       } else if (!result.ok && classifyTransportFailure(result) === 'transport-unavailable') {
         // The LAN stopped answering too. Local-only continuation: the game stays mounted,
-        // the final stays durable, and both paths keep healing underneath.
-        applyTransportEvent('http-failed');
+        // the final stays durable, and both paths keep healing underneath. No second
+        // `http-failed` here — the poll already applied it above, and the transition is
+        // idempotent, so re-applying would only restate the same contract state.
       }
       if (classified.credentialProblem) {
         setRoomCredentialProblem(true);
@@ -1463,12 +1468,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       // A healthy stream takes the final through the protocol's durable-receipt path: the
       // relay commits before answering, so a receipt means retained even when Director is
-      // offline — received, never standings-accepted. The retry key travels with the
-      // submission, so falling through to HTTP below stays idempotent: the server answers
-      // the repeat `duplicate: true` and retains exactly one result.
+      // offline — received, never standings-accepted. One retry key covers this whole
+      // attempt: it travels on the stream frame and, unanswered, on the HTTP envelope
+      // below, so the server answers the repeat `duplicate: true` and retains exactly
+      // one result.
+      const retryKey = newFinalRetryKey();
       const stream = streamRef.current;
       if (stream?.isLive) {
-        const answered = await stream.submitFinal(newFinalRetryKey(), qbj);
+        const answered = await stream.submitFinal(retryKey, qbj);
         if (answered.delivered) {
           const receipt = readResultReceipt(answered.receipt ?? {});
           const delivery = classifyFinalDelivery({ ok: true, value: receipt });
@@ -1480,10 +1487,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           return delivery;
         }
         // Unanswered over the stream is not a refusal — retry over HTTP with the same
-        // bytes, and let fingerprint idempotency converge the two paths.
+        // key and bytes, and let retry-key plus fingerprint idempotency converge the paths.
       }
       const activeClient = getActiveClient();
-      const delivered = await deliverFinalResult(activeClient, credentials, qbj, noteWrite);
+      const delivered = await deliverFinalResult(activeClient, credentials, qbj, noteWrite, retryKey);
       if (delivered.delivery === 'sent') {
         timeline.record(
           delivered.duplicate ? 'final-duplicate' : 'final-sent',

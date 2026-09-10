@@ -285,7 +285,7 @@ export function buildCanonicalSnapshot(
         gets: standing.gets,
         negs: standing.negs,
         points,
-        ppg: standing.gamesPlayed > 0 ? points / standing.gamesPlayed : 0,
+        ppg: standing.gamesPlayedKnown && standing.gamesPlayed > 0 ? points / standing.gamesPlayed : null,
         pptuh:
           standing.tossupsHeardKnown && standing.tossupsHeard > 0 ? points / standing.tossupsHeard : null,
         // Director scoresheets record bonus points per player but not

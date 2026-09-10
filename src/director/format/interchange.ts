@@ -52,6 +52,8 @@ import { scoringRulesObject } from '../transfers/assignment';
 export const directorStateArchiveExtension = 'qbsheet:director-state' as const;
 export const directorOrganizationShortNameExtension = 'qbsheet:director-short-name' as const;
 export const directorPhaseTeamIdsExtension = 'qbsheet:phase-team-ids' as const;
+/** Per-team overtime tossup points, keyed by team ID. Written only when known. */
+export const directorOvertimePointsExtension = 'qbsheet:overtime-points-by-team' as const;
 
 export interface DirectorImportReport {
   ok: boolean;
@@ -298,7 +300,31 @@ function sourceForPacket(source: string | undefined): 'manual' | 'qbj' | 'import
   return 'imported';
 }
 
+/**
+ * Validated exact TUH counts for import. A count that is not a finite, non-negative
+ * integer is absent data, not zero; overtime beyond the total contradicts the total,
+ * so both stay absent rather than persisting a disagreement (#746).
+ */
+function validatedGameTuh(
+  tossupsRead: unknown,
+  overtimeTossupsRead: unknown,
+): { tossupsRead?: number; overtimeTossupsRead?: number } {
+  const valid = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) && value >= 0;
+  if (!valid(tossupsRead)) return {};
+  if (!valid(overtimeTossupsRead)) return { tossupsRead };
+  if (overtimeTossupsRead > tossupsRead) return {};
+  return { tossupsRead, overtimeTossupsRead };
+}
+
 function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
+  // Per-team overtime points ride a namespaced game extension; absent stays unknown (#746).
+  const overtimeByTeam =
+    game.extensions?.[directorOvertimePointsExtension] !== null &&
+    typeof game.extensions?.[directorOvertimePointsExtension] === 'object' &&
+    !Array.isArray(game.extensions?.[directorOvertimePointsExtension])
+      ? (game.extensions?.[directorOvertimePointsExtension] as Record<string, unknown>)
+      : undefined;
   return (game.result?.teams ?? []).map((team) => ({
     teamId: team.teamId,
     score: number(team.points) ?? 0,
@@ -312,6 +338,9 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
     bouncebacks: number(team.bonusBouncebackPoints) ?? null,
     // YellowFruit parity (#747): unknown lightning stays unknown through interchange.
     ...(typeof team.lightningPoints === 'number' ? { lightningPoints: team.lightningPoints } : {}),
+    ...(typeof overtimeByTeam?.[team.teamId] === 'number' && Number.isFinite(overtimeByTeam[team.teamId])
+      ? { overtimePoints: overtimeByTeam[team.teamId] as number }
+      : {}),
   }));
 }
 
@@ -480,6 +509,7 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
   // The resolver falls back to the game's embedded ScoringRules so legacy games without a
   // snapshot stay stable too.
   const rules = scoringValuesForGameRecord(state, game);
+  const overtimeByTeam = overtimePointsByTeam(game);
   const scores: GameTeamResult[] = game.scores.map((score) => ({
     teamId: score.teamId,
     points: score.score,
@@ -539,7 +569,8 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     ...(game.rawQbj !== undefined ? { rawSubmission: jsonValue(game.rawQbj) } : {}),
     ...(game.finishedAt ? { submittedAt: game.finishedAt } : {}),
     ...(game.acceptedAt ? { acceptedAt: game.acceptedAt } : {}),
-    ...((game.definitionRevision ?? game.definitionDigest ?? game.definitionSource)
+    ...((game.definitionRevision ?? game.definitionDigest ?? game.definitionSource) ||
+    overtimeByTeam !== undefined
       ? {
           extensions: {
             ...(typeof game.definitionRevision === 'number'
@@ -547,10 +578,25 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
               : {}),
             ...(game.definitionDigest ? { definitionDigest: game.definitionDigest } : {}),
             ...(game.definitionSource ? { definitionSource: game.definitionSource } : {}),
+            ...(overtimeByTeam !== undefined ? { [directorOvertimePointsExtension]: overtimeByTeam } : {}),
           },
         }
       : {}),
   };
+}
+
+/**
+ * Known per-team overtime points for interchange, keyed by team ID. Unknown stays
+ * absent: a missing breakdown is not a verified zero, and fabricating one would poison
+ * regulation derivations on re-import (#746).
+ */
+function overtimePointsByTeam(game: GameRecord): Record<string, number> | undefined {
+  const entries = game.scores.flatMap((score) =>
+    typeof score.overtimePoints === 'number' && Number.isFinite(score.overtimePoints)
+      ? [[score.teamId, score.overtimePoints] as const]
+      : [],
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
 export function toInterchange(state: DirectorState): DirectorTournament {
@@ -1052,10 +1098,9 @@ function fromInterchange(data: DirectorTournament): DirectorState {
       : {}),
     scores: resultScores(game),
     // Exact match TUH restores from native result fields; absent stays unknown (#746).
-    ...(typeof game.result?.tossupsRead === 'number' ? { tossupsRead: game.result.tossupsRead } : {}),
-    ...(typeof game.result?.overtimeTossupsRead === 'number'
-      ? { overtimeTossupsRead: game.result.overtimeTossupsRead }
-      : {}),
+    // Counts are validated before persistence: only finite, non-negative integers reach
+    // DirectorState, and overtime beyond the total contradicts it, so both stay absent.
+    ...validatedGameTuh(game.result?.tossupsRead, game.result?.overtimeTossupsRead),
     playerStats: (game.result?.players ?? []).map((player) => ({
       playerId: player.playerId,
       teamId: player.teamId,

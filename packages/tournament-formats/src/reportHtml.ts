@@ -144,7 +144,7 @@ export function reportPointsMetricLabel(presentation: ReportPresentation): strin
 }
 
 export function reportPointsMetricValue(
-  row: { ppg: number; pointsPerX?: number | null },
+  row: { ppg: number | null; pointsPerX?: number | null },
   presentation: ReportPresentation,
 ): string {
   return presentation.options.pointsMetric === 'pointsPerX'
