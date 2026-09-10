@@ -817,6 +817,9 @@ export class QbtcpAdapter extends BaseAdapter {
     credentials: ISessionCredentials,
     qbj: object,
   ): Promise<ApiResult<IResultReceipt>> {
+    // The result posts as the bare QBJ document both servers accept: YellowFruit reads the
+    // identity out of the raw body, so an envelope would arrive unreadable. Transport
+    // metadata stays out of the QBJ — the same rule as the progress envelope above.
     const result = await this.request<unknown>(this.routes.result(credentials.sessionId), {
       method: 'POST',
       headers: this.sessionHeaders(credentials, qbjMediaType),

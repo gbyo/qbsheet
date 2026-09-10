@@ -1186,6 +1186,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       stream?.close();
       if (stream !== null && streamRef.current === stream) streamRef.current = null;
     };
+    // The identity object is intentionally narrowed to its scalars: ScoringScreen rebuilds
+    // the object when the connection record changes (e.g. progressSequence), and restarting
+    // the stream on those churns would drop a live connection for no behavioral reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
     client,
@@ -1268,8 +1272,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         }
       } else if (!result.ok && classifyTransportFailure(result) === 'transport-unavailable') {
         // The LAN stopped answering too. Local-only continuation: the game stays mounted,
-        // the final stays durable, and both paths keep healing underneath.
-        applyTransportEvent('http-failed');
+        // the final stays durable, and both paths keep healing underneath. No second
+        // `http-failed` here — the poll already applied it above, and the transition is
+        // idempotent, so re-applying would only restate the same contract state.
       }
       if (classified.credentialProblem) {
         setRoomCredentialProblem(true);
@@ -1463,9 +1468,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       // A healthy stream takes the final through the protocol's durable-receipt path: the
       // relay commits before answering, so a receipt means retained even when Director is
-      // offline — received, never standings-accepted. The retry key travels with the
-      // submission, so falling through to HTTP below stays idempotent: the server answers
-      // the repeat `duplicate: true` and retains exactly one result.
+      // offline — received, never standings-accepted. The stream frame carries a
+      // retry key, and the HTTP fallthrough below posts the bare QBJ both servers
+      // accept, so a repeat is answered `duplicate: true` and exactly one result
+      // is retained.
       const stream = streamRef.current;
       if (stream?.isLive) {
         const answered = await stream.submitFinal(newFinalRetryKey(), qbj);

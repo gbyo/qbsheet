@@ -92,7 +92,8 @@ export interface PlayerStatsRow {
   gets: number;
   negs: number;
   points: number;
-  ppg: number;
+  /** Null when games played is unknown: a partial denominator must not masquerade as a rate. */
+  ppg: number | null;
   /** Null when tossups-heard is unknown or zero. */
   pptuh: number | null;
   bonusesHeard: number;
@@ -182,7 +183,11 @@ function acceptedGame(game: GameRecord, statuses: readonly string[]): boolean {
 }
 
 function isForfeitGame(game: GameRecord): boolean {
-  return game.status === 'forfeit' || game.result?.forfeit === true;
+  return (
+    game.status === 'forfeit' ||
+    game.result?.forfeit === true ||
+    (game.result?.teams ?? []).some((team) => team.forfeitLoss === true)
+  );
 }
 
 function validGameTuh(value: unknown): value is number {
@@ -342,7 +347,7 @@ function playerRow(mutable: MutablePlayerStats): PlayerStatsRow {
     rank: 0,
     ...rest,
     tossupsHeard: known ? mutable.tossupsHeard : null,
-    ppg: mutable.gamesPlayed > 0 ? mutable.points / mutable.gamesPlayed : 0,
+    ppg: mutable.gamesPlayedKnown && mutable.gamesPlayed > 0 ? mutable.points / mutable.gamesPlayed : null,
     pptuh: known && mutable.tossupsHeard > 0 ? mutable.points / mutable.tossupsHeard : null,
     ppb: mutable.bonusesHeard > 0 ? mutable.bonusPoints / mutable.bonusesHeard : null,
   };
@@ -513,7 +518,9 @@ export function buildStatsSnapshot(
     const resultPlayers = game.result.players ?? [];
     resultPlayers.forEach((result) => {
       const player = ensurePlayer(result);
-      if (result.tossupsHeard !== undefined && gameTuh !== null) {
+      // Exposure beyond the game's own count is corrupt data, not extra participation:
+      // crediting it would publish more than one GP for a single game.
+      if (result.tossupsHeard !== undefined && gameTuh !== null && result.tossupsHeard <= gameTuh) {
         player.gamesPlayed += result.tossupsHeard / gameTuh;
       } else {
         player.gamesPlayedKnown = false;
@@ -552,7 +559,7 @@ export function buildStatsSnapshot(
   const players = rankRows(
     [...playerStats.values()].map(playerRow),
     (left, right) =>
-      right.ppg - left.ppg ||
+      (right.ppg ?? Number.NEGATIVE_INFINITY) - (left.ppg ?? Number.NEGATIVE_INFINITY) ||
       right.powers - left.powers ||
       right.gets - left.gets ||
       left.playerName.localeCompare(right.playerName),
@@ -814,7 +821,7 @@ export function exportStatsHtml(snapshot: StatsSnapshot): string {
     row.gets,
     row.negs,
     row.points,
-    row.gamesPlayedKnown ? row.ppg.toFixed(1) : '—',
+    row.gamesPlayedKnown && row.ppg !== null ? row.ppg.toFixed(1) : '—',
     fixedStatText(row.pptuh, 2),
     row.bonusesHeard,
     row.bonusPoints,
@@ -991,7 +998,7 @@ export function buildStatReportBundle(snapshot: StatsSnapshot): StatReportPage[]
         `${showGrades ? cell(typeof row.schoolYear === 'number' ? row.schoolYear : '—', true) : ''}` +
         `<td class="num">${row.gamesPlayed}</td>${numCell(row.tossupsHeard)}` +
         `${showSuperpowers ? cell(row.superpowers, true) : ''}<td class="num">${row.powers}</td><td class="num">${row.gets}</td><td class="num">${row.negs}</td>` +
-        `<td class="num">${row.points}</td><td class="num">${row.ppg.toFixed(1)}</td>${numCell(row.pptuh, 2)}` +
+        `<td class="num">${row.points}</td>${numCell(row.ppg, 1)}${numCell(row.pptuh, 2)}` +
         `<td class="num">${row.bonusPoints}</td>${numCell(row.ppb, 2)}</tr>`,
     )
     .join('');
@@ -1047,7 +1054,7 @@ export function buildStatReportBundle(snapshot: StatsSnapshot): StatReportPage[]
         `<section id="${playerAnchor(row)}" aria-label="${htmlEscape(row.playerName)}"><h2>${htmlEscape(row.playerName)}</h2>` +
         `<p><a href="teamdetail.html#${teamAnchor(teamById.get(row.teamId) ?? ({ rank: 0, teamId: row.teamId } as TeamStatsRow))}">${htmlEscape(row.teamName)}</a>` +
         `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''} · ${row.gamesPlayed} games · ` +
-        `${row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`} · ${row.powers}/${row.gets}/${row.negs} · ${row.points} pts · ${row.ppg.toFixed(1)} PPG · ` +
+        `${row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`} · ${row.powers}/${row.gets}/${row.negs} · ${row.points} pts · ${row.ppg === null ? 'PPG —' : `${row.ppg.toFixed(1)} PPG`} · ` +
         `${row.pptuh === null ? 'PPTUH —' : `${row.pptuh.toFixed(2)} PPTUH`}</p>` +
         `<h3>Games</h3>${log.length > 0 ? `<ul>${log.map(gameLine).join('')}</ul>` : '<p class="meta">No games.</p>'}</section>`
       );

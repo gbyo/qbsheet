@@ -89,6 +89,13 @@ export function normalizeEndpoint(input: string): { ok: true; value: string } | 
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
     return { ok: false };
   }
+  // Same for a bare `scheme:rest` URI: prefixing `mailto:a@b.c` yields an http URL on
+  // host `b.c`. A host:port pair is never mistaken for one — its host contains a dot
+  // or its port leads with a digit — so valid bare addresses still get the http default.
+  const bareScheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):([\s\S]*)$/.exec(trimmed);
+  if (bareScheme !== null && !bareScheme[1].includes('.') && !/^[0-9/]/.test(bareScheme[2])) {
+    return { ok: false };
+  }
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   let url: URL;
   try {

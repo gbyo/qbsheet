@@ -135,7 +135,7 @@ export function playerStatsCsv(state: DirectorState): string {
       standing.gets,
       standing.negs,
       standing.bonusPoints,
-      standing.ppg.toFixed(1),
+      standing.gamesPlayedKnown === false ? '' : standing.ppg.toFixed(1),
     ]),
   );
 }

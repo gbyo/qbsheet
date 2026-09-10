@@ -190,6 +190,14 @@ function helpFailure(result: FailedApiResult): HelpFailure {
 export function normalizeBaseUrl(input: string): { ok: true; value: string } | { ok: false; error: string } {
   const trimmed = input.trim();
   if (trimmed === '') return { ok: false, error: 'Enter the address tournament control gave you.' };
+  // A bare `scheme:rest` URI is a scheme, not a host missing its prefix: defaulting it to
+  // http would mangle `mailto:a@b.c` into an address on host `b.c`. Host:port pairs are
+  // excluded — the host contains a dot or the port leads with a digit. Mirrors
+  // `normalizeEndpoint` in `src/qbtcp/QbtcpPreferredTransport.ts`.
+  const bareScheme = /^([a-zA-Z][a-zA-Z0-9+.-]*):([\s\S]*)$/.exec(trimmed);
+  if (bareScheme !== null && !bareScheme[1].includes('.') && !/^[0-9/]/.test(bareScheme[2])) {
+    return { ok: false, error: 'The address has to start with http:// or https://.' };
+  }
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   let url: URL;
   try {
