@@ -778,6 +778,8 @@ export class QbtcpRelay extends DurableObject<Env> {
       return credentialed(() => this.postHelpCancel(request, helpCancel[1]));
 
     if (method === 'POST' && action === 'manage/claim') return credentialed(() => this.claim(request));
+    if (method === 'POST' && action === 'manage/rotate')
+      return credentialed(() => this.rotateManagement(request));
     if (method === 'PUT' && action === 'manage/mirror') return credentialed(() => this.putMirror(request));
     if (method === 'GET' && action === 'manage/events')
       return credentialed(() => this.getEvents(request, url));
@@ -1723,6 +1725,35 @@ export class QbtcpRelay extends DurableObject<Env> {
     );
     this.wrote();
     return json({ tournamentId, managementToken, origin: new URL(request.url).origin }, 200, cors);
+  }
+
+  /**
+   * Rotate the management credential without touching the setup token.
+   *
+   * Requires the current management credential and mints a fresh one: only the new hash is
+   * stored, the old credential stops authorizing new requests immediately, and the plaintext
+   * leaves the relay exactly once, in this response. Retained results, mirrored state, and the
+   * replay cursor are untouched — rotation changes who may manage the tournament, never what
+   * the tournament holds.
+   *
+   * There is deliberately no "recover with the setup token" path: the setup token is consumed
+   * by the first claim. A Director that has lost its credential follows the documented
+   * destroy-and-reclaim recovery (export unacknowledged finals first; the teardown planner in
+   * Director refuses a silent destroy while any remain).
+   */
+  private async rotateManagement(request: Request): Promise<Response> {
+    const { tournament, cors } = await this.authorizeManagement(request);
+    this.guardWrites();
+    await this.readJson(request, MAX_BODY_BYTES).catch(() => ({}));
+    const managementToken = randomToken();
+    const now = nowIso();
+    this.sql.exec(
+      'UPDATE tournament SET management_token_hash = ?, updated_at = ? WHERE id = 1',
+      await sha256Hex(managementToken),
+      now,
+    );
+    this.wrote();
+    return json({ tournamentId: tournament.tournament_id, managementToken }, 200, cors);
   }
 
   /**

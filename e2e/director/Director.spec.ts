@@ -275,13 +275,14 @@ test('Director runs a local tournament slice and reopens its result', async ({ p
   await expect(page.getByRole('button', { name: 'Teams 2' })).toBeVisible();
 
   /*
-   * The default table is rank, team, and record. Points for is a detailed
-   * scoring column the operator opts into, which is how ten equally weighted
-   * columns stopped being forced on everyone — so the persisted score is
-   * checked after turning them on.
+   * The default table is rank, team, and record. Points for is an optional
+   * column the operator opts into through the column chooser, which is how
+   * ten equally weighted columns stopped being forced on everyone — so the
+   * persisted score is checked after turning it on.
    */
   await expect(page.getByRole('cell', { name: '210', exact: true })).toHaveCount(0);
-  await page.getByRole('switch', { name: 'Detailed scoring columns' }).click();
+  await page.getByRole('button', { name: 'Team columns', exact: true }).click();
+  await page.getByRole('switch', { name: 'PF', exact: true }).click();
   await expect(page.getByRole('cell', { name: '210', exact: true }).first()).toBeVisible();
 });
 

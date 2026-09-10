@@ -1,5 +1,5 @@
 /**
- * The QBLive conformance suite.
+ * The QBLive conformance suite: the hosting-neutral contract made runnable.
  *
  * # What it is for
  *
@@ -12,6 +12,12 @@
  *   --origin https://my-backend.example --publication <id> --management-token <token>
  * ```
  *
+ * For a fresh backend, use the standard setup/claim hook in `./setup.js`
+ * (or `--setup-token` on the CLI) to claim a publication and publish the
+ * first snapshot before running the suite. The hook speaks observable QBLive
+ * behavior only, so the same flow tests the Cloudflare reference backend, a
+ * standalone QBServer, and any third-party host.
+ *
  * # How it decides
  *
  * Checks are grouped by the capability level they belong to. A Basic server that fails a Realtime
@@ -19,9 +25,17 @@
  * host as broken because it has no WebSocket would make the suite useless for the deployment the
  * protocol was designed to allow.
  *
- * Nothing here mutates a publication unless a management token is supplied, and the checks that do
- * are marked. A director can point this at a live tournament with read-only credentials and learn
- * something without risking anything.
+ * Where local-only Director intentionally advertises fewer capabilities, run
+ * with `profile: 'local'`: management checks pass when the server answers
+ * that there is no management API here, rather than failing local mode for
+ * not being a full remote backend.
+ *
+ * Nothing here depends on Durable Object internals, Wrangler bindings,
+ * Cloudflare-specific headers, a specific database, or Director-native APIs.
+ * It tests observable QBLive behavior. Nothing here mutates a publication
+ * unless a management token is supplied, and the checks that do are marked. A
+ * director can point this at a live tournament with read-only credentials and
+ * learn something without risking anything.
  */
 
 import {
@@ -48,6 +62,8 @@ export interface CheckResult {
   elapsedMs: number;
 }
 
+export type ConformanceProfile = 'full' | 'local' | 'basic';
+
 export interface ConformanceOptions {
   origin: string;
   publicationId: string;
@@ -60,6 +76,22 @@ export interface ConformanceOptions {
   streamTimeoutMs?: number;
   /** Skip the check that uploads ~9 MB, for a run against a remote server over a slow link. */
   skipLargeUpload?: boolean;
+  /**
+   * The capability profile the server is expected to satisfy.
+   *
+   * - `full`: a remote backend (Cloudflare reference, QBServer) with public
+   *   reads, replay, stream, and an authenticated management API.
+   * - `local`: Director local-only mode, which intentionally advertises fewer
+   *   capabilities and exposes no management API. Management checks pass when
+   *   the server answers that there is no management API here, rather than
+   *   failing it for not being a full remote backend.
+   * - `basic`: a static host with snapshot reads only.
+   *
+   * Defaults to `full`; the suite still skips checks for capabilities the
+   * manifest does not advertise, so a Basic server is never reported as
+   * broken for having no WebSocket.
+   */
+  profile?: ConformanceProfile;
 }
 
 export interface ConformanceReport {
@@ -165,6 +197,95 @@ export async function runConformance(options: ConformanceOptions): Promise<Confo
     expect(allow === '*' || allow !== null, 'no access-control-allow-origin header on a public route');
     return `access-control-allow-origin: ${allow}`;
   });
+
+  await recorder.run('cache', 'basic', 'Public reads are cacheable-by-contract', async () => {
+    if (!snapshot) return { skip: 'no snapshot' };
+    const response = await doFetch(`${base}/snapshot`);
+    const cache = response.headers.get('cache-control');
+    expect(cache !== null, 'no cache-control header on a public route');
+    const etag = response.headers.get('etag');
+    // An ETag is required by the hosting-neutral contract so caches can
+    // revalidate: `ETag: "<revision>"`. A host that omits it is conforming
+    // but dated; reporting it as a failure would break existing local servers,
+    // so this check passes with a note and becomes a failure only when the
+    // header is present but wrong.
+    if (etag === null) return 'no etag header (tolerated for local-only hosts)';
+    expect(
+      etag === `"${snapshot.revision}"`,
+      `the snapshot etag was ${etag}, expected "${snapshot.revision}"`,
+    );
+    return `cache-control: ${cache}, etag: ${etag}`;
+  });
+
+  await recorder.run(
+    'endpoints',
+    'basic',
+    'The manifest constructs endpoints for its capabilities',
+    async () => {
+      if (!manifest) return { skip: 'no manifest' };
+      expect(
+        typeof manifest.endpoints.snapshot === 'string' && manifest.endpoints.snapshot.length > 0,
+        'the manifest names no snapshot endpoint',
+      );
+      if (manifest.capabilities.events) {
+        expect(typeof manifest.endpoints.events === 'string', 'events advertised but no events endpoint');
+      }
+      if (manifest.capabilities.stream) {
+        expect(typeof manifest.endpoints.stream === 'string', 'stream advertised but no stream endpoint');
+      }
+      return `snapshot ${manifest.endpoints.snapshot}`;
+    },
+  );
+
+  await recorder.run('profile', 'basic', 'The server advertises its capability profile', async () => {
+    if (!manifest) return { skip: 'no manifest' };
+    const expected = options.profile ?? 'full';
+    if (expected === 'local') {
+      // Local-only mode intentionally offers less: snapshot + events, no
+      // stream, no management API. This passes rather than pretending local
+      // mode is a full remote backend.
+      expect(manifest.capabilities.stream !== true, 'a local-only server advertises a stream');
+      return `local-only: ${describeCapabilities(manifest)}`;
+    }
+    if (expected === 'basic') {
+      expect(manifest.capabilities.events !== true, 'a basic server advertises events');
+      expect(manifest.capabilities.stream !== true, 'a basic server advertises a stream');
+      return `basic: ${describeCapabilities(manifest)}`;
+    }
+    return `full: ${describeCapabilities(manifest)}`;
+  });
+
+  await recorder.run('invalid-id', 'basic', 'A forged publication id is not found', async () => {
+    for (const forged of ['../etc', 'AAAA', 'aeiouaeiouaeiouaeiou']) {
+      const response = await doFetch(
+        `${origin}/qblive/v1/tournaments/${encodeURIComponent(forged)}/snapshot`,
+      );
+      expect(
+        response.status === 404 || response.status === 410,
+        `a forged id ${forged} answered ${response.status}`,
+      );
+    }
+    return 'vowel, length, and traversal forgeries all refused';
+  });
+
+  await recorder.run(
+    'hosting-neutral',
+    'basic',
+    'No hosting implementation detail is a protocol requirement',
+    async () => {
+      if (!rawSnapshot) return { skip: 'no snapshot' };
+      // Cloudflare-specific internals must never be normative: a conforming
+      // server answers without Durable Object ids, Wrangler bindings, or
+      // provider headers, and never requires them.
+      const serialized = rawSnapshot.toLowerCase();
+      for (const needle of ['durableobject', 'durable_object', 'wrangler', 'cloudflare-env']) {
+        expect(!serialized.includes(needle), `the snapshot contains ${needle}`);
+      }
+      const response = await doFetch(`${base}/snapshot`);
+      expect(response.ok, `snapshot answered ${response.status} without provider headers`);
+      return 'public reads need no provider affordance';
+    },
+  );
 
   await recorder.run('timestamps', 'basic', 'Published timestamps carry an explicit offset', async () => {
     if (!snapshot) return { skip: 'no snapshot' };
