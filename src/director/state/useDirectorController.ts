@@ -399,6 +399,21 @@ export type DocumentTransitionCheck =
       error: string | null;
     };
 
+/**
+ * Process-exit readiness for #731. `prepareForClose()` flushes the canonical
+ * persistence queue and then judges the *current* revision counters — never a
+ * merely settled Promise — so a mutation that lands mid-flush is waited for
+ * too, while a failed save stays `blocked` for operator recovery.
+ */
+export type CloseReadiness =
+  | { status: 'safe' }
+  | {
+      status: 'blocked';
+      revision: number;
+      durableRevision: number;
+      error: string | null;
+    };
+
 export type DirectorDocumentTransition =
   | { kind: 'switching'; tournamentId: DirectorId }
   | { kind: 'creating-tournament' }
@@ -448,6 +463,14 @@ export interface DirectorController {
   /** Whether the current in-memory document may be replaced or left safely. */
   canLeaveCurrentDocument(): DocumentTransitionCheck;
   retryPersistence(): Promise<boolean>;
+  /**
+   * Flush the canonical persistence queue for process exit (#731). Resolves
+   * `safe` only once the current revision is durable; resolves `blocked`
+   * when the queue is settled but the revision is still memory-only so the
+   * close surface can offer retry/recovery instead of quitting. Concurrent
+   * calls share one flush.
+   */
+  prepareForClose(): Promise<CloseReadiness>;
   writerStatus: 'native' | 'held' | 'checking' | 'blocked' | 'unavailable';
   repositoryKind: DirectorRepository['kind'];
   tournaments: TournamentCatalogEntry[];
@@ -977,6 +1000,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const durableRevisionRef = useRef(0);
   const persistenceQueueRef = useRef(Promise.resolve());
   const persistenceSequenceRef = useRef(0);
+  /** Shared in-flight exit flush so repeated close requests never fork duplicate flushes (#731). */
+  const closeFlushRef = useRef<Promise<CloseReadiness> | null>(null);
   const writerClaimRef = useRef<DirectorWriterClaim | null>(null);
   const writerStatusRef = useRef<DirectorController['writerStatus']>(writerStatus);
   const writerGraceDocumentRef = useRef<DirectorId | null>(null);
@@ -1467,6 +1492,41 @@ export function useDirectorController(repository = createDirectorRepository()): 
       return false;
     }
   }, [ensureWriter, persist]);
+
+  const prepareForClose = useCallback((): Promise<CloseReadiness> => {
+    if (closeFlushRef.current) return closeFlushRef.current;
+    const flush = (async (): Promise<CloseReadiness> => {
+      for (;;) {
+        if (canLeaveCurrentDocument().ok) return { status: 'safe' };
+        const queued = persistenceQueueRef.current;
+        await queued;
+        // The authoritative test is the live counters, not the settled
+        // Promise: a rejection leaves revision > durableRevision (#731).
+        if (canLeaveCurrentDocument().ok) return { status: 'safe' };
+        if (persistenceQueueRef.current === queued) {
+          // The queue drained without making the current revision durable.
+          // The save failed (or needs an explicit retry); waiting longer
+          // cannot fix it, so report blocked for operator recovery.
+          const check = canLeaveCurrentDocument();
+          if (check.ok) return { status: 'safe' };
+          return {
+            status: 'blocked',
+            revision: check.revision,
+            durableRevision: check.durableRevision,
+            error: check.error,
+          };
+        }
+        // A newer mutation queued while the close was settling: loop and
+        // wait for the current revision too instead of exiting on the old one.
+      }
+    })();
+    closeFlushRef.current = flush;
+    const release = () => {
+      if (closeFlushRef.current === flush) closeFlushRef.current = null;
+    };
+    flush.then(release, release);
+    return flush;
+  }, [canLeaveCurrentDocument]);
 
   /**
    * Apply a mutation, derive the public projection, and persist both together.
@@ -7473,6 +7533,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     persistence,
     canLeaveCurrentDocument,
     retryPersistence,
+    prepareForClose,
     writerStatus,
     repositoryKind,
     tournaments,

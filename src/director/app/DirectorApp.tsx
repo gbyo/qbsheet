@@ -69,6 +69,7 @@ import {
 } from './TournamentForm';
 import { openTournamentFile } from './openTournament';
 import type { PickedFile } from '../components/FilePicker';
+import { useCloseGuard } from './useCloseGuard';
 
 /**
  * The Director application.
@@ -187,6 +188,22 @@ function DirectorAppContent() {
     setBlockedTransition(null);
     await action();
   }, [blockedTransition, retryPersistence, setBlockedTransition]);
+
+  // Process-exit durability guard (#731): the native shell calls the
+  // registered requestClose from its close interception; the phases below
+  // drive the quit dialogs. Browser tabs get a best-effort unload warning —
+  // unload handlers cannot complete async persistence, so they only warn.
+  const closeGuard = useCloseGuard(controller);
+  useEffect(() => {
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!canLeaveCurrentDocument().ok) {
+        event.preventDefault();
+        event.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [canLeaveCurrentDocument]);
 
   // The index does not depend on the query: `cmdk` ranks it per keystroke.
   const searchIndex = useMemo(() => buildSearchIndex(state), [state]);
@@ -585,6 +602,46 @@ function DirectorAppContent() {
           onExport={() => void downloadArchive(state, announce)}
         />
       )}
+      {closeGuard.phase === 'flushing' && (
+        <Dialog
+          title="Saving before quit…"
+          description="Director is flushing the latest tournament revision to durable storage."
+          size="sm"
+          onClose={() => closeGuard.cancelClose()}
+          footer={
+            <div className="director-dialog-footer">
+              <Button variant="secondary" onClick={() => closeGuard.cancelClose()} data-autofocus>
+                Keep working
+              </Button>
+            </div>
+          }
+        >
+          <p role="status">
+            The app will quit as soon as the current revision is durable. Keep Director open until this
+            finishes.
+          </p>
+        </Dialog>
+      )}
+      {closeGuard.phase === 'blocked' && closeGuard.blockedCheck && (
+        <DocumentTransitionDialog
+          check={closeGuard.blockedCheck}
+          title="Cannot quit yet"
+          description="Director cannot quit yet because the latest tournament changes exist only in memory and the save did not succeed."
+          cancelLabel="Keep working"
+          onCancel={() => closeGuard.cancelClose()}
+          onRetry={() => void closeGuard.retryClose()}
+          onExport={() => void downloadArchive(state, announce)}
+          quit={
+            closeGuard.canForceClose
+              ? {
+                  label: 'Quit without saving',
+                  consequence: `Quitting now loses every in-memory change after durable revision ${closeGuard.blockedCheck.durableRevision}. Only do this if the tournament can be reconstructed or the changes do not matter.`,
+                  onQuit: () => closeGuard.quitWithoutSaving(),
+                }
+              : null
+          }
+        />
+      )}
     </>
   );
 }
@@ -633,22 +690,30 @@ function DocumentTransitionDialog({
   onCancel,
   onRetry,
   onExport,
+  title = 'Unsaved tournament changes',
+  description = 'This tournament cannot be replaced yet because its latest changes exist only in memory.',
+  cancelLabel = 'Cancel',
+  quit = null,
 }: {
-  check: Extract<DocumentTransitionCheck, { ok: false }>;
+  check: Pick<Extract<DocumentTransitionCheck, { ok: false }>, 'revision' | 'durableRevision' | 'error'>;
   onCancel: () => void;
   onRetry: () => void;
   onExport: () => void;
+  title?: string;
+  description?: string;
+  cancelLabel?: string;
+  quit?: { label: string; consequence: string; onQuit: () => void } | null;
 }) {
   return (
     <Dialog
-      title="Unsaved tournament changes"
-      description="This tournament cannot be replaced yet because its latest changes exist only in memory."
+      title={title}
+      description={description}
       size="sm"
       onClose={onCancel}
       footer={
         <div className="director-dialog-footer">
           <Button variant="secondary" onClick={onCancel} data-autofocus>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button variant="secondary" onClick={onRetry}>
             Retry save
@@ -656,6 +721,11 @@ function DocumentTransitionDialog({
           <Button variant="secondary" icon="download" onClick={onExport}>
             Export recovery archive
           </Button>
+          {quit && (
+            <Button variant="danger-solid" onClick={quit.onQuit}>
+              {quit.label}
+            </Button>
+          )}
         </div>
       }
     >
@@ -664,9 +734,13 @@ function DocumentTransitionDialog({
         now would lose the in-memory changes.
       </p>
       {check.error && <p className="director-panel-footnote">Save error: {check.error}</p>}
-      <p className="director-panel-footnote">
-        Retry the save, export a recovery archive, or cancel and keep working in this tournament.
-      </p>
+      {quit ? (
+        <p className="director-panel-footnote">{quit.consequence}</p>
+      ) : (
+        <p className="director-panel-footnote">
+          Retry the save, export a recovery archive, or cancel and keep working in this tournament.
+        </p>
+      )}
     </Dialog>
   );
 }

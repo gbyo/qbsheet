@@ -12,4 +12,14 @@ describe('Director native bridge', () => {
       'This action is available from the QBSheet Director desktop app.',
     );
   });
+
+  it('installs no close interception outside the desktop runtime (#731)', async () => {
+    const { installCloseInterception } = await import('./native');
+    const { getClosePerformer } = await import('../../../src/director/platform/closeGuard');
+    const cleanup = await installCloseInterception();
+    // No native close performer: the browser keeps beforeunload only, and no
+    // destructive quit path is offered.
+    expect(getClosePerformer()).toBeNull();
+    cleanup();
+  });
 });
