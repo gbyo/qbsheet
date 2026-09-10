@@ -309,6 +309,8 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
     bonuses: number(team.bonusesHeard) ?? 0,
     bonusPoints: number(team.bonusPoints) ?? 0,
     bouncebacks: number(team.bonusBouncebackPoints) ?? 0,
+    // YellowFruit parity (#747): unknown lightning stays unknown through interchange.
+    ...(number(team.lightningPoints) !== undefined ? { lightningPoints: number(team.lightningPoints) } : {}),
   }));
 }
 
@@ -443,6 +445,8 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     bonusesHeard: score.bonuses,
     bonusPoints: score.bonusPoints,
     bonusBouncebackPoints: score.bouncebacks,
+    // YellowFruit parity (#747): omit unknown lightning rather than writing a false zero.
+    ...(typeof score.lightningPoints === 'number' ? { lightningPoints: score.lightningPoints } : {}),
     // The forfeiting side is explicit so a re-import awards the win to the
     // other side even when both recorded scores are zero.
     ...(game.status === 'forfeit' && score.teamId === game.forfeitedTeamId ? { forfeitLoss: true } : {}),

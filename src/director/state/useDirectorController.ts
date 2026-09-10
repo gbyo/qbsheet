@@ -55,6 +55,7 @@ import {
   unresolvedBracketDependencyForTeam,
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
+  isCanonicalCount,
   applyTournamentStatusTransition,
   planTournamentStatusTransition,
   type TimelineEventType,
@@ -7590,6 +7591,8 @@ function fingerprintForScores(scores: TeamGameScore[]): string {
         score.bonuses,
         score.bonusPoints,
         score.bouncebacks,
+        // YellowFruit parity (#747): unknown lightning fingerprints distinctly from zero.
+        score.lightningPoints ?? 'unknown',
       ]
         .map((value) => String(value))
         .join('\u001f'),
@@ -7734,6 +7737,15 @@ export function validateResultForScheduledGame(
     }
     const invalidCountField = invalidTeamGameScoreCountField(score);
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
+    // YellowFruit parity (#747): lightning is optional (unknown when absent) but when
+    // supplied it must be a canonical count.
+    if (
+      score.lightningPoints !== undefined &&
+      score.lightningPoints !== null &&
+      !isCanonicalCount(score.lightningPoints)
+    ) {
+      return 'lightningPoints must be a finite non-negative whole number.';
+    }
   }
   const decisionIssue = resultDecisionIssue(state, scheduled, scores);
   if (decisionIssue) return decisionIssue.message;

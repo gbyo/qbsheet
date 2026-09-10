@@ -236,6 +236,9 @@ export function buildCanonicalSnapshot(
       bonusPoints: standing.bonusPoints,
       bonusesHeard: standing.bonuses,
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
+      // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
+      lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
+      lightningKnown: standing.lightningKnown,
     };
   });
 
