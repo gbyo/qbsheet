@@ -137,7 +137,8 @@ numerator/denominator pairs plus final display):
 11. pure forfeit (W/L counts, no TUH);
 12. score-only partial result (detail unknown);
 13. multi-round aggregation;
-14. multi-stage/pool/carryover scoping;
+14. multi-round aggregation plus phase scoping (carryover scopes ride the same
+    composition, covered by the Director `StandingsView` carryover test);
 15. player metadata (year/UG/D2, incl. unknown);
 16. mixed historical definitions (per-game valuation);
 17. zero-vs-unknown semifinal cases (0 allowed, 0 heard, 0 converted).
