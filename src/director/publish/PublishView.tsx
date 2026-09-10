@@ -11,6 +11,7 @@ import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
 import { ReportOptionsDialog } from './ReportOptionsDialog';
+import { SqbsTournamentDialog } from './SqbsTournamentDialog';
 
 export function PublishView({
   state,
@@ -38,6 +39,7 @@ export function PublishView({
       ? reportOptionsOverride.options
       : loadedReportOptions;
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
+  const [sqbsTournamentOpen, setSqbsTournamentOpen] = useState(false);
 
   return (
     <Page>
@@ -106,13 +108,27 @@ export function PublishView({
               onClick={() => downloadQbj(state, onAnnounce)}
             />
             <ExportAction
+              title="SQBS tournament"
+              description="Full tournament data file for SQBS: teams, players, games, scores, and detail stats."
+              action="Download tournament"
+              onClick={() => setSqbsTournamentOpen(true)}
+            />
+            <ExportAction
               title="SQBS roster"
-              description="Positional roster export for SQBS-compatible tools."
-              action="Download SQBS"
+              description="Roster-only compatibility file for SQBS-compatible tools. No games or scores."
+              action="Download roster"
               onClick={() => downloadSqbs(state, onAnnounce)}
             />
           </SummaryList>
         </Panel>
+      )}
+
+      {sqbsTournamentOpen && state.tournament && (
+        <SqbsTournamentDialog
+          state={state}
+          onAnnounce={onAnnounce}
+          onClose={() => setSqbsTournamentOpen(false)}
+        />
       )}
 
       {reportOptionsOpen && state.tournament && (

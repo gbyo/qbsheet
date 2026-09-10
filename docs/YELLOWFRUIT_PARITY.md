@@ -111,8 +111,8 @@ QBJ or reinterpret old games using current rules.
 | Capability | Class | Notes |
 |---|---|---|
 | SQBS roster import | implemented (PR 5) | Parser in `tournament-formats`; Teams offers Import CSV and Import SQBS through one shared mapping with stable identity; Scenario K covers same-organization teams |
-| Full SQBS tournament export | implemented (PR 5) | Canonical-engine exporter (teams, players, games, scores, detail, divisions); roster-only helper retained and labeled as such |
-| Multi-stage SQBS (per-stage files, combine warnings) | implemented (PR 5) | Publish offers per-stage scope, overall-with-warning, or each-stage-as-its-own-file; pools map to divisions within one stage |
+| Full SQBS tournament export | implemented | Exports offers a labeled SQBS tournament file (teams, players, games, scores, detail, divisions) with scope label and warnings shown before and after save; the roster-only helper is retained as SQBS roster |
+| Multi-stage SQBS (per-stage scope, combine warnings) | implemented | Exports offers per-stage/pool scope plus overall-with-warning; pools map to divisions within one stage; exporting each stage as its own file in one operation is not yet offered — export each scope separately |
 | QBJ single-game import (incl. Neg5/MODAQ variants) | equivalent | Multi-round batch import exists |
 | QBJ tournament export (v2, match IDs) | better | Preserved and extended (day order, classifications, final placement via safe extensions) |
 | Assignment QBJ minimality | better | Minimal assignments already; no future-pairing or private leakage |
