@@ -55,6 +55,45 @@ and is not an upload slot.
 - **Director scope.** The Director adapter forces the full six-view page set even when the
   printable report options narrow pages, so upload roles and cross-links never drop.
 
+## Multi-phase scopes (issue #763)
+
+Director's **Exports → Resource Center report** offers publishable scopes from the
+explicit phase model (never round-number ranges):
+
+- one set per non-archived phase, in phase order;
+- a `Combined` set for the entire tournament (`Overall` for single-stage);
+- single-stage tournaments expose only the combined scope — no phase chooser.
+
+The recommended preset (**every phase + combined**) matches current ACF guidance;
+`selected phases only` and `combined only` are also available. The dialog previews
+the number of report sets and files before export, and one operation writes a single
+ZIP containing every selected set under its own stable base prefix:
+
+- `my-tournament-prelims_standings.html`
+- `my-tournament-playoffs_standings.html`
+- `my-tournament-combined_standings.html`
+
+Scope policy:
+
+- Per-phase games are exactly the accepted games in that phase's rounds (byes,
+  cancelled rows, superseded corrections, and invalid legacy records excluded;
+  forfeits counted; replays collapsed to the current accepted truth).
+- Dropped teams keep their valid historical games for opponents but leave
+  standings rows, matching Director/Live.
+- Carryover phases include eligible prior-phase games in standings only; the
+  Scoreboard lists stage games, so no game is duplicated in detail. The label
+  gains `· including carryover` and the set warns explicitly.
+- Tiebreaker-packet games stay in the Scoreboard as explicit results but do not
+  decide standings unless `tiebreakerCountsStatistically` is set.
+- `finalPlacement` overrides order in the combined set only.
+- Within one phase, pools are retained as division metadata; the combined set
+  omits pool assignments with an explicit warning instead of flattening
+  changing pools into one global division.
+- Each scope uses only its own games' scoring definitions. Mixed definitions
+  render one semantic answer column with explicit notes (never merged by
+  number or silently re-valued); the combined set additionally warns and
+  points at the phase sets.
+
 ## Compatibility status
 
 Structure is tested against the reference contract (document shell, per-role content,

@@ -11,7 +11,9 @@ import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
 import { buildCanonicalResourceCenterReport } from '../reports/resourceCenterExport';
+import { resourceCenterScopes } from '../reports/resourceCenterScopes';
 import { ReportOptionsDialog } from './ReportOptionsDialog';
+import { ResourceCenterScopesDialog } from './ResourceCenterScopesDialog';
 import { SqbsTournamentDialog } from './SqbsTournamentDialog';
 
 export function PublishView({
@@ -41,6 +43,8 @@ export function PublishView({
       : loadedReportOptions;
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
   const [sqbsTournamentOpen, setSqbsTournamentOpen] = useState(false);
+  const [resourceCenterOpen, setResourceCenterOpen] = useState(false);
+  const resourceCenterScopeCount = useMemo(() => resourceCenterScopes(state).length, [state]);
 
   return (
     <Page>
@@ -80,9 +84,15 @@ export function PublishView({
             />
             <ExportAction
               title="Resource Center report"
-              description="Preflighted HTML files with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus an optional stat-key companion, all from the canonical snapshot, for manual upload to the Resource Center. The set downloads only after its structural preflight passes; live-upload compatibility is verified manually per the release checklist."
+              description="Preflighted, upload-ready HTML sets with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus a stat-key companion, all from the canonical snapshot. The set downloads only after its structural preflight passes; multi-phase tournaments offer every phase plus combined; live-upload compatibility is verified manually per the release checklist."
               action="Download ZIP"
-              onClick={() => void downloadResourceCenterReport(state, onAnnounce, reportOptions)}
+              onClick={() => {
+                if (resourceCenterScopeCount > 1) {
+                  setResourceCenterOpen(true);
+                  return;
+                }
+                void downloadResourceCenterReport(state, onAnnounce, reportOptions);
+              }}
             />
             <ExportAction
               title="Team standings HTML"
@@ -135,6 +145,14 @@ export function PublishView({
           state={state}
           onAnnounce={onAnnounce}
           onClose={() => setSqbsTournamentOpen(false)}
+        />
+      )}
+
+      {resourceCenterOpen && state.tournament && (
+        <ResourceCenterScopesDialog
+          state={state}
+          onAnnounce={onAnnounce}
+          onClose={() => setResourceCenterOpen(false)}
         />
       )}
 
