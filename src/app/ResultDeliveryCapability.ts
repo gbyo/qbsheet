@@ -15,6 +15,12 @@ export interface IResultDeliveryCapability {
   baseUrl: string;
   sessionId: string;
   sessionToken: string;
+  /**
+   * Optional LAN fallback under the same room authority. Remembered alongside the
+   * primary so a pending final can retry across transports after the primary dies.
+   * Same credentials apply on either path; absent for rooms paired without one.
+   */
+  lanBaseUrl?: string;
 }
 interface IStoredResultDeliveryCapability extends IResultDeliveryCapability {
   expiresAt: string;
@@ -48,7 +54,9 @@ function validCapability(value: unknown): value is IResultDeliveryCapability {
     typeof candidate.sessionId === 'string' &&
     candidate.sessionId !== '' &&
     typeof candidate.sessionToken === 'string' &&
-    candidate.sessionToken !== ''
+    candidate.sessionToken !== '' &&
+    (candidate.lanBaseUrl === undefined ||
+      (typeof candidate.lanBaseUrl === 'string' && candidate.lanBaseUrl !== ''))
   );
 }
 
@@ -144,7 +152,12 @@ export class ResultDeliveryCapabilityStore {
       if (entry) this.remove(recordId);
       return null;
     }
-    return { baseUrl: entry.baseUrl, sessionId: entry.sessionId, sessionToken: entry.sessionToken };
+    return {
+      baseUrl: entry.baseUrl,
+      sessionId: entry.sessionId,
+      sessionToken: entry.sessionToken,
+      ...(entry.lanBaseUrl !== undefined ? { lanBaseUrl: entry.lanBaseUrl } : {}),
+    };
   }
 
   remember(recordId: string, capability: IResultDeliveryCapability, completedAt: string): boolean {

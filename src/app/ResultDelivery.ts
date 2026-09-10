@@ -196,11 +196,26 @@ export class ResultDeliveryService {
     if (!record || !this.canRetry(record)) return null;
     const capability = this.capabilities.get(recordId);
     if (!capability || !record.finalQbj) return null;
-    const delivery = await deliverFinalResult(
-      this.makeClient(capability.baseUrl),
-      { sessionId: capability.sessionId, token: capability.sessionToken },
-      record.finalQbj,
-    );
+    const credentials = { sessionId: capability.sessionId, token: capability.sessionToken };
+    const delivery = await deliverFinalResult(this.makeClient(capability.baseUrl), credentials, record.finalQbj);
+    // A pending outcome is a transport failure, never a refusal: the primary did not
+    // answer or failed server-side, so the same idempotent final (same fingerprint)
+    // is worth one attempt on the LAN fallback when the room holds one. Refusals and
+    // receipts stay on the primary path — the LAN is the same authority and would
+    // answer the same way, and a duplicate across transports converges server-side.
+    if (
+      delivery.delivery === 'pending' &&
+      capability.lanBaseUrl !== undefined &&
+      capability.lanBaseUrl !== capability.baseUrl
+    ) {
+      const lanDelivery = await deliverFinalResult(
+        this.makeClient(capability.lanBaseUrl),
+        credentials,
+        record.finalQbj,
+      );
+      await this.recordOutcome(recordId, lanDelivery, now);
+      return lanDelivery;
+    }
     await this.recordOutcome(recordId, delivery, now);
     return delivery;
   }
