@@ -355,6 +355,49 @@ function finalPlacementFromExtension(value: unknown): FinalPlacement | undefined
   };
 }
 
+/**
+ * Player-level UG/D2 eligibility survives interchange as explicit extension booleans (#749).
+ *
+ * Standard QBJ has no direct player field, so an explicit false is preserved as well as true;
+ * unknown (null/undefined) stays absent rather than becoming a fabricated false.
+ */
+function playerEligibilityExtensions(player: DirectorState['players'][number]):
+  | Record<string, never>
+  | {
+      extensions: { undergraduateEligible?: boolean; divisionTwoEligible?: boolean };
+    } {
+  const extensions: { undergraduateEligible?: boolean; divisionTwoEligible?: boolean } = {};
+  if (typeof player.undergraduateEligible === 'boolean') {
+    extensions.undergraduateEligible = player.undergraduateEligible;
+  }
+  if (typeof player.divisionTwoEligible === 'boolean') {
+    extensions.divisionTwoEligible = player.divisionTwoEligible;
+  }
+  return Object.keys(extensions).length > 0 ? { extensions } : {};
+}
+
+function eligibilityFromExtensions(
+  extensions: Record<string, unknown> | undefined,
+): Pick<DirectorState['players'][number], 'undergraduateEligible' | 'divisionTwoEligible'> {
+  if (!extensions) return {};
+  const result: { undergraduateEligible?: boolean; divisionTwoEligible?: boolean } = {};
+  // QBSheet's own extension vocabulary wins; a YellowFruit YfData sidecar is the fallback so
+  // .yft imports and foreign QBJ carrying YfData restore the same explicit eligibility.
+  const sidecar =
+    extensions.YfData !== null && typeof extensions.YfData === 'object' && !Array.isArray(extensions.YfData)
+      ? (extensions.YfData as Record<string, unknown>)
+      : undefined;
+  const undergraduate = extensions.undergraduateEligible ?? sidecar?.isUG;
+  const divisionTwo = extensions.divisionTwoEligible ?? sidecar?.isD2;
+  if (typeof undergraduate === 'boolean') {
+    result.undergraduateEligible = undergraduate;
+  }
+  if (typeof divisionTwo === 'boolean') {
+    result.divisionTwoEligible = divisionTwo;
+  }
+  return result;
+}
+
 function interchangePlayer(player: DirectorState['players'][number]): Record<string, unknown> {
   return {
     id: player.id,
@@ -362,6 +405,7 @@ function interchangePlayer(player: DirectorState['players'][number]): Record<str
     captain: player.captain,
     ...(player.rosterNumber === undefined ? {} : { rosterNumber: player.rosterNumber }),
     ...schoolYearGrade(player.schoolYear),
+    ...playerEligibilityExtensions(player),
     ...(player.notes ? { notes: player.notes } : {}),
   };
 }
@@ -853,6 +897,8 @@ function fromInterchange(data: DirectorTournament): DirectorState {
       active: true,
       rosterNumber: player.rosterNumber,
       ...(schoolYear === undefined ? {} : { schoolYear }),
+      // YellowFruit parity (#749): explicit eligibility restores; unknown stays unknown.
+      ...eligibilityFromExtensions((player.extensions ?? undefined) as Record<string, unknown> | undefined),
       notes: player.notes,
     };
   });

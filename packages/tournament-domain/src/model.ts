@@ -153,6 +153,21 @@ export interface Player {
   rosterNumber?: string | number;
   /** Structured school year/grade (for example 10 for a sophomore), distinct from freeform notes. */
   schoolYear?: number | null;
+  /**
+   * Player-level undergraduate eligibility, YellowFruit parity field (#749).
+   *
+   * Tri-state: true/false are explicit eligibility states, null/undefined means unknown or not
+   * supplied. This is a per-player attribute and must never be inferred from the team's
+   * `undergraduate` classification: a roster can mix eligibility states.
+   */
+  undergraduateEligible?: boolean | null;
+  /**
+   * Player-level Division II eligibility, YellowFruit parity field (#749).
+   *
+   * Same tri-state semantics as `undergraduateEligible`, and likewise never inferred from the
+   * team's `division-2` classification.
+   */
+  divisionTwoEligible?: boolean | null;
   notes?: string;
 }
 
