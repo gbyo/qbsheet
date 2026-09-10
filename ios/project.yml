@@ -65,12 +65,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qbsheet.live
+        # Every target here supplies its own Info.plist, so the INFOPLIST_KEY_* settings do not
+        # apply — they only feed an Info.plist that Xcode generates. UILaunchScreen and the iPad
+        # orientations are literal keys in the file itself.
         INFOPLIST_FILE: QBSheetLive/Info.plist
         CODE_SIGN_ENTITLEMENTS: QBSheetLive/QBSheetLive.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
 
   # ---------------------------------------------------------------- App Clip
   QBSheetLiveClip:
@@ -97,8 +98,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: QBSheetLiveClip/QBSheetLiveClip.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
 
   # ------------------------------------------------- Live Activity extensions
   QBSheetLiveActivity:

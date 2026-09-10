@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!--
+    This extension is embedded in the App Clip rather than in the full app, and everything inside an
+    App Clip has to be marked on-demand-install-capable too. Without it the build warns and App
+    Store validation rejects the Clip. The full app's copy of this same extension
+    (QBSheetLiveActivity) must NOT carry the key — it is not in a Clip.
+  -->
+  <key>com.apple.developer.on-demand-install-capable</key>
+  <true/>
   <!-- The extension reads the cached snapshot the app wrote, so it needs the same group. -->
   <key>com.apple.security.application-groups</key>
   <array>
