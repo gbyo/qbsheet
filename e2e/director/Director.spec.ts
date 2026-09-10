@@ -602,9 +602,12 @@ test('Director supports keyboard search, inline edits, and audited result review
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('215', { exact: false }).first()).toBeVisible();
 
+  // The correction above leaves the superseded prior revision in History ahead of the
+  // accepted replacement (array order, no sort), and only accepted rows offer the
+  // protest option — so scope the menu to the accepted row, not the first row.
   await page
+    .getByRole('row', { name: /Accepted/ })
     .getByRole('button', { name: /result actions$/ })
-    .first()
     .click();
   await page.getByRole('option', { name: 'Open protest…' }).click();
   await page.getByRole('dialog').getByLabel('Description').fill('Verify the tossup ruling.');
