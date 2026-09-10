@@ -1041,6 +1041,7 @@ export function RecoveryDialog(props: {
   const [error, setError] = useState('');
   const [review, setReview] = useState<{
     payload: Extract<ScorerRecoveryInspection, { kind: 'review-required' }>['payload'];
+    reason: Extract<ScorerRecoveryInspection, { kind: 'review-required' }>['reason'];
     fileName: string;
     savedAt: string;
   }>();
@@ -1085,7 +1086,14 @@ export function RecoveryDialog(props: {
               {review.fileName} · saved {review.savedAt}
             </dd>
             <dt>Identity</dt>
-            <dd>No Director match ID in this older or manual file.</dd>
+            <dd>
+              {review.reason === 'definition-mismatch' &&
+                'This file was scored under a different competitive definition than the current game. Restoring it replays those events under this game\u2019s rules only if you explicitly choose to.'}
+              {review.reason === 'missing-definition-identity' &&
+                'This file carries no competitive-definition identity, so it cannot be proven to match the current game\u2019s scoring rules.'}
+              {review.reason === 'missing-stable-identity' &&
+                'No Director match ID in this older or manual file.'}
+            </dd>
           </dl>
           <div className="scorer-choices">
             <button type="button" className="scorer-choice" onClick={() => setReview(undefined)}>
@@ -1122,6 +1130,7 @@ export function RecoveryDialog(props: {
                   if (inspected.kind === 'review-required') {
                     setReview({
                       payload: inspected.payload,
+                      reason: inspected.reason,
                       fileName: file.name,
                       savedAt:
                         file.lastModified > 0

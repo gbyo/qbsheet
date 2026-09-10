@@ -27,6 +27,16 @@ export interface IScorerRecoveryIdentity {
   matchId?: string;
   roundId?: string;
   assignmentRevision?: number;
+  /**
+   * Which issued competitive-definition revision produced the events (#670).
+   *
+   * The revision is convenient and auditable; the digest proves equality. A recovery
+   * payload must never be treated as automatically compatible when the identities
+   * match but the definition that produced the events differs from the live one.
+   */
+  definitionRevision?: number;
+  /** Digest over the canonical competitive semantics that produced the events. */
+  definitionDigest?: string;
   leftTeamId?: string;
   rightTeamId?: string;
   leftTeamName: string;
@@ -43,7 +53,11 @@ export type ScorerRecoveryRejection =
 
 export type ScorerRecoveryInspection =
   | { kind: 'compatible'; payload: IScorerRecoveryPayload }
-  | { kind: 'review-required'; payload: IScorerRecoveryPayload; reason: 'missing-stable-identity' }
+  | {
+      kind: 'review-required';
+      payload: IScorerRecoveryPayload;
+      reason: 'missing-stable-identity' | 'definition-mismatch' | 'missing-definition-identity';
+    }
   | { kind: 'rejected'; reason: ScorerRecoveryRejection };
 
 export interface ReadScorerRecoveryOptions {
@@ -313,6 +327,17 @@ function readRecoveryIdentity(value: unknown): IScorerRecoveryIdentity | undefin
   )
     return null;
   if (identity.assignmentRevision !== undefined) result.assignmentRevision = identity.assignmentRevision;
+  if (
+    identity.definitionRevision !== undefined &&
+    (!Number.isInteger(identity.definitionRevision) || Number(identity.definitionRevision) < 1)
+  )
+    return null;
+  if (identity.definitionRevision !== undefined) result.definitionRevision = identity.definitionRevision;
+  if (identity.definitionDigest !== undefined) {
+    const digest = identityText(identity.definitionDigest);
+    if (digest === undefined) return null;
+    result.definitionDigest = digest;
+  }
   return result;
 }
 
@@ -336,6 +361,10 @@ export function scorerRecoveryIdentity(
     ...(definition?.round.assignmentRevision !== undefined
       ? { assignmentRevision: definition.round.assignmentRevision }
       : {}),
+    ...(definition?.definition?.revision !== undefined
+      ? { definitionRevision: definition.definition.revision }
+      : {}),
+    ...(definition?.definition?.digest ? { definitionDigest: definition.definition.digest } : {}),
     ...(qbjIdentity?.teamIds?.left ? { leftTeamId: qbjIdentity.teamIds.left } : {}),
     ...(qbjIdentity?.teamIds?.right ? { rightTeamId: qbjIdentity.teamIds.right } : {}),
   };
@@ -422,6 +451,18 @@ export function inspectScorerRecovery(
     ...(history ? { history } : {}),
   };
 
+  // Definition comparison before any caller can replay events under the live format (#670).
+  // Exact digest match proceeds to the normal identity rules below; anything else that a
+  // definition-bound game can say about the payload is review-required, never compatible.
+  if (identity && expected.definitionDigest) {
+    if (!identity.definitionDigest) {
+      return { kind: 'review-required', payload: recovered, reason: 'missing-definition-identity' };
+    }
+    if (identity.definitionDigest !== expected.definitionDigest) {
+      return { kind: 'review-required', payload: recovered, reason: 'definition-mismatch' };
+    }
+  }
+
   // A scheduled match id is the proof that separates a rematch from the first meeting.
   if (!identity || !expected.matchId || !identity.matchId) {
     return { kind: 'review-required', payload: recovered, reason: 'missing-stable-identity' };
@@ -437,6 +478,15 @@ export function readScorerRecovery(
 ): IScorerRecoveryPayload | null {
   const inspected = inspectScorerRecovery(value, expected);
   if (inspected.kind === 'compatible') return inspected.payload;
-  if (inspected.kind === 'review-required' && options.allowLegacy) return inspected.payload;
+  // The legacy fallback covers only unprovable legacy identity. A definition mismatch or a
+  // missing definition identity is never auto-restored, not even from a trusted session
+  // snapshot: replaying events scored under one competitive definition under another
+  // format requires explicit moderator review, never a silent resume.
+  if (
+    inspected.kind === 'review-required' &&
+    inspected.reason === 'missing-stable-identity' &&
+    options.allowLegacy
+  )
+    return inspected.payload;
   return null;
 }

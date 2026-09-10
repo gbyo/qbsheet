@@ -221,6 +221,82 @@ describe('the versioned private scorer recovery envelope', () => {
     expect(readScorerRecovery(qbj, setup, { allowLegacy: true })?.history).toEqual({ undo: [1], redo: [] });
   });
 
+  describe('definition identity (#670)', () => {
+    const baseIdentity = {
+      tournamentId: 'tournament-1',
+      matchId: 'match-1',
+      leftTeamName: 'Left',
+      rightTeamName: 'Right',
+    };
+
+    test('derives the definition identity from the scheduled package', () => {
+      const packageValue = validPackage({
+        definition: { revision: 2, digest: 'digest-definition-b' },
+      });
+      expect(scorerRecoveryIdentity(packageValue, setup)).toMatchObject({
+        definitionRevision: 2,
+        definitionDigest: 'digest-definition-b',
+      });
+    });
+
+    test('an exact digest match recovers normally', () => {
+      const identity = {
+        ...baseIdentity,
+        definitionRevision: 2,
+        definitionDigest: 'digest-definition-b',
+      };
+      const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, identity);
+      expect(inspectScorerRecovery(qbj, identity)).toMatchObject({ kind: 'compatible' });
+      expect(readScorerRecovery(qbj, identity)).not.toBeNull();
+    });
+
+    test('same match identity under a different definition is review-required, never compatible', () => {
+      const identity = {
+        ...baseIdentity,
+        definitionRevision: 1,
+        definitionDigest: 'digest-definition-a',
+      };
+      const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, identity);
+      const expected = { ...identity, definitionRevision: 2, definitionDigest: 'digest-definition-b' };
+      expect(inspectScorerRecovery(qbj, expected)).toMatchObject({
+        kind: 'review-required',
+        reason: 'definition-mismatch',
+      });
+      // Not even the trusted session-snapshot fallback may replay events scored under one
+      // definition under another format.
+      expect(readScorerRecovery(qbj, expected)).toBeNull();
+      expect(readScorerRecovery(qbj, expected, { allowLegacy: true })).toBeNull();
+    });
+
+    test('a payload without definition identity is review-required against a bound game', () => {
+      const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, baseIdentity);
+      const expected = { ...baseIdentity, definitionRevision: 2, definitionDigest: 'digest-definition-b' };
+      expect(inspectScorerRecovery(qbj, expected)).toMatchObject({
+        kind: 'review-required',
+        reason: 'missing-definition-identity',
+      });
+      expect(readScorerRecovery(qbj, expected, { allowLegacy: true })).toBeNull();
+    });
+
+    test('legacy payloads keep their legacy behavior when neither side is bound', () => {
+      const qbj = attachScorerRecovery({ type: 'Match' }, setup, events, undefined, baseIdentity);
+      expect(inspectScorerRecovery(qbj, baseIdentity)).toMatchObject({ kind: 'compatible' });
+      expect(readScorerRecovery(qbj, baseIdentity)).not.toBeNull();
+    });
+
+    test('rejects a malformed definition identity instead of degrading silently', () => {
+      const qbj = {
+        [scorerRecoveryKey]: {
+          version: scorerRecoveryVersion,
+          setup,
+          events,
+          identity: { ...baseIdentity, definitionRevision: 0, definitionDigest: '   ' },
+        },
+      };
+      expect(inspectScorerRecovery(qbj, baseIdentity)).toEqual({ kind: 'rejected', reason: 'invalid' });
+    });
+  });
+
   test('does not carry the v2 history into portable QBJ', () => {
     const qbj = attachScorerRecovery({ type: 'Match', match_teams: [] }, setup, events, {
       undo: [1],

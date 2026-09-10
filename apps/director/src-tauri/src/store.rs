@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
 
-const SCHEMA_VERSION: i64 = 10;
+const SCHEMA_VERSION: i64 = 11;
 const MAX_STATE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug, Error)]
@@ -94,6 +94,12 @@ pub struct StoredQbtcpResult {
     pub review_required: bool,
     pub warnings: Vec<String>,
     pub conflict_with: Option<String>,
+    /// The session-bound definition the submission was checked against (#670).
+    pub expected_definition_revision: Option<i64>,
+    pub expected_definition_digest: Option<String>,
+    /// The identity the room actually scored under.
+    pub submitted_definition_revision: Option<i64>,
+    pub submitted_definition_digest: Option<String>,
 }
 
 impl DirectorStore {
@@ -213,7 +219,9 @@ impl DirectorStore {
         let connection = self.connection.lock().map_err(|_| StoreError::Poisoned)?;
         let mut statement = connection.prepare(
             "SELECT id, tournament_id, session_id, room_id, match_id, fingerprint,
-                    raw_payload, qbj_json, received_at, review_required, warnings_json, conflict_with
+                    raw_payload, qbj_json, received_at, review_required, warnings_json, conflict_with,
+                    expected_definition_revision, expected_definition_digest,
+                    submitted_definition_revision, submitted_definition_digest
              FROM qbtcp_results WHERE tournament_id = ?1
              AND NOT EXISTS (SELECT 1 FROM qbtcp_recovery_exclusions x WHERE x.tournament_id = qbtcp_results.tournament_id AND x.result_id = qbtcp_results.id)
              ORDER BY received_at, id",
@@ -246,6 +254,10 @@ impl DirectorStore {
                     )
                 })?,
                 conflict_with: row.get(11)?,
+                expected_definition_revision: row.get(12)?,
+                expected_definition_digest: row.get(13)?,
+                submitted_definition_revision: row.get(14)?,
+                submitted_definition_digest: row.get(15)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -262,8 +274,10 @@ impl DirectorStore {
         connection.execute(
             "INSERT OR IGNORE INTO qbtcp_results
                 (id, tournament_id, session_id, room_id, match_id, fingerprint, raw_payload,
-                 qbj_json, received_at, review_required, warnings_json, conflict_with)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                 qbj_json, received_at, review_required, warnings_json, conflict_with,
+                 expected_definition_revision, expected_definition_digest,
+                 submitted_definition_revision, submitted_definition_digest)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 disposition.result_id,
                 tournament_id,
@@ -284,6 +298,14 @@ impl DirectorStore {
                         .collect(),
                 )),
                 disposition.conflict_with,
+                submission
+                    .expected_definition_revision
+                    .map(|revision| revision as i64),
+                submission.expected_definition_digest.clone(),
+                submission
+                    .submitted_definition_revision
+                    .map(|revision| revision as i64),
+                submission.submitted_definition_digest.clone(),
             ],
         )?;
         Ok(())
@@ -1860,7 +1882,11 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
                 received_at TEXT NOT NULL,
                 review_required INTEGER NOT NULL DEFAULT 0 CHECK (review_required IN (0, 1)),
                 warnings_json TEXT NOT NULL DEFAULT '[]',
-                conflict_with TEXT
+                conflict_with TEXT,
+                expected_definition_revision INTEGER,
+                expected_definition_digest TEXT,
+                submitted_definition_revision INTEGER,
+                submitted_definition_digest TEXT
             );
             CREATE INDEX IF NOT EXISTS qbtcp_results_tournament_idx
                 ON qbtcp_results(tournament_id, received_at, id);
@@ -2090,6 +2116,39 @@ fn migrate(connection: &mut Connection) -> Result<(), StoreError> {
         )?;
         add_column_if_missing(&transaction, "qbtcp_sessions", "staff_id", "TEXT")?;
         add_column_if_missing(&transaction, "qbtcp_sessions", "expected_staff_id", "TEXT")?;
+    }
+
+    if current < 11 {
+        // The definition identity a QBTCP result was checked against (#670). Stored as
+        // normalized correlation columns so safe operations never depend on re-parsing
+        // the retained QBJ; the raw payload and full document remain the audit source.
+        // Added column by column: databases whose migration ledger was rewound still have
+        // these columns, and re-running must not fail the open.
+        add_column_if_missing(
+            &transaction,
+            "qbtcp_results",
+            "expected_definition_revision",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &transaction,
+            "qbtcp_results",
+            "expected_definition_digest",
+            "TEXT",
+        )?;
+        add_column_if_missing(
+            &transaction,
+            "qbtcp_results",
+            "submitted_definition_revision",
+            "INTEGER",
+        )?;
+        add_column_if_missing(
+            &transaction,
+            "qbtcp_results",
+            "submitted_definition_digest",
+            "TEXT",
+        )?;
+        transaction.execute("INSERT INTO schema_migrations(version) VALUES (11);", [])?;
     }
 
     transaction.commit()?;
@@ -2639,9 +2698,13 @@ mod tests {
             expected_tournament_id: "tournament-1".to_owned(),
             expected_match_id: "match-1".to_owned(),
             expected_round_revision: Some(2),
+            expected_definition_revision: Some(3),
+            expected_definition_digest: Some("digest-expected".to_owned()),
             submitted_tournament_id: Some("tournament-1".to_owned()),
             submitted_match_id: Some("match-1".to_owned()),
             submitted_round_revision: Some(2),
+            submitted_definition_revision: Some(3),
+            submitted_definition_digest: Some("digest-expected".to_owned()),
             fingerprint: "fingerprint-1".to_owned(),
             qbj: qbj.clone(),
             raw: b"original-qbj-bytes".to_vec(),
@@ -2672,6 +2735,17 @@ mod tests {
         assert!(results[0].review_required);
         assert_eq!(results[0].warnings, vec!["late-after-abandon".to_owned()]);
         assert_eq!(results[0].conflict_with.as_deref(), Some("result-0"));
+        // The definition correlation survives native persistence without re-parsing QBJ.
+        assert_eq!(results[0].expected_definition_revision, Some(3));
+        assert_eq!(
+            results[0].expected_definition_digest.as_deref(),
+            Some("digest-expected")
+        );
+        assert_eq!(results[0].submitted_definition_revision, Some(3));
+        assert_eq!(
+            results[0].submitted_definition_digest.as_deref(),
+            Some("digest-expected")
+        );
 
         // A pending raw native submission belongs to a checkpoint even before the frontend
         // imports it. Later submissions survive physically, but cannot leak into an old restore.

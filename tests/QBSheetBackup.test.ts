@@ -100,6 +100,36 @@ describe('QBSheet backup format', () => {
     expect(serialized).toContain('"version": 1');
   });
 
+  test('a backup of a definition-bound game keeps the definition reference with its events', () => {
+    const boundPackage = validPackage({
+      producer: 'QBSheet',
+      definition: { revision: 2, digest: 'digest-definition-b' },
+    });
+    const boundSetup = {
+      left: {
+        name: boundPackage.left.name,
+        players: boundPackage.left.players.map((player) => player.name),
+      },
+      right: {
+        name: boundPackage.right.name,
+        players: boundPackage.right.players.map((player) => player.name),
+      },
+    };
+    const text = serializeQbsheetBackup(
+      createQbsheetBackup({ gamePackage: boundPackage, setup: boundSetup, events: [buzz] }),
+    );
+
+    const raw = JSON.parse(text) as { package?: { definition?: unknown } };
+    expect(raw.package?.definition).toEqual({ revision: 2, digest: 'digest-definition-b' });
+    const parsed = readQbsheetBackup(raw);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // The frozen definition travels with the history, so restore never interprets bare
+    // events under whatever tournament rules happen to be current.
+    expect(parsed.value.package.definition).toEqual({ revision: 2, digest: 'digest-definition-b' });
+    expect(parsed.value.events).toEqual([buzz]);
+  });
+
   test('the ordinary open-file reader routes a backup without a second import mode', () => {
     const text = serializeQbsheetBackup(createQbsheetBackup({ gamePackage, setup, events: [buzz] }));
     const opened = openGameText(text);
