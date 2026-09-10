@@ -137,7 +137,24 @@ test('controller restores exact document and preserves the state before destruct
   await act(async () => {
     expect(await hook.result.current.restoreCheckpoint(point.id)).toBe(true);
   });
-  expect(hook.result.current.state).toEqual(before);
+  // The restore reconciles newer external authority (#673): the document comes
+  // back plus exactly one checkpoint-restored audit record. Nothing here was
+  // issued after the checkpoint, so the reconciliation is empty.
+  const { audit, ...restored } = hook.result.current.state;
+  const { audit: beforeAudit, ...beforeRest } = before;
+  expect(restored).toEqual(beforeRest);
+  expect(audit).toHaveLength(beforeAudit.length + 1);
+  expect(audit.at(-1)).toMatchObject({
+    type: 'checkpoint-restored',
+    details: {
+      checkpointId: point.id,
+      abandonedSessionIds: [],
+      invalidatedSessionIds: [],
+      supersededResultIds: [],
+      invalidatedAssignmentIds: [],
+      invalidatedArtifactIds: [],
+    },
+  });
   expect(
     await repository.readCheckpoint(before.tournament!.id, hook.result.current.checkpoints[0].id),
   ).toEqual(removed);

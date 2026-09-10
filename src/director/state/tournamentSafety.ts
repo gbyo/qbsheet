@@ -1,7 +1,9 @@
 import {
   formatDistance,
+  latestAdvancementCommit,
   phaseCanComplete,
   phaseCompetitiveField,
+  qbtcpSessionHasUnresolvedWork,
   type DirectorId,
   type DirectorState,
 } from '../domain';
@@ -146,32 +148,165 @@ function phaseStructureIsValid(state: DirectorState, phaseId: DirectorId): boole
 }
 
 /**
- * A result correction after advancement has been materialized changes the competitive basis under
- * downstream membership. Until advancement has an explicit stale/reconcile state, refuse that
- * rewrite and direct the operator through the recovery checkpoint so playoffs can never silently
- * diverge from the corrected standings.
+ * Which downstream lifecycle tier a historical result correction falls into (#673).
+ *
+ * - Tier 1: no committed advancement depends on the source phase. Apply normally.
+ * - Tier 2: committed advancement exists but nothing downstream has been issued.
+ *   The correction applies; the dependent basis reads stale and must be recommitted.
+ * - Tier 3: downstream assignments were issued but no scorekeeper progress exists.
+ *   The correction is refused until the operator revokes/reissues the exact games listed.
+ * - Tier 4: downstream games are live, have progress, or already have results.
+ *   Nothing downstream is rewritten automatically; an explicit recovery decision is required.
  */
-export function advancementCorrectionBlocker(state: DirectorState, gameId: DirectorId): string | null {
+export interface CorrectionDownstreamExposure {
+  scheduledGameId: DirectorId;
+  roundName: string;
+  roomName: string | null;
+  exposure: 'issued' | 'progress' | 'result';
+}
+
+export interface CorrectionTierClassification {
+  tier: 1 | 2 | 3 | 4;
+  sourcePhaseName: string | null;
+  committedTargetName: string | null;
+  /** Tier 3 drivers: issued downstream assignments with no scorekeeper progress. */
+  issued: CorrectionDownstreamExposure[];
+  /** Tier 4 drivers: downstream games with progress or results. */
+  live: CorrectionDownstreamExposure[];
+}
+
+function downstreamExposure(
+  state: DirectorState,
+  scheduledId: DirectorId,
+  exposure: CorrectionDownstreamExposure['exposure'],
+): CorrectionDownstreamExposure {
+  const scheduled = state.scheduledGames.find((game) => game.id === scheduledId);
+  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
+  const room = scheduled?.roomId ? state.rooms.find((entry) => entry.id === scheduled.roomId) : undefined;
+  return {
+    scheduledGameId: scheduledId,
+    roundName: round?.name ?? 'a downstream round',
+    roomName: room?.name ?? null,
+    exposure,
+  };
+}
+
+/**
+ * Classify a historical result correction into its downstream lifecycle tier (#673).
+ *
+ * Pure: callers apply Tier 1/2 corrections through the ordinary correction path
+ * (which re-verifies brackets and records the invalidation) and refuse Tier 3/4
+ * with the exact affected games from this classification.
+ */
+export function classifyResultCorrectionTier(
+  state: DirectorState,
+  gameId: DirectorId,
+): CorrectionTierClassification {
+  const empty: CorrectionTierClassification = {
+    tier: 1,
+    sourcePhaseName: null,
+    committedTargetName: null,
+    issued: [],
+    live: [],
+  };
   const game = state.games.find((entry) => entry.id === gameId);
   const scheduled = game
     ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
     : undefined;
   const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
   const source = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
-  if (!source) return null;
-  const advancement = [...state.audit].reverse().find((entry) => {
-    if (entry.type !== 'advancement-committed' || !entry.details || typeof entry.details !== 'object') {
-      return false;
-    }
-    return (entry.details as Record<string, unknown>).sourcePhaseId === source.id;
-  });
-  if (!advancement) return null;
+  if (!game || !scheduled || !source) return empty;
+  const advancement = latestAdvancementCommit(state, source.id);
+  if (!advancement) return empty;
   const target = advancement.entityId
     ? state.phases.find((entry) => entry.id === advancement.entityId)
     : undefined;
+  const classified: CorrectionTierClassification = {
+    tier: 2,
+    sourcePhaseName: source.name,
+    committedTargetName: target?.name ?? null,
+    issued: [],
+    live: [],
+  };
+  const targetRoundIds = new Set(target && Array.isArray(target.roundIds) ? target.roundIds : []);
+  const downstreamScheduled = state.scheduledGames.filter(
+    (candidate) =>
+      targetRoundIds.has(candidate.roundId) && !candidate.bye && candidate.status !== 'cancelled',
+  );
+  const downstreamIds = new Set(downstreamScheduled.map((candidate) => candidate.id));
+  if (downstreamIds.size === 0) return classified;
+  for (const candidate of downstreamScheduled) {
+    const exposing =
+      state.games.some(
+        (record) =>
+          record.scheduledGameId === candidate.id &&
+          (record.status === 'live' || record.status === 'submitted' || record.status === 'accepted'),
+      ) ||
+      candidate.status === 'live' ||
+      candidate.status === 'submitted' ||
+      candidate.status === 'accepted';
+    if (exposing) {
+      const hasResult =
+        candidate.status === 'accepted' ||
+        state.games.some((record) => record.scheduledGameId === candidate.id && record.status === 'accepted');
+      classified.live.push(downstreamExposure(state, candidate.id, hasResult ? 'result' : 'progress'));
+      continue;
+    }
+    const issued =
+      state.rounds.some(
+        (entry) =>
+          entry.id === candidate.roundId &&
+          (entry.status === 'prepared' || entry.status === 'released') &&
+          candidate.status !== 'accepted',
+      ) ||
+      state.qbtcpSessions.some(
+        (session) => session.matchId === candidate.id && qbtcpSessionHasUnresolvedWork(state, session),
+      ) ||
+      (state.transfers?.assignments ?? []).some(
+        (assignment) => assignment.status === 'written' && assignment.scheduledGameId === candidate.id,
+      ) ||
+      (state.transfers?.artifacts ?? []).some(
+        (artifact) => artifact.classification === 'assignment' && artifact.scheduledGameId === candidate.id,
+      );
+    if (issued) classified.issued.push(downstreamExposure(state, candidate.id, 'issued'));
+  }
+  if (classified.live.length > 0) classified.tier = 4;
+  else if (classified.issued.length > 0) classified.tier = 3;
+  return classified;
+}
+
+function describeExposure(entries: CorrectionDownstreamExposure[]): string {
+  return entries
+    .map((entry) => {
+      const room = entry.roomName ? ` in ${entry.roomName}` : '';
+      return `${entry.roundName}${room} (${entry.scheduledGameId})`;
+    })
+    .join('; ');
+}
+
+/**
+ * A result correction after advancement has been materialized changes the competitive basis under
+ * downstream membership. Tier 1/2 corrections apply through the ordinary correction path, which
+ * records the dependent basis as stale; Tier 3/4 corrections are refused with the exact affected
+ * games so playoffs can never silently diverge from corrected standings.
+ */
+export function advancementCorrectionBlocker(state: DirectorState, gameId: DirectorId): string | null {
+  const classification = classifyResultCorrectionTier(state, gameId);
+  if (classification.tier <= 2) return null;
+  const head = `${classification.sourcePhaseName ?? 'This stage'} already has committed advancement${
+    classification.committedTargetName ? ` into ${classification.committedTargetName}` : ''
+  }.`;
+  if (classification.tier === 3) {
+    return (
+      `${head} These downstream assignments were already issued but have no scorekeeper progress yet: ` +
+      `${describeExposure(classification.issued)}. ` +
+      'Revoke and reissue those assignments through the game reissue workflow first, then correct this result and recommit advancement.'
+    );
+  }
   return (
-    `${source.name} already has committed advancement${target ? ` into ${target.name}` : ''}. ` +
-    'Restore the recovery point from before advancement, correct this result, then recommit advancement before downstream play.'
+    `${head} These downstream games already have progress or results: ` +
+    `${describeExposure(classification.live)}. ` +
+    'QBSheet will not rewrite them automatically. Choose a tournament recovery action first: keep the played games as an explicit director ruling, void and replay them, or restore a recovery point and roll the tournament back.'
   );
 }
 

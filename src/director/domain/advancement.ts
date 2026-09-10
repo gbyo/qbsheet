@@ -1,4 +1,6 @@
 import {
+  isoNow,
+  newDirectorId,
   type DirectorId,
   type DirectorState,
   type GameRecord,
@@ -48,6 +50,25 @@ export function advancementBasisToken(state: DirectorState, phase: Phase): strin
   });
 }
 
+/**
+ * Which accepted truth a result record carries (#673). Records written before
+ * revision tracking read as revision 1, so legacy tournaments verify exactly as
+ * before until their first tracked correction.
+ */
+export function resultRevisionOf(game: Pick<GameRecord, 'resultRevision'>): number {
+  return game.resultRevision ?? 1;
+}
+
+/** The accepted-result revisions a phase's advancement basis was verified against. */
+export function resultRevisionsForPhase(state: DirectorState, phase: Phase): Record<DirectorId, number> {
+  const roundIds = new Set(phase.roundIds);
+  const revisions: Record<DirectorId, number> = {};
+  for (const game of state.games) {
+    if (roundIds.has(game.roundId)) revisions[game.id] = resultRevisionOf(game);
+  }
+  return revisions;
+}
+
 /** A committed advancement record and whether its basis still verifies. */
 export type AdvancementBasisStatus = 'current' | 'stale' | 'unknown' | 'uncommitted';
 
@@ -83,7 +104,95 @@ export function advancementBasisStatus(
       ? (commit.details as Record<string, unknown>).basisToken
       : undefined;
   if (typeof stored !== 'string') return 'unknown';
-  return stored === advancementBasisToken(state, phase) ? 'current' : 'stale';
+  if (stored !== advancementBasisToken(state, phase)) return 'stale';
+  // Commits that recorded the accepted-result revisions they verified against
+  // (#673) also prove those revisions are still the canonical ones. Commits
+  // that predate revision tracking skip this proof and verify by token alone.
+  const storedRevisions =
+    commit.details && typeof commit.details === 'object'
+      ? (commit.details as Record<string, unknown>).resultRevisions
+      : undefined;
+  if (storedRevisions === undefined) return 'current';
+  if (!isResultRevisionMap(storedRevisions)) return 'unknown';
+  const currentRevisions = resultRevisionsForPhase(state, phase);
+  const storedIds = Object.keys(storedRevisions);
+  if (storedIds.length !== Object.keys(currentRevisions).length) return 'stale';
+  return storedIds.every((gameId) => storedRevisions[gameId] === currentRevisions[gameId])
+    ? 'current'
+    : 'stale';
+}
+
+function isResultRevisionMap(value: unknown): value is Record<DirectorId, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every((entry) => typeof entry === 'number');
+}
+
+/**
+ * Invalidate the committed advancement bases a mutation retired (#673).
+ *
+ * The basis-token comparison stays the proof; this is the explicit record plus
+ * the downstream repair signal: generated rounds in the commit target are
+ * revision-bumped so prepared artifacts cut from them read stale and the round
+ * must be repaired or regenerated, never silently kept. Only a basis that
+ * verified before the mutation is invalidated by it; an already-stale basis
+ * keeps its original invalidation record. Returns the invalidated source phase
+ * ids.
+ */
+export function invalidateDependentAdvancementBases(
+  before: DirectorState,
+  draft: DirectorState,
+  cause: string,
+  details: Record<string, unknown> = {},
+): DirectorId[] {
+  const invalidated: DirectorId[] = [];
+  for (const phase of draft.phases) {
+    if (advancementBasisStatus(before, phase.id) !== 'current') continue;
+    if (advancementBasisStatus(draft, phase.id) === 'current') continue;
+    const commit = latestAdvancementCommit(draft, phase.id);
+    const markedRoundIds = markGeneratedDownstreamStale(draft, commit?.entityId);
+    invalidated.push(phase.id);
+    draft.audit.push({
+      id: newDirectorId('audit'),
+      at: isoNow(),
+      actor: 'Director',
+      type: 'advancement-stale',
+      summary: `Committed advancement from ${phase.name} no longer verifies against its source basis (${cause}). Recommit before downstream play.`,
+      entityId: commit?.entityId,
+      details: { sourcePhaseId: phase.id, cause, markedRoundIds, ...details },
+    });
+  }
+  return invalidated;
+}
+
+/**
+ * Revision-bump generated rounds in an advancement target so anything cut from
+ * them (assignments, artifacts, sessions) reads stale after the basis moved.
+ * Rounds with accepted/live results are left alone: played history is never
+ * rewritten by an upstream correction (Tier 4 refuses before this runs).
+ */
+function markGeneratedDownstreamStale(
+  draft: DirectorState,
+  targetPhaseId: DirectorId | undefined,
+): DirectorId[] {
+  if (!targetPhaseId) return [];
+  const target = draft.phases.find((entry) => entry.id === targetPhaseId);
+  if (!target || !Array.isArray(target.roundIds)) return [];
+  const marked: DirectorId[] = [];
+  for (const roundId of target.roundIds) {
+    const round = draft.rounds.find((entry) => entry.id === roundId);
+    if (!round) continue;
+    const hasGames = draft.scheduledGames.some((game) => game.roundId === roundId);
+    if (!hasGames) continue;
+    const hasPlayed = draft.scheduledGames.some(
+      (game) =>
+        game.roundId === roundId &&
+        (game.status === 'accepted' || game.status === 'live' || game.status === 'submitted'),
+    );
+    if (hasPlayed) continue;
+    round.revision += 1;
+    marked.push(round.id);
+  }
+  return marked;
 }
 
 export function previewAdvancement(state: DirectorState, phase: Phase): AdvancementPreview {

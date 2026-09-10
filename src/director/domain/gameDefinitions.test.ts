@@ -71,6 +71,90 @@ describe('game definition digests', () => {
       digestGameDefinition(base),
     );
   });
+
+  test('every competitive scoring/procedure field moves the digest', () => {
+    // #674: no scoring/procedure field may be added to the rules without
+    // joining the definition identity. The digest hashes the whole rules
+    // object, so this test fails if a field stops being hashed.
+    const state = releasableTournament();
+    const rules = state.tournament!.rules;
+    const base = {
+      rules,
+      roundId: 'round-1',
+      packetId: null,
+      leftTeamId: 'team-a',
+      rightTeamId: 'team-b',
+      leftRoster: issuedRosterFor(state, 'team-a'),
+      rightRoster: issuedRosterFor(state, 'team-b'),
+    };
+    const expected = digestGameDefinition(base);
+    const fields = [
+      'tossupValue',
+      'superpowerValue',
+      'powerValue',
+      'negValue',
+      'useBonuses',
+      'bonusValue',
+      'tossupCount',
+      'bonusParts',
+      'minimumBonusParts',
+      'maximumBonusScore',
+      'bonusDivisor',
+      'bouncebacks',
+      'overtime',
+      'overtimeTossupCount',
+      'overtimeBonuses',
+      'timed',
+      'lightning',
+      'lightningCountPerTeam',
+      'lightningDivisor',
+      'maximumTossupCount',
+      'maximumActivePlayers',
+      'regulationMinutes',
+      'tiebreakers',
+    ] as const;
+    expect(fields).toHaveLength(23);
+    for (const field of fields) {
+      const current: unknown = rules[field];
+      const next =
+        field === 'tiebreakers'
+          ? [...(current as string[])].reverse()
+          : field === 'negValue' && current === null
+            ? -5
+            : current === null
+              ? 7
+              : typeof current === 'number'
+                ? current + 1
+                : typeof current === 'boolean'
+                  ? !current
+                  : current;
+      expect(next).not.toEqual(current);
+      const nextRules = { ...rules } as unknown as Record<string, unknown>;
+      nextRules[field] = next;
+      expect(
+        digestGameDefinition({ ...base, rules: nextRules as typeof rules }),
+        `digest ignores ${field}`,
+      ).not.toBe(expected);
+    }
+  });
+
+  test('match identity moves the digest', () => {
+    const state = releasableTournament();
+    const rules = state.tournament!.rules;
+    const base = {
+      rules,
+      roundId: 'round-1',
+      packetId: null,
+      leftTeamId: 'team-a',
+      rightTeamId: 'team-b',
+      leftRoster: issuedRosterFor(state, 'team-a'),
+      rightRoster: issuedRosterFor(state, 'team-b'),
+    };
+    const expected = digestGameDefinition(base);
+    expect(digestGameDefinition({ ...base, roundId: 'round-2' })).not.toBe(expected);
+    expect(digestGameDefinition({ ...base, packetId: 'packet-9' })).not.toBe(expected);
+    expect(digestGameDefinition({ ...base, rightTeamId: 'team-c' })).not.toBe(expected);
+  });
 });
 
 describe('definition pinning', () => {

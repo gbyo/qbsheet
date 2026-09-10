@@ -557,6 +557,15 @@ export interface GameRecord {
   playerStats: PlayerGameStat[];
   source: 'qbtcp' | 'manual' | 'qbj' | 'paper';
   /**
+   * Which accepted truth this record carries (#673). The first accepted result is
+   * revision 1; every accepted correction (score edit, protest adjustment,
+   * administrative replacement) increments it. Absent on records written before
+   * revision tracking, which read as revision 1. Superseded records keep their
+   * revision as historical evidence; dependency references (advancement basis
+   * records) name the revision they verified against.
+   */
+  resultRevision?: number;
+  /**
    * Issued definition revision the scorer used, when the returned document carried one (#670).
    * The per-game historical semantics themselves arrive with #671; this is the correlation
    * key that lets statistics resolve the right definition instead of current defaults.
@@ -646,6 +655,8 @@ export interface AuditEvent {
     | 'schedule-repaired'
     | 'schedule-cancelled'
     | 'advancement-committed'
+    | 'advancement-stale'
+    | 'checkpoint-restored'
     | 'final-placement-set'
     | 'final-placement-cleared'
     | 'roster-amendment'

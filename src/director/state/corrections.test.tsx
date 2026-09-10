@@ -1,6 +1,12 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { describe, expect, test } from 'vitest';
-import { acceptedGameRecords, deriveTeamStandings } from '../domain';
+import {
+  acceptedGameRecords,
+  advancementBasisStatus,
+  advancementBasisToken,
+  deriveTeamStandings,
+  resultRevisionOf,
+} from '../domain';
 import { MemoryDirectorRepository } from '../persistence';
 import { score, scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import { useDirectorController } from './useDirectorController';
@@ -48,7 +54,11 @@ async function controllerFor(state: DirectorState) {
 
 function committedAdvancementState(): DirectorState {
   const state = forfeitState();
-  state.phases.push({ id: 'playoffs', name: 'Playoffs' } as DirectorState['phases'][number]);
+  state.phases.push({
+    id: 'playoffs',
+    name: 'Playoffs',
+    roundIds: ['downstream-round'],
+  } as DirectorState['phases'][number]);
   state.audit.push({
     id: 'advancement-audit',
     at: '2026-09-05T12:01:00.000Z',
@@ -133,12 +143,28 @@ describe('administrative result corrections', () => {
     );
   });
 
+  /**
+   * A committed advancement whose basis verifies, so a later correction must retire it
+   * explicitly instead of leaving it silently current.
+   */
+  function verifiableAdvancementState(): DirectorState {
+    const state = committedAdvancementState();
+    const phase = state.phases.find((entry) => entry.id === 'phase-1')!;
+    const commit = state.audit.find((entry) => entry.type === 'advancement-committed')!;
+    commit.details = {
+      ...((commit.details as Record<string, unknown> | undefined) ?? {}),
+      basisToken: advancementBasisToken(state, phase),
+      qualifierTeamIds: ['team-a'],
+    };
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('current');
+    return state;
+  }
+
   test.each(['reopen', 'switch-forfeit', 'score replacement'] as const)(
-    'correctForfeit rejects %s atomically after advancement',
+    'correctForfeit applies %s after advancement when nothing downstream is issued, and retires the basis',
     async (kind) => {
-      const state = committedAdvancementState();
+      const state = verifiableAdvancementState();
       const { hook } = await controllerFor(state);
-      const before = structuredClone(hook.result.current.state);
       const replacement =
         kind === 'reopen'
           ? { kind: 'reopen' as const }
@@ -149,21 +175,41 @@ describe('administrative result corrections', () => {
       act(() => {
         expect(
           hook.result.current.correctForfeit('scheduled-1', replacement, 'The original result was wrong.'),
-        ).toBe(false);
+        ).toBe(true);
       });
-      expect(hook.result.current.state).toEqual(before);
-      expect(hook.result.current.error).toMatch(/committed advancement/i);
+      await waitFor(() => expect(hook.result.current.saving).toBe(false));
+
+      const next = hook.result.current.state;
+      expect(next.games.find((game) => game.id === 'forfeit-game')?.status).toBe('rejected');
+      // The dependent basis no longer verifies, and the audit says why.
+      expect(advancementBasisStatus(next, 'phase-1')).toBe('stale');
+      const stale = next.audit.find((entry) => entry.type === 'advancement-stale');
+      expect(stale?.details).toMatchObject({ sourcePhaseId: 'phase-1', cause: 'administrative-correction' });
+      if (kind !== 'reopen') {
+        const current = next.games.find(
+          (game) => game.scheduledGameId === 'scheduled-1' && game.status !== 'rejected',
+        );
+        expect(resultRevisionOf(current!)).toBe(2);
+      }
     },
   );
 
   test.each(['accepted result', 'protest score adjustment'] as const)(
-    '%s correction has the same advancement dependency guard and is atomic',
+    '%s correction applies after advancement when nothing downstream is issued, with a new result revision',
     async (path) => {
-      const state = committedAdvancementState();
+      const state = verifiableAdvancementState();
       const game = state.games[0]!;
       game.status = 'accepted';
       delete game.forfeitedTeamId;
       game.scores = [score('team-a', 100), score('team-b', 90)];
+      // Re-stamp the basis after reshaping the fixture game: the commit verifies this game.
+      const phase = state.phases.find((entry) => entry.id === 'phase-1')!;
+      const commit = state.audit.find((entry) => entry.type === 'advancement-committed')!;
+      commit.details = {
+        ...((commit.details as Record<string, unknown> | undefined) ?? {}),
+        basisToken: advancementBasisToken(state, phase),
+      };
+      expect(advancementBasisStatus(state, 'phase-1')).toBe('current');
       if (path === 'protest score adjustment') {
         state.protests.push({
           id: 'protest-1',
@@ -176,7 +222,6 @@ describe('administrative result corrections', () => {
         });
       }
       const { hook } = await controllerFor(state);
-      const before = structuredClone(hook.result.current.state);
 
       act(() => {
         const saved =
@@ -190,12 +235,58 @@ describe('administrative result corrections', () => {
                 teamId: 'team-a',
                 delta: 10,
               });
-        expect(saved).toBe(false);
+        expect(saved).toBe(true);
       });
-      expect(hook.result.current.state).toEqual(before);
-      expect(hook.result.current.error).toMatch(/committed advancement/i);
+      await waitFor(() => expect(hook.result.current.saving).toBe(false));
+
+      const next = hook.result.current.state;
+      expect(resultRevisionOf(next.games.find((entry) => entry.id === game.id)!)).toBe(2);
+      expect(advancementBasisStatus(next, 'phase-1')).toBe('stale');
+      expect(next.audit.find((entry) => entry.type === 'advancement-stale')?.details).toMatchObject({
+        sourcePhaseId: 'phase-1',
+        cause: 'result-correction',
+      });
     },
   );
+
+  test('a correction is refused atomically once a downstream assignment is issued', async () => {
+    const state = verifiableAdvancementState();
+    state.rounds.find((round) => round.id === 'downstream-round')!.status = 'released';
+    const { hook } = await controllerFor(state);
+    const before = structuredClone(hook.result.current.state);
+
+    act(() => {
+      expect(
+        hook.result.current.correctForfeit(
+          'scheduled-1',
+          { kind: 'scores' as const, scores: [score('team-a', 250), score('team-b', 200)] },
+          'The original result was wrong.',
+        ),
+      ).toBe(false);
+    });
+    expect(hook.result.current.state).toEqual(before);
+    expect(hook.result.current.error).toContain('downstream-game');
+    expect(hook.result.current.error).toMatch(/reissue/i);
+  });
+
+  test('a correction is refused atomically once a downstream game has a result', async () => {
+    const state = verifiableAdvancementState();
+    state.scheduledGames.find((game) => game.id === 'downstream-game')!.status = 'accepted';
+    const { hook } = await controllerFor(state);
+    const before = structuredClone(hook.result.current.state);
+
+    act(() => {
+      expect(
+        hook.result.current.editAcceptedResult(
+          'forfeit-game',
+          [score('team-a', 250), score('team-b', 200)],
+          'The score was entered incorrectly.',
+        ),
+      ).toBe(false);
+    });
+    expect(hook.result.current.state).toEqual(before);
+    expect(hook.result.current.error).toMatch(/recovery action/i);
+  });
 
   test('blocks a correction that would rewrite an active downstream bracket game', async () => {
     const state = forfeitState();
