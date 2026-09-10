@@ -182,12 +182,7 @@ describe('bounceback parity (#748)', () => {
     expect(bouncebacksOf(score)).toBe(0);
     expect(bouncebacksKnownOf(score)).toBe(true);
 
-    const state = stateWithGames([
-      game('g1', [
-        score,
-        teamScore('b', 200, { bonuses: 4, bonusPoints: 50 }),
-      ]),
-    ]);
+    const state = stateWithGames([game('g1', [score, teamScore('b', 200, { bonuses: 4, bonusPoints: 50 })])]);
     expect(standingOf(state, 'a').bouncebacksKnown).toBe(true);
     const derivation = bouncebackDerivationForTeam('a', state.games);
     expect(derivation.bouncebackPoints).toBe(0);
@@ -215,8 +210,6 @@ describe('bounceback parity (#748)', () => {
     expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: 10 }))).toBeNull();
     expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: null }))).toBeNull();
     expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0))).toBeNull();
-    expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: -5 }))).toBe(
-      'bouncebacks',
-    );
+    expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: -5 }))).toBe('bouncebacks');
   });
 });

@@ -379,7 +379,9 @@ export function buildStatsSnapshot(
       // An omitted breakdown is a legacy zero shorthand; an explicit null is an unknown
       // manual/imported result, never a verified zero (#748).
       if (result.bonusBouncebackPoints === null) team.bouncebacksKnown = false;
-      else team.bouncebackPoints = valueOrZero(team.bouncebackPoints) + valueOrZero(result.bonusBouncebackPoints);
+      else
+        team.bouncebackPoints =
+          valueOrZero(team.bouncebackPoints) + valueOrZero(result.bonusBouncebackPoints);
     };
     updateTeamStats(firstTeam, first);
     updateTeamStats(secondTeam, second);

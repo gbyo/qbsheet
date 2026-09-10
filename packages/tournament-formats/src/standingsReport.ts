@@ -110,9 +110,7 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
   const showSuperpowers = section.teams.some((row) => row.superpowers > 0);
   // Bounceback points appear only when some team actually converted them: an unknown
   // breakdown (manual/imported results) renders "—", never a fabricated zero (#748).
-  const showBouncebacks = section.teams.some(
-    (row) => row.bouncebacksKnown && row.bouncebackPoints > 0,
-  );
+  const showBouncebacks = section.teams.some((row) => row.bouncebacksKnown && row.bouncebackPoints > 0);
   const showAdvancement = section.advancement !== undefined;
   const rows = section.teams
     .map((row) => {
