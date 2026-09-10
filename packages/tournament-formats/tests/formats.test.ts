@@ -605,13 +605,8 @@ describe('derived statistics exports', () => {
   });
 
   test('leaves GP and PPG blank in exports when the game supplies no TUH denominator', () => {
-    const withoutTuh = {
-      ...tournament,
-      games: tournament.games.map((game) => {
-        const { tossupsRead: _dropped, ...result } = game.result;
-        return { ...game, result };
-      }),
-    };
+    const withoutTuh = structuredClone(tournament);
+    for (const game of withoutTuh.games) delete game.result.tossupsRead;
     const stats = buildStatsSnapshot(withoutTuh, { generatedAt: '2026-04-11T16:00:00.000Z' });
     expect(stats.ok).toBe(true);
     if (!stats.ok) return;
