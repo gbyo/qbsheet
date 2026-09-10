@@ -24,23 +24,20 @@ test('the standalone standings HTML is described as a view of the canonical repo
   expect(row.textContent).toContain('same canonical snapshot and renderer');
 });
 
-test('Exports offers the Resource Center report as a first-class download', () => {
+test('Exports offers the Resource Center preparation as a first-class workflow', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  const row = screen.getByText('Resource Center report').closest('[role="listitem"]') as HTMLElement;
+  const row = screen.getByText('Quizbowl Resource Center').closest('[role="listitem"]') as HTMLElement;
   expect(row).toBeTruthy();
-  expect(within(row).getByRole('button', { name: 'Download ZIP' })).toBeTruthy();
-  expect(row.textContent).toContain('standings');
-  expect(row.textContent).toContain('scoreboard');
-  expect(row.textContent).toContain('stat-key');
+  expect(within(row).getByRole('button', { name: 'Prepare for HSQuizbowl' })).toBeTruthy();
+  expect(row.textContent).toContain('hsquizbowl.org');
 });
 
 test('Exports never calls the Resource Center report upload-ready before the live smoke test', () => {
   render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
 
-  const row = screen.getByText('Resource Center report').closest('[role="listitem"]') as HTMLElement;
+  const row = screen.getByText('Quizbowl Resource Center').closest('[role="listitem"]') as HTMLElement;
   expect(row.textContent).not.toMatch(/upload-ready|compatible|ready for/i);
-  expect(row.textContent).toContain('preflight');
 });
 
 test('Resource Center download is refused while preflight fails', async () => {
