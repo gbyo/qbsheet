@@ -17,7 +17,6 @@ import {
   applyFinalPlacement,
   deriveTeamStandings,
   derivePlayerStandings,
-  playerPoints,
   type DirectorState,
   type PlayerStanding,
   type TeamStanding,
@@ -221,9 +220,10 @@ export function buildPlayerStatisticsTable(
   for (const standing of standings) {
     const name = naming.playerName(standing.playerId);
     if (name === null) continue;
-    // Scored with the tournament's own values rather than the common ones, so a house format that
-    // does not use powers, or values a neg differently, publishes its own arithmetic.
-    const points = playerPoints(standing, state.tournament?.rules);
+    // Valued per game under each game's own definition inside derivePlayerStandings (#671).
+    // Revaluing the aggregate buckets with live defaults here would rewrite history — and a
+    // house format's arithmetic is already the arithmetic those games were valued with.
+    const points = standing.points;
     rows.push({
       id: standing.playerId,
       playerId: standing.playerId,

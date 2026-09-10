@@ -464,6 +464,19 @@ export interface IssuedRosterPlayer {
 }
 
 /**
+ * Where the scoring truth for one game came from (#671).
+ *
+ * - `issued`: the echoed digest exactly matches the game's active snapshot.
+ * - `corrected`: resolved through Director history without an exact match — a superseded
+ *   revision the digest names, or the active snapshot standing in for an unknown echo.
+ * - `qbj`: resolved from the result document's own embedded ScoringRules vocabulary.
+ * - `legacy-inferred`: no snapshot history exists but the game already has records, so the
+ *   definition cannot be proven; current defaults are used and flagged as inference.
+ * - `current`: no snapshot history and no prior records; current defaults are the only truth.
+ */
+export type HistoricalDefinitionSource = 'issued' | 'corrected' | 'qbj' | 'legacy-inferred' | 'current';
+
+/**
  * An immutable competitive definition issued to a scorer for one scheduled game (#667).
  *
  * Once persisted, a snapshot is never edited in place. Tournament defaults may keep changing
@@ -551,6 +564,11 @@ export interface GameRecord {
   definitionRevision?: number;
   /** Digest over the competitive semantics the scorer actually used (#670). */
   definitionDigest?: string;
+  /**
+   * Which scoring truth statistics used for this game (#671). Absent on records written
+   * before per-game resolution existed.
+   */
+  definitionSource?: HistoricalDefinitionSource;
   /** Manual/paper results may have a known final score without detailed scoresheet stats. */
   detailedStats?: DetailedStatsStatus;
   transportResultId?: string;
@@ -573,6 +591,8 @@ export interface ResultSubmission {
   definitionRevision?: number;
   /** Digest over the competitive semantics the room actually scored under (#670). */
   definitionDigest?: string;
+  /** Which scoring truth the staged statistics were derived under (#671). */
+  definitionSource?: HistoricalDefinitionSource;
   rawSubmission: unknown;
   warnings?: string[];
   conflictWith?: string;

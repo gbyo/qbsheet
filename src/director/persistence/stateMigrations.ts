@@ -4,6 +4,7 @@ import {
   emptyDirectorState,
   emptyLivePublication,
   fallbackTimeZone,
+  inferLegacyDefinitions,
   legacyDayOrder,
   normalizeDayOrder,
   normalizeTimeZone,
@@ -340,6 +341,10 @@ function completeState(value: Record<string, unknown>): DirectorState {
     transfers: normalizeTransferState(candidate.transfers),
   };
   state.submissions = supersedeDuplicateScheduledSubmissions(state);
+  // One-time legacy inference (#671): games accepted before pins existed gain a marked
+  // revision-1 snapshot so later defaults changes cannot reinterpret them. Idempotent —
+  // games that already have snapshots are skipped — so this is stable across loads.
+  inferLegacyDefinitions(state);
   state.packets = canonicalizePacketReferences(state);
   state.operationalAssignments = pruneOperationalAssignments(state);
   // Densify the shared day sequence on every load: duplicates and gaps from

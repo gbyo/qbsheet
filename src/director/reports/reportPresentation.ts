@@ -9,8 +9,9 @@ import {
 } from '@qbsheet/tournament-formats';
 import type { DirectorState, TournamentRules } from '../domain';
 
-function scoringDefinition(rules: TournamentRules): ReportScoringDefinition {
+function scoringDefinition(rules: TournamentRules, id?: string): ReportScoringDefinition {
   return {
+    ...(id ? { id } : {}),
     tossupValue: rules.tossupValue,
     superpowerValue: rules.superpowerValue,
     powerValue: rules.powerValue,
@@ -21,6 +22,27 @@ function scoringDefinition(rules: TournamentRules): ReportScoringDefinition {
     lightning: rules.lightning,
     overtime: rules.overtime,
   };
+}
+
+/**
+ * Every scoring truth any issued game was scored under (#671). The report renderer keys answer
+ * columns by semantic tier and notes mixed values explicitly, so a tournament whose power moved
+ * from 15 to 20 mid-event prints one Power column with both values rather than silently picking
+ * the current default. Tournaments with no issued history fall back to live defaults.
+ */
+function stateDefinitions(state: DirectorState): ReportScoringDefinition[] {
+  if (state.gameDefinitions.length === 0) {
+    const rules = state.tournament?.rules;
+    return rules ? [scoringDefinition(rules)] : [];
+  }
+  const seen = new Set<string>();
+  const definitions: ReportScoringDefinition[] = [];
+  for (const snapshot of state.gameDefinitions) {
+    if (seen.has(snapshot.digest)) continue;
+    seen.add(snapshot.digest);
+    definitions.push(scoringDefinition(snapshot.rules, snapshot.id));
+  }
+  return definitions;
 }
 
 /**
@@ -39,13 +61,12 @@ export function withReportPresentation(
   const tournament = state.tournament;
   if (!tournament) return snapshot;
 
-  // GameRecord does not yet persist a historical rules snapshot (#671 owns that canonical storage).
-  // The optional seam lets that work feed exact per-game definitions here later without changing any
-  // renderer. Until then, the current tournament rules are the only definition we can assert.
+  // Per-game issued definitions feed the renderer's mixed-value columns (#671). An explicit
+  // override still wins when a caller scopes the report to a subset of history.
   const definitions =
     historicalDefinitions && historicalDefinitions.length > 0
       ? historicalDefinitions
-      : [scoringDefinition(tournament.rules)];
+      : stateDefinitions(state);
   const phaseIds = new Set(
     snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)),
   );

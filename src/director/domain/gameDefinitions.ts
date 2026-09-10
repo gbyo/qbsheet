@@ -17,6 +17,7 @@ import {
   type DirectorId,
   type DirectorState,
   type GameDefinitionSnapshot,
+  type HistoricalDefinitionSource,
   type IssuedRosterPlayer,
   type ScheduledGame,
   type TournamentRules,
@@ -80,6 +81,195 @@ export function digestGameDefinition(input: DefinitionDigestInput): string {
       ),
     }),
   );
+}
+
+/** The three rule values answer bucketing actually depends on. */
+export interface HistoricalBucketValues {
+  superpowerValue?: number;
+  powerValue: number;
+  tossupValue: number;
+}
+
+export interface HistoricalDefinition extends HistoricalBucketValues {
+  source: HistoricalDefinitionSource;
+  snapshotId?: DirectorId;
+  revision?: number;
+  digest?: string;
+}
+
+/**
+ * Derive bucket values from embedded ScoringRules answer-type values (#671 source 3).
+ *
+ * Standard formats tier distinct positive values tallest-first: three or more positive tiers
+ * means a superpower tier above power above get; two means power above get; one means every
+ * positive value is a get. Negatives always bucket as negs regardless of magnitude.
+ */
+export function bucketValuesFromAnswerTypes(values: readonly number[]): HistoricalBucketValues {
+  const positive = [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))].sort(
+    (left, right) => right - left,
+  );
+  if (positive.length >= 3) {
+    return { superpowerValue: positive[0], powerValue: positive[1]!, tossupValue: positive[2]! };
+  }
+  if (positive.length === 2) return { powerValue: positive[0]!, tossupValue: positive[1]! };
+  if (positive.length === 1) return { powerValue: positive[0]!, tossupValue: positive[0]! };
+  return { powerValue: 15, tossupValue: 10 };
+}
+
+/**
+ * Answer-type values from a QBJ document's own embedded ScoringRules, when it carries one.
+ *
+ * The single implementation behind ingest resolution and stored-game valuation: the first
+ * ScoringRules object carrying values wins. Never a substitute for an issued snapshot.
+ */
+export function embeddedAnswerValuesFromRawQbj(value: unknown): number[] | undefined {
+  const document = value && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+  const objects = document && Array.isArray(document.objects) ? document.objects : [];
+  for (const object of objects) {
+    if (!object || typeof object !== 'object') continue;
+    const record = object as Record<string, unknown>;
+    if (record.type !== 'ScoringRules' || !Array.isArray(record.answer_types)) continue;
+    const values = record.answer_types
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return undefined;
+        const answerValue = (entry as Record<string, unknown>).value;
+        return typeof answerValue === 'number' && Number.isFinite(answerValue) ? answerValue : undefined;
+      })
+      .filter((entry): entry is number => entry !== undefined);
+    if (values.length > 0) return values;
+  }
+  return undefined;
+}
+
+/** Bucket values from live tournament rules, with the ingest engine's historical fallbacks. */
+export function bucketValuesFromRules(rules: TournamentRules | null | undefined): HistoricalBucketValues {
+  return {
+    ...(typeof rules?.superpowerValue === 'number' ? { superpowerValue: rules.superpowerValue } : {}),
+    powerValue: rules?.powerValue ?? 15,
+    tossupValue: rules?.tossupValue ?? 10,
+  };
+}
+
+export interface HistoricalResolutionInput {
+  /** Digest echoed by the room, when the returned document carried one. */
+  echoedDigest?: string;
+  /** Answer-type values from the document's embedded ScoringRules, when present. */
+  embeddedAnswerValues?: readonly number[];
+}
+
+/**
+ * Resolve which scoring truth statistics must use for one scheduled game (#671).
+ *
+ * Precedence: exact snapshot match, superseded snapshot match, embedded document rules,
+ * snapshot fallback, legacy inference, current defaults. Resolution never fails: there is
+ * always a triple to bucket with, and the source says how much to trust it. Callers that
+ * need enforcement (ingest classification) decide review/reject from the source and the
+ * echo, not from this return alone.
+ */
+export function resolveHistoricalDefinition(
+  state: DirectorState,
+  scheduledGameId: DirectorId,
+  input: HistoricalResolutionInput = {},
+): HistoricalDefinition {
+  const live = bucketValuesFromRules(state.tournament?.rules);
+  const scheduled = state.scheduledGames.find((game) => game.id === scheduledGameId);
+  const history = state.gameDefinitions.filter((entry) => entry.scheduledGameId === scheduledGameId);
+  const active =
+    scheduled?.definitionSnapshotId != null
+      ? history.find((entry) => entry.id === scheduled.definitionSnapshotId)
+      : history
+          .filter((entry) => !entry.supersededById)
+          .sort((left, right) => right.revision - left.revision)[0];
+  if (input.echoedDigest) {
+    const exact = history.find((entry) => entry.digest === input.echoedDigest);
+    if (exact && active && exact.id === active.id) {
+      return {
+        ...bucketValuesFromRules(exact.rules),
+        source: 'issued',
+        snapshotId: exact.id,
+        revision: exact.revision,
+        digest: exact.digest,
+      };
+    }
+    if (exact) {
+      return {
+        ...bucketValuesFromRules(exact.rules),
+        source: 'corrected',
+        snapshotId: exact.id,
+        revision: exact.revision,
+        digest: exact.digest,
+      };
+    }
+  }
+  if (input.embeddedAnswerValues && input.embeddedAnswerValues.length > 0) {
+    return { ...bucketValuesFromAnswerTypes(input.embeddedAnswerValues), source: 'qbj' };
+  }
+  if (active) {
+    // The game was issued, but this result proves nothing about which issue it used: the
+    // active snapshot is the best available estimate, and review is mandatory (enforced by
+    // the missing/stale/mismatch warnings, never by this return).
+    return {
+      ...bucketValuesFromRules(active.rules),
+      source: 'corrected',
+      snapshotId: active.id,
+      revision: active.revision,
+      digest: active.digest,
+    };
+  }
+  if (!scheduled) return { ...live, source: 'current' };
+  const hasHistory = state.games.some((record) => record.scheduledGameId === scheduledGameId);
+  return { ...live, source: hasHistory ? 'legacy-inferred' : 'current' };
+}
+
+/**
+ * The scoring rules a stored game record's statistics were derived under (#671).
+ *
+ * A record carrying a digest that names one of its game's snapshots resolves to that
+ * snapshot's rules; everything else resolves to live tournament rules. Exporters use this
+ * so per-game values (player points recomputation, box scores) match the app exactly even
+ * after tournament defaults move on.
+ */
+export function historicalRulesForGame(
+  state: DirectorState,
+  game: { scheduledGameId: DirectorId; definitionDigest?: string },
+): TournamentRules | undefined {
+  if (game.definitionDigest) {
+    const snapshot = state.gameDefinitions.find(
+      (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
+    );
+    if (snapshot) return snapshot.rules;
+  }
+  return state.tournament?.rules;
+}
+
+interface ScoringValues {
+  superpowerValue?: number | null;
+  powerValue?: number | null;
+  tossupValue?: number | null;
+  negValue?: number | null;
+}
+
+/**
+ * The answer values one stored game record's lines must be valued with (#671).
+ *
+ * Same precedence as ingest resolution, at the granularity aggregates need: the snapshot the
+ * game's digest names, the game's own embedded ScoringRules, live tournament rules. Exporters
+ * and report rows use this so per-game values match the app exactly even after defaults move
+ * on — and legacy games carrying their rules in raw QBJ stay stable without a snapshot.
+ */
+export function scoringValuesForGameRecord(
+  state: DirectorState,
+  game: { scheduledGameId: DirectorId; definitionDigest?: string; rawQbj?: unknown },
+): ScoringValues | undefined {
+  if (game.definitionDigest) {
+    const snapshot = state.gameDefinitions.find(
+      (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
+    );
+    if (snapshot) return snapshot.rules;
+  }
+  const embedded = embeddedAnswerValuesFromRawQbj(game.rawQbj);
+  if (embedded) return bucketValuesFromAnswerTypes(embedded);
+  return state.tournament?.rules;
 }
 
 /** Active roster as the assignment builder carries it: same membership, same order. */
@@ -316,6 +506,48 @@ export type ReissueDefinitionResult =
  * session: an old artifact already exists and cannot be wished away, and replacing the
  * definition underneath live play would misread the room's game.
  */
+/**
+ * One-time historical definitions for games that predate pins (#671 migration).
+ *
+ * A scheduled game with accepted results but no snapshot history gains a revision-1 snapshot
+ * derived from current defaults, and each accepted game without definition evidence gains that
+ * snapshot's digest marked `legacy-inferred`. Games whose raw QBJ carries embedded ScoringRules
+ * are left alone: resolution reads their rules from the immutable document, and pointing them
+ * at a current-defaults snapshot would corrupt that. Scheduled-game refs are NOT set — the
+ * game was never issued, and claiming otherwise would let future assignments rebuild from an
+ * inference instead of failing closed.
+ *
+ * Idempotent: games that already have snapshots, and accepted games that already carry a
+ * digest, are skipped, so a later defaults change never re-infers history.
+ */
+export function inferLegacyDefinitions(draft: DirectorState, at: string = isoNow()): DirectorId[] {
+  const inferred: DirectorId[] = [];
+  if (!draft.tournament) return inferred;
+  for (const scheduled of draft.scheduledGames) {
+    if (draft.gameDefinitions.some((entry) => entry.scheduledGameId === scheduled.id)) continue;
+    // Only games with no stronger evidence take the inference. In particular, a game whose
+    // raw QBJ carries embedded ScoringRules keeps resolving from the immutable document.
+    const targets = draft.games.filter(
+      (game) =>
+        game.scheduledGameId === scheduled.id &&
+        game.status === 'accepted' &&
+        !game.definitionDigest &&
+        !embeddedAnswerValuesFromRawQbj(game.rawQbj),
+    );
+    if (targets.length === 0) continue;
+    const derived = deriveDefinitionSnapshot(draft, scheduled.id, at);
+    if (!derived.ok) continue;
+    draft.gameDefinitions.push(derived.snapshot);
+    for (const game of targets) {
+      game.definitionDigest = derived.snapshot.digest;
+      game.definitionRevision = derived.snapshot.revision;
+      game.definitionSource = 'legacy-inferred';
+    }
+    inferred.push(scheduled.id);
+  }
+  return inferred;
+}
+
 export function reissueGameDefinition(
   draft: DirectorState,
   scheduledGameId: DirectorId,

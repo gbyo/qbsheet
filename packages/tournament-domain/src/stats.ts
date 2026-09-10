@@ -47,6 +47,12 @@ export interface PlayerStanding {
   gets: number;
   negs: number;
   bonusPoints: number;
+  /**
+   * Total points, summed per game under each game's own scoring definition (#671). Buckets
+   * cannot be valued once after aggregation: two games in one standing may price a power
+   * differently, so each game's player lines are valued with that game's rules first.
+   */
+  points: number;
   ppg: number;
 }
 
@@ -392,6 +398,80 @@ function headToHeadValue(
   return gamesPlayed === 0 ? 0 : wins / gamesPlayed;
 }
 
+/**
+ * Answer-type values from a stored game's own embedded ScoringRules (#671 source 3).
+ *
+ * Mirrors the ingest-side extractor at bucket granularity: the first ScoringRules object
+ * carrying values wins. Buckets are all aggregates need, so no full QBJ-to-rules conversion
+ * is attempted here — or anywhere; none exists.
+ */
+function embeddedAnswerValues(rawQbj: unknown): number[] | undefined {
+  if (!rawQbj || typeof rawQbj !== 'object') return undefined;
+  const objects = (rawQbj as { objects?: unknown }).objects;
+  if (!Array.isArray(objects)) return undefined;
+  for (const object of objects) {
+    if (!object || typeof object !== 'object') continue;
+    const record = object as Record<string, unknown>;
+    if (record.type !== 'ScoringRules' || !Array.isArray(record.answer_types)) continue;
+    const values = record.answer_types
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return undefined;
+        const value = (entry as Record<string, unknown>).value;
+        return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+      })
+      .filter((value): value is number => value !== undefined);
+    if (values.length > 0) return values;
+  }
+  return undefined;
+}
+
+/**
+ * Tier mapping for embedded answer-type values (#671 source 3).
+ *
+ * Standard formats tier distinct positive values tallest-first. Mirrors the ingest-side
+ * mapping so classification and valuation can never disagree about which tier a value is.
+ */
+function bucketValuesFromAnswerTypes(values: readonly number[]): ScoringValues {
+  const positive = [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))].sort(
+    (left, right) => right - left,
+  );
+  if (positive.length >= 3) {
+    return { superpowerValue: positive[0], powerValue: positive[1]!, tossupValue: positive[2]! };
+  }
+  if (positive.length === 2) return { powerValue: positive[0]!, tossupValue: positive[1]! };
+  if (positive.length === 1) return { powerValue: positive[0]!, tossupValue: positive[0]! };
+  return { powerValue: 15, tossupValue: 10 };
+}
+
+/** Answer values at the granularity aggregates need; every tier is optional downstream. */
+interface ScoringValues {
+  superpowerValue?: number | null;
+  powerValue?: number | null;
+  tossupValue?: number | null;
+  negValue?: number | null;
+}
+
+/**
+ * The answer values one stored game's player lines must be valued with (#671).
+ *
+ * Precedence: the snapshot the game's digest names, the game's own embedded ScoringRules,
+ * live tournament rules. The embedded tier is what keeps a legacy game — scored before pins
+ * existed, carrying its rules in its raw QBJ — stable in standings after defaults move on.
+ * Only a game with neither a snapshot nor embedded rules is valued with live defaults, and
+ * the migration pins even those as explicitly marked inferences.
+ */
+function scoringValuesForGame(state: DirectorState, game: GameRecord): ScoringValues | undefined {
+  if (game.definitionDigest) {
+    const snapshot = state.gameDefinitions.find(
+      (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
+    );
+    if (snapshot) return snapshot.rules;
+  }
+  const embedded = embeddedAnswerValues(game.rawQbj);
+  if (embedded) return bucketValuesFromAnswerTypes(embedded);
+  return state.tournament?.rules;
+}
+
 export function derivePlayerStandings(
   state: DirectorState,
   options: DirectorStandingsOptions = {},
@@ -416,20 +496,22 @@ export function derivePlayerStandings(
       gets: 0,
       negs: 0,
       bonusPoints: 0,
+      points: 0,
       ppg: 0,
     });
   }
   const games = acceptedGameRecords(state, options);
   for (const game of games) {
+    const values = scoringValuesForGame(state, game);
     for (const stat of game.playerStats) {
       const standing = byPlayer.get(stat.playerId);
       if (!standing) continue;
       addPlayerGame(standing, stat);
+      standing.points += playerPoints(stat, values);
     }
   }
   for (const standing of byPlayer.values()) {
-    standing.ppg =
-      standing.gamesPlayed === 0 ? 0 : playerPoints(standing, state.tournament?.rules) / standing.gamesPlayed;
+    standing.ppg = standing.gamesPlayed === 0 ? 0 : standing.points / standing.gamesPlayed;
   }
   return [...byPlayer.values()].sort(
     (a, b) => b.ppg - a.ppg || b.powers - a.powers || a.playerId.localeCompare(b.playerId),
@@ -468,7 +550,7 @@ function addTeamTossupsHeard(
  */
 export function playerPoints(
   standing: Pick<PlayerStanding, 'superpowers' | 'powers' | 'gets' | 'negs' | 'bonusPoints'>,
-  rules?: Pick<TournamentRules, 'superpowerValue' | 'powerValue' | 'tossupValue' | 'negValue'> | null,
+  rules?: ScoringValues | null,
 ): number {
   return (
     standing.superpowers * (rules?.superpowerValue ?? rules?.powerValue ?? 15) +

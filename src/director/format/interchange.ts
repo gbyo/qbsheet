@@ -1,6 +1,7 @@
 import {
   exportDirectorArchive,
   exportQbjText,
+  exportQbjTextReport,
   exportSqbsTeams,
   exportSqbsTournamentFile,
   exportTeamsCsv,
@@ -28,9 +29,11 @@ import {
   newDirectorId,
   normalizeTimeZone,
   roomDefaultEquipmentIds,
+  scoringValuesForGameRecord,
   timelineEventTypes,
   type DirectorState,
   type FinalPlacement,
+  type GameDefinitionSnapshot,
   type GameRecord,
   type TeamClassification,
   type TeamGameScore,
@@ -78,6 +81,80 @@ function text(value: unknown): string | undefined {
 
 function number(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** A 1-based revision reference, for issued-definition refs and provenance (#671). */
+function revisionValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? value : undefined;
+}
+
+/**
+ * One per-game definition snapshot from the tournament extensions (#671). Malformed entries
+ * are dropped, not coerced: a half-snapshot that silently adopted live rules would misread
+ * the history it claims to preserve, while a dropped one fails closed at build time.
+ */
+function snapshotValue(value: unknown): GameDefinitionSnapshot | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entry = value as Record<string, unknown>;
+  const id = text(entry.id);
+  const scheduledGameId = text(entry.scheduledGameId);
+  const revision = revisionValue(entry.revision);
+  const createdAt = text(entry.createdAt);
+  const rules = entry.rules;
+  const roundId = text(entry.roundId);
+  const leftTeamId = text(entry.leftTeamId);
+  const rightTeamId = text(entry.rightTeamId);
+  const digest = text(entry.digest);
+  if (
+    !id ||
+    !scheduledGameId ||
+    revision === undefined ||
+    !createdAt ||
+    !rules ||
+    typeof rules !== 'object' ||
+    Array.isArray(rules) ||
+    !roundId ||
+    !leftTeamId ||
+    !rightTeamId ||
+    !digest ||
+    !Array.isArray(entry.leftRoster) ||
+    !Array.isArray(entry.rightRoster) ||
+    typeof entry.assignmentRevision !== 'number' ||
+    (entry.packetId !== null && text(entry.packetId) === undefined) ||
+    (entry.supersededById !== undefined &&
+      entry.supersededById !== null &&
+      text(entry.supersededById) === undefined)
+  )
+    return undefined;
+  return {
+    id,
+    scheduledGameId,
+    revision,
+    createdAt,
+    rules: rules as GameDefinitionSnapshot['rules'],
+    roundId,
+    packetId: entry.packetId === null ? null : (text(entry.packetId) ?? null),
+    leftTeamId,
+    rightTeamId,
+    leftRoster: entry.leftRoster as GameDefinitionSnapshot['leftRoster'],
+    rightRoster: entry.rightRoster as GameDefinitionSnapshot['rightRoster'],
+    assignmentRevision: entry.assignmentRevision,
+    digest,
+    ...(entry.supersededById === undefined || entry.supersededById === null
+      ? {}
+      : { supersededById: text(entry.supersededById)! }),
+  };
+}
+
+/** A definition-source provenance tag, dropped when it names nothing known (#671). */
+function definitionSourceValue(value: unknown): DirectorState['games'][number]['definitionSource'] {
+  return value === 'issued' ||
+    value === 'corrected' ||
+    value === 'qbj' ||
+    value === 'legacy-inferred' ||
+    value === 'current'
+    ? value
+    : undefined;
 }
 
 function teamStatus(status: string | undefined): DirectorState['teams'][number]['status'] {
@@ -352,7 +429,10 @@ function interchangeTimelineEvents(state: DirectorState): TimelineEventRecord[] 
 
 function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeGameRecord {
   const scheduled = state.scheduledGames.find((entry) => entry.id === game.scheduledGameId);
-  const rules = state.tournament?.rules;
+  // Player points recompute under the game's own historical definition, not live defaults (#671).
+  // The resolver falls back to the game's embedded ScoringRules so legacy games without a
+  // snapshot stay stable too.
+  const rules = scoringValuesForGameRecord(state, game);
   const scores: GameTeamResult[] = game.scores.map((score) => ({
     teamId: score.teamId,
     points: score.score,
@@ -405,6 +485,17 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     ...(game.rawQbj !== undefined ? { rawSubmission: jsonValue(game.rawQbj) } : {}),
     ...(game.finishedAt ? { submittedAt: game.finishedAt } : {}),
     ...(game.acceptedAt ? { acceptedAt: game.acceptedAt } : {}),
+    ...((game.definitionRevision ?? game.definitionDigest ?? game.definitionSource)
+      ? {
+          extensions: {
+            ...(typeof game.definitionRevision === 'number'
+              ? { definitionRevision: game.definitionRevision }
+              : {}),
+            ...(game.definitionDigest ? { definitionDigest: game.definitionDigest } : {}),
+            ...(game.definitionSource ? { definitionSource: game.definitionSource } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -447,18 +538,25 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         : {}),
     },
   }));
-  const scheduledGames = state.scheduledGames.map((game) => ({
-    id: game.id,
-    roundId: game.roundId,
-    poolId: game.poolId ?? undefined,
-    roomId: game.roomId ?? undefined,
-    packetId: game.packetId ?? undefined,
-    teamIds: [game.leftTeamId, game.rightTeamId] as [string | null, string | null],
-    status: game.status,
-    startsAt: game.scheduledStart ?? undefined,
-    bye: game.bye,
-    extensions: game.movedFromRoomId ? { movedFromRoomId: game.movedFromRoomId } : undefined,
-  }));
+  const scheduledGames = state.scheduledGames.map((game) => {
+    const extensions = {
+      ...(game.movedFromRoomId ? { movedFromRoomId: game.movedFromRoomId } : {}),
+      ...(typeof game.definitionRevision === 'number' ? { definitionRevision: game.definitionRevision } : {}),
+      ...(game.definitionSnapshotId ? { definitionSnapshotId: game.definitionSnapshotId } : {}),
+    };
+    return {
+      id: game.id,
+      roundId: game.roundId,
+      poolId: game.poolId ?? undefined,
+      roomId: game.roomId ?? undefined,
+      packetId: game.packetId ?? undefined,
+      teamIds: [game.leftTeamId, game.rightTeamId] as [string | null, string | null],
+      status: game.status,
+      startsAt: game.scheduledStart ?? undefined,
+      bye: game.bye,
+      ...(Object.keys(extensions).length > 0 ? { extensions } : {}),
+    };
+  });
   const output = {
     tournament: {
       id: tournament.id,
@@ -486,6 +584,10 @@ export function toInterchange(state: DirectorState): DirectorTournament {
         ...(tournament.rules.tiebreakerCountsStatistically === true
           ? { tiebreakerCountsStatistically: true }
           : {}),
+        // Per-game definitions travel with the export in this namespaced extension (#671):
+        // without them an importer could only resolve history against its own (possibly
+        // different) defaults. Scorer-facing ScoringRules stay untouched.
+        ...(state.gameDefinitions.length > 0 ? { gameDefinitions: jsonValue(state.gameDefinitions) } : {}),
       },
     },
     // Director's camelCase rules are an internal editing model. Public QBJ needs the canonical
@@ -595,6 +697,17 @@ export function toInterchange(state: DirectorState): DirectorTournament {
       raw: jsonValue(submission.rawSubmission),
       ...(submission.reason ? { reviewNote: submission.reason } : {}),
       ...(submission.acceptedAt ? { reviewedAt: submission.acceptedAt } : {}),
+      ...((submission.definitionRevision ?? submission.definitionDigest ?? submission.definitionSource)
+        ? {
+            extensions: {
+              ...(typeof submission.definitionRevision === 'number'
+                ? { definitionRevision: submission.definitionRevision }
+                : {}),
+              ...(submission.definitionDigest ? { definitionDigest: submission.definitionDigest } : {}),
+              ...(submission.definitionSource ? { definitionSource: submission.definitionSource } : {}),
+            },
+          }
+        : {}),
     })),
     protests: state.protests.map((protest) => ({
       id: protest.id,
@@ -853,7 +966,23 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     scheduledStart: game.startsAt ?? null,
     assignmentRevision: 1,
     movedFromRoomId: text(game.extensions?.movedFromRoomId),
+    // Issued-definition refs travel so an export/import round-trip keeps every game pinned
+    // to the same truth (#671). Refs naming snapshots absent from the payload stay absent
+    // here and fail closed at build time rather than silently adopting live rules.
+    ...(revisionValue(game.extensions?.definitionRevision) !== undefined
+      ? { definitionRevision: revisionValue(game.extensions?.definitionRevision) }
+      : {}),
+    ...(text(game.extensions?.definitionSnapshotId)
+      ? { definitionSnapshotId: text(game.extensions?.definitionSnapshotId) }
+      : {}),
   }));
+  // The per-game definition history rides in the tournament extensions (#671). Assignment
+  // happens here rather than through rules merging: snapshots are history, not defaults.
+  state.gameDefinitions = Array.isArray(tournamentExtensions.gameDefinitions)
+    ? tournamentExtensions.gameDefinitions
+        .map((entry) => snapshotValue(entry))
+        .filter((entry) => entry !== undefined)
+    : [];
   state.games = data.games.map((game) => ({
     id: game.id,
     scheduledGameId: game.scheduledGameId ?? game.id,
@@ -881,6 +1010,15 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     finishedAt: game.submittedAt,
     acceptedAt: game.acceptedAt,
     note: game.result?.notes,
+    ...(revisionValue(game.extensions?.definitionRevision) !== undefined
+      ? { definitionRevision: revisionValue(game.extensions?.definitionRevision) }
+      : {}),
+    ...(text(game.extensions?.definitionDigest)
+      ? { definitionDigest: text(game.extensions?.definitionDigest) }
+      : {}),
+    ...(definitionSourceValue(game.extensions?.definitionSource) !== undefined
+      ? { definitionSource: definitionSourceValue(game.extensions?.definitionSource) }
+      : {}),
   }));
   state.submissions = data.resultSubmissions.map((submission) => ({
     id: submission.id,
@@ -902,6 +1040,15 @@ function fromInterchange(data: DirectorTournament): DirectorState {
     rawSubmission: submission.raw,
     reason: submission.reviewNote,
     acceptedAt: submission.reviewedAt,
+    ...(revisionValue(submission.extensions?.definitionRevision) !== undefined
+      ? { definitionRevision: revisionValue(submission.extensions?.definitionRevision) }
+      : {}),
+    ...(text(submission.extensions?.definitionDigest)
+      ? { definitionDigest: text(submission.extensions?.definitionDigest) }
+      : {}),
+    ...(definitionSourceValue(submission.extensions?.definitionSource) !== undefined
+      ? { definitionSource: definitionSourceValue(submission.extensions?.definitionSource) }
+      : {}),
   }));
   state.protests = data.protests.map((protest) => ({
     id: protest.id,
@@ -1124,6 +1271,26 @@ export function exportArchiveBytes(state: DirectorState): Uint8Array {
 
 export function exportQbj(state: DirectorState): string {
   return exportQbjText(toInterchange(state), { mode: 'tournament' });
+}
+
+export interface QbjTournamentExport {
+  text: string;
+  warnings: string[];
+}
+
+/**
+ * QBJ tournament export with its compatibility warnings (#671).
+ *
+ * Canonical QBJ carries one tournament-level ScoringRules object, so a tournament whose games
+ * were scored under several definitions says so here instead of letting that single object
+ * imply a shared truth. Per-game provenance itself rides in each Match's extensions.
+ */
+export function exportQbjReport(state: DirectorState): QbjTournamentExport {
+  const report = exportQbjTextReport(toInterchange(state), { mode: 'tournament' });
+  if (!report.ok) {
+    throw new Error(report.errors.map((entry) => entry.message).join(' '));
+  }
+  return { text: report.value, warnings: report.warnings.map((entry) => entry.message) };
 }
 
 export function exportTeamCsv(state: DirectorState): string {

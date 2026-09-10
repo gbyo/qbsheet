@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import { defaultReportOptions, type ReportOptions } from '@qbsheet/tournament-formats';
 import type { DirectorState } from '../domain';
 import { Button, EmptyState, Page, PageHeader, Panel, SummaryItem, SummaryList } from '../components';
-import { exportArchiveBytes, exportQbj, exportSqbs, exportTeamCsv } from '../format/interchange';
+import { exportArchiveBytes, exportQbjReport, exportSqbs, exportTeamCsv } from '../format/interchange';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
 import { csvMediaType, downloadBytes, downloadText } from '../format/downloadFile';
 import { isNativeDirector, saveNativeFile } from '../platform/native';
-import { errorNotice, infoNotice, type AnnounceInput } from '../notices';
+import { errorNotice, infoNotice, warningNotice, type AnnounceInput } from '../notices';
 import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
@@ -251,12 +251,23 @@ function downloadTeamCsv(state: DirectorState, onAnnounce: (announcement: Announ
 }
 
 function downloadQbj(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {
-  downloadText(
-    exportQbj(state),
-    `${standingsFileStem(state)}.qbj`,
-    'application/vnd.quizbowl.qbj+json;charset=utf-8',
-  );
-  onAnnounce('QBJ tournament exported.');
+  try {
+    const exported = exportQbjReport(state);
+    downloadText(
+      exported.text,
+      `${standingsFileStem(state)}.qbj`,
+      'application/vnd.quizbowl.qbj+json;charset=utf-8',
+    );
+    onAnnounce('QBJ tournament exported.');
+    // A multi-definition tournament's single global ScoringRules object does not describe every
+    // game (#671). The file stays honest through per-Match extensions; say so where the director
+    // will see it rather than letting the download look self-describing.
+    for (const message of exported.warnings) onAnnounce(warningNotice(message));
+  } catch (reason: unknown) {
+    onAnnounce(
+      errorNotice(reason instanceof Error ? reason.message : 'QBJ tournament could not be exported.'),
+    );
+  }
 }
 
 function downloadSqbs(state: DirectorState, onAnnounce: (announcement: AnnounceInput) => void): void {

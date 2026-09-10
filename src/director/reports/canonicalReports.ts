@@ -17,6 +17,7 @@ import {
   gameDetailedCountsKnown,
   orderDayItems,
   playerPoints,
+  scoringValuesForGameRecord,
   type DirectorState,
   type GameRecord,
 } from '../domain';
@@ -238,12 +239,13 @@ export function buildCanonicalSnapshot(
     };
   });
 
-  const rules = state.tournament?.rules;
   const players: PlayerStatsRow[] = derivePlayerStandings(state, scoped)
     .filter((standing) => standing.gamesPlayed > 0)
     .map((standing, index) => {
       const player = state.players.find((entry) => entry.id === standing.playerId);
-      const points = playerPoints(standing, rules);
+      // Valued per game under each game's own definition inside derivePlayerStandings (#671);
+      // revaluing the aggregate buckets with live defaults here would rewrite history.
+      const points = standing.points;
       return {
         rank: index + 1,
         playerId: standing.playerId,
@@ -311,7 +313,7 @@ export function buildCanonicalSnapshot(
       gets: detailedCountsKnown ? stat.gets : null,
       negs: detailedCountsKnown ? stat.negs : null,
       bonusPoints: detailedCountsKnown ? stat.bonusPoints : null,
-      points: detailedCountsKnown ? playerPoints(stat, rules) : null,
+      points: detailedCountsKnown ? playerPoints(stat, scoringValuesForGameRecord(state, game)) : null,
     }));
 
     const phaseId = roundPhase.get(game.roundId);

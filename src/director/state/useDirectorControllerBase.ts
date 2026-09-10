@@ -22,6 +22,7 @@ import {
   plannedEliminationGameForTeam,
   previewAdvancement,
   reissueGameDefinition,
+  resolveHistoricalDefinition,
   advancementBasisToken,
   roundCloseBlockers,
   roomAssignmentConflicts,
@@ -5156,17 +5157,33 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError('This unmatched QBTCP result is review-only until a director explicitly associates it.');
         return false;
       }
+      // Re-derive statistics under the game's historical definition (#671). Staged stats may
+      // have been bucketed under live defaults or an older resolution; what lands in the
+      // canonical record is always derived under the resolved truth, with its provenance.
+      // The association-aware reader preserves the positional team remap of results a
+      // director explicitly associated; the plain reader would unmap them back to nothing.
+      const rawQbj =
+        game.rawQbj ?? (isRecordLike(submission.rawSubmission) ? submission.rawSubmission.qbj : undefined);
+      const historical =
+        rawQbj === undefined ? null : readResultStatisticsForAssociation(rawQbj, snapshot, scheduled);
+      const finalScores = historical ? historical.scores : game.scores;
+      const finalPlayerStats = historical ? historical.playerStats : game.playerStats;
+      const definitionSource =
+        historical?.definition.source ??
+        resolveHistoricalDefinition(snapshot, scheduled.id, {
+          ...(game.definitionDigest ? { echoedDigest: game.definitionDigest } : {}),
+        }).source;
       const validationError = validateResultForScheduledGame(
         snapshot,
         scheduled,
-        game.scores,
-        game.playerStats,
+        finalScores,
+        finalPlayerStats,
       );
       if (validationError) {
         setError(validationError);
         return false;
       }
-      const detailedStatsError = validateDetailedStats(game.detailedStats, game.playerStats);
+      const detailedStatsError = validateDetailedStats(game.detailedStats, finalPlayerStats);
       if (detailedStatsError) {
         setError(detailedStatsError);
         return false;
@@ -5245,8 +5262,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
         target.status = 'accepted';
         target.acceptedBy = actor;
         target.acceptedAt = acceptedAt;
+        target.definitionSource = definitionSource;
         targetGame.status = 'accepted';
         targetGame.acceptedAt = acceptedAt;
+        targetGame.scores = finalScores;
+        targetGame.playerStats = finalPlayerStats;
+        targetGame.definitionSource = definitionSource;
         targetGame.detailedStats ??= targetGame.playerStats.length > 0 ? 'incomplete' : 'unknown';
         targetScheduled.status = 'accepted';
         markPacketUsed(draft, targetScheduled.id, effectivePacketId(draft, targetScheduled));

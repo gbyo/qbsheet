@@ -35,7 +35,13 @@ import {
   type TeamGameScore,
 } from '../domain/model';
 import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, isCanonicalCount } from '../domain';
-import { activeDefinitionSnapshot } from '../domain/gameDefinitions';
+import {
+  activeDefinitionSnapshot,
+  embeddedAnswerValuesFromRawQbj,
+  resolveHistoricalDefinition,
+  type HistoricalBucketValues,
+  type HistoricalDefinition,
+} from '../domain/gameDefinitions';
 import { resultFingerprint } from './canonical';
 import { hasScoringContent, matchObject, readQbjIdentity, type QbjIdentity } from './parse';
 import {
@@ -174,6 +180,11 @@ export interface ResultAssessment {
   scheduledGameId?: DirectorId;
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  /**
+   * Which scoring truth the statistics above were derived under (#671). Present whenever
+   * statistics were derived; absent on early returns that derive none.
+   */
+  definition?: HistoricalDefinition;
   /** The submission this repeats, when it repeats one. */
   duplicateOfSubmissionId?: DirectorId;
   /** The submission this disagrees with, when it disagrees with one. */
@@ -230,9 +241,19 @@ function resultTeamId(
   return teams.length === 1 ? teams[0]?.id : undefined;
 }
 
+/**
+ * Answer-type values from the document's own embedded ScoringRules, when it carries one.
+ * Used only to resolve which historical truth a result was scored under (#671 source 3);
+ * never as a substitute for an issued snapshot. Implemented in the domain module so stored
+ * games resolve through the same extractor.
+ */
+function embeddedAnswerValues(value: unknown): number[] | undefined {
+  return embeddedAnswerValuesFromRawQbj(value);
+}
+
 function answerAggregate(
   counts: unknown,
-  state: DirectorState,
+  rules: HistoricalBucketValues,
   warnings: string[] = [],
 ): { superpowers: number; powers: number; gets: number; negs: number; tossupPoints: number } {
   let superpowers = 0;
@@ -241,7 +262,6 @@ function answerAggregate(
   let negs = 0;
   let tossupPoints = 0;
   if (!Array.isArray(counts)) return { superpowers, powers, gets, negs, tossupPoints };
-  const rules = state.tournament?.rules;
   for (const count of counts) {
     if (!isRecord(count)) continue;
     const value = isRecord(count.answer_type) ? finiteNumber(count.answer_type.value) : undefined;
@@ -256,9 +276,9 @@ function answerAggregate(
     // answer type the tournament rules do not name. Bucketing is where the
     // rules matter — and an unmapped value is a warning, never a silent drop.
     tossupPoints += value * number;
-    if (value === (rules?.superpowerValue ?? Number.NaN)) superpowers += number;
-    else if (value === (rules?.powerValue ?? 15)) powers += number;
-    else if (value === (rules?.tossupValue ?? 10)) gets += number;
+    if (value === (rules.superpowerValue ?? Number.NaN)) superpowers += number;
+    else if (value === rules.powerValue) powers += number;
+    else if (value === rules.tossupValue) gets += number;
     else if (value < 0) negs += number;
     else warnings.push(ingestWarnings.unrecognizedAnswerValue);
   }
@@ -267,7 +287,7 @@ function answerAggregate(
 
 function teamAggregate(
   entry: Record<string, unknown>,
-  state: DirectorState,
+  rules: HistoricalBucketValues,
   warnings: string[] = [],
 ): Omit<TeamGameScore, 'teamId' | 'score'> {
   let superpowers = 0;
@@ -278,7 +298,7 @@ function teamAggregate(
   if (Array.isArray(entry.match_players)) {
     for (const candidate of entry.match_players) {
       if (!isRecord(candidate)) continue;
-      const aggregate = answerAggregate(candidate.answer_counts, state, warnings);
+      const aggregate = answerAggregate(candidate.answer_counts, rules, warnings);
       superpowers += aggregate.superpowers;
       powers += aggregate.powers;
       gets += aggregate.gets;
@@ -311,8 +331,21 @@ export function readResultStatistics(
   value: unknown,
   state: DirectorState,
   scheduled: DirectorState['scheduledGames'][number] | undefined,
-): { scores: TeamGameScore[]; playerStats: PlayerGameStat[]; warnings: string[] } {
+): {
+  scores: TeamGameScore[];
+  playerStats: PlayerGameStat[];
+  warnings: string[];
+  definition: HistoricalDefinition;
+} {
   const warnings: string[] = [];
+  // Which scoring truth this document was scored under (#671). The echo and the embedded
+  // rules come from the document itself; snapshots come from state. Every bucket below uses
+  // this triple, never live tournament rules directly.
+  const identity = readQbjIdentity(value);
+  const definition = resolveHistoricalDefinition(state, scheduled?.id ?? '', {
+    ...(identity.definitionDigest ? { echoedDigest: identity.definitionDigest } : {}),
+    ...(embeddedAnswerValues(value) ? { embeddedAnswerValues: embeddedAnswerValues(value) } : {}),
+  });
   const match = matchObject(value);
   const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
   const scores = entries
@@ -321,7 +354,7 @@ export function readResultStatistics(
       const teamId = resultTeamId(entry.team, state, scheduled, warnings);
       const score = finiteNumber(entry.points);
       if (!teamId || score === undefined) return null;
-      const candidate = { teamId, score, ...teamAggregate(entry, state, warnings) };
+      const candidate = { teamId, score, ...teamAggregate(entry, definition, warnings) };
       if (invalidTeamGameScoreCountField(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
       return candidate;
     })
@@ -343,7 +376,7 @@ export function readResultStatistics(
         return [];
       }
       const [player] = players;
-      const aggregate = answerAggregate(candidate.answer_counts, state, warnings);
+      const aggregate = answerAggregate(candidate.answer_counts, definition, warnings);
       const stat = {
         playerId: player.id,
         teamId,
@@ -360,7 +393,7 @@ export function readResultStatistics(
       return [stat];
     });
   });
-  return { scores, playerStats, warnings };
+  return { scores, playerStats, warnings, definition };
 }
 
 /**
@@ -380,6 +413,7 @@ export function readResultStatisticsForAssociation(
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   warnings: string[];
+  definition: HistoricalDefinition;
   positionalAssociation: boolean;
 } {
   const direct = readResultStatistics(value, state, scheduled);
@@ -596,6 +630,49 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
   }
   if (scheduled?.status === 'cancelled') warnings.add(ingestWarnings.cancelledGame);
 
+  // Identity rejections (#671). A rejected file is recorded as a failed artifact and is never
+  // staged, and `alreadySeen` skips it on every later scan — which is the enforcement the
+  // filesystem port allows: the port contract forbids delete/move, so "deleted from the
+  // drive" is implemented as "recorded failed and never re-scanned".
+  if (scheduled && expectedDefinition && matchedByTeams && !identity.definitionDigest) {
+    // Weak team-only match against a game whose truth was issued: without an echo there is no
+    // way to prove which issue the room used, and guessing would misread history.
+    return {
+      classification: 'invalid',
+      warnings: [...warnings, ingestWarnings.missingDefinitionIdentity],
+      detail:
+        'This result only matches by team names, but the game was issued under a pinned ' +
+        'competitive definition the result does not name. It was not imported.',
+      fingerprint,
+      identity,
+      scheduledGameId: scheduled.id,
+      scores: [],
+      playerStats: [],
+    };
+  }
+  if (
+    scheduled &&
+    expectedDefinition &&
+    identity.definitionRevision !== undefined &&
+    identity.definitionRevision > expectedDefinition.revision
+  ) {
+    // The room claims a newer issue than Director ever issued: this result belongs to a
+    // future Director does not have (usually a rewound restore). Accepting it would graft a
+    // game from a lost timeline onto current standings.
+    return {
+      classification: 'invalid',
+      warnings: [...warnings, ingestWarnings.definitionMismatch],
+      detail:
+        'This result claims a competitive-definition revision newer than anything issued ' +
+        'for this game. It was not imported.',
+      fingerprint,
+      identity,
+      scheduledGameId: scheduled.id,
+      scores: [],
+      playerStats: [],
+    };
+  }
+
   const statistics = readResultStatistics(document.qbj, state, scheduled);
   for (const warning of statistics.warnings) warnings.add(warning);
   if (scheduled && statistics.scores.length === 2) {
@@ -633,6 +710,7 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
       ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
       scores: statistics.scores,
       playerStats: statistics.playerStats,
+      definition: statistics.definition,
       duplicateOfSubmissionId: duplicate.id,
       existingGameId: duplicate.gameId,
     };
@@ -654,6 +732,7 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
     scores: statistics.scores,
     playerStats: statistics.playerStats,
+    definition: statistics.definition,
     ...(conflict ? { conflictWithSubmissionId: conflict.id, existingGameId: conflict.gameId } : {}),
   };
 }
@@ -812,6 +891,8 @@ export function stageIncomingDocument(
     ...(assessment.identity.definitionDigest === undefined
       ? {}
       : { definitionDigest: assessment.identity.definitionDigest }),
+    ...(assessment.definition ? { definitionSource: assessment.definition.source } : {}),
+    ...(assessment.definition ? { definitionSource: assessment.definition.source } : {}),
     rawQbj: document.qbj,
     finishedAt: now,
   };
@@ -831,6 +912,7 @@ export function stageIncomingDocument(
     ...(assessment.identity.definitionDigest === undefined
       ? {}
       : { definitionDigest: assessment.identity.definitionDigest }),
+    ...(assessment.definition ? { definitionSource: assessment.definition.source } : {}),
     rawSubmission: {
       source: document.sourceKind,
       sourceLabel: document.sourceLabel,

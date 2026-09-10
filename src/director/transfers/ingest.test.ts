@@ -10,6 +10,8 @@ import { digestText } from './canonical';
 import {
   assessIncomingDocument,
   ingestWarnings,
+  readResultStatistics,
+  readResultStatisticsForAssociation,
   stageIncomingDocument,
   type IncomingDocument,
 } from './ingest';
@@ -385,6 +387,33 @@ describe('definition identity', () => {
     });
     expect(staged.artifact.definitionRevision).toBe(expected.revision);
     expect(staged.artifact.definitionDigest).toBe(expected.digest);
+  });
+});
+
+describe('positional association', () => {
+  it('re-derives an opaque result through the positional remap', () => {
+    const state = directorFixture();
+    const scored = structuredClone(assignmentFor(state, 'game-5-1').document);
+    const scoredObjects = (scored as { objects: Array<Record<string, unknown>> }).objects;
+    const scoredMatch = scoredObjects.find((object) => object.type === 'Match');
+    const scoredTeams = scoredMatch?.match_teams as Array<Record<string, unknown>> | undefined;
+    if (!scoredTeams || scoredTeams.length !== 2) throw new Error('fixture: expected two teams');
+    // An older/offline scorer that assigned its own team ids: no lookup can resolve these.
+    scoredTeams[0]!.team = { $ref: 'offline-team-a' };
+    scoredTeams[1]!.team = { $ref: 'offline-team-b' };
+    const result = scoreAssignment(scored);
+    const scheduled = state.scheduledGames.find((game) => game.id === 'game-5-1');
+
+    // The plain reader finds no teams; accept-time re-derivation must not use it alone or
+    // associated games would be unmapped back to nothing.
+    expect(readResultStatistics(result, state, scheduled).scores).toHaveLength(0);
+
+    const reassociated = readResultStatisticsForAssociation(result, state, scheduled);
+    expect(reassociated.positionalAssociation).toBe(true);
+    expect(reassociated.scores.map((score) => score.teamId)).toEqual([
+      scheduled?.leftTeamId,
+      scheduled?.rightTeamId,
+    ]);
   });
 });
 
