@@ -39,7 +39,8 @@ export interface TeamStatsRow {
   powers: number;
   gets: number;
   negs: number;
-  tossupsHeard: number;
+  /** Null when any contributing scoresheet omitted tossups-heard; never a partial-sum zero. */
+  tossupsHeard: number | null;
   /** False when any contributing scoresheet omitted tossups-heard. */
   tossupsHeardKnown: boolean;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
@@ -153,8 +154,8 @@ function resultTeam(result: GameTeamResult | undefined): GameTeamResult | undefi
   return result;
 }
 
-function valueOrZero(value: number | undefined): number {
-  return value !== undefined && Number.isFinite(value) ? value : 0;
+function valueOrZero(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 function configTiebreakers(
@@ -207,7 +208,10 @@ function rankRows<T>(rows: T[], compare: (left: T, right: T) => number): T[] {
 
 function teamRow(mutable: MutableTeamStats): TeamStatsRow {
   const games = mutable.gamesPlayed;
-  const tossups = mutable.tossupsHeardKnown ? mutable.tossupsHeard : 0;
+  const tossups =
+    mutable.tossupsHeardKnown && typeof mutable.tossupsHeard === 'number'
+      ? mutable.tossupsHeard
+      : 0;
   const bonuses = mutable.bonusesHeard;
   return {
     rank: 0,
@@ -215,6 +219,8 @@ function teamRow(mutable: MutableTeamStats): TeamStatsRow {
     winPercentage: games > 0 ? mutable.wins / games : 0,
     ppg: games > 0 ? mutable.pointsFor / games : 0,
     papg: games > 0 ? mutable.pointsAgainst / games : 0,
+    // Unknown TUH is null like the player rows, never the partial sum (#754).
+    tossupsHeard: mutable.tossupsHeardKnown ? mutable.tossupsHeard : null,
     pptuh: tossups > 0 ? mutable.pointsFor / tossups : null,
     ppb: bonuses > 0 ? mutable.bonusPoints / bonuses : null,
   };
