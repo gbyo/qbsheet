@@ -236,6 +236,56 @@ describe('frame validation', () => {
     if (!result.ok) expect(result.error.code).toBe('too-large');
   });
 
+  test('frame limits are UTF-8 bytes on both sides, not UTF-16 code units (#809)', () => {
+    // Compact JSON is 93 JS characters but 133 UTF-8 bytes: under the old
+    // `String.length` check this passed a 100-byte limit; now it must fail like Rust.
+    const bmp = {
+      version: 1,
+      type: 'progress',
+      payload: { note: 'é'.repeat(40) },
+    };
+    expect(JSON.stringify(bmp).length).toBe(93);
+    expect(new TextEncoder().encode(JSON.stringify(bmp)).length).toBe(133);
+    const bmpResult = validateStreamFrame(bmp, { maxBytes: 100 });
+    expect(bmpResult.ok).toBe(false);
+    if (!bmpResult.ok) {
+      expect(bmpResult.error.code).toBe('too-large');
+      if (bmpResult.error.code === 'too-large') {
+        expect(bmpResult.error.size).toBe(133);
+        expect(bmpResult.error.maxBytes).toBe(100);
+      }
+    }
+    // The shared BMP corpus fixture agrees with the inline vector.
+    const bmpFixture = validateStreamFrame(fixture('frame-unicode-bmp.json'), { maxBytes: 100 });
+    expect(bmpFixture.ok).toBe(false);
+    if (!bmpFixture.ok && bmpFixture.error.code === 'too-large') {
+      expect(bmpFixture.error.size).toBe(133);
+    }
+    // Non-BMP (astral) text: each emoji is 2 UTF-16 units but 4 UTF-8 bytes.
+    const astral = {
+      version: 1,
+      type: 'progress',
+      payload: { note: '😀'.repeat(20) },
+    };
+    expect(JSON.stringify(astral).length).toBe(93);
+    expect(new TextEncoder().encode(JSON.stringify(astral)).length).toBe(133);
+    const astralResult = validateStreamFrame(astral, { maxBytes: 100 });
+    expect(astralResult.ok).toBe(false);
+    if (!astralResult.ok && astralResult.error.code === 'too-large') {
+      expect(astralResult.error.size).toBe(133);
+    }
+    const astralFixture = validateStreamFrame(fixture('frame-unicode-astral.json'), { maxBytes: 100 });
+    expect(astralFixture.ok).toBe(false);
+    // ASCII boundary: at the limit passes, one byte over fails.
+    const ascii = { version: 1, type: 'hello' };
+    const asciiSize = new TextEncoder().encode(JSON.stringify(ascii)).length;
+    expect(validateStreamFrame(ascii, { maxBytes: asciiSize }).ok).toBe(true);
+    expect(validateStreamFrame(ascii, { maxBytes: asciiSize - 1 }).ok).toBe(false);
+    // Generous limits and the default 1 MiB bound still accept normal frames.
+    expect(validateStreamFrame(bmp, { maxBytes: 133 }).ok).toBe(true);
+    expect(validateStreamFrame(bmp).ok).toBe(true);
+  });
+
   test('negative and fractional sequences are malformed', () => {
     for (const sequence of [-1, 1.5, '42', Number.NaN]) {
       expect(validateStreamFrame({ version: 1, type: 'hello', sequence }).ok).toBe(false);

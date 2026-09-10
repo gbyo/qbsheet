@@ -19,7 +19,7 @@ pub const STREAM_CAPABILITY: &str = "stream";
 pub const STREAM_FRAME_VERSION: u32 = 1;
 /// The WebSocket subprotocol naming the framing. It carries no credential.
 pub const STREAM_SUBPROTOCOL: &str = "qbtcp.stream.v1";
-/// Default bound on one decoded stream frame, in bytes.
+/// Default bound on one decoded stream frame, in UTF-8 bytes.
 pub const DEFAULT_MAX_STREAM_FRAME_BYTES: usize = 1024 * 1024;
 /// Reconnect backoff base and cap, in milliseconds.
 pub const STREAM_RECONNECT_BASE_MS: u64 = 500;
@@ -71,7 +71,7 @@ pub struct StreamDescriptor {
     /// Reconnect/replay features the server supports.
     #[serde(default)]
     pub replay: Vec<String>,
-    /// Bound on one decoded frame, in bytes.
+    /// Bound on one decoded frame, in UTF-8 bytes of the serialized JSON.
     pub max_frame_bytes: usize,
     /// Whether the server additionally offers a narrow pre-auth ticket exchange.
     #[serde(default)]
@@ -261,7 +261,8 @@ fn bounded_text(value: &Value, max_chars: usize) -> Option<String> {
 /// Unknown frame types validate as [`ValidatedStreamFrame::Ignored`] so a future server
 /// cannot break this implementation. Anything structurally wrong — including a frame
 /// version other than [`STREAM_FRAME_VERSION`] and any oversize frame — is an error the
-/// caller must answer without mutating the game.
+/// caller must answer without mutating the game. The size bound is UTF-8 bytes of the
+/// serialized JSON, matching the TypeScript mirror.
 pub fn validate_stream_frame(
     value: &Value,
     max_bytes: usize,

@@ -33,7 +33,7 @@ export const STREAM_FRAME_VERSION = 1;
  */
 export const STREAM_SUBPROTOCOL = 'qbtcp.stream.v1';
 
-/** Default bound on one decoded stream frame, in bytes. A server may advertise less. */
+/** Default bound on one decoded stream frame, in UTF-8 bytes. A server may advertise less. */
 export const DEFAULT_MAX_STREAM_FRAME_BYTES = 1_048_576;
 
 /** Reconnect backoff: first retry waits up to this long, with full jitter. */
@@ -107,7 +107,7 @@ export interface IQbtcpStreamDescriptor {
   mirrorsAssignment: boolean;
   /** Reconnect/replay features the server supports. */
   replay: StreamReplayFeature[];
-  /** Bound on one decoded frame, in bytes. */
+  /** Bound on one decoded frame, in UTF-8 bytes of the serialized JSON. */
   maxFrameBytes: number;
   /** Whether the server additionally offers a narrow pre-auth ticket exchange. */
   ticket: boolean;
@@ -228,7 +228,9 @@ export function streamUrl(baseUrl: string, descriptor: IQbtcpStreamDescriptor | 
  * Unknown frame types are reported as ignored so the caller can drop them: forward
  * compatibility means a future server must not break this client. Anything structurally
  * wrong — including a frame version this client does not speak and any oversize frame —
- * is an error the caller must answer without mutating the game.
+ * is an error the caller must answer without mutating the game. The size bound is UTF-8
+ * bytes of the serialized JSON, matching the Rust mirror and the `max_frame_bytes`
+ * contract: JavaScript string length (UTF-16 code units) is never used as a byte count.
  */
 export function validateStreamFrame(
   value: unknown,
@@ -237,7 +239,8 @@ export function validateStreamFrame(
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_STREAM_FRAME_BYTES;
   let size = 0;
   try {
-    size = JSON.stringify(value)?.length ?? 0;
+    const serialized = JSON.stringify(value);
+    size = serialized === undefined ? 0 : new TextEncoder().encode(serialized).length;
   } catch {
     return { ok: false, error: { code: 'malformed', detail: 'A stream frame must be a JSON object.' } };
   }

@@ -57,8 +57,8 @@ The descriptor answers, in order:
   non-string entry is malformed and unusable as a whole — the client MUST fall back to HTTP
   rather than filter the list — so both implementations make the same stream-capable
   decision for the same discovery document.
-- `max_frame_bytes`: the bound on one decoded frame. A client MUST NOT send larger
-  frames; a server MUST reject them before reading them.
+- `max_frame_bytes`: the bound on one decoded frame, in UTF-8 bytes of the serialized
+  JSON. A client MUST NOT send larger frames; a server MUST reject them before reading them.
 - `ticket` (optional, default `false`): whether the server additionally offers the
   narrow pre-auth ticket exchange described under Authentication.
 
@@ -88,9 +88,11 @@ One envelope, versioned and bounded:
 - `payload`, when present, MUST be an object. Unknown optional payload fields MUST be
   ignored, per the v1 compatibility rule.
 
-Frames MUST NOT exceed the advertised bound. A malformed frame is an error the receiver
-answers without mutating any session state: it MUST NOT corrupt, unmount, or reset the
-game, and it MUST NOT be retried unchanged.
+Frames MUST NOT exceed the advertised bound. The bound (`max_frame_bytes`) is UTF-8
+bytes of the serialized JSON frame as sent on the wire — never JavaScript UTF-16 string
+length — so both implementations measure the same value for Unicode-heavy payloads. A
+malformed frame is an error the receiver answers without mutating any session state: it
+MUST NOT corrupt, unmount, or reset the game, and it MUST NOT be retried unchanged.
 
 ### Server → scorer
 
