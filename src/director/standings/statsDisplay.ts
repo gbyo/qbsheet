@@ -16,6 +16,7 @@ import {
 } from '@qbsheet/tournament-formats';
 import {
   isTeamClassification,
+  playerPptuh,
   type DirectorState,
   type Player,
   type PlayerStanding,
@@ -186,8 +187,7 @@ export function formatPptuh(points: number, standing: TossupsHeardKnown): string
 
 /** Numeric PPTUH behind formatPptuh, for shared canonical derivations like points-per-X. */
 export function pptuhValue(points: number, standing: TossupsHeardKnown): number | null {
-  if (standing.tossupsHeardKnown === false || standing.tossupsHeard === 0) return null;
-  return points / standing.tossupsHeard;
+  return playerPptuh({ points, ...standing });
 }
 
 /**
@@ -277,15 +277,14 @@ export function tiedTeamIds(ranks: Map<string, number>): Set<string> {
 }
 
 /**
- * Player rank ties: adjacent rows equal on PPG and PPTUH share the rank number.
- * Unknown PPTUH ties only with unknown; the marker never invents equality across
- * rows the canonical order already separated on a different rate.
+ * Player rank ties: adjacent rows with equal PPTUH share the rank number, matching
+ * the canonical PPTUH ordering (#751). Unknown PPTUH ties only with unknown.
  */
 export function playerRankTies(standings: readonly PlayerStanding[]): Set<string> {
   const tied = new Set<string>();
   const keyOf = (standing: PlayerStanding): string => {
-    const pptuh = pptuhValue(standing.points, standing);
-    return `${standing.ppg}|${pptuh === null ? 'unknown' : pptuh}`;
+    const pptuh = playerPptuh(standing);
+    return pptuh === null ? 'unknown' : String(pptuh);
   };
   for (let index = 1; index < standings.length; index++) {
     const previous = standings[index - 1]!;

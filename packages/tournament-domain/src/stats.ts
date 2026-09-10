@@ -820,9 +820,30 @@ export function derivePlayerStandings(
   for (const standing of byPlayer.values()) {
     standing.ppg = standing.gamesPlayed === 0 ? 0 : standing.points / standing.gamesPlayed;
   }
+  // YellowFruit parity (#751): individuals order by PPTUH descending with unknown
+  // rates last, not by PPG. Powers then player id break remaining ties; equal PPTUH
+  // marks a shared rank downstream, so the order key and the tie key coincide.
   return [...byPlayer.values()].sort(
-    (a, b) => b.ppg - a.ppg || b.powers - a.powers || a.playerId.localeCompare(b.playerId),
+    (a, b) => comparePlayerPptuh(a, b) || b.powers - a.powers || a.playerId.localeCompare(b.playerId),
   );
+}
+
+/** Null PPTUH (unknown or zero denominator) sorts after every known rate. */
+function comparePlayerPptuh(a: PlayerStanding, b: PlayerStanding): number {
+  const aRate = playerPptuh(a);
+  const bRate = playerPptuh(b);
+  if (aRate !== null && bRate !== null) return bRate - aRate;
+  if (aRate !== null) return -1;
+  if (bRate !== null) return 1;
+  return 0;
+}
+
+/** Numeric PPTUH behind ordering and rank ties; null is unknown, never zero. */
+export function playerPptuh(
+  standing: Pick<PlayerStanding, 'points' | 'tossupsHeard' | 'tossupsHeardKnown'>,
+): number | null {
+  if (standing.tossupsHeardKnown === false || standing.tossupsHeard === 0) return null;
+  return standing.points / standing.tossupsHeard;
 }
 
 /**

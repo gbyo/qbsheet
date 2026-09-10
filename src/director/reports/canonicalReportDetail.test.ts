@@ -202,6 +202,10 @@ describe('canonical per-game report detail', () => {
       tossupsRead: 20,
       overtimeTossupsRead: 0,
     });
+    // Parts come from the game's own regular definition (#748, #751): team-a heard 6
+    // bonuses worth 90 (18 parts of 10), leaving the opponent's 4-for-50 (120) with
+    // 7 unconverted parts heard and 0 converted; lightning stays unknown because a
+    // manual result without the breakdown is unknown, never zero.
     expect(game.teamStats).toEqual([
       {
         teamId: 'team-a',
@@ -216,6 +220,11 @@ describe('canonical per-game report detail', () => {
         bonusPoints: 90,
         ppb: 15,
         bouncebacks: 0,
+        lightningPoints: null,
+        bouncebackPartsHeard: 7,
+        bouncebackPartsConverted: 0,
+        bonusPartsConverted: 9,
+        bonusPartsHeard: 18,
       },
       {
         teamId: 'team-b',
@@ -230,6 +239,11 @@ describe('canonical per-game report detail', () => {
         bonusPoints: 50,
         ppb: 12.5,
         bouncebacks: 0,
+        lightningPoints: null,
+        bouncebackPartsHeard: 9,
+        bouncebackPartsConverted: 0,
+        bonusPartsConverted: 5,
+        bonusPartsHeard: 12,
       },
     ]);
     expect(game.playerStats?.map((row) => row.playerId)).toEqual(['a1', 'b1']);

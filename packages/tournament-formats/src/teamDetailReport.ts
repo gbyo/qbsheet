@@ -1,5 +1,5 @@
 import type { GameTeamStatsRow } from './reportDetail.js';
-import { reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
+import { reportPercent, reportPresentationOf, type ReportPresentation } from './reportPresentation.js';
 import type { GameStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 import {
   renderReportPage,
@@ -17,6 +17,14 @@ import {
 
 function recordText(row: TeamStatsRow): string {
   return row.ties > 0 ? `${row.wins}–${row.losses}–${row.ties}` : `${row.wins}–${row.losses}`;
+}
+
+/** Per-game bounceback conversion cell: parts-converted over parts-heard (#748). */
+function bouncebackConversionCell(stats: GameTeamStatsRow | undefined): string {
+  const heard = stats?.bouncebackPartsHeard ?? null;
+  const converted = stats?.bouncebackPartsConverted ?? null;
+  const conversion = heard !== null && heard > 0 && converted !== null ? converted / heard : null;
+  return `<td class="num">${reportPercent(conversion, 1)}</td>`;
 }
 
 function opponentFor(game: GameStatsRow, teamId: string): { id: string; name: string } {
@@ -68,7 +76,8 @@ function gameRows(
         `${stats ? reportAnswerCells(stats, presentation) : presentation.answerColumns.map(() => reportNumberCell(null)).join('')}` +
         `${reportNumberCell(stats?.tossupsHeard ?? null)}` +
         `${presentation.applicability.bonuses ? `${reportNumberCell(stats?.bonusesHeard ?? null)}${reportNumberCell(stats?.bonusPoints ?? null)}${reportNumberCell(stats?.ppb ?? null, presentation.precision.ppb)}` : ''}` +
-        `${presentation.applicability.bouncebacks ? reportNumberCell(stats?.bouncebacks ?? null) : ''}` +
+        `${presentation.applicability.bouncebacks ? `${reportNumberCell(stats?.bouncebacks ?? null)}${reportNumberCell(stats?.bouncebackPartsHeard ?? null, 0)}${bouncebackConversionCell(stats)}` : ''}` +
+        `${presentation.applicability.lightning ? reportNumberCell(stats?.lightningPoints ?? null, 0) : ''}` +
         `${presentation.applicability.packet ? `<td>${reportEscape(game.packetName ?? '—')}</td>` : ''}</tr>`
       );
     })
@@ -81,7 +90,11 @@ function totalsRow(row: TeamStatsRow, presentation: ReportPresentation): string 
     `<td class="num">PF ${row.pointsFor}</td>${reportAnswerCells(row, presentation)}` +
     `${reportNumberCell(row.tossupsHeardKnown ? row.tossupsHeard : null)}` +
     `${presentation.applicability.bonuses ? `${reportNumberCell(row.bonusesHeard)}${reportNumberCell(row.bonusPoints)}${reportNumberCell(row.ppb, presentation.precision.ppb)}` : ''}` +
-    `${presentation.applicability.bouncebacks ? reportNumberCell(null) : ''}` +
+    // Totals come from the team's canonical aggregates, never re-summed from the
+    // per-game cells above: the points total stays exactly known when the team
+    // total is known, even if some row cell is individually blank.
+    `${presentation.applicability.bouncebacks ? `${reportNumberCell(row.bouncebacksKnown ? row.bouncebackPoints : null)}${reportNumberCell(row.bouncebackPartsHeard, 0)}<td class="num">${reportPercent(row.bouncebackConversion, 1)}</td>` : ''}` +
+    `${presentation.applicability.lightning ? reportNumberCell(row.lightningKnown ? row.lightningPoints : null, 0) : ''}` +
     `${presentation.applicability.packet ? '<td></td>' : ''}</tr>`
   );
 }
@@ -135,6 +148,17 @@ function teamSection(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
     ...(presentation.applicability.bonuses
       ? [row.ppb === null ? 'PPB —' : `${row.ppb.toFixed(presentation.precision.ppb)} PPB`]
       : []),
+    ...(presentation.applicability.bouncebacks
+      ? [
+          row.bouncebacksKnown ? `${row.bouncebackPoints} BB pts` : 'BB pts —',
+          row.bouncebackConversion === null
+            ? 'BB conv —'
+            : `${reportPercent(row.bouncebackConversion, 1)} BB conv`,
+        ]
+      : []),
+    ...(presentation.applicability.lightning
+      ? [row.lightningKnown ? `${row.lightningPoints} lightning pts` : 'Lightning —']
+      : []),
   ].join(' · ');
   const body = gameRows(snapshot, row, games, presentation);
 
@@ -143,7 +167,7 @@ function teamSection(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
     `<p>${reportEscape(summary)}</p>` +
     `${presentation.options.showClassifications && classifications ? `<p class="meta">Classifications: ${reportEscape(classifications)}</p>` : ''}` +
     `<h3>Game-by-game</h3>` +
-    `${games.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">TUH</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}${presentation.applicability.bouncebacks ? '<th scope="col" class="num">Bounceback pts</th>' : ''}${presentation.applicability.packet ? '<th scope="col">Packet</th>' : ''}</tr></thead><tbody>${body}</tbody><tfoot>${totalsRow(row, presentation)}</tfoot></table></div>` : '<p class="meta">No games.</p>'}` +
+    `${games.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">TUH</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}${presentation.applicability.bouncebacks ? '<th scope="col" class="num">Bounceback pts</th><th scope="col" class="num">BB parts heard</th><th scope="col" class="num">BB conv %</th>' : ''}${presentation.applicability.lightning ? '<th scope="col" class="num">Lightning pts</th>' : ''}${presentation.applicability.packet ? '<th scope="col">Packet</th>' : ''}</tr></thead><tbody>${body}</tbody><tfoot>${totalsRow(row, presentation)}</tfoot></table></div>` : '<p class="meta">No games.</p>'}` +
     `<h3>Roster</h3>${rosterTable(snapshot, row, presentation)}</section>`
   );
 }

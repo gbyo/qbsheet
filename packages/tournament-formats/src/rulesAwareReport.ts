@@ -11,8 +11,10 @@ import {
   renderReportPage,
   reportAnswerCells,
   reportAnswerHeaders,
+  reportEligibilityCell,
   reportEscape,
   reportGameAnchor,
+  reportGamesPlayedCell,
   reportNumberCell,
   reportPlayerAnchor,
   reportPointsMetricLabel,
@@ -88,11 +90,18 @@ export function renderRulesAwareStandings(snapshot: StatsSnapshot): string {
   return renderReportPage(snapshot, 'Standings', `${reportScopeNote(snapshot)}${table}`);
 }
 
+function playerRankCell(row: PlayerStatsRow, tied: boolean): string {
+  return tied ? `<td class="num" title="Tied rank">${row.rank}=</td>` : `<td class="num">${row.rank}</td>`;
+}
+
 function playerRowHtml(
   row: PlayerStatsRow,
   presentation: ReportPresentation,
   showGrade: boolean,
   showPlayerPpb: boolean,
+  showUndergraduate: boolean,
+  showDivisionTwo: boolean,
+  tied: boolean,
 ): string {
   const team = snapshotTeamLinkFallback(row.teamId);
   const playerName = reportEscape(row.playerName);
@@ -104,10 +113,12 @@ function playerRowHtml(
     ? `<a href="teamdetail.html#${reportTeamAnchor(team)}">${teamName}</a>`
     : teamName;
   return (
-    `<tr><td class="num">${row.rank}</td><td>${playerCell}</td>` +
+    `${playerRankCell(row, tied)}<td>${playerCell}</td>` +
     `<td>${teamCell}</td>` +
     `${showGrade ? `<td class="num">${reportEscape(row.schoolYear ?? '—')}</td>` : ''}` +
-    `<td class="num">${row.gamesPlayed}</td>${reportNumberCell(row.tossupsHeard)}${reportAnswerCells(row, presentation)}` +
+    `${showUndergraduate ? reportEligibilityCell(row.undergraduateEligible) : ''}` +
+    `${showDivisionTwo ? reportEligibilityCell(row.divisionTwoEligible) : ''}` +
+    `${reportGamesPlayedCell(row.gamesPlayedKnown ? row.gamesPlayed : null)}${reportNumberCell(row.tossupsHeard)}${reportAnswerCells(row, presentation)}` +
     `${reportNumberCell(row.points)}<td class="num">${reportEscape(reportPointsMetricValue(row, presentation))}</td>${reportNumberCell(row.pptuh, presentation.precision.rate)}` +
     `${presentation.applicability.bonuses ? `${reportNumberCell(row.bonusPoints)}${showPlayerPpb ? reportNumberCell(row.ppb, presentation.precision.ppb) : ''}` : ''}</tr>`
   );
@@ -120,15 +131,35 @@ function snapshotTeamLinkFallback(teamId: string): Pick<TeamStatsRow, 'teamId'> 
 export function renderRulesAwareIndividuals(snapshot: StatsSnapshot): string {
   const presentation = reportPresentationOf(snapshot);
   const showGrade = snapshot.players.some((row) => typeof row.schoolYear === 'number');
+  const showUndergraduate = snapshot.players.some((row) => typeof row.undergraduateEligible === 'boolean');
+  const showDivisionTwo = snapshot.players.some((row) => typeof row.divisionTwoEligible === 'boolean');
   const showPlayerPpb =
     presentation.applicability.bonuses &&
     snapshot.players.some((row) => row.bonusesHeard > 0 && typeof row.ppb === 'number');
+  // Rows arrive in canonical PPTUH order; adjacent equal rates share the rank marker,
+  // and unknown rates share it with each other, matching YellowFruit (#751).
+  let previousPptuh: number | null | undefined;
   const rows = snapshot.players
-    .map((row) => playerRowHtml(row, presentation, showGrade, showPlayerPpb))
+    .map((row, index) => {
+      const tied = index > 0 && previousPptuh !== undefined && previousPptuh === row.pptuh;
+      previousPptuh = row.pptuh;
+      return playerRowHtml(
+        row,
+        presentation,
+        showGrade,
+        showPlayerPpb,
+        showUndergraduate,
+        showDivisionTwo,
+        tied,
+      );
+    })
     .join('');
   const table =
     `<div class="table-wrap"><table><caption>Individual statistics</caption><thead><tr><th scope="col" class="num">#</th><th scope="col">Player</th><th scope="col">Team</th>` +
-    `${showGrade ? '<th scope="col" class="num">Grade</th>' : ''}<th scope="col" class="num">GP</th><th scope="col" class="num">TUH</th>${reportAnswerHeaders(presentation)}` +
+    `${showGrade ? '<th scope="col" class="num">Grade</th>' : ''}` +
+    `${showUndergraduate ? '<th scope="col" class="num">UG</th>' : ''}` +
+    `${showDivisionTwo ? '<th scope="col" class="num">D2</th>' : ''}` +
+    `<th scope="col" class="num">GP</th><th scope="col" class="num">TUH</th>${reportAnswerHeaders(presentation)}` +
     `<th scope="col" class="num">Pts</th><th scope="col" class="num">${reportEscape(reportPointsMetricLabel(presentation))}</th><th scope="col" class="num">PPTUH</th>` +
     `${presentation.applicability.bonuses ? `<th scope="col" class="num">Bonus pts</th>${showPlayerPpb ? '<th scope="col" class="num">PPB</th>' : ''}` : ''}</tr></thead><tbody>${rows}</tbody></table></div>`;
   return renderReportPage(snapshot, 'Individuals', `${reportScopeNote(snapshot)}${table}`);

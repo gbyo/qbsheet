@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { buildExtendedStatReportBundle } from '../src/printableStatReport';
+import { buildReportPresentation } from '../src/reportPresentation';
 import type { StatsSnapshot } from '../src/stats';
 
 function team(rank: number, teamId: string, teamName: string): StatsSnapshot['teams'][number] {
@@ -240,5 +241,197 @@ describe('printable team detail', () => {
     expect(aiken).toContain('playerdetail.html#player-alice');
     expect(aiken).toContain('teamdetail.html#team-team-b');
     expect(aiken).toContain('<th scope="col">Stage</th>');
+  });
+});
+
+function paritySnapshot(): StatsSnapshot {
+  return {
+    format: 'qbsheet-stats',
+    version: 1,
+    generatedAt: '2026-09-09T20:00:00.000Z',
+    tournament: { id: 'tournament', name: 'Parity Detail Test' },
+    presentation: buildReportPresentation({
+      metadata: {
+        tournamentName: 'Parity Detail Test',
+        scopeLabel: 'Overall',
+        generatedAt: '2026-09-09T20:00:00.000Z',
+      },
+      definitions: [
+        {
+          tossupValue: 10,
+          superpowerValue: null,
+          powerValue: 15,
+          negValue: -5,
+          useBonuses: true,
+          tossupCount: 20,
+          bouncebacks: true,
+          lightning: true,
+          overtime: false,
+        },
+      ],
+      capabilities: { bouncebacksRecorded: true, lightningRecorded: true },
+    }),
+    teams: [
+      {
+        rank: 1,
+        teamId: 'team-a',
+        teamName: 'Aiken',
+        gamesPlayed: 1,
+        wins: 1,
+        losses: 0,
+        ties: 0,
+        winPercentage: 1,
+        pointsFor: 400,
+        pointsAgainst: 160,
+        ppg: 400,
+        papg: 160,
+        margin: 240,
+        superpowers: 0,
+        powers: 3,
+        gets: 5,
+        negs: 1,
+        tossupsHeard: 20,
+        tossupsHeardKnown: true,
+        pptuh: 20,
+        bonusPoints: 200,
+        bonusesHeard: 8,
+        ppb: 25,
+        bouncebackPoints: 30,
+        bouncebacksKnown: true,
+        bouncebackPartsHeard: 6,
+        bouncebackPartsConverted: 3,
+        bouncebackConversion: 0.5,
+        totalBonusConversion: 0.7,
+        lightningPoints: 40,
+        lightningKnown: true,
+      },
+      {
+        rank: 2,
+        teamId: 'team-b',
+        teamName: 'Wren',
+        gamesPlayed: 1,
+        wins: 0,
+        losses: 1,
+        ties: 0,
+        winPercentage: 0,
+        pointsFor: 160,
+        pointsAgainst: 400,
+        ppg: 160,
+        papg: 400,
+        margin: -240,
+        superpowers: 0,
+        powers: 1,
+        gets: 3,
+        negs: 1,
+        tossupsHeard: 20,
+        tossupsHeardKnown: true,
+        pptuh: 8,
+        bonusPoints: 60,
+        bonusesHeard: 4,
+        ppb: 15,
+        bouncebackPoints: 0,
+        bouncebacksKnown: false,
+        bouncebackPartsHeard: null,
+        bouncebackPartsConverted: null,
+        bouncebackConversion: null,
+        totalBonusConversion: null,
+        lightningPoints: null,
+        lightningKnown: false,
+      },
+    ],
+    players: [],
+    games: [
+      {
+        gameId: 'g1',
+        phaseId: 'prelims',
+        roundId: 'r1',
+        roundName: 'Round 1',
+        teamOneId: 'team-a',
+        teamOneName: 'Aiken',
+        teamOnePoints: 400,
+        teamTwoId: 'team-b',
+        teamTwoName: 'Wren',
+        teamTwoPoints: 160,
+        winnerId: 'team-a',
+        status: 'accepted',
+        detail: 'complete',
+        teamStats: [
+          {
+            teamId: 'team-a',
+            teamName: 'Aiken',
+            points: 400,
+            superpowers: 0,
+            powers: 3,
+            gets: 5,
+            negs: 1,
+            tossupsHeard: 20,
+            bonusesHeard: 8,
+            bonusPoints: 200,
+            ppb: 25,
+            bouncebacks: 30,
+            lightningPoints: 40,
+            bouncebackPartsHeard: 6,
+            bouncebackPartsConverted: 3,
+            bonusPartsConverted: 20,
+            bonusPartsHeard: 24,
+          },
+          {
+            teamId: 'team-b',
+            teamName: 'Wren',
+            points: 160,
+            superpowers: 0,
+            powers: 1,
+            gets: 3,
+            negs: 1,
+            tossupsHeard: 20,
+            bonusesHeard: 4,
+            bonusPoints: 60,
+            ppb: 15,
+            bouncebacks: null,
+            lightningPoints: null,
+            bouncebackPartsHeard: null,
+            bouncebackPartsConverted: null,
+            bonusPartsConverted: null,
+            bonusPartsHeard: null,
+          },
+        ],
+      },
+    ],
+    extensions: { scopeLabel: 'Overall' },
+  };
+}
+
+function parityPage(): string {
+  return buildExtendedStatReportBundle(paritySnapshot()).find((entry) => entry.name === 'teamdetail.html')!
+    .content;
+}
+
+describe('printable team detail parity (#751)', () => {
+  test('renders bounceback-parts and lightning columns with per-game conversion', () => {
+    const aiken = sectionFor(parityPage(), 'team-team-a');
+
+    expect(aiken).toContain('<th scope="col" class="num">BB parts heard</th>');
+    expect(aiken).toContain('<th scope="col" class="num">BB conv %</th>');
+    expect(aiken).toContain('<th scope="col" class="num">Lightning pts</th>');
+    // 3 converted of 6 heard in the game row, from the row's own parts.
+    expect(aiken).toContain('<td class="num">50.0%</td>');
+    expect(aiken).toContain('<td class="num">40</td>');
+  });
+
+  test('totals come from the canonical aggregates, never re-summed from rows', () => {
+    const aiken = sectionFor(parityPage(), 'team-team-a');
+    const foot = aiken.slice(aiken.indexOf('<tfoot>'));
+
+    expect(aiken).toContain('30 BB pts');
+    expect(aiken).toContain('50.0% BB conv');
+    expect(aiken).toContain('40 lightning pts');
+    expect(foot).toContain('<td class="num">30</td>');
+  });
+
+  test('unknown aggregates render as unknown, never zero', () => {
+    const wren = sectionFor(parityPage(), 'team-team-b');
+
+    expect(wren).toContain('BB pts —');
+    expect(wren).toContain('Lightning —');
   });
 });
