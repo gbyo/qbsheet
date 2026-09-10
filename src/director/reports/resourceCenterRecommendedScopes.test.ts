@@ -5,7 +5,12 @@
  */
 import { expect, test } from 'vitest';
 import type { DirectorState, Phase } from '../domain';
-import { acceptedGame, playedTournament, scheduledGame, score } from '../../../tests/directorFixtures';
+import {
+  acceptedGame,
+  playedTournament,
+  scheduledGame,
+  score,
+} from '../../../tests/directorFixtures';
 import {
   buildCanonicalResourceCenterScopeArtifact,
   buildCanonicalResourceCenterScopeSets,
@@ -51,7 +56,10 @@ function acceptGameInPhase(state: DirectorState, phase: Phase, suffix: string): 
   const roundId = phase.roundIds[0]!;
   const scheduledId = `scheduled-${suffix}`;
   state.scheduledGames.push(scheduledGame(scheduledId, 'team-a', 'team-b', { roundId }));
-  const game = acceptedGame(`game-${suffix}`, scheduledId, [score('team-a', 280), score('team-b', 240)]);
+  const game = acceptedGame(`game-${suffix}`, scheduledId, [
+    score('team-a', 280),
+    score('team-b', 240),
+  ]);
   game.roundId = roundId;
   state.games.push(game);
   state.rounds.find((round) => round.id === roundId)!.scheduledGameIds.push(scheduledId);
