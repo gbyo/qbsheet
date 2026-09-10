@@ -1,7 +1,8 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
-import { playedTournament } from '../../../tests/directorFixtures';
-import { PublishView } from './PublishView';
+import { playedTournament, tournamentState } from '../../../tests/directorFixtures';
+import { toDirectorNotice, type AnnounceInput } from '../notices';
+import { downloadResourceCenterReport, PublishView } from './PublishView';
 
 afterEach(() => cleanup());
 
@@ -32,4 +33,21 @@ test('Exports offers the Resource Center report as a first-class download', () =
   expect(row.textContent).toContain('standings');
   expect(row.textContent).toContain('scoreboard');
   expect(row.textContent).toContain('stat-key');
+});
+
+test('Exports never calls the Resource Center report upload-ready before the live smoke test', () => {
+  render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
+
+  const row = screen.getByText('Resource Center report').closest('[role="listitem"]') as HTMLElement;
+  expect(row.textContent).not.toMatch(/upload-ready|compatible|ready for/i);
+  expect(row.textContent).toContain('preflight');
+});
+
+test('Resource Center download is refused while preflight fails', async () => {
+  const announced: AnnounceInput[] = [];
+  await downloadResourceCenterReport(tournamentState(), (announcement: AnnounceInput) => {
+    announced.push(announcement);
+  });
+  const messages = announced.map((announcement) => toDirectorNotice(announcement).message);
+  expect(messages.some((message) => message.includes('Resource Center preflight failed'))).toBe(true);
 });

@@ -16,3 +16,4 @@ export * from './reportPresentation';
 export * from './boxScoreReport';
 export * from './printableStatReport';
 export * from './resourceCenterReport';
+export * from './resourceCenterPreflight';
