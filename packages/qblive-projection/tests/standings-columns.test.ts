@@ -210,10 +210,14 @@ describe('Live standings parity columns', () => {
       'ppg',
       'margin',
       'games',
+      'powers',
+      'gets',
+      'negs',
       'tuh',
+      'pptuh',
       'bonuses',
       'bonuspoints',
-      'pptuh',
+      'ppb',
     ]);
     for (const row of table.rows) expect(row.cells).toHaveLength(table.columns.length);
   });
@@ -226,7 +230,10 @@ describe('Live standings parity columns', () => {
     expect(cell(table, 'team-a', 'bonuses')).toEqual({ value: 12, display: '12' });
     expect(cell(table, 'team-a', 'bonuspoints')).toEqual({ value: 130, display: '130' });
     expect(cell(table, 'team-a', 'pptuh')).toEqual({ value: 16, display: '16.00' });
-    expect(cell(table, 'team-a', 'pct')).toEqual({ value: 1, display: '1.000' });
+    expect(cell(table, 'team-a', 'pct')).toEqual({ value: 1, display: '100.0%' });
+    expect(cell(table, 'team-a', 'margin')).toEqual({ value: 210, display: '+210' });
+    expect(cell(table, 'team-a', 'powers')).toEqual({ value: 4, display: '4' });
+    expect(cell(table, 'team-a', 'ppb')).toEqual({ value: 130 / 12, display: '10.83' });
   });
 
   test('unknown TUH unknowns PPTUH too, and an unplayed team has no win rate', () => {

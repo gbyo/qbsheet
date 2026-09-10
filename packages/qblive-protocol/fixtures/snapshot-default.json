@@ -202,9 +202,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -243,11 +244,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -264,12 +294,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -286,12 +316,12 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -307,11 +337,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -326,8 +372,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -344,12 +390,12 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -365,11 +411,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -384,8 +446,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -402,12 +464,12 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -430,6 +492,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -442,8 +520,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -460,12 +538,12 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -488,6 +566,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -500,8 +594,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -534,9 +628,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -575,11 +670,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -596,12 +720,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -618,12 +742,12 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -639,11 +763,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -658,8 +798,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -676,12 +816,12 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -697,11 +837,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -716,8 +872,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -734,12 +890,12 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -762,6 +918,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -774,8 +946,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -792,12 +964,12 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -820,6 +992,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -832,8 +1020,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -866,9 +1054,10 @@
         {
           "id": "pct",
           "label": "Pct",
-          "kind": "decimal",
-          "precision": 3,
-          "alignment": "trailing"
+          "kind": "percentage",
+          "precision": 1,
+          "alignment": "trailing",
+          "description": "Win percentage"
         },
         {
           "id": "pf",
@@ -907,11 +1096,40 @@
           "description": "Games played"
         },
         {
+          "id": "powers",
+          "label": "15",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Powers"
+        },
+        {
+          "id": "gets",
+          "label": "10",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Regular tossups"
+        },
+        {
+          "id": "negs",
+          "label": "−5",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Negs"
+        },
+        {
           "id": "tuh",
           "label": "TUH",
           "kind": "integer",
           "alignment": "trailing",
           "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
         },
         {
           "id": "bonuses",
@@ -928,12 +1146,12 @@
           "description": "Bonus points"
         },
         {
-          "id": "pptuh",
-          "label": "PPTUH",
+          "id": "ppb",
+          "label": "PPB",
           "kind": "decimal",
           "precision": 2,
           "alignment": "trailing",
-          "description": "Points per tossup heard"
+          "description": "Points per bonus"
         }
       ],
       "rows": [
@@ -950,12 +1168,12 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 285,
@@ -971,11 +1189,27 @@
             },
             {
               "value": 95,
-              "display": "95"
+              "display": "+95"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 4,
+              "display": "4"
+            },
+            {
+              "value": 9,
+              "display": "9"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -990,8 +1224,8 @@
               "display": "150"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.538461538461538,
+              "display": "11.54"
             }
           ]
         },
@@ -1008,12 +1242,12 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
-              "display": "1.000"
+              "display": "100.0%"
             },
             {
               "value": 240,
@@ -1029,11 +1263,27 @@
             },
             {
               "value": 35,
-              "display": "35"
+              "display": "+35"
             },
             {
               "value": 1,
               "display": "1"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": null,
+              "display": "—"
             },
             {
               "value": null,
@@ -1048,8 +1298,8 @@
               "display": "120"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -1066,12 +1316,12 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 205,
@@ -1094,6 +1344,22 @@
               "display": "1"
             },
             {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -1106,8 +1372,8 @@
               "display": "100"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 10,
+              "display": "10.00"
             }
           ]
         },
@@ -1124,12 +1390,12 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
-              "display": "0.000"
+              "display": "0.0%"
             },
             {
               "value": 190,
@@ -1152,6 +1418,22 @@
               "display": "1"
             },
             {
+              "value": 1,
+              "display": "1"
+            },
+            {
+              "value": 7,
+              "display": "7"
+            },
+            {
+              "value": 2,
+              "display": "2"
+            },
+            {
+              "value": null,
+              "display": "—"
+            },
+            {
               "value": null,
               "display": "—"
             },
@@ -1164,8 +1446,8 @@
               "display": "90"
             },
             {
-              "value": null,
-              "display": "—"
+              "value": 11.25,
+              "display": "11.25"
             }
           ]
         }
@@ -1214,6 +1496,35 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
@@ -1222,18 +1533,12 @@
           "description": "Points per bonus"
         },
         {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
-        },
-        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1262,12 +1567,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1300,12 +1617,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1338,12 +1667,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1376,12 +1717,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,
@@ -1432,6 +1785,35 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
@@ -1440,18 +1822,12 @@
           "description": "Points per bonus"
         },
         {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
-        },
-        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1480,12 +1856,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1518,12 +1906,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1556,12 +1956,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1594,12 +2006,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,
@@ -1650,6 +2074,35 @@
           "description": "Negs"
         },
         {
+          "id": "tuh",
+          "label": "TUH",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Tossups heard"
+        },
+        {
+          "id": "pptuh",
+          "label": "PPTUH",
+          "kind": "decimal",
+          "precision": 2,
+          "alignment": "trailing",
+          "description": "Points per tossup heard"
+        },
+        {
+          "id": "bonuses",
+          "label": "Bonuses",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonuses heard"
+        },
+        {
+          "id": "bonuspoints",
+          "label": "Bonus pts",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bonus points"
+        },
+        {
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
@@ -1658,18 +2111,12 @@
           "description": "Points per bonus"
         },
         {
-          "id": "bb",
-          "label": "BB",
-          "kind": "integer",
-          "alignment": "trailing",
-          "description": "Bounceback points"
-        },
-        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
           "precision": 1,
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Points per game"
         }
       ],
       "rows": [
@@ -1698,12 +2145,24 @@
               "display": "1"
             },
             {
-              "value": 11.538461538461538,
-              "display": "11.54"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 13,
+              "display": "13"
+            },
+            {
+              "value": 150,
+              "display": "150"
+            },
+            {
+              "value": 11.538461538461538,
+              "display": "11.54"
             },
             {
               "value": 285,
@@ -1736,12 +2195,24 @@
               "display": "0"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 12,
+              "display": "12"
+            },
+            {
+              "value": 120,
+              "display": "120"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 240,
@@ -1774,12 +2245,24 @@
               "display": "1"
             },
             {
-              "value": 10,
-              "display": "10.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 10,
+              "display": "10"
+            },
+            {
+              "value": 100,
+              "display": "100"
+            },
+            {
+              "value": 10,
+              "display": "10.00"
             },
             {
               "value": 205,
@@ -1812,12 +2295,24 @@
               "display": "2"
             },
             {
-              "value": 11.25,
-              "display": "11.25"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 0,
-              "display": "0"
+              "value": null,
+              "display": "—"
+            },
+            {
+              "value": 8,
+              "display": "8"
+            },
+            {
+              "value": 90,
+              "display": "90"
+            },
+            {
+              "value": 11.25,
+              "display": "11.25"
             },
             {
               "value": 190,

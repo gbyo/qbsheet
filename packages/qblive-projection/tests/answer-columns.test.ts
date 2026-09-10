@@ -141,28 +141,37 @@ describe('answer tier columns', () => {
     ]);
     const state = liveState(structuredClone(defaultRules));
     const teams = buildTeamStatisticsTable(state, scope, naming);
+    // Default rules configure bonuses but not bouncebacks or lightning: the
+    // parity set appends TUH/PPTUH/bonus facts, while BB and lightning columns
+    // stay out rather than publishing em dashes for a format without them.
     expect(teams.columns.map((column) => column.id)).toEqual([
       'team',
       'games',
       'powers',
       'gets',
       'negs',
+      'tuh',
+      'pptuh',
+      'bonuses',
+      'bonuspoints',
       'ppb',
-      // Bounceback column (#748) survives the answer-tier rework; the tiers stay historical.
-      'bb',
       'ppg',
     ]);
     for (const row of teams.rows) expect(row.cells).toHaveLength(teams.columns.length);
     const players = buildPlayerStatisticsTable(state, scope, naming);
     expect(players.columns.map((column) => column.id)).toEqual([
+      'rank',
       'player',
       'team',
       'games',
+      'tuh',
       'powers',
       'gets',
       'negs',
       'points',
       'ppg',
+      'pptuh',
+      'bonus',
     ]);
     for (const row of players.rows) expect(row.cells).toHaveLength(players.columns.length);
   });

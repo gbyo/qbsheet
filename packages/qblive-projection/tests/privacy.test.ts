@@ -282,6 +282,39 @@ describe('specific disclosures', () => {
       '2026-09-05T10:00:00-04:00',
     );
   });
+
+  test('player metadata publishes with the individual table and leaks nowhere else', () => {
+    const published = project({
+      ...defaultLivePublicationSettings(),
+      enabled: true,
+      playerNames: true,
+      playerStatistics: true,
+    });
+    const individuals = published.statistics.filter((table) => table.id.startsWith('player-statistics'));
+    expect(individuals.length).toBeGreaterThan(0);
+    const columns = individuals[0]!.columns.map((column) => column.id);
+    expect(columns).toEqual(expect.arrayContaining(['year', 'ug', 'd2']));
+    const serialized = JSON.stringify(published);
+    expect(serialized).toContain('Grade 12');
+
+    for (const settings of [
+      { ...defaultLivePublicationSettings(), enabled: true, playerNames: false },
+      { ...defaultLivePublicationSettings(), enabled: true, playerNames: true },
+      { ...defaultLivePublicationSettings(), enabled: true, playerStatistics: true },
+    ]) {
+      const snapshot = project(settings);
+      expect(snapshot.statistics.some((table) => table.id.startsWith('player-statistics'))).toBe(false);
+      const hidden = JSON.stringify(snapshot);
+      // The sentinel fixture player's grade, eligibility answers, and the
+      // metadata column identities must not appear anywhere: the roster
+      // publishes names only, never metadata.
+      expect(hidden).not.toContain('Grade 12');
+      expect(hidden).not.toContain('"ug"');
+      expect(hidden).not.toContain('"d2"');
+      expect(hidden).not.toContain('"year"');
+      if (!settings.playerNames) expect(hidden).not.toContain('Player 0-0');
+    }
+  });
 });
 
 /**

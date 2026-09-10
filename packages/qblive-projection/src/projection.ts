@@ -463,12 +463,24 @@ export function projectLiveSnapshot(input: ProjectionInput): QbliveSnapshot {
   const resultsByGame = new Map(accepted.map((game) => [game.scheduledGameId, game]));
 
   const publicPlayerNames = new Map<DirectorId, string>();
+  const publicPlayerMeta = new Map<
+    DirectorId,
+    { schoolYear: number | null; undergraduateEligible: boolean | null; divisionTwoEligible: boolean | null }
+  >();
   if (settings.playerNames) {
-    for (const player of state.players) publicPlayerNames.set(player.id, player.name);
+    for (const player of state.players) {
+      publicPlayerNames.set(player.id, player.name);
+      publicPlayerMeta.set(player.id, {
+        schoolYear: player.schoolYear ?? null,
+        undergraduateEligible: player.undergraduateEligible ?? null,
+        divisionTwoEligible: player.divisionTwoEligible ?? null,
+      });
+    }
   }
   const naming: TableNaming = {
     teamName: lookups.teamName,
     playerName: (playerId) => publicPlayerNames.get(playerId) ?? null,
+    playerMeta: (playerId) => publicPlayerMeta.get(playerId) ?? null,
   };
 
   const scopes = tableScopes(state, lookups);
