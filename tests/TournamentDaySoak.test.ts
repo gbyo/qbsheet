@@ -55,6 +55,7 @@ import useConnectedRuntime, { assignmentPollIntervalMs } from '../src/app/useCon
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import FruityServerClient from '../src/integrations/fruity/FruityServerClient';
 import { progressIntervalMs } from '../src/integrations/fruity/FruityResultDestination';
+import { PRIMARY_HEALTH_CHECK_INTERVAL_MS } from '../src/qbtcp/QbtcpPreferredTransport';
 import { validPackage } from './packages';
 import { event } from './events';
 
@@ -618,6 +619,7 @@ describe('a morning of network failures', () => {
     Object.assign(lan, { baseUrl: 'http://192.168.1.24:3000' });
     const lanAssignment = vi.spyOn(lan, 'assignment');
     const lanFinal = vi.spyOn(lan, 'postFinal');
+    const primaryFinal = vi.spyOn(primary, 'postFinal');
     const lanIdentity = {
       roomId: 'room-204',
       token: 'lan-room-token',
@@ -647,6 +649,16 @@ describe('a morning of network failures', () => {
       await hook.result.current.submitFinal({ tossups_read: 20 });
     });
     expect(lanFinal).toHaveBeenCalledWith(lanCredentials, { tossups_read: 20 });
+
+    primaryControl.offline = false;
+    await act(async () => vi.advanceTimersByTimeAsync(PRIMARY_HEALTH_CHECK_INTERVAL_MS));
+    await act(async () => {
+      await hook.result.current.submitFinal({ tossups_read: 21 });
+    });
+    expect(primaryFinal).toHaveBeenCalledWith(
+      { sessionId: 'relay-session-5', token: 'relay-session-token' },
+      { tossups_read: 21 },
+    );
     hook.unmount();
   });
 
