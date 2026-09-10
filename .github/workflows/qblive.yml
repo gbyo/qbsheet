@@ -8,10 +8,12 @@ name: QBSheet Live
 # a scorer typo wait on `workerd` downloading.
 #
 # What each job protects is named in its own comment. The privacy job is the one to look at first
-# if any of this is ever reorganised.
+# if any of this is ever reorganised. Live Web has its own path-filtered workflow so its test, build,
+# bundle budget, and deployment-specific validation run exactly once.
 
 on:
   push:
+    branches: [main]
     paths:
       - 'packages/qblive-*/**'
       - 'packages/qbtcp-relay-conformance/**'
@@ -19,7 +21,6 @@ on:
       - 'packages/qblive-activity/**'
       - 'apps/qblive-*/**'
       - 'apps/qbtcp-relay-backend-cloudflare/**'
-      - 'apps/live-web/**'
       - 'src/director/live/**'
       - 'apps/director/src-tauri/src/live*.rs'
       - 'apps/director/src-tauri/Cargo.toml'
@@ -37,7 +38,6 @@ on:
       - 'packages/qblive-activity/**'
       - 'apps/qblive-*/**'
       - 'apps/qbtcp-relay-backend-cloudflare/**'
-      - 'apps/live-web/**'
       - 'src/director/live/**'
       - 'apps/director/src-tauri/src/live*.rs'
       - 'apps/director/src-tauri/Cargo.toml'
@@ -51,6 +51,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: qblive-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # The load-bearing job. A failure here means private tournament data would have been published to
@@ -85,6 +89,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: The vendored backend protocol is in sync
+        # The Cloudflare backend vendors the protocol so "Deploy to Cloudflare" can build it
+        # without resolving monorepo workspace packages. Check the copy before installing anything.
+        working-directory: apps/qblive-backend-cloudflare
+        run: node scripts/sync-protocol.mjs --check
       - run: npm ci
       - name: Protocol types, JSON Schema, and the shared fixtures
         run: npm run test --workspace=@qbsheet/qblive-protocol
@@ -99,33 +108,6 @@ jobs:
           npm run fixtures --workspace=@qbsheet/qblive-protocol
           git diff --exit-code packages/qblive-protocol/fixtures \
             || { echo '::error::QBLive fixtures are out of date. Run: npm run fixtures --workspace=@qbsheet/qblive-protocol'; exit 1; }
-
-  live-web:
-    name: Live Web
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci
-      - run: npm run test --workspace=@qbsheet/live-web
-      - run: npm run build --workspace=@qbsheet/live-web
-      - name: The spectator bundle stays small
-        # Live Web is loaded by a few hundred phones on one school's WiFi within a minute of each
-        # other. A dependency that quietly doubles it is a room full of people waiting.
-        run: |
-          bytes=$(gzip -c apps/live-web/dist/assets/*.js | wc -c | tr -d ' ')
-          echo "Live Web JavaScript: ${bytes} bytes gzipped"
-          if [ "$bytes" -gt 120000 ]; then
-            echo "::error::Live Web's JavaScript is ${bytes} bytes gzipped, over the 120 kB budget."
-            exit 1
-          fi
 
   cloudflare:
     name: Cloudflare backend and push gateway
@@ -157,23 +139,6 @@ jobs:
       - name: Test in workerd
         working-directory: ${{ matrix.directory }}
         run: npm test
-
-  vendored-protocol:
-    name: Vendored protocol is in sync
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-      # The Cloudflare backend vendors the protocol so "Deploy to Cloudflare" can build it without
-      # resolving monorepo workspace packages. A copy risks drift, so the copy is checked.
-      - name: Check the vendored copy
-        working-directory: apps/qblive-backend-cloudflare
-        run: node scripts/sync-protocol.mjs --check
 
   conformance:
     name: Conformance against the real backend

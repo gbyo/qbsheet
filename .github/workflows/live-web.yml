@@ -18,10 +18,19 @@ on:
       - 'apps/live-web/**'
       - 'packages/qblive-protocol/**'
       - '.github/workflows/live-web.yml'
+  pull_request:
+    paths:
+      - 'apps/live-web/**'
+      - 'packages/qblive-protocol/**'
+      - '.github/workflows/live-web.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: live-web-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
