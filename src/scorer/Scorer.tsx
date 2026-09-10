@@ -221,6 +221,11 @@ export interface IScorerProps {
   statusLabel?: string;
   /** Set when the room is degraded: the game is real, the room state behind it is stale. */
   degradedMessage?: string;
+  /**
+   * Which path serves the game, in troubleshooting words for the connection dialog.
+   * See `ConnectionDetailDialog`. Absent for games with no tournament control.
+   */
+  scoringPath?: string;
   /** False when this browser could not save the game locally. */
   saved?: boolean;
   /** Sends the finished game. The room owns what that means; this only decides when. */
@@ -679,6 +684,7 @@ export default function Scorer(props: IScorerProps) {
     connection,
     statusLabel,
     degradedMessage,
+    scoringPath,
     saved,
     onSubmit,
     onDownload,
@@ -3635,6 +3641,7 @@ export default function Scorer(props: IScorerProps) {
           connection={connection}
           recovery={recoveryStatus}
           statusLabel={statusLabel}
+          scoringPath={scoringPath}
           now={detailNow}
           // Read when the dialog opens rather than subscribed to. A history that grew a line under
           // somebody reading it would move the rest of the list, and nothing in here is urgent.

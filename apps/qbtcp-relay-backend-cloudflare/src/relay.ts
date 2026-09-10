@@ -1116,11 +1116,19 @@ export class QbtcpRelay extends DurableObject<Env> {
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as {
       sequence?: unknown;
       match_state?: unknown;
+      match?: unknown;
     };
     const presented = this.sessionToken(request) ?? '';
     const writer = await this.writerTokenHash(session, presented);
     if (!writer) throw writerConflict(session.writer_device);
-    return json(await this.storeProgress(session, body.sequence, body.match_state), 200, cors);
+    // `match` is the normative QBTCP progress key (docs/QBTCP.md); `match_state` is the
+    // relay's earlier spelling. Accept both so scorers speaking the documented protocol —
+    // over HTTP or the stream — are not refused for a key alias.
+    return json(
+      await this.storeProgress(session, body.sequence, body.match_state ?? body.match),
+      200,
+      cors,
+    );
   }
 
   /**
@@ -2933,7 +2941,11 @@ export class QbtcpRelay extends DurableObject<Env> {
           frame.sessionId ?? (typeof payload.session_id === 'string' ? payload.session_id : undefined),
         );
         if (session.writer_device !== deviceId) throw writerConflict(session.writer_device);
-        await this.storeProgress(session, frame.sequence ?? payload.sequence, payload.match_state);
+        await this.storeProgress(
+          session,
+          frame.sequence ?? payload.sequence,
+          payload.match_state ?? payload.match,
+        );
         return;
       }
       case 'presence': {

@@ -50,6 +50,16 @@ export interface IPairedRoom {
   roomToken: string;
   /** A stable per-browser label for presence and writer arbitration. Carries no authority. */
   deviceId: string;
+  /**
+   * Optional LAN fallback for the same room authority. Normalized, no trailing slash.
+   *
+   * Kept as a secondary endpoint under this pairing — not a second pairing — so the same
+   * room and session credentials apply on either path. A tournament-owned Internet endpoint
+   * is the normal primary; this is the venue-network address used when the primary is
+   * unreachable. Absent for rooms paired before the fallback existed, which stay
+   * primary-only.
+   */
+  lanBaseUrl?: string;
 }
 
 export interface IConnectedSession extends IPairedRoom {
@@ -92,7 +102,32 @@ export function pairedRoomOf(session: IConnectedSession | null): IPairedRoom | n
     roomName: session.roomName,
     roomToken: session.roomToken,
     deviceId: session.deviceId,
+    ...(session.lanBaseUrl !== undefined ? { lanBaseUrl: session.lanBaseUrl } : {}),
   };
+}
+
+/**
+ * Whether a stored string is a usable secondary endpoint.
+ *
+ * Same rules as the primary address — http(s), no query, no fragment — and never equal to
+ * the primary, which would make "fallback" a second copy of the same path. A stored value
+ * that fails this (hand-edited storage, an older writer) is dropped, not repaired: the
+ * room stays primary-only rather than failing over somewhere unvalidated.
+ */
+function readLanBaseUrl(value: unknown, primary: string): string | undefined {
+  if (typeof value !== 'string' || value === '') return undefined;
+  const trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return undefined;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
+  if (url.search !== '' || url.hash !== '') return undefined;
+  const normalized = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
+  return normalized === primary ? undefined : normalized;
 }
 
 interface IStorageLike {
@@ -125,6 +160,7 @@ export function readConnection(
     if (typeof parsed.updatedAt !== 'string') return null;
     const updated = new Date(parsed.updatedAt).getTime();
     if (!Number.isFinite(updated)) return null;
+    const lanBaseUrl = readLanBaseUrl(parsed.lanBaseUrl, parsed.baseUrl);
     return {
       version: connectionVersion,
       baseUrl: parsed.baseUrl,
@@ -140,6 +176,7 @@ export function readConnection(
           ? parsed.progressSequence
           : undefined,
       tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
+      ...(lanBaseUrl !== undefined ? { lanBaseUrl } : {}),
       updatedAt: parsed.updatedAt,
     };
   } catch {

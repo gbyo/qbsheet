@@ -834,6 +834,9 @@ function RoomPairingRepair(props: {
         code,
         room.roomId,
         room.deviceId,
+        // A re-pair repairs the room capability, not the topology: the fallback the room
+        // already holds survives, so a new code does not silently drop the LAN path.
+        room.lanBaseUrl,
       );
       if (!result.ok) {
         setError(result.error);

@@ -256,12 +256,18 @@ export function ConnectionDetailDialog(props: {
   now: number;
   /** The word the header is showing, when the game's standing is not a network fact. See `Scorer`. */
   statusLabel?: string;
+  /**
+   * Which path serves the game, in troubleshooting words ("internet relay", "local
+   * network", "this device only"). Present for connected games; absent for file games.
+   * Never a credential — endpoints are normalized addresses with no query or fragment.
+   */
+  scoringPath?: string;
   /** The connection history. Passed in rather than read from the singleton so this stays renderable. */
   timeline?: ITimelineEntry[];
   onDownload: () => void;
   onClose: () => void;
 }) {
-  const { connection, recovery, now, statusLabel, timeline = [], onDownload, onClose } = props;
+  const { connection, recovery, now, statusLabel, scoringPath, timeline = [], onDownload, onClose } = props;
   const recordDurablyStored = recovery.recordDurablyStored !== false;
   const tournamentControl = recovery.tournamentControl !== false;
   return (
@@ -297,6 +303,7 @@ export function ConnectionDetailDialog(props: {
           <DetailRow label="Tournament control" value="None for this game" />
         )}
         <DetailRow label="Automatic delivery" value={deliveryValue(recovery)} />
+        {scoringPath !== undefined && <DetailRow label="Scoring path" value={scoringPath} />}
         {/* Last, because it is the only row here that is not about this game — and present at all
             because the first question about a room that is misbehaving is whether it is running the
             same build as the rooms that are not. */}
