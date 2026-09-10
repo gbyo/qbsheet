@@ -133,7 +133,7 @@ export function PrepareHsqbDialog({
     setSaving(true);
     try {
       const setWord = preview.totalSets === 1 ? 'set' : 'sets';
-      await saveOrDownloadBytes(
+      const outcome = await saveOrDownloadBytes(
         preview.bytes,
         preview.fileName,
         'application/zip',
@@ -141,6 +141,7 @@ export function PrepareHsqbDialog({
         `Resource Center reports saved (${preview.totalSets} ${setWord}, ${preview.totalFiles} files). Not yet published`,
         'Resource Center reports save cancelled.',
       );
+      if (outcome.status !== 'saved') return;
       setSaved({ fileName: preview.fileName, revision: preview.revision });
       for (const message of preview.warnings) onAnnounce(warningNotice(message));
     } finally {
