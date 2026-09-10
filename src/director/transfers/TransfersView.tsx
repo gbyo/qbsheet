@@ -1,5 +1,5 @@
 /** Delivery moves assignments out; Results decides what a return means. */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
@@ -98,11 +98,15 @@ export function TransfersView({
 
   // Selections address current-round rows only. When the operational round
   // changes, previously visible rows disappear and their IDs must not linger
-  // where the operator can no longer see or uncheck them (#756).
+  // where the operator can no longer see or uncheck them (#756). This is the
+  // render-phase adjustment pattern (no effect): the reset applies before the
+  // new round's rows commit, so no stale selection is ever actionable.
   const roundId = delivery.round?.id;
-  useEffect(() => {
+  const [selectionRoundId, setSelectionRoundId] = useState(roundId);
+  if (selectionRoundId !== roundId) {
+    setSelectionRoundId(roundId);
     setSelected([]);
-  }, [roundId]);
+  }
 
   // Defense in depth: the effective selection is the intersection of the
   // stored selection and the currently displayed rows, so a game removed or
