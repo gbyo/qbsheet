@@ -9,7 +9,12 @@
 import { describe, expect, test } from 'vitest';
 import { parseSqbsTournamentFile } from '@qbsheet/tournament-formats';
 import { emptyDirectorState, type DirectorState } from '../domain';
-import { exportSqbsTournament } from './interchange';
+import {
+  exportSqbs,
+  exportSqbsTournament,
+  sqbsTournamentFileName,
+  sqbsTournamentScopes,
+} from './interchange';
 
 const NOW = '2026-09-05T12:00:00.000Z';
 
@@ -330,5 +335,153 @@ describe('SQBS tournament export from Director state', () => {
     const exported = exportSqbsTournament(state, { phaseId: 'phase-prelims' });
     expect(exported.ok).toBe(false);
     expect(exported.errors.join('\n')).toMatch(/nothing to export/);
+  });
+
+  test('a pool scope exports only that pool’s game', () => {
+    const exported = exportSqbsTournament(scenarioState(), { poolId: 'pool-1' });
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    expect(exported.scopeLabel).toBe('Prelims · Pool A');
+    expect(exported.teamCount).toBe(2);
+    expect(exported.gameCount).toBe(1);
+
+    const parsed = parseSqbsTournamentFile(exported.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    // One pool needs no divisions, and only its own game travels.
+    expect(parsed.value.divisions).toEqual([]);
+    expect(parsed.value.games).toHaveLength(1);
+    const [game] = parsed.value.games;
+    expect([game!.left.score, game!.right.score]).toEqual([320, 150]);
+    expect(parsed.value.teams.map((entry) => entry.name)).toEqual(['Wren A', 'Aiken']);
+  });
+
+  test('custom point values flow into the SQBS slots', () => {
+    const state = scenarioState();
+    state.tournament!.rules.superpowerValue = 20;
+    const exported = exportSqbsTournament(state, { phaseId: 'phase-prelims' });
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+
+    const parsed = parseSqbsTournamentFile(exported.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.pointValues).toEqual([20, 15, 10, -5]);
+  });
+
+  test('score-only games export honest zeroes with warnings', () => {
+    const exported = exportSqbsTournament(scenarioState(), {});
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+    // Game 3 is a manual final score with no player detail: TUH and bonus
+    // fields are unknown, so the file carries zeroes and says so.
+    expect(exported.warnings.join('\n')).toMatch(/unknown tossups-heard/);
+    expect(exported.warnings.join('\n')).toMatch(/unknown bonus/);
+
+    const parsed = parseSqbsTournamentFile(exported.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const manual = parsed.value.games.find((game) => game.round === 2)!;
+    expect([manual.left.score, manual.right.score]).toEqual([260, 240]);
+    expect(manual.tossupsHeard).toBe(0);
+    expect(manual.left.bonusesHeard).toBe(0);
+  });
+
+  test('more than eight participating players on one side blocks the export', () => {
+    const state = scenarioState();
+    for (let index = 3; index <= 9; index += 1) {
+      state.players.push({
+        id: `player-a${index}`,
+        teamId: 'team-a',
+        name: `Teammate ${index}`,
+        captain: false,
+        active: true,
+        rosterNumber: undefined,
+      });
+    }
+    const game = state.games.find((entry) => entry.id === 'game-1')!;
+    game.playerStats = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        playerId: `player-a${index + 1}`,
+        teamId: 'team-a',
+        superpowers: 0,
+        powers: index === 0 ? 2 : 0,
+        gets: 1,
+        negs: 0,
+        bonusPoints: 0,
+        tossupsHeard: 20,
+      })),
+      ...game.playerStats.filter((stat) => stat.teamId !== 'team-a'),
+    ];
+    const exported = exportSqbsTournament(state, { phaseId: 'phase-prelims' });
+    expect(exported.ok).toBe(false);
+    expect(exported.text).toBe('');
+    expect(exported.errors.join('\n')).toMatch(/at most 8 players/);
+  });
+
+  test('a forfeit with no recorded winner blocks the export instead of guessing', () => {
+    const state = scenarioState();
+    const game = state.games.find((entry) => entry.id === 'game-2')!;
+    game.status = 'forfeit';
+    delete game.forfeitedTeamId;
+    const exported = exportSqbsTournament(state, { phaseId: 'phase-prelims' });
+    expect(exported.ok).toBe(false);
+    expect(exported.text).toBe('');
+    expect(exported.errors.join('\n')).toMatch(/no recorded winner/);
+  });
+
+  test('scope options list the tournament, its stages, and its pools', () => {
+    const scopes = sqbsTournamentScopes(scenarioState());
+    expect(scopes.map((option) => option.key)).toEqual([
+      'entire',
+      'phase:phase-prelims',
+      'phase:phase-playoffs',
+      'pool:pool-1',
+      'pool:pool-2',
+    ]);
+    expect(scopes.map((option) => option.label)).toEqual([
+      'Entire tournament',
+      'Prelims',
+      'Playoffs',
+      'Prelims · Pool A',
+      'Prelims · Pool B',
+    ]);
+    expect(scopes.map((option) => option.detail)).toEqual([
+      '3 games',
+      '2 games',
+      '1 game',
+      '1 game',
+      '1 game',
+    ]);
+  });
+
+  test('a single-stage unpooled tournament offers only the entire tournament', () => {
+    const state = scenarioState();
+    state.phases = state.phases.filter((phase) => phase.id === 'phase-prelims');
+    state.pools = [];
+    state.rounds = state.rounds.filter((round) => round.id === 'round-1');
+    state.scheduledGames = state.scheduledGames.filter((game) => game.roundId === 'round-1');
+    state.games = state.games.filter((game) => game.roundId === 'round-1');
+    expect(sqbsTournamentScopes(state).map((option) => option.key)).toEqual(['entire']);
+  });
+
+  test('tournament filenames never collide with the roster-only file', () => {
+    const state = scenarioState();
+    expect(sqbsTournamentFileName(state, {})).toBe('Saturday-Invitational-tournament.sqbs');
+    expect(sqbsTournamentFileName(state, { phaseId: 'phase-prelims' })).toBe(
+      'Saturday-Invitational-Prelims.sqbs',
+    );
+    expect(sqbsTournamentFileName(state, { poolId: 'pool-1' })).toBe(
+      'Saturday-Invitational-Prelims-Pool-A.sqbs',
+    );
+    for (const scope of sqbsTournamentScopes(state).map((option) => option.scope)) {
+      expect(sqbsTournamentFileName(state, scope)).not.toBe('Saturday-Invitational.sqbs');
+    }
+  });
+
+  test('the roster-only export still works and stays positional', () => {
+    const roster = exportSqbs(scenarioState());
+    expect(roster.split(/\r?\n/)[0]).toBe('4');
+    expect(roster).toContain('Wren A');
   });
 });
