@@ -43,6 +43,22 @@ export const PUBLIC_METHODS = 'GET, OPTIONS';
 
 const MAX_AGE = '86400';
 
+const SLASH = 0x2f;
+
+/**
+ * Drop trailing `/` characters, without a regular expression.
+ *
+ * `replace(/\/+$/, '')` is the obvious spelling and it backtracks: on an `Origin` header of many
+ * slashes the engine retries the anchored `+` from every start position, which is quadratic in the
+ * length of a header a stranger chooses. A character scan is linear and has no worst case, and the
+ * `Origin` on a relay request is exactly the kind of input not to hand a backtracking matcher.
+ */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === SLASH) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 /** The CORS headers for a credential-free answer. Safe to share with any origin. */
 export function publicCorsHeaders(): Record<string, string> {
   return {
@@ -65,13 +81,13 @@ export function parseAllowedOrigins(raw: string | undefined): string[] | '*' {
   if (value.trim() === '*') return '*';
   return value
     .split(',')
-    .map((entry) => entry.trim().replace(/\/+$/, ''))
+    .map((entry) => trimTrailingSlashes(entry.trim()))
     .filter((entry) => entry !== '');
 }
 
 /** Normalize the `Origin` a browser sent for comparison against the allowlist. */
 export function normalizeOrigin(request: Request): string {
-  return (request.headers.get('origin') ?? '').trim().replace(/\/+$/, '');
+  return trimTrailingSlashes((request.headers.get('origin') ?? '').trim());
 }
 
 /** Whether `origin` is approved. An empty origin is not a browser request and is not judged here. */

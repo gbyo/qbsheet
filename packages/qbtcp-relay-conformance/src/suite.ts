@@ -102,6 +102,19 @@ export function randomTournamentId(): string {
   return [...bytes].map((byte) => TOURNAMENT_ALPHABET[byte % TOURNAMENT_ALPHABET.length]).join('');
 }
 
+/**
+ * Drop trailing `/` characters, without a regular expression.
+ *
+ * `replace(/\/+$/, '')` backtracks: on a value of many slashes the engine retries the anchored
+ * `+` from every start position, which is quadratic in the length of a caller-supplied origin. A
+ * character scan is linear with no worst case.
+ */
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 0x2f) end -= 1;
+  return end === value.length ? value : value.slice(0, end);
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -248,7 +261,7 @@ export async function runRelayConformance(options: ConformanceOptions): Promise<
   const fetchImpl: FetchImpl = options.fetchImpl ?? fetch;
   const WebSocketClass: WebSocketImpl | undefined = options.webSocketImpl ?? globalThis.WebSocket;
   const timeoutMs = options.streamTimeoutMs ?? 5000;
-  const origin = options.origin.replace(/\/+$/, '');
+  const origin = trimTrailingSlashes(options.origin);
   const recorder = new Recorder();
 
   const tournamentId = options.tournamentId ?? randomTournamentId();
@@ -473,7 +486,7 @@ export async function runRelayConformance(options: ConformanceOptions): Promise<
     },
   );
 
-  const browserOrigin = options.browserOrigin?.replace(/\/+$/, '');
+  const browserOrigin = options.browserOrigin ? trimTrailingSlashes(options.browserOrigin) : undefined;
   if (!browserOrigin) {
     recorder.skip(
       'cors-preflight',

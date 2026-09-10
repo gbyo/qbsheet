@@ -14,6 +14,7 @@
 import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { trimTrailingSlashes } from '../src/protocol/cors';
 import { validateStreamFrame } from '../src/protocol/frames';
 import { resultFingerprint } from '../src/protocol/qbj';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
@@ -1926,6 +1927,50 @@ describe('browser CORS preflight', () => {
     expect(ok.status).toBe(101);
     ok.webSocket!.accept();
     ok.webSocket!.close();
+  });
+
+  it('normalizes trailing slashes on an origin in linear time', async () => {
+    const { tournamentId } = await setupRoom('room-slash', '57575757');
+    // A configured `https://qbsheet.com/` and a browser's `https://qbsheet.com` are the same
+    // origin, so the comparison trims trailing slashes on both sides.
+    const trailing = await preflight(
+      `${tournamentBase(tournamentId)}/sessions`,
+      'POST',
+      'x-yf-room-token,content-type',
+      'https://qbsheet.com/',
+    );
+    expect(trailing.status).toBe(204);
+    expect(trailing.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+
+    // A slash-laden origin is still refused on its merits once normalized: the trailing `x` means
+    // there is nothing to trim, so it does not match the allowlist.
+    const pathological = await preflight(
+      `${tournamentBase(tournamentId)}/sessions`,
+      'POST',
+      'x-yf-room-token,content-type',
+      `https://qbsheet.com${'/'.repeat(2_000)}x`,
+    );
+    expect(pathological.status).toBe(403);
+  });
+
+  it('trims trailing slashes in linear time, not by backtracking', () => {
+    // `replace(/\/+$/, '')` is the obvious spelling of this and it backtracks: with a trailing
+    // character that defeats the anchor, the engine retries the `+` from every slash position.
+    // That is quadratic in the length of an `Origin` header a stranger chooses — 200k slashes
+    // costs a regular expression tens of seconds and a character scan no measurable time.
+    // Tested against the helper rather than through a request because the point is the algorithm,
+    // and a header that large never reaches the Worker to begin with.
+    const pathological = `https://qbsheet.com${'/'.repeat(200_000)}x`;
+    const started = Date.now();
+    expect(trimTrailingSlashes(pathological)).toBe(pathological);
+    expect(Date.now() - started).toBeLessThan(1_000);
+
+    // And it still does the job it exists for.
+    expect(trimTrailingSlashes('https://qbsheet.com/')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('https://qbsheet.com///')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('https://qbsheet.com')).toBe('https://qbsheet.com');
+    expect(trimTrailingSlashes('')).toBe('');
+    expect(trimTrailingSlashes('///')).toBe('');
   });
 
   it('never puts a credential in a URL, preflight or not', async () => {
