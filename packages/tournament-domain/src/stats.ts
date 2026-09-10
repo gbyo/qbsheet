@@ -1,6 +1,7 @@
 import {
   type DirectorId,
   type DirectorState,
+  defaultRules,
   type FinalPlacement,
   type GameRecord,
   type PlayerGameStat,
@@ -315,16 +316,26 @@ export function deriveTeamStandings(
     leftStanding.negs += left.negs;
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
-    leftStanding.bouncebackPoints += left.bouncebacks ?? 0;
-    if (left.bouncebacks === null) leftStanding.bouncebacksKnown = false;
+    // A pure-forfeit placeholder carries no bounceback breakdown and must not unknown the
+    // scope (#748): skip it the way YellowFruit skips forfeit matches. A forfeit that kept
+    // entered bounceback detail aggregates as-entered.
+    if (left.bouncebacks === null) {
+      if (game.status !== 'forfeit') leftStanding.bouncebacksKnown = false;
+    } else {
+      // An omitted breakdown is the legacy zero shorthand; only explicit null is unknown.
+      leftStanding.bouncebackPoints += left.bouncebacks ?? 0;
+    }
     addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    rightStanding.bouncebackPoints += right.bouncebacks ?? 0;
-    if (right.bouncebacks === null) rightStanding.bouncebacksKnown = false;
+    if (right.bouncebacks === null) {
+      if (game.status !== 'forfeit') rightStanding.bouncebacksKnown = false;
+    } else {
+      rightStanding.bouncebackPoints += right.bouncebacks ?? 0;
+    }
     const leftOutcome = gameOutcomeForTeam(game, left.teamId);
     const rightOutcome = gameOutcomeForTeam(game, right.teamId);
     if (leftOutcome === 'win') leftStanding.wins += 1;
@@ -439,6 +450,39 @@ export function tiebreakerIsComparable(
   return group.every((standing) => teamTiebreakerValue(standing, key, group, games) !== null);
 }
 
+/**
+ * Bonuses are regular when every bonus has the same part count at the same per-part
+ * value, so opponent bonus detail converts exactly into bounceback parts. This mirrors
+ * YellowFruit's `bonusesAreRegular` gate (`pointsPerBonusPart` set and minimum parts
+ * equal to maximum parts): irregular bonuses make parts heard uncomputable, never zero.
+ */
+export function bonusPartsAreRegular(rules: TournamentRules): boolean {
+  return (
+    rules.useBonuses && (rules.minimumBonusParts === null || rules.minimumBonusParts === rules.bonusParts)
+  );
+}
+
+function maximumBonusScoreOf(rules: TournamentRules): number {
+  return rules.maximumBonusScore ?? rules.bonusValue * rules.bonusParts;
+}
+
+/**
+ * Bounceback parts heard for one side of a game, YellowFruit `Match` arithmetic in
+ * QBSheet-native form: the opponent's unconverted bonus value expressed in parts,
+ * `(opponentBonusesHeard * maximumBonusScore - opponentBonusPoints) / pointsPerBonusPart`.
+ * Null when the game's rules make parts uncomputable (irregular bonuses or no usable
+ * per-part value), never a fabricated zero.
+ */
+export function bouncebackPartsHeardForTeam(
+  opponentBonuses: number,
+  opponentBonusPoints: number,
+  rules: TournamentRules,
+): number | null {
+  if (!bonusPartsAreRegular(rules)) return null;
+  if (!(rules.bonusValue > 0)) return null;
+  return (opponentBonuses * maximumBonusScoreOf(rules) - opponentBonusPoints) / rules.bonusValue;
+}
+
 export interface TeamBouncebackDerivation {
   /**
    * Bounceback points earned, or null when any contributing game supplied no bounceback
@@ -446,17 +490,30 @@ export interface TeamBouncebackDerivation {
    */
   bouncebackPoints: number | null;
   /**
-   * Bounceback opportunities: the opponents' bonuses heard across contributing games.
-   * Null when any contributing game lacks the opponent bonus detail the denominator
-   * requires — opportunities are scoped to the other side's scoresheet, never inferred
+   * Bounceback parts heard: opponents' unconverted bonus value in parts, summed across
+   * contributing games under each game's own historical rules. Null when any
+   * contributing game lacks the opponent bonus detail or the regular rules the
+   * denominator requires — scoped to the other side's scoresheet, never inferred
    * from point deltas or the converting team's own lines (#748).
    */
-  bouncebackOpportunities: number | null;
+  bouncebackPartsHeard: number | null;
   /**
-   * Bounceback conversion in points per opportunity. Null unless both the numerator and
-   * the opponent-scoped denominator are fully known and at least one opportunity exists.
+   * Bounceback parts converted: bounceback points divided by each game's per-part
+   * value. Null when any contributing game's bounceback breakdown is unknown.
+   */
+  bouncebackPartsConverted: number | null;
+  /**
+   * Bounceback conversion as a fraction of parts heard. Null unless both parts are
+   * fully known and at least one part was heard; a heard-zero scope reports zero
+   * parts with a null rate, never NaN.
    */
   bouncebackConversion: number | null;
+  /**
+   * Total bonus conversion as a fraction: own converted parts plus bounceback
+   * converted parts over own parts heard plus bounceback parts heard. Null unless
+   * every part of the denominator is known and positive.
+   */
+  totalBonusConversion: number | null;
   /**
    * Points per bonus on the team's own bonuses only. Team bonusPoints never include
    * bounceback points (the scorer and every ingest path keep the buckets separate), so
@@ -466,20 +523,34 @@ export interface TeamBouncebackDerivation {
 }
 
 /**
- * Derive a team's bounceback facts with opponent-scoped denominators (#748).
+ * Derive a team's bounceback facts with opponent-scoped parts denominators (#748).
  *
- * Only accepted games in which the team appears contribute. A single game with an unknown
- * bounceback breakdown — on either side — unknowns the facts it touches rather than
- * contributing a zero.
+ * Only games in which the team appears contribute. Pure-forfeit placeholders are
+ * skipped without unknowning the scope; a forfeit that kept entered bounceback detail
+ * aggregates as-entered. A single contributing game with an unknown bounceback
+ * breakdown, missing detail, or irregular bonus rules unknowns the parts facts it
+ * touches rather than contributing a zero.
  */
 export function bouncebackDerivationForTeam(
   teamId: DirectorId,
   games: readonly GameRecord[],
+  state?: DirectorState,
 ): TeamBouncebackDerivation {
+  const empty: TeamBouncebackDerivation = {
+    bouncebackPoints: 0,
+    bouncebackPartsHeard: 0,
+    bouncebackPartsConverted: 0,
+    bouncebackConversion: null,
+    totalBonusConversion: null,
+    ppbWithoutBouncebacks: null,
+  };
   let bouncebackPoints = 0;
   let bouncebacksKnown = true;
-  let opportunities = 0;
-  let opportunitiesKnown = true;
+  let partsHeard = 0;
+  let partsConverted = 0;
+  let partsKnown = true;
+  let ownPartsHeard = 0;
+  let ownPartsConverted = 0;
   let bonuses = 0;
   let bonusPoints = 0;
   let contributingGames = 0;
@@ -488,31 +559,51 @@ export function bouncebackDerivationForTeam(
     if (!own) continue;
     const opponent = game.scores.find((score) => score.teamId !== teamId);
     if (!opponent) continue;
+    if (game.status === 'forfeit' && own.bouncebacks === null) continue;
     contributingGames += 1;
-    if (own.bouncebacks === null) bouncebacksKnown = false;
-    // An omitted breakdown is the legacy zero shorthand; only explicit null is unknown.
-    else bouncebackPoints += own.bouncebacks ?? 0;
-    if (own.bouncebacks === null || !gameDetailedCountsKnown(game)) opportunitiesKnown = false;
-    else opportunities += opponent.bonuses;
+    if (own.bouncebacks === null) {
+      bouncebacksKnown = false;
+      partsKnown = false;
+    } else {
+      // An omitted breakdown is the legacy zero shorthand; only explicit null is unknown.
+      bouncebackPoints += own.bouncebacks ?? 0;
+    }
+    const rules = state ? (rulesForGame(state, game) ?? defaultRules) : defaultRules;
+    const heard = gameDetailedCountsKnown(game)
+      ? bouncebackPartsHeardForTeam(opponent.bonuses, opponent.bonusPoints, rules)
+      : null;
+    if (heard === null || own.bouncebacks === null) {
+      partsKnown = false;
+    } else {
+      partsHeard += heard;
+      partsConverted += (own.bouncebacks ?? 0) / rules.bonusValue;
+      ownPartsHeard += own.bonuses * rules.bonusParts;
+      ownPartsConverted += own.bonusPoints / rules.bonusValue;
+    }
     bonuses += own.bonuses;
     bonusPoints += own.bonusPoints;
   }
-  if (contributingGames === 0) {
-    return {
-      bouncebackPoints: 0,
-      bouncebackOpportunities: 0,
-      bouncebackConversion: null,
-      ppbWithoutBouncebacks: null,
-    };
-  }
+  if (contributingGames === 0) return empty;
   const knownPoints = bouncebacksKnown ? bouncebackPoints : null;
-  const knownOpportunities = opportunitiesKnown ? opportunities : null;
+  const knownPartsHeard = partsKnown ? partsHeard : null;
+  const knownPartsConverted = partsKnown ? partsConverted : null;
+  const knownOwnHeard = partsKnown ? ownPartsHeard : null;
+  const knownOwnConverted = partsKnown ? ownPartsConverted : null;
   return {
     bouncebackPoints: knownPoints,
-    bouncebackOpportunities: knownOpportunities,
+    bouncebackPartsHeard: knownPartsHeard,
+    bouncebackPartsConverted: knownPartsConverted,
     bouncebackConversion:
-      knownPoints !== null && knownOpportunities !== null && knownOpportunities > 0
-        ? knownPoints / knownOpportunities
+      knownPartsConverted !== null && knownPartsHeard !== null && knownPartsHeard > 0
+        ? knownPartsConverted / knownPartsHeard
+        : null,
+    totalBonusConversion:
+      knownPartsConverted !== null &&
+      knownPartsHeard !== null &&
+      knownOwnConverted !== null &&
+      knownOwnHeard !== null &&
+      knownOwnHeard + knownPartsHeard > 0
+        ? (knownOwnConverted + knownPartsConverted) / (knownOwnHeard + knownPartsHeard)
         : null,
     ppbWithoutBouncebacks: bonuses > 0 ? bonusPoints / bonuses : null,
   };
@@ -683,7 +774,7 @@ function addTeamLightning(standing: TeamStanding, lightningPoints: number | null
  * no lines for the team, or any line without a count, makes the team's total
  * unknown rather than a fabricated partial sum.
  */
-function rulesForGame(state: DirectorState, game: GameRecord): TournamentRules | undefined {
+export function rulesForGame(state: DirectorState, game: GameRecord): TournamentRules | undefined {
   if (game.definitionDigest) {
     const snapshot = state.gameDefinitions.find(
       (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
