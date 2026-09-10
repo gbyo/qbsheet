@@ -9,6 +9,7 @@ struct HomeView: View {
     let snapshot: QBLiveSnapshot
     let teamId: String
     let selectedPlayerId: String?
+    let lockScreenControl: LockScreenControl?
 
     var body: some View {
         // Home has time-sensitive presentation even when no network snapshot changes: a scheduled
@@ -16,6 +17,10 @@ struct HomeView: View {
         // refreshes instead of keeping a Combine timer alive with the view.
         TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 20) {
+                if let lockScreenControl {
+                    LockScreenCard(control: lockScreenControl)
+                }
+
                 if let announcement = headline(now: context.date) {
                     AnnouncementCard(announcement: announcement, snapshot: snapshot, compact: true)
                 }
@@ -118,6 +123,38 @@ struct HomeView: View {
         [snapshot.tournament.name, snapshot.tournament.venue]
             .compactMap { $0 }
             .joined(separator: " · ")
+    }
+}
+
+struct LockScreenControl {
+    let isRunning: Bool
+    let explanation: String?
+    let toggle: @MainActor () -> Void
+}
+
+private struct LockScreenCard: View {
+    let control: LockScreenControl
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Button(
+                    control.isRunning ? "Stop Lock Screen Activity" : "Keep on Lock Screen",
+                    systemImage: control.isRunning ? "stop.circle" : "iphone.gen3.radiowaves.left.and.right",
+                    action: control.toggle
+                )
+                .buttonStyle(.borderedProminent)
+
+                if let explanation = control.explanation, !control.isRunning {
+                    Text(explanation)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } label: {
+            Label("Live Activity", systemImage: "livephoto")
+        }
     }
 }
 

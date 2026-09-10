@@ -187,6 +187,24 @@ Two `#if DEBUG` mechanisms exist because a universal link cannot work before the
   arguments, for scripted screenshots. A simulator has no way to tap. Both the app and the Clip read
   them, because the Clip needs screenshots too and one that ignored them would produce the wrong
   screen without saying so.
+- **`-qblive-test-apple-push`** — full-app Debug builds only: permits the local demo's known
+  publication to request its real sandbox broadcast channel even though the demo correctly keeps
+  `applePush` false by default. It does not exist in Release and does not enable ordinary
+  notification registration.
+
+### Physical sandbox Live Activity check
+
+1. Run `npm run qblive:demo -- --speed 1` on the Mac and copy the printed **phone on this network**
+   bootstrap URL.
+2. In the `QBSheetLive` scheme's Run arguments, add `-qblive-bootstrap` followed by that URL, then
+   add `-qblive-team team-96a` and `-qblive-test-apple-push`.
+3. Select the connected iPhone, choose Team `57CW34C9J4` under Signing & Capabilities if Xcode has
+   not already selected it, and run the Debug build. Allow local-network access when iOS asks.
+4. On Home, tap **Keep on Lock Screen**. Lock the phone or open the Dynamic Island to see the Live
+   Activity. Reopen the app while the demo advances; foreground WebSocket revisions update the same
+   Activity immediately. Lock the phone again to verify the newer state.
+5. Tap **Stop Lock Screen Activity** to verify clean dismissal. Repeat with **Change Team** to verify
+   the old Activity ends before the chosen team's Activity starts.
 
 Neither ships. A custom scheme is claimable by any app on the device; a universal link is not, which
 is exactly why the release build uses only the latter.

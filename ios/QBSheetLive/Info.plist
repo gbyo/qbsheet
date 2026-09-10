@@ -84,6 +84,14 @@
   </array>
   <key>NSCameraUsageDescription</key>
   <string>Scan a QBSheet Live tournament code.</string>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Connect to a tournament's QBSheet Live server on your local network.</string>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <!-- The QBLive protocol permits plain HTTP only for private-network development backends. -->
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
   <key>NSSupportsLiveActivities</key>
   <true/>
   <!--

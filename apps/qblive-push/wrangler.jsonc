@@ -9,6 +9,8 @@
   "compatibility_date": "2026-06-01",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  "workers_dev": true,
+  "routes": [{ "pattern": "push.qbsheet.com", "custom_domain": true }],
   "durable_objects": {
     "bindings": [
       { "name": "PUSH_PUBLICATION", "class_name": "PushPublication" },
@@ -18,10 +20,9 @@
   "migrations": [
     {
       "tag": "v1",
-      // PushPublication is SQLite-backed: channels and device tokens are relational and queried by
-      // audience. ApnsCredential holds one cached token in memory and needs no storage at all.
-      "new_sqlite_classes": ["PushPublication"],
-      "new_classes": ["ApnsCredential"]
+      // Cloudflare's free plan requires every Durable Object namespace to use a SQLite-backed
+      // class. PushPublication uses that storage; ApnsCredential remains memory-only at runtime.
+      "new_sqlite_classes": ["PushPublication", "ApnsCredential"]
     }
   ],
   "queues": {

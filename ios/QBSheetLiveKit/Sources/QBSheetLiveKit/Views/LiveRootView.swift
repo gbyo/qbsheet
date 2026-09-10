@@ -1,5 +1,69 @@
 import SwiftUI
 
+/// Full-app hooks for the Live Activity coordinator.
+///
+/// The shared view does not own ActivityKit. The full app supplies these actions; the App Clip
+/// supplies nothing, so it cannot accidentally acquire the full app's Lock Screen control.
+public struct LiveActivityControls: Sendable {
+    public let isRunning: Bool
+    public let activePublicationId: String?
+    public let activeTeamId: String?
+    public let explanation: String?
+
+    private let startAction: @MainActor @Sendable (QBLiveSnapshot, String) async -> Void
+    private let updateAction: @MainActor @Sendable (QBLiveSnapshot, String) async -> Void
+    private let endAction: @MainActor @Sendable (String) async -> Void
+
+    public init(
+        isRunning: Bool,
+        activePublicationId: String?,
+        activeTeamId: String?,
+        explanation: String?,
+        start: @escaping @MainActor @Sendable (QBLiveSnapshot, String) async -> Void,
+        update: @escaping @MainActor @Sendable (QBLiveSnapshot, String) async -> Void,
+        end: @escaping @MainActor @Sendable (String) async -> Void
+    ) {
+        self.isRunning = isRunning
+        self.activePublicationId = activePublicationId
+        self.activeTeamId = activeTeamId
+        self.explanation = explanation
+        self.startAction = start
+        self.updateAction = update
+        self.endAction = end
+    }
+
+    @MainActor
+    func start(snapshot: QBLiveSnapshot, teamId: String) async {
+        await startAction(snapshot, teamId)
+    }
+
+    @MainActor
+    func update(snapshot: QBLiveSnapshot, teamId: String) async {
+        await updateAction(snapshot, teamId)
+    }
+
+    @MainActor
+    func end(publicationId: String) async {
+        await endAction(publicationId)
+    }
+}
+
+private struct LiveActivitySyncStamp: Equatable {
+    let publicationId: String?
+    let revision: Int?
+    let final: Bool
+    let tournamentStatus: String?
+    let followedTeamId: String?
+
+    init(snapshot: QBLiveSnapshot?, followedTeamId: String?) {
+        self.publicationId = snapshot?.publicationId
+        self.revision = snapshot?.revision
+        self.final = snapshot?.final ?? false
+        self.tournamentStatus = snapshot?.tournament.status.rawValue
+        self.followedTeamId = followedTeamId
+    }
+}
+
 /// The whole QBSheet Live interface, shared by the full app and the App Clip.
 ///
 /// One view hierarchy rather than two. The App Clip differs from the full app in exactly one
@@ -9,7 +73,7 @@ import SwiftUI
 /// Everything here is stock SwiftUI, SF Symbols and system typography. No design system, no
 /// third-party components: the App Clip has a 15 MB thinned budget, and this is what stays inside it.
 public struct LiveRootView: View {
-    public enum Presentation: Sendable {
+    public enum Presentation: Sendable, Equatable {
         case fullApp
         /// The App Clip. Shows an unobtrusive invitation to install the full app.
         case appClip
@@ -18,21 +82,25 @@ public struct LiveRootView: View {
     @State private var store: TournamentStore
     @State private var tab: Tab = .home
     @State private var choosingPlayer = false
+    @State private var restartActivityAfterTeamChange = false
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.liveActivityController) private var activityController
     @State private var activityDriver = LiveActivityDriver()
 
     private let presentation: Presentation
     private let bootstrap: QBLiveBootstrap?
+    private let liveActivityControls: LiveActivityControls?
 
     public init(
         bootstrap: QBLiveBootstrap?,
         presentation: Presentation = .fullApp,
         store: TournamentStore = TournamentStore(),
-        initialTab: String? = nil
+        initialTab: String? = nil,
+        liveActivityControls: LiveActivityControls? = nil
     ) {
         self.bootstrap = bootstrap
         self.presentation = presentation
+        self.liveActivityControls = liveActivityControls
         _store = State(initialValue: store)
         _tab = State(initialValue: Tab(name: initialTab) ?? .home)
     }
@@ -67,8 +135,7 @@ public struct LiveRootView: View {
                     }
                 } else {
                     FollowTeamView(snapshot: snapshot) { teamId in
-                        store.followedTeamId = teamId
-                        choosingPlayer = snapshot.publishesPlayers
+                        follow(teamId: teamId, snapshot: snapshot)
                     }
                 }
             } else if case .failed(let message) = store.connection {
@@ -80,6 +147,11 @@ public struct LiveRootView: View {
         .task {
             guard let bootstrap else { return }
             await store.open(bootstrap)
+        }
+        .onChange(
+            of: LiveActivitySyncStamp(snapshot: store.snapshot, followedTeamId: store.followedTeamId)
+        ) { _, _ in
+            synchronizeLiveActivity()
         }
         .onChange(of: scenePhase) { _, phase in
             // Coming back to the app should show current data, and going away should stop the
@@ -112,7 +184,12 @@ public struct LiveRootView: View {
     private func tabs(snapshot: QBLiveSnapshot, teamId: String) -> some View {
         TabView(selection: $tab) {
             navigation("Home") {
-                HomeView(snapshot: snapshot, teamId: teamId, selectedPlayerId: store.selectedPlayerId)
+                HomeView(
+                    snapshot: snapshot,
+                    teamId: teamId,
+                    selectedPlayerId: store.selectedPlayerId,
+                    lockScreenControl: lockScreenControl(snapshot: snapshot, teamId: teamId)
+                )
             }
             .tabItem { Label("Home", systemImage: "house") }
             .tag(Tab.home)
@@ -172,10 +249,7 @@ public struct LiveRootView: View {
                         Menu {
                             Section(snapshot.teamName(teamId)) {
                                 Button {
-                                    store.selectedPlayerId = nil
-                                    store.followedTeamId = nil
-                                    choosingPlayer = false
-                                    tab = .home
+                                    changeTeam(snapshot: snapshot)
                                 } label: {
                                     Label("Change Team", systemImage: "person.2")
                                 }
@@ -212,6 +286,76 @@ public struct LiveRootView: View {
                 }
             }
         }
+    }
+
+    private func lockScreenControl(snapshot: QBLiveSnapshot, teamId: String) -> LockScreenControl? {
+        guard presentation == .fullApp, let controls = liveActivityControls else { return nil }
+        guard controls.isRunning || (!snapshot.final && snapshot.tournament.status != .complete) else {
+            return nil
+        }
+        let capabilityExplanation = snapshot.capabilities.applePush
+            ? nil
+            : "This tournament has not turned on Lock Screen updates."
+        return LockScreenControl(
+            isRunning: controls.isRunning,
+            explanation: controls.explanation ?? capabilityExplanation,
+            toggle: {
+                Task { @MainActor in
+                    if controls.isRunning {
+                        restartActivityAfterTeamChange = false
+                        await controls.end(
+                            publicationId: controls.activePublicationId ?? snapshot.publicationId
+                        )
+                    } else {
+                        await controls.start(snapshot: snapshot, teamId: teamId)
+                    }
+                }
+            }
+        )
+    }
+
+    private func synchronizeLiveActivity() {
+        guard let controls = liveActivityControls, controls.isRunning else { return }
+        guard let snapshot = store.snapshot,
+              let teamId = store.followedTeamId,
+              controls.activePublicationId == snapshot.publicationId,
+              controls.activeTeamId == teamId,
+              !snapshot.final,
+              snapshot.tournament.status != .complete
+        else {
+            if let publicationId = controls.activePublicationId {
+                Task { @MainActor in await controls.end(publicationId: publicationId) }
+            }
+            return
+        }
+        Task { @MainActor in await controls.update(snapshot: snapshot, teamId: teamId) }
+    }
+
+    private func changeTeam(snapshot: QBLiveSnapshot) {
+        guard let controls = liveActivityControls, controls.isRunning else {
+            clearTeamSelection()
+            return
+        }
+        restartActivityAfterTeamChange = true
+        Task { @MainActor in
+            await controls.end(publicationId: controls.activePublicationId ?? snapshot.publicationId)
+            clearTeamSelection()
+        }
+    }
+
+    private func follow(teamId: String, snapshot: QBLiveSnapshot) {
+        store.followedTeamId = teamId
+        choosingPlayer = snapshot.publishesPlayers
+        guard restartActivityAfterTeamChange, let controls = liveActivityControls else { return }
+        restartActivityAfterTeamChange = false
+        Task { @MainActor in await controls.start(snapshot: snapshot, teamId: teamId) }
+    }
+
+    private func clearTeamSelection() {
+        store.selectedPlayerId = nil
+        store.followedTeamId = nil
+        choosingPlayer = false
+        tab = .home
     }
 }
 
