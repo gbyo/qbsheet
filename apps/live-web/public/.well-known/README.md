@@ -5,12 +5,12 @@
 fetches it; a redirect or the wrong content type makes universal links and the App Clip both fail,
 and the failure looks like "the link opens Safari instead of the app".
 
-## Before shipping
+## The Team ID
 
-Replace `TEAMID` with the real Apple Developer Team ID in both `appIDs` and `appclips.apps`. The same
-identifier has to appear in `ios/QBSheetLive/QBSheetLive.entitlements` and
-`ios/QBSheetLiveClip/QBSheetLiveClip.entitlements`; if those disagree with this file, nothing works
-and the error is silent.
+`appIDs` and `appclips.apps` name Team ID `57CW34C9J4`, and they have to keep agreeing with
+`DEVELOPMENT_TEAM` in `ios/project.yml`. The entitlements files need no Team ID of their own — they
+use `$(AppIdentifierPrefix)`, which the signing team supplies at build time. If this file and the
+signed build disagree, nothing works and the error is silent.
 
 Verify after deploying:
 

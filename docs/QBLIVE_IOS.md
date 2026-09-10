@@ -251,9 +251,9 @@ came from.
 - [ ] App ID `com.qbsheet.live` with **Associated Domains**, **Push Notifications**, **App Groups**.
 - [ ] App Clip ID `com.qbsheet.live.Clip` registered as an App Clip of the above.
 - [ ] App Group `group.com.qbsheet.live` created and assigned to all four targets.
-- [ ] `TEAMID` replaced in `apps/live-web/public/.well-known/apple-app-site-association`. The
+- [x] Team ID `57CW34C9J4` in `apps/live-web/public/.well-known/apple-app-site-association`. The
       entitlements need no edit — they use `$(AppIdentifierPrefix)`.
-- [ ] `DEVELOPMENT_TEAM` set in `ios/project.yml` (committed empty) and the project regenerated.
+- [x] `DEVELOPMENT_TEAM` set in `ios/project.yml`, and the project regenerated.
 - [ ] AASA served from `live.qbsheet.com` as `application/json`, no redirect, verified with `curl -I`.
 - [ ] **Advanced App Clip Experience** registered for `https://live.qbsheet.com/t/*`, with the App
       Clip Code / QR image, title and subtitle. Without this the Clip does not appear from a code.

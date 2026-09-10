@@ -25,9 +25,10 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    # Placeholders. Replace with the real Team ID before an App Store build; the AASA file and the
-    # associated-domains entitlements have to agree with it. See docs/QBLIVE_IOS.md.
-    DEVELOPMENT_TEAM: ""
+    # The Apple Developer Team ID. The AASA file served from live.qbsheet.com has to name the same
+    # one in `appIDs` and `appclips.apps`, or universal links and App Clip invocation both fail
+    # silently. See docs/QBLIVE_IOS.md and apps/live-web/public/.well-known/.
+    DEVELOPMENT_TEAM: "57CW34C9J4"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
