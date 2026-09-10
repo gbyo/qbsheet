@@ -2,8 +2,11 @@ import { describe, expect, test } from 'vitest';
 import { acceptedGame, player, scheduledGame, team, tournamentState } from '../../../tests/directorFixtures';
 import {
   advancementBasisStatus,
+  advancementBasisTeams,
   advancementBasisToken,
+  advancementBasisTokenV1,
   latestAdvancementCommit,
+  previewAdvancement,
   resultRevisionOf,
   resultRevisionsForPhase,
 } from './advancement';
@@ -123,5 +126,64 @@ describe('advancement basis (#673)', () => {
     const details = latestAdvancementCommit(state, 'phase-1')!.details as Record<string, unknown>;
     details.resultRevisions = 'revision-1';
     expect(advancementBasisStatus(state, 'phase-1')).toBe('unknown');
+  });
+});
+
+describe('advancement basis team scope (#727)', () => {
+  function pooledCommit() {
+    const state = committedState();
+    state.pools.push({
+      id: 'pool-1',
+      phaseId: 'phase-1',
+      name: 'Pool 1',
+      teamIds: ['team-a', 'team-b'],
+      order: 1,
+    });
+    state.phases[0]!.poolIds = ['pool-1'];
+    // Re-stamp the commit under the pool-scoped field.
+    const phase = state.phases[0]!;
+    const details = latestAdvancementCommit(state, 'phase-1')!.details as Record<string, unknown>;
+    details.basisToken = advancementBasisToken(state, phase);
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('current');
+    return state;
+  }
+
+  test('an unrelated confirmed team does not invalidate the basis', () => {
+    const state = pooledCommit();
+    const qualifiersBefore = previewAdvancement(state, state.phases[0]!).qualifiers.map((team) => team.id);
+    state.teams.push(team('team-c', 'Cedar Rapids'));
+    expect(advancementBasisTeams(state, state.phases[0]!).map((entry) => entry.id)).toEqual([
+      'team-a',
+      'team-b',
+    ]);
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('current');
+    expect(previewAdvancement(state, state.phases[0]!).qualifiers.map((team) => team.id)).toEqual(
+      qualifiersBefore,
+    );
+  });
+
+  test('an eligibility change inside the field invalidates the basis', () => {
+    const state = pooledCommit();
+    state.teams.find((entry) => entry.id === 'team-b')!.status = 'dropped';
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('stale');
+  });
+
+  test('a pool membership change invalidates the basis', () => {
+    const state = pooledCommit();
+    state.teams.push(team('team-c', 'Cedar Rapids'));
+    state.pools.find((entry) => entry.id === 'pool-1')!.teamIds.push('team-c');
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('stale');
+  });
+
+  test('a legacy global-teams token still verifies without mass-invalidation', () => {
+    const state = pooledCommit();
+    const phase = state.phases[0]!;
+    const details = latestAdvancementCommit(state, 'phase-1')!.details as Record<string, unknown>;
+    details.basisToken = advancementBasisTokenV1(state, phase);
+    // Untouched since the upgrade: verifies under the semantics it committed with.
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('current');
+    // Under legacy semantics an unrelated team still moves the basis.
+    state.teams.push(team('team-c', 'Cedar Rapids'));
+    expect(advancementBasisStatus(state, 'phase-1')).toBe('stale');
   });
 });

@@ -30,6 +30,31 @@ export interface AdvancementPreview {
   explanation: string[];
 }
 
+/**
+ * The team inputs that can move a source phase's advancement preview (#727).
+ *
+ * This mirrors the selectors `previewAdvancement` reads: the phase competitive
+ * field (which already applies confirmed/active semantics, including the
+ * tournament-field fallback for a first phase with no pools) union the pool
+ * memberships that feed the per-pool previews. Each entry carries its
+ * eligibility status, because confirming, dropping, or restoring a team inside
+ * the field changes qualification while an unrelated team elsewhere in the
+ * tournament cannot.
+ */
+export function advancementBasisTeams(
+  state: DirectorState,
+  phase: Phase,
+): Array<{ id: DirectorId; status: string }> {
+  const ids = new Set<DirectorId>();
+  for (const team of phaseCompetitiveField(state, phase.id).teams) ids.add(team.id);
+  for (const poolId of phase.poolIds) {
+    const pool = state.pools.find((entry) => entry.id === poolId);
+    for (const teamId of pool?.teamIds ?? []) ids.add(teamId);
+  }
+  const statuses = new Map(state.teams.map((team) => [team.id, team.status]));
+  return [...ids].sort().map((id) => ({ id, status: statuses.get(id) ?? 'missing' }));
+}
+
 export function advancementBasisToken(state: DirectorState, phase: Phase): string {
   const roundIds = new Set(phase.roundIds);
   return JSON.stringify({
@@ -38,9 +63,11 @@ export function advancementBasisToken(state: DirectorState, phase: Phase): strin
       status: phase.status,
       poolIds: phase.poolIds,
       advancementRule: phase.advancementRule,
+      // An explicitly committed advancement field selects the preview outright.
+      ...(phase.teamIds === undefined ? {} : { teamIds: phase.teamIds }),
     },
     pools: phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId)?.teamIds ?? []),
-    teams: state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
+    teams: advancementBasisTeams(state, phase),
     games: state.games.filter((game) => roundIds.has(game.roundId)),
     // The standings tiebreakers decide cutoffs, so they are part of the basis (#673). A
     // tiebreaker reorder after a commit must read as a changed basis, never silently
@@ -85,11 +112,35 @@ export function latestAdvancementCommit(
 }
 
 /**
+ * The pre-#727 basis token, which scoped games and pools to the phase but read
+ * every confirmed tournament team. Kept so commits stored before the team
+ * scoping still verify under the semantics they were committed with instead of
+ * reading stale after the upgrade.
+ */
+export function advancementBasisTokenV1(state: DirectorState, phase: Phase): string {
+  const roundIds = new Set(phase.roundIds);
+  return JSON.stringify({
+    phase: {
+      id: phase.id,
+      status: phase.status,
+      poolIds: phase.poolIds,
+      advancementRule: phase.advancementRule,
+    },
+    pools: phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId)?.teamIds ?? []),
+    teams: state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
+    games: state.games.filter((game) => roundIds.has(game.roundId)),
+    tiebreakers: phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers,
+  });
+}
+
+/**
  * Whether the latest committed advancement for a phase still verifies (#673).
  *
  * Committed advancement is never presented as current unless its stored basis token
  * matches a fresh computation. Commits that predate basis tracking read as `unknown`,
- * which callers treat like `stale` with honest copy.
+ * which callers treat like `stale` with honest copy. Commits stored under the
+ * pre-#727 global-teams token verify against that same computation, so the team
+ * scoping upgrade never mass-invalidates existing bases.
  */
 export function advancementBasisStatus(
   state: DirectorState,
@@ -104,7 +155,9 @@ export function advancementBasisStatus(
       ? (commit.details as Record<string, unknown>).basisToken
       : undefined;
   if (typeof stored !== 'string') return 'unknown';
-  if (stored !== advancementBasisToken(state, phase)) return 'stale';
+  if (stored !== advancementBasisToken(state, phase) && stored !== advancementBasisTokenV1(state, phase)) {
+    return 'stale';
+  }
   // Commits that recorded the accepted-result revisions they verified against
   // (#673) also prove those revisions are still the canonical ones. Commits
   // that predate revision tracking skip this proof and verify by token alone.
