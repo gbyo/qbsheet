@@ -380,6 +380,52 @@ describe('resource center report artifact', () => {
     expect(sanitizeResourceCenterBaseName('UPPER_case.Name')).toBe('UPPER_case.Name');
   });
 
+  test('truncates base names by code points without splitting astral characters', () => {
+    const astralLetter = '𐐀';
+    const hasWellFormed = typeof (String.prototype as { isWellFormed?: unknown }).isWellFormed === 'function';
+    const expectWellFormed = (value: string) => {
+      expect(value).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+      if (hasWellFormed) {
+        expect((value as unknown as { isWellFormed(): boolean }).isWellFormed()).toBe(true);
+      }
+    };
+    // Exactly-at-limit ASCII input is unchanged.
+    expect(sanitizeResourceCenterBaseName('x'.repeat(80))).toBe('x'.repeat(80));
+    // An astral letter ending exactly at the 80-code-point limit survives whole.
+    const atLimit = sanitizeResourceCenterBaseName(`${'a'.repeat(79)}${astralLetter}`);
+    expect(Array.from(atLimit)).toHaveLength(80);
+    expect(atLimit).toBe(`${'a'.repeat(79)}${astralLetter}`);
+    expectWellFormed(atLimit);
+    // The old UTF-16 slice kept 79 ASCII units plus a lone high surrogate here.
+    expect(atLimit.length).toBe(81);
+    // An astral letter past the code-point limit is omitted whole, never split.
+    const pastLimit = sanitizeResourceCenterBaseName(`${'a'.repeat(80)}${astralLetter}`);
+    expect(pastLimit).toBe('a'.repeat(80));
+    expectWellFormed(pastLimit);
+    // Multiple astral letters near the boundary truncate on a character edge.
+    const multi = sanitizeResourceCenterBaseName(`${'a'.repeat(78)}${astralLetter.repeat(3)}`);
+    expect(multi).toBe(`${'a'.repeat(78)}${astralLetter.repeat(2)}`);
+    expect(Array.from(multi)).toHaveLength(80);
+    expectWellFormed(multi);
+    // Ordinary BMP Unicode names still survive truncation intact.
+    const bmp = sanitizeResourceCenterBaseName(`${'é'.repeat(100)}`);
+    expect(Array.from(bmp)).toHaveLength(80);
+    expect(bmp).toBe('é'.repeat(80));
+    expectWellFormed(bmp);
+    // Every generated filename shares exactly the sanitized astral base name.
+    const artifact = buildResourceCenterReport(standardSnapshot(), {
+      baseName: `${'a'.repeat(79)}${astralLetter}`,
+    });
+    expect(artifact.baseName).toBe(`${'a'.repeat(79)}${astralLetter}`);
+    expectWellFormed(artifact.baseName);
+    const expected = resourceCenterFileNames(artifact.baseName);
+    for (const file of artifact.files) {
+      expect(file.fileName).toBe(expected[file.kind]);
+      expect(file.fileName.startsWith(`${artifact.baseName}_`)).toBe(true);
+      expectWellFormed(file.fileName);
+    }
+  });
+
   test('never presents index.html as an upload slot', () => {
     const artifact = buildResourceCenterReport(standardSnapshot());
     expect(artifact.files.map((file) => file.fileName)).not.toContain('index.html');
