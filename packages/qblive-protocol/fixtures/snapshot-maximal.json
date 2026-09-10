@@ -415,8 +415,8 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -489,8 +489,8 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -563,8 +563,8 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -637,8 +637,8 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -841,8 +841,8 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -915,8 +915,8 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -989,8 +989,8 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -1063,8 +1063,8 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -1267,8 +1267,8 @@
               "entityId": "team-a"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -1341,8 +1341,8 @@
               "entityId": "team-c"
             },
             {
-              "value": "1-0",
-              "display": "1-0"
+              "value": "1–0",
+              "display": "1–0"
             },
             {
               "value": 1,
@@ -1415,8 +1415,8 @@
               "entityId": "team-d"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -1489,8 +1489,8 @@
               "entityId": "team-b"
             },
             {
-              "value": "0-1",
-              "display": "0-1"
+              "value": "0–1",
+              "display": "0–1"
             },
             {
               "value": 0,
@@ -1605,8 +1605,8 @@
           "id": "pptuh",
           "label": "PPTUH",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per tossup heard"
         },
         {
@@ -1627,16 +1627,16 @@
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per bonus"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 1,
+          "alignment": "trailing",
           "description": "Points per game"
         }
       ],
@@ -1894,8 +1894,8 @@
           "id": "pptuh",
           "label": "PPTUH",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per tossup heard"
         },
         {
@@ -1916,16 +1916,16 @@
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per bonus"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 1,
+          "alignment": "trailing",
           "description": "Points per game"
         }
       ],
@@ -2183,8 +2183,8 @@
           "id": "pptuh",
           "label": "PPTUH",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per tossup heard"
         },
         {
@@ -2205,16 +2205,16 @@
           "id": "ppb",
           "label": "PPB",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 2,
+          "alignment": "trailing",
           "description": "Points per bonus"
         },
         {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
-          "alignment": "trailing",
           "precision": 1,
+          "alignment": "trailing",
           "description": "Points per game"
         }
       ],
@@ -2556,16 +2556,16 @@
               "display": "Grade 12"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": "yes",
+              "display": "Yes"
             },
             {
               "value": "no",
               "display": "No"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -2588,16 +2588,16 @@
               "display": "85"
             },
             {
-              "value": 85.0,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 4.25,
               "display": "4.25"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2619,20 +2619,20 @@
               "entityId": "team-b"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -2655,16 +2655,16 @@
               "display": "40"
             },
             {
-              "value": 40.0,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 2.0,
+              "value": 2,
               "display": "2.00"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -2686,24 +2686,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2722,12 +2714,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2753,24 +2753,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2789,12 +2781,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2820,24 +2820,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2856,12 +2848,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2887,24 +2887,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2923,12 +2915,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2954,24 +2954,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -2990,12 +2982,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3021,24 +3021,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3057,12 +3049,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3088,24 +3088,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3124,16 +3116,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 30,
-              "display": "30"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3155,24 +3155,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3191,12 +3183,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3222,24 +3222,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3258,12 +3250,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3289,24 +3289,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3325,12 +3317,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3356,24 +3356,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3392,16 +3384,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3423,24 +3423,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3459,12 +3451,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3490,24 +3490,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3526,12 +3518,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3557,24 +3557,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3593,12 +3585,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3743,16 +3743,16 @@
               "display": "Grade 12"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": "yes",
+              "display": "Yes"
             },
             {
               "value": "no",
               "display": "No"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -3775,16 +3775,16 @@
               "display": "85"
             },
             {
-              "value": 85.0,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 4.25,
               "display": "4.25"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3806,20 +3806,20 @@
               "entityId": "team-b"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -3842,16 +3842,16 @@
               "display": "40"
             },
             {
-              "value": 40.0,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 2.0,
+              "value": 2,
               "display": "2.00"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -3873,24 +3873,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3909,12 +3901,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3940,24 +3940,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -3976,12 +3968,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4007,24 +4007,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4043,12 +4035,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4074,24 +4074,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4110,12 +4102,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4141,24 +4141,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4177,12 +4169,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4208,24 +4208,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4244,12 +4236,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4275,24 +4275,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4311,16 +4303,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 30,
-              "display": "30"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -4342,24 +4342,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4378,12 +4370,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4409,24 +4409,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4445,12 +4437,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4476,24 +4476,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4512,12 +4504,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4543,24 +4543,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4579,16 +4571,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -4610,24 +4610,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4646,12 +4638,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4677,24 +4677,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4713,12 +4705,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4744,24 +4744,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4780,12 +4772,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -4930,16 +4930,16 @@
               "display": "Grade 12"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": "yes",
+              "display": "Yes"
             },
             {
               "value": "no",
               "display": "No"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -4962,16 +4962,16 @@
               "display": "85"
             },
             {
-              "value": 85.0,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 4.25,
               "display": "4.25"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -4993,20 +4993,20 @@
               "entityId": "team-b"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 1.0,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 20,
@@ -5029,16 +5029,16 @@
               "display": "40"
             },
             {
-              "value": 40.0,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 2.0,
+              "value": 2,
               "display": "2.00"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -5060,24 +5060,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5096,12 +5088,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5127,24 +5127,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5163,12 +5155,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5194,24 +5194,16 @@
               "entityId": "team-a"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5230,12 +5222,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5261,24 +5261,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5297,12 +5289,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5328,24 +5328,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5364,12 +5356,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5395,24 +5395,16 @@
               "entityId": "team-b"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5431,12 +5423,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5462,24 +5462,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5498,16 +5490,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 30,
-              "display": "30"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -5529,24 +5529,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5565,12 +5557,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5596,24 +5596,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5632,12 +5624,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5663,24 +5663,16 @@
               "entityId": "team-c"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 0.5,
-              "display": "0.50"
-            },
-            {
-              "value": 10,
-              "display": "10"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5699,12 +5691,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5730,24 +5730,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 11,
-              "display": "Grade 11"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5766,16 +5758,24 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": 10,
-              "display": "10"
+              "value": 0,
+              "display": "0"
             }
           ]
         },
@@ -5797,24 +5797,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 10,
-              "display": "Grade 10"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5833,12 +5825,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5864,24 +5864,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 9,
-              "display": "Grade 9"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5900,12 +5892,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5931,24 +5931,16 @@
               "entityId": "team-d"
             },
             {
-              "value": 12,
-              "display": "Grade 12"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "yes",
-              "display": "Yes"
+              "value": null,
+              "display": "—"
             },
             {
-              "value": "no",
-              "display": "No"
-            },
-            {
-              "value": 1.0,
-              "display": "1"
-            },
-            {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
@@ -5967,12 +5959,20 @@
               "display": "0"
             },
             {
-              "value": 0.0,
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
+              "display": "0"
+            },
+            {
+              "value": 0,
               "display": "0.0"
             },
             {
-              "value": 0.0,
-              "display": "0.00"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 0,
