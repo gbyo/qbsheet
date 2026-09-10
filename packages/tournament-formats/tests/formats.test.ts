@@ -603,4 +603,20 @@ describe('derived statistics exports', () => {
       exportStatsHtml({ ...stats.value, tournament: { ...stats.value.tournament, name: '<Unsafe>' } }),
     ).toContain('&lt;Unsafe&gt;');
   });
+
+  test('aggregates known lightning points and keeps missing breakdowns unknown (#747)', () => {
+    const input = structuredClone(tournament);
+    const game = input.games[0];
+    if (!game?.result) throw new Error('fixture has no game result');
+    game.result.teams[0].lightningPoints = 50;
+    const stats = buildStatsSnapshot(input, { generatedAt: '2026-04-11T16:00:00.000Z' });
+    expect(stats.ok).toBe(true);
+    if (!stats.ok) return;
+    const known = stats.value.teams.find((row) => row.teamId === game.result.teams[0].teamId);
+    const unknown = stats.value.teams.find((row) => row.teamId === game.result.teams[1].teamId);
+    expect(known?.lightningPoints).toBe(50);
+    expect(known?.lightningKnown).toBe(true);
+    expect(unknown?.lightningPoints).toBeNull();
+    expect(unknown?.lightningKnown).toBe(false);
+  });
 });

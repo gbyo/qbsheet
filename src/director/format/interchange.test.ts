@@ -10,8 +10,17 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { exportArchiveBytes, exportQbj, importArchiveBytes, importQbjText } from './interchange';
-import { directorFixture } from '../transfers/testFixtures';
+import {
+  exportArchiveBytes,
+  exportQbj,
+  importArchiveBytes,
+  importDirectorTournament,
+  importQbjText,
+  toInterchange,
+} from './interchange';
+import { digestText } from '../transfers/canonical';
+import { assessIncomingDocument, stageIncomingDocument } from '../transfers/ingest';
+import { assignmentFor, directorFixture, scoreAssignment } from '../transfers/testFixtures';
 
 function classifiedFixture() {
   const state = directorFixture({ games: 1 });
@@ -102,5 +111,61 @@ describe('classifications, school year, and final placement round-trip', () => {
     for (const player of restored.players) {
       expect(player.schoolYear).toBeUndefined();
     }
+  });
+});
+
+describe('lightning points round-trip (#747)', () => {
+  function acceptedGameWithLightning() {
+    const state = directorFixture();
+    const scored = scoreAssignment(assignmentFor(state, 'game-5-1').document);
+    const text = JSON.stringify(scored);
+    const incoming = {
+      sourceKind: 'removable-drive' as const,
+      sourceLabel: 'SanDisk Ultra',
+      fileName: 'result.qbj',
+      byteLength: text.length,
+      digest: digestText(text),
+      qbj: scored,
+    };
+    const assessment = assessIncomingDocument(state, incoming);
+    const outcome = stageIncomingDocument(state, incoming, assessment);
+    const submission = state.submissions.find((entry) => entry.id === outcome.submissionId);
+    if (!submission) throw new Error('fixture staged no submission');
+    submission.status = 'accepted';
+    submission.acceptedAt = '2026-09-05T18:00:00.000Z';
+    const game = state.games.find((entry) => entry.id === submission.gameId);
+    if (!game) throw new Error('fixture staged no game');
+    game.status = 'accepted';
+    game.acceptedAt = submission.acceptedAt;
+    // The left team ran a lightning round for 45 points; the right team has no breakdown.
+    game.scores[0].lightningPoints = 45;
+    return { state, game };
+  }
+
+  it('interchange preserves known lightning and keeps unknown lightning unknown', () => {
+    const { state, game } = acceptedGameWithLightning();
+    const restored = importDirectorTournament(toInterchange(state));
+    const restoredGame = restored.games.find((entry) => entry.id === game.id);
+    expect(restoredGame?.scores[0]?.lightningPoints).toBe(45);
+    expect(restoredGame?.scores[1]?.lightningPoints).toBeNull();
+  });
+
+  it('QBJ export carries known lightning back into canonical scores', () => {
+    const { state, game } = acceptedGameWithLightning();
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    // A QBJ hand-off re-keys schedule linkage, so match the game by its teams.
+    const teamIds = game.scores.map((score) => score.teamId).sort();
+    const restoredGame = restored.games.find(
+      (entry) =>
+        entry.scores
+          .map((score) => score.teamId)
+          .sort()
+          .join() === teamIds.join() && entry.scores[0]?.score === game.scores[0]?.score,
+    );
+    if (!restoredGame) throw new Error('qbj import produced no matching game');
+    expect(restoredGame.scores[0]?.lightningPoints).toBe(45);
   });
 });

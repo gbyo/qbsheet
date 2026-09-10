@@ -556,6 +556,14 @@ export interface TeamGameScore {
   bonuses: number;
   bonusPoints: number;
   bouncebacks: number;
+  /**
+   * Known lightning-round points for this team game, YellowFruit-parity field (#747).
+   *
+   * Null/undefined means the source result did not supply a lightning breakdown: a legacy or
+   * manual result without that detail is unknown, not a verified zero. Only an explicit zero
+   * from a lightning-format result is a known zero.
+   */
+  lightningPoints?: number | null;
 }
 
 export interface PlayerGameStat {

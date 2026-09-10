@@ -49,6 +49,10 @@ export interface TeamStatsRow {
   bonusesHeard: number;
   /** Null when no bonuses were heard: PPB is undefined, not zero. */
   ppb: number | null;
+  /** Sum of known per-game lightning points; null when any game lacked the breakdown. */
+  lightningPoints: number | null;
+  /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
+  lightningKnown: boolean;
 }
 
 export interface PlayerStatsRow {
@@ -221,6 +225,7 @@ function teamRow(mutable: MutableTeamStats): TeamStatsRow {
     tossupsHeard: mutable.tossupsHeardKnown ? mutable.tossupsHeard : null,
     pptuh: tossups > 0 ? mutable.pointsFor / tossups : null,
     ppb: bonuses > 0 ? mutable.bonusPoints / bonuses : null,
+    lightningPoints: mutable.lightningKnown ? mutable.lightningPoints : null,
   };
 }
 
@@ -274,6 +279,8 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       bonusPoints: 0,
       bonusesHeard: 0,
+      lightningPoints: 0,
+      lightningKnown: true,
     };
     teamStats.set(teamId, created);
     return created;
@@ -371,6 +378,8 @@ export function buildStatsSnapshot(
       else team.tossupsHeard = valueOrZero(team.tossupsHeard) + result.tossupsHeard;
       team.bonusPoints = valueOrZero(team.bonusPoints) + valueOrZero(result.bonusPoints);
       team.bonusesHeard = valueOrZero(team.bonusesHeard) + valueOrZero(result.bonusesHeard);
+      if (result.lightningPoints === undefined) team.lightningKnown = false;
+      else team.lightningPoints = valueOrZero(team.lightningPoints ?? undefined) + result.lightningPoints;
     };
     updateTeamStats(firstTeam, first);
     updateTeamStats(secondTeam, second);
