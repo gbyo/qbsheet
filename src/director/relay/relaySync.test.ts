@@ -116,6 +116,24 @@ describe('durable cursor ordering', () => {
 });
 
 describe('replay and resync', () => {
+  const validEvent = (revision: number, overrides: Record<string, unknown> = {}) => ({
+    revision,
+    kind: 'result',
+    entity_id: `res-${revision}`,
+    body: {},
+    created_at: '2026-09-10T12:00:00Z',
+    ...overrides,
+  });
+
+  const replayFetch = (events: unknown[], currentRevision = 182) =>
+    (async () =>
+      jsonResponse(200, {
+        tournamentId: connection.tournamentId,
+        currentRevision,
+        events,
+        resyncRequired: false,
+      })) as unknown as typeof fetch;
+
   it('replays events after the cursor and flags resync honestly', async () => {
     const fetchImpl = (async (url: string) => {
       if (url.includes('/events')) {
@@ -146,6 +164,45 @@ describe('replay and resync', () => {
     const page = await fetchRelayEventsPage({ ...connection, fetchImpl }, 178);
     expect(page.events.map((entry) => entry.revision)).toEqual([180, 181]);
     expect(page.resyncRequired).toBe(false);
+  });
+
+  it.each([
+    ['revision', validEvent(180, { revision: '180' })],
+    ['kind', validEvent(180, { kind: 'unknown' })],
+    ['entity id', validEvent(180, { entity_id: '' })],
+  ])('rejects the whole page when one event has a malformed %s', async (_field, malformed) => {
+    await expect(
+      fetchRelayEventsPage(
+        { ...connection, fetchImpl: replayFetch([validEvent(179), malformed, validEvent(181)]) },
+        178,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-event' });
+  });
+
+  it.each([
+    ['duplicate', [validEvent(179), validEvent(179), validEvent(181)]],
+    ['out-of-order', [validEvent(180), validEvent(179), validEvent(181)]],
+  ])('rejects %s event revisions', async (_case, events) => {
+    await expect(
+      fetchRelayEventsPage({ ...connection, fetchImpl: replayFetch(events) }, 178),
+    ).rejects.toMatchObject({ code: 'invalid-event' });
+  });
+
+  it('does not advance the durable cursor when a later event follows a malformed event', async () => {
+    let cursor = { lastIngestedRelayRevision: 178 };
+    try {
+      const page = await fetchRelayEventsPage(
+        {
+          ...connection,
+          fetchImpl: replayFetch([validEvent(179), validEvent(180, { entity_id: '' }), validEvent(181)]),
+        },
+        cursor.lastIngestedRelayRevision,
+      );
+      cursor = advanceRelayCursor(cursor, page.events.at(-1)?.revision ?? cursor.lastIngestedRelayRevision);
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'invalid-event' });
+    }
+    expect(cursor).toEqual({ lastIngestedRelayRevision: 178 });
   });
 
   it('never lets a full snapshot excuse losing an unacknowledged final', () => {

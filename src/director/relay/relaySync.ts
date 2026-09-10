@@ -352,11 +352,24 @@ export async function fetchRelayEventsPage(
       : null;
   if (currentRevision === null)
     throw new RelaySyncError('The relay replay response was not valid.', { code: 'invalid-body' });
-  const events = Array.isArray(body.events)
-    ? body.events.map(readRelayEvent).filter((entry): entry is RelayEvent => entry !== null)
-    : null;
-  if (events === null)
+  if (!Array.isArray(body.events))
     throw new RelaySyncError('The relay replay response was not valid.', { code: 'invalid-body' });
+  const events: RelayEvent[] = [];
+  for (const [index, value] of body.events.entries()) {
+    const event = readRelayEvent(value);
+    if (event === null) {
+      throw new RelaySyncError(`Relay replay event ${index + 1} was not valid.`, {
+        code: 'invalid-event',
+      });
+    }
+    const previousRevision = events.at(-1)?.revision ?? after;
+    if (event.revision <= previousRevision || event.revision > currentRevision) {
+      throw new RelaySyncError(`Relay replay event ${index + 1} had an invalid revision sequence.`, {
+        code: 'invalid-event',
+      });
+    }
+    events.push(event);
+  }
   return { currentRevision, events, resyncRequired: body.resyncRequired === true };
 }
 
