@@ -1281,6 +1281,8 @@ function emptyStanding(teamId: DirectorId): TeamStanding {
     negs: 0,
     bonuses: 0,
     bonusPoints: 0,
+    lightningPoints: 0,
+    lightningKnown: true,
     gamesPlayed: 0,
     headToHead: 0,
   };

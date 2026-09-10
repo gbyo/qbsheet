@@ -18,8 +18,10 @@ import {
   importQbjText,
   toInterchange,
 } from './interchange';
-import { directorFixture } from '../transfers/testFixtures';
 import { acceptedGame } from '../../../tests/directorFixtures';
+import { digestText } from '../transfers/canonical';
+import { assessIncomingDocument, stageIncomingDocument } from '../transfers/ingest';
+import { assignmentFor, directorFixture, scoreAssignment } from '../transfers/testFixtures';
 
 function classifiedFixture() {
   const state = directorFixture({ games: 1 });
@@ -169,5 +171,117 @@ describe('exact match TUH round-trip (#746)', () => {
     if (!game) throw new Error('qbj import produced no matching game');
     expect(game.tossupsRead).toBe(22);
     expect(game.overtimeTossupsRead).toBe(2);
+  });
+});
+
+describe('player UG/D2 eligibility round-trip (#749)', () => {
+  function eligibilityFixture() {
+    const state = directorFixture();
+    const [first, second, third] = state.players;
+    if (!first || !second || !third) throw new Error('fixture needs three players');
+    first.undergraduateEligible = true;
+    first.divisionTwoEligible = false;
+    second.undergraduateEligible = false;
+    second.divisionTwoEligible = false;
+    // The third player stays unknown: no flags at all.
+    return { state, first, second, third };
+  }
+
+  it('archive interchange preserves explicit true, explicit false, and unknown', () => {
+    const { state, first, second, third } = eligibilityFixture();
+    const restored = importDirectorTournament(toInterchange(state));
+    expect(restored.players.find((player) => player.id === first.id)).toMatchObject({
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    });
+    expect(restored.players.find((player) => player.id === second.id)).toMatchObject({
+      undergraduateEligible: false,
+      divisionTwoEligible: false,
+    });
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+
+  it('QBJ export carries the same tri-state through player extensions', () => {
+    const { state, first, third } = eligibilityFixture();
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    expect(restored.players.find((player) => player.id === first.id)).toMatchObject({
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    });
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+
+  it('never invents player eligibility from team classifications', () => {
+    const { state, third } = eligibilityFixture();
+    const team = state.teams.find((entry) => entry.id === third.teamId);
+    if (!team) throw new Error('fixture player has no team');
+    team.classifications = ['undergraduate', 'division-2'];
+    const restored = importDirectorTournament(toInterchange(state));
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+});
+
+describe('lightning points round-trip (#747)', () => {
+  function acceptedGameWithLightning() {
+    const state = directorFixture();
+    const scored = scoreAssignment(assignmentFor(state, 'game-5-1').document);
+    const text = JSON.stringify(scored);
+    const incoming = {
+      sourceKind: 'removable-drive' as const,
+      sourceLabel: 'SanDisk Ultra',
+      fileName: 'result.qbj',
+      byteLength: text.length,
+      digest: digestText(text),
+      qbj: scored,
+    };
+    const assessment = assessIncomingDocument(state, incoming);
+    const outcome = stageIncomingDocument(state, incoming, assessment);
+    const submission = state.submissions.find((entry) => entry.id === outcome.submissionId);
+    if (!submission) throw new Error('fixture staged no submission');
+    submission.status = 'accepted';
+    submission.acceptedAt = '2026-09-05T18:00:00.000Z';
+    const game = state.games.find((entry) => entry.id === submission.gameId);
+    if (!game) throw new Error('fixture staged no game');
+    game.status = 'accepted';
+    game.acceptedAt = submission.acceptedAt;
+    // The left team ran a lightning round for 45 points; the right team has no breakdown.
+    game.scores[0].lightningPoints = 45;
+    return { state, game };
+  }
+
+  it('interchange preserves known lightning and keeps unknown lightning unknown', () => {
+    const { state, game } = acceptedGameWithLightning();
+    const restored = importDirectorTournament(toInterchange(state));
+    const restoredGame = restored.games.find((entry) => entry.id === game.id);
+    expect(restoredGame?.scores[0]?.lightningPoints).toBe(45);
+    expect(restoredGame?.scores[1]?.lightningPoints).toBeNull();
+  });
+
+  it('QBJ export carries known lightning back into canonical scores', () => {
+    const { state, game } = acceptedGameWithLightning();
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    // A QBJ hand-off re-keys schedule linkage, so match the game by its teams.
+    const teamIds = game.scores.map((score) => score.teamId).sort();
+    const restoredGame = restored.games.find(
+      (entry) =>
+        entry.scores
+          .map((score) => score.teamId)
+          .sort()
+          .join() === teamIds.join() && entry.scores[0]?.score === game.scores[0]?.score,
+    );
+    if (!restoredGame) throw new Error('qbj import produced no matching game');
+    expect(restoredGame.scores[0]?.lightningPoints).toBe(45);
   });
 });

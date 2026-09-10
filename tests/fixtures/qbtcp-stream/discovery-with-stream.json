@@ -1,0 +1,15 @@
+{
+  "protocol": "QBTCP",
+  "version": 1,
+  "capabilities": ["pairing", "assignment", "progress", "result", "recovery", "help", "presence", "stream"],
+  "qbj_version": "2.1.1",
+  "name": "Greenwood Fall Invitational",
+  "stream": {
+    "endpoint": "/qbtcp/v1/stream",
+    "frames": 1,
+    "retains_finals": true,
+    "mirrors_assignment": true,
+    "replay": ["sequence", "resync"],
+    "max_frame_bytes": 1048576
+  }
+}

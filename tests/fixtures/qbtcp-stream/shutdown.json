@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "type": "shutdown",
+  "sequence": 133,
+  "payload": {
+    "reason": "relay-draining",
+    "message": "The relay is draining connections. Continue over LAN QBTCP or locally.",
+    "retry_after_ms": 30000
+  }
+}

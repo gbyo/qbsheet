@@ -114,6 +114,21 @@ describe('SQBS tournament data file', () => {
     expect([manual!.left.score, manual!.right.score]).toEqual([260, 240]);
   });
 
+  test('custom four-slot point values round-trip with superpower detail', () => {
+    const fixture = input();
+    fixture.pointValues = [20, 15, 10, -5];
+    fixture.games[0]!.left.players[0]!.counts = [1, 1, 6, 0];
+    const exported = exportSqbsTournamentFile(fixture);
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) return;
+
+    const parsed = parseSqbsTournamentFile(exported.value.text);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.pointValues).toEqual([20, 15, 10, -5]);
+    expect(parsed.value.games[0]!.left.players[0]!.counts).toEqual([1, 1, 6, 0]);
+  });
+
   test('unrepresentable tournaments fail instead of misleading', () => {
     const tooManyValues = input();
     tooManyValues.pointValues = [20, 15, 10, 5, -5];

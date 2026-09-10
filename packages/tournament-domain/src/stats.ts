@@ -55,6 +55,10 @@ export interface TeamStanding {
   overtimePointsKnown: boolean;
   bonuses: number;
   bonusPoints: number;
+  /** Sum of known per-game lightning points. Games with unknown lightning contribute nothing. */
+  lightningPoints: number;
+  /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
+  lightningKnown: boolean;
   gamesPlayed: number;
   headToHead: number;
 }
@@ -261,6 +265,8 @@ export function deriveTeamStandings(
       overtimePointsKnown: true,
       bonuses: 0,
       bonusPoints: 0,
+      lightningPoints: 0,
+      lightningKnown: true,
       gamesPlayed: 0,
       headToHead: 0,
     });
@@ -297,6 +303,7 @@ export function deriveTeamStandings(
     leftStanding.negs += left.negs;
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
+    addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
@@ -310,6 +317,7 @@ export function deriveTeamStandings(
     if (rightOutcome === 'win') rightStanding.wins += 1;
     else if (rightOutcome === 'loss') rightStanding.losses += 1;
     else if (rightOutcome === 'tie') rightStanding.ties += 1;
+    addTeamLightning(rightStanding, right.lightningPoints);
   }
 
   for (const standing of byTeam.values()) {
@@ -561,8 +569,24 @@ export function derivePlayerStandings(
 }
 
 /**
+ * Lightning points are known only when the result supplies the breakdown.
+ * A missing value marks the aggregate unknown rather than contributing zero.
+ */
+function addTeamLightning(standing: TeamStanding, lightningPoints: number | null | undefined): void {
+  if (lightningPoints === null || lightningPoints === undefined) {
+    standing.lightningKnown = false;
+    return;
+  }
+  standing.lightningPoints += lightningPoints;
+}
+
+/**
  * Full scoring rules applicable to one stored game: its pinned definition snapshot when the
  * record names one, else live tournament rules (#671 precedence, full-rules granularity).
+ *
+ * Team tossups-heard comes from the team's own scoresheet lines. A game with
+ * no lines for the team, or any line without a count, makes the team's total
+ * unknown rather than a fabricated partial sum.
  */
 function rulesForGame(state: DirectorState, game: GameRecord): TournamentRules | undefined {
   if (game.definitionDigest) {

@@ -1,0 +1,9 @@
+{
+  "version": 2,
+  "type": "assignment-changed",
+  "sequence": 129,
+  "payload": {
+    "round_revision": 4,
+    "assignment_revision": 9
+  }
+}

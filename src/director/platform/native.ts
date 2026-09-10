@@ -13,6 +13,13 @@ export interface NativeServerStatus {
   pairingCode?: string;
   pairingUrl?: string;
   message?: string;
+  /** Host sleep-prevention state while QBTCP is serving (#745). */
+  sleepPrevention?: NativeSleepPrevention;
+}
+
+export interface NativeSleepPrevention {
+  active: boolean;
+  warning?: string;
 }
 
 export interface NativeAdvertisedAddressCandidate {
@@ -202,6 +209,16 @@ function normalizeStatus(value: unknown, fallback: string): NativeServerStatus {
     ...(typeof value.pairingCode === 'string' ? { pairingCode: value.pairingCode } : {}),
     ...(typeof value.pairingUrl === 'string' ? { pairingUrl: value.pairingUrl } : {}),
     ...(typeof value.message === 'string' ? { message: value.message } : {}),
+    ...(isRecord(value.sleepPrevention) && typeof value.sleepPrevention.active === 'boolean'
+      ? {
+          sleepPrevention: {
+            active: value.sleepPrevention.active,
+            ...(typeof value.sleepPrevention.warning === 'string'
+              ? { warning: value.sleepPrevention.warning }
+              : {}),
+          },
+        }
+      : {}),
   };
 }
 

@@ -238,7 +238,9 @@ export function buildCanonicalSnapshot(
       powers: standing.powers,
       gets: standing.gets,
       negs: standing.negs,
-      tossupsHeard: standing.tossupsHeard,
+      // Unknown TUH is null, matching the player rows below: a partial sum must not
+      // masquerade as a whole-scope zero for consumers that do not check the flag (#754).
+      tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
       tossupsHeardKnown: standing.tossupsHeardKnown,
       tossupsHeardRegulation: standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
       pptuh:
@@ -248,6 +250,9 @@ export function buildCanonicalSnapshot(
       bonusPoints: standing.bonusPoints,
       bonusesHeard: standing.bonuses,
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
+      // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
+      lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
+      lightningKnown: standing.lightningKnown,
     };
   });
 
@@ -265,6 +270,11 @@ export function buildCanonicalSnapshot(
         teamId: standing.teamId,
         teamName: teamName(standing.teamId),
         ...(typeof player?.schoolYear === 'number' ? { schoolYear: player.schoolYear } : {}),
+        // YellowFruit parity (#749): tri-state eligibility; unknown stays null, never false.
+        undergraduateEligible:
+          typeof player?.undergraduateEligible === 'boolean' ? player.undergraduateEligible : null,
+        divisionTwoEligible:
+          typeof player?.divisionTwoEligible === 'boolean' ? player.divisionTwoEligible : null,
         gamesPlayed: standing.gamesPlayed,
         gamesPlayedKnown: standing.gamesPlayedKnown,
         tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,

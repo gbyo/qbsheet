@@ -56,6 +56,7 @@ import {
   invalidPlayerGameStatCountField,
   invalidTeamGameScoreCountField,
   invalidTeamGameScoreOvertimePoints,
+  isCanonicalCount,
   applyTournamentStatusTransition,
   planTournamentStatusTransition,
   type TimelineEventType,
@@ -821,6 +822,42 @@ function roundDeliveryBlocker(state: DirectorState, roundId: DirectorId): string
       : invalidRoom
         ? `Room assignment for ${invalidRoom.id} is not operationally available.`
         : null)
+  );
+}
+
+/**
+ * The full Director-side release contract for one round, evaluated against an
+ * explicit state value. Both releaseRound and startRound authorize against
+ * this before any native preflight and must re-run it after the await and at
+ * the commit boundary: the await is a real interleaving point for concurrent
+ * Director mutations (#785).
+ *
+ * Returns the first blocking reason, or null when the state may be released.
+ *
+ * Exported for focused unit tests: every branch here is a tournament-day
+ * authority decision and must stay pinned.
+ */
+export function roundReleaseBlocker(
+  state: DirectorState,
+  roundId: DirectorId,
+  allowedStatuses: readonly string[] = ['prepared'],
+): string | null {
+  const unresolvedBlocker = unresolvedReleasedRoundBlocker(state, roundId);
+  if (unresolvedBlocker) return unresolvedBlocker;
+  const round = state.rounds.find((entry) => entry.id === roundId);
+  if (!round || !allowedStatuses.includes(round.status)) {
+    return allowedStatuses.length === 1 && allowedStatuses[0] === 'prepared'
+      ? 'Only a prepared round can be released.'
+      : 'The round changed while starting. Review its current status and try again.';
+  }
+  const games = state.scheduledGames.filter((game) => game.roundId === roundId);
+  if (!roundScheduleIsValid(state, roundId) || games.length === 0) {
+    return 'This round cannot be released until every game has a valid matchup.';
+  }
+  return (
+    packetReuseBlocker(state, roundId) ??
+    retiredPacketBlocker(state, roundId) ??
+    roundDeliveryBlocker(state, roundId)
   );
 }
 
@@ -4756,57 +4793,61 @@ export function useDirectorController(repository = createDirectorRepository()): 
   const releaseRound = useCallback(
     (roundId: DirectorId): boolean | Promise<boolean> => {
       const snapshot = stateRef.current;
+      const epoch = documentEpochRef.current;
+      const tournamentId = snapshot.tournament?.id ?? null;
       // The tournament-day invariant boundary runs before the authoritative
       // mutation, exactly as the former controller wrapper ordered it (#620).
-      const unresolvedBlocker = unresolvedReleasedRoundBlocker(snapshot, roundId);
-      if (unresolvedBlocker) {
-        setError(unresolvedBlocker);
+      const blocker = roundReleaseBlocker(snapshot, roundId);
+      if (blocker) {
+        setError(blocker);
         return false;
       }
       const round = snapshot.rounds.find((entry) => entry.id === roundId);
-      if (!round || round.status !== 'prepared') {
-        setError('Only a prepared round can be released.');
-        return false;
-      }
-      const games = snapshot.scheduledGames.filter((game) => game.roundId === roundId);
-      if (!roundScheduleIsValid(snapshot, roundId) || games.length === 0) {
-        setError('This round cannot be released until every game has a valid matchup.');
-        return false;
-      }
-      const packetBlocker = packetReuseBlocker(snapshot, roundId);
-      if (packetBlocker) {
-        setError(packetBlocker);
-        return false;
-      }
-      const retiredBlocker = retiredPacketBlocker(snapshot, roundId);
-      if (retiredBlocker) {
-        setError(retiredBlocker);
-        return false;
-      }
-      const deliveryBlocker = roundDeliveryBlocker(snapshot, roundId);
-      if (deliveryBlocker) {
-        setError(deliveryBlocker);
-        return false;
-      }
       const release = (): boolean =>
-        commit((draft) => {
-          // Release fixes every releasable game's definition even when its transport runs
-          // later: no scorer may ever score a game whose truth can still silently change.
-          pinIssuedDefinitions(
-            draft,
-            draft.scheduledGames
-              .filter(
-                (game) =>
-                  game.roundId === roundId && !game.bye && game.status !== 'cancelled' && game.rightTeamId,
-              )
-              .map((game) => game.id),
+        commit(
+          (draft) => {
+            // Release fixes every releasable game's definition even when its transport runs
+            // later: no scorer may ever score a game whose truth can still silently change.
+            pinIssuedDefinitions(
+              draft,
+              draft.scheduledGames
+                .filter(
+                  (game) =>
+                    game.roundId === roundId && !game.bye && game.status !== 'cancelled' && game.rightTeamId,
+                )
+                .map((game) => game.id),
+            );
+            applyRoundRelease(draft, roundId);
+          },
+          // The commit boundary re-proves the release contract against the
+          // exact draft being committed (#785).
+          { validateDraft: (draft) => roundReleaseBlocker(draft, roundId) },
+        );
+      if (!round || effectiveRoundDeliveryMode(snapshot, round) !== 'qbtcp' || !isNativeDirector())
+        return release();
+      const roundName = round.name;
+      return nativeQbtcpRoundBlocker(tournamentId, roundName).then((nativeBlocker) => {
+        if (nativeBlocker) {
+          setError(nativeBlocker);
+          return false;
+        }
+        // The native await above is a real interleaving point: another action
+        // may have changed rooms, delivery, packets, or the document itself.
+        // Never authorize the pre-await snapshot after local state has moved.
+        const latest = stateRef.current;
+        if (
+          (latest.tournament?.id ?? null) !== tournamentId ||
+          documentEpochRef.current !== epoch ||
+          documentTransitionRef.current
+        ) {
+          setError(
+            `${roundName} changed while QBTCP readiness was being checked. Review the current room/delivery assignments and start the round again.`,
           );
-          applyRoundRelease(draft, roundId);
-        });
-      if (effectiveRoundDeliveryMode(snapshot, round) !== 'qbtcp' || !isNativeDirector()) return release();
-      return nativeQbtcpRoundBlocker(snapshot.tournament?.id ?? null, round.name).then((blocker) => {
-        if (blocker) {
-          setError(blocker);
+          return false;
+        }
+        const staleBlocker = roundReleaseBlocker(latest, roundId);
+        if (staleBlocker) {
+          setError(staleBlocker);
           return false;
         }
         return release();
@@ -6605,14 +6646,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       }
       // Check room occupancy again after the checkpoint. QBTCP sync or another Director action
       // may have claimed a room while the durable recovery point was being written.
-      const latest = stateRef.current;
-      const latestRound = latest.rounds.find((entry) => entry.id === roundId);
-      const latestGames = latest.scheduledGames.filter((game) => game.roundId === roundId);
-      const latestActiveGames = latestGames.filter((game) => !game.bye && game.status !== 'cancelled');
+      let latest = stateRef.current;
+      let latestRound = latest.rounds.find((entry) => entry.id === roundId);
+      let latestGames = latest.scheduledGames.filter((game) => game.roundId === roundId);
+      let latestActiveGames = latestGames.filter((game) => !game.bye && game.status !== 'cancelled');
       if (!latestRound || !['planned', 'prepared'].includes(latestRound.status)) {
         return fail(round.name, 'The round changed while starting. Review its current status and try again.');
       }
-      const latestDeliveryMode = effectiveRoundDeliveryMode(latest, latestRound);
+      let latestDeliveryMode = effectiveRoundDeliveryMode(latest, latestRound);
       const latestDeliveryBlocker = roundDeliveryBlocker(latest, roundId);
       if (latestDeliveryBlocker) return fail(round.name, latestDeliveryBlocker);
       const latestPacketBlocker = packetReuseBlocker(latest, roundId);
@@ -6622,6 +6663,26 @@ export function useDirectorController(repository = createDirectorRepository()): 
       if (latestDeliveryMode === 'qbtcp') {
         const qbtcpBlocker = await nativeQbtcpRoundBlocker(latest.tournament?.id ?? null, latestRound.name);
         if (qbtcpBlocker) return fail(round.name, qbtcpBlocker);
+        // The native await above is a real interleaving point: reread the
+        // live state and re-prove every release invariant against it before
+        // the room checks and commit below can authorize anything (#785).
+        if (
+          stateRef.current.tournament?.id !== snapshot.tournament?.id ||
+          documentEpochRef.current !== epoch ||
+          documentTransitionRef.current
+        ) {
+          return fail(
+            round.name,
+            `${round.name} changed while QBTCP readiness was being checked. Review the current room/delivery assignments and start the round again.`,
+          );
+        }
+        latest = stateRef.current;
+        latestRound = latest.rounds.find((entry) => entry.id === roundId);
+        latestGames = latest.scheduledGames.filter((game) => game.roundId === roundId);
+        latestActiveGames = latestGames.filter((game) => !game.bye && game.status !== 'cancelled');
+        const revalidatedBlocker = roundReleaseBlocker(latest, roundId, ['planned', 'prepared']);
+        if (revalidatedBlocker) return fail(round.name, revalidatedBlocker);
+        latestDeliveryMode = effectiveRoundDeliveryMode(latest, roundId);
       }
       if (latestDeliveryMode !== 'manual') {
         const latestRoomIds = latestActiveGames.map((game) => game.roomId);
@@ -6651,27 +6712,32 @@ export function useDirectorController(repository = createDirectorRepository()): 
           : [];
       const delivered = latestActiveGames.filter((game) => game.roomId !== null).length;
       const manual = latestDeliveryMode === 'manual';
-      const committed = commit((draft) => {
-        const target = draft.rounds.find((entry) => entry.id === roundId);
-        if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
-        if (target.status === 'planned') target.status = 'prepared';
-        const releasedName = applyRoundRelease(draft, roundId);
-        if (!releasedName) return;
-        draft.audit.push({
-          id: newDirectorId('audit'),
-          at: isoNow(),
-          actor: 'Director',
-          type: 'assignment-released',
-          summary: `Started ${releasedName}.`,
-          entityId: roundId,
-          details: {
-            manual,
-            deliveryMode: latestDeliveryMode,
-            deliveredGames: delivered,
-            pendingHandoffs: pending,
-          },
-        });
-      });
+      const committed = commit(
+        (draft) => {
+          const target = draft.rounds.find((entry) => entry.id === roundId);
+          if (!target || (target.status !== 'planned' && target.status !== 'prepared')) return;
+          if (target.status === 'planned') target.status = 'prepared';
+          const releasedName = applyRoundRelease(draft, roundId);
+          if (!releasedName) return;
+          draft.audit.push({
+            id: newDirectorId('audit'),
+            at: isoNow(),
+            actor: 'Director',
+            type: 'assignment-released',
+            summary: `Started ${releasedName}.`,
+            entityId: roundId,
+            details: {
+              manual,
+              deliveryMode: latestDeliveryMode,
+              deliveredGames: delivered,
+              pendingHandoffs: pending,
+            },
+          });
+        },
+        // The commit boundary re-proves the release contract against the
+        // exact draft being committed (#785).
+        { validateDraft: (draft) => roundReleaseBlocker(draft, roundId, ['planned', 'prepared']) },
+      );
       if (!committed)
         return fail(round.name, 'The round could not be started. Review the Director warning and try again.');
       return {
@@ -7715,6 +7781,8 @@ function fingerprintForScores(scores: TeamGameScore[]): string {
         score.bonuses,
         score.bonusPoints,
         score.bouncebacks,
+        // YellowFruit parity (#747): unknown lightning fingerprints distinctly from zero.
+        score.lightningPoints ?? 'unknown',
       ]
         .map((value) => String(value))
         .join('\u001f'),
@@ -7861,6 +7929,15 @@ export function validateResultForScheduledGame(
     if (invalidCountField) return `${invalidCountField} must be a finite non-negative whole number.`;
     if (invalidTeamGameScoreOvertimePoints(score)) {
       return 'overtimePoints must be a finite number when supplied.';
+    }
+    // YellowFruit parity (#747): lightning is optional (unknown when absent) but when
+    // supplied it must be a canonical count.
+    if (
+      score.lightningPoints !== undefined &&
+      score.lightningPoints !== null &&
+      !isCanonicalCount(score.lightningPoints)
+    ) {
+      return 'lightningPoints must be a finite non-negative whole number.';
     }
   }
   const decisionIssue = resultDecisionIssue(state, scheduled, scores);
