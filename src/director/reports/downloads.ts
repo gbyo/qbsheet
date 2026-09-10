@@ -50,7 +50,8 @@ export async function saveOrDownloadBytes(
     onAnnounce(`${successMessage}.`);
     return { status: 'saved' };
   } catch (reason: unknown) {
-    const message = reason instanceof Error ? reason.message : `${successMessage} failed.`;
+    const message =
+      reason instanceof Error ? reason.message : `${successMessage} failed.`;
     onAnnounce(errorNotice(message));
     return { status: 'error', message };
   }
