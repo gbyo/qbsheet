@@ -4,13 +4,13 @@ import { clampPage, parseAfterCursor, resyncDecision } from '../src/replay';
 describe('replay cursors', () => {
   it('accepts non-negative safe integers and rejects everything else', () => {
     expect(parseAfterCursor('178')).toEqual({ ok: true, value: 178 });
+    expect(parseAfterCursor(' 178 ')).toEqual({ ok: true, value: 178 });
     expect(parseAfterCursor(0)).toEqual({ ok: true, value: 0 });
     expect(parseAfterCursor(Number.MAX_SAFE_INTEGER)).toEqual({ ok: true, value: Number.MAX_SAFE_INTEGER });
     expect(parseAfterCursor('-1')).toEqual({ ok: false, error: '`after` must be a non-negative integer.' });
     expect(parseAfterCursor('1.5')).toEqual({ ok: false, error: '`after` must be a non-negative integer.' });
     expect(parseAfterCursor('0x10')).toEqual({ ok: false, error: '`after` must be a non-negative integer.' });
     expect(parseAfterCursor('   ')).toEqual({ ok: false, error: '`after` must be a non-negative integer.' });
-    expect(parseAfterCursor(' 178 ')).toEqual({ ok: false, error: '`after` must be a non-negative integer.' });
     expect(parseAfterCursor(Number.MAX_SAFE_INTEGER + 1)).toEqual({
       ok: false,
       error: '`after` must be a non-negative integer.',
