@@ -108,6 +108,11 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
   );
   const showClassifications = section.teams.some((row) => (row.classifications ?? []).length > 0);
   const showSuperpowers = section.teams.some((row) => row.superpowers > 0);
+  // Bounceback points appear only when some team actually converted them: an unknown
+  // breakdown (manual/imported results) renders "—", never a fabricated zero (#748).
+  const showBouncebacks = section.teams.some(
+    (row) => row.bouncebacksKnown && row.bouncebackPoints > 0,
+  );
   const showAdvancement = section.advancement !== undefined;
   const rows = section.teams
     .map((row) => {
@@ -123,6 +128,7 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
         `<td class="num">${row.powers}</td><td class="num">${row.gets}</td><td class="num">${row.negs}</td>` +
         `<td class="num">${row.tossupsHeardKnown ? row.tossupsHeard : '—'}</td><td class="num">${numberText(row.pptuh, 2)}</td>` +
         `<td class="num">${numberText(row.ppb, 2)}</td>` +
+        `${showBouncebacks ? `<td class="num">${row.bouncebacksKnown ? row.bouncebackPoints : '—'}</td>` : ''}` +
         `${showAdvancement ? `<td>${escapeHtml(advancementText(section.advancement?.[row.teamId]))}</td>` : ''}</tr>`
       );
     })
@@ -136,6 +142,7 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
     `${showSuperpowers ? '<th scope="col" class="num">Superpowers</th>' : ''}` +
     `<th scope="col" class="num">Powers</th><th scope="col" class="num">Gets</th><th scope="col" class="num">Negs</th>` +
     `<th scope="col" class="num">TUH</th><th scope="col" class="num">PPTUH</th><th scope="col" class="num">PPB</th>` +
+    `${showBouncebacks ? '<th scope="col" class="num">BB</th>' : ''}` +
     `${showAdvancement ? '<th scope="col">Advancement</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`
   );
 }

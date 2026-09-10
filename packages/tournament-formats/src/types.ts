@@ -183,7 +183,8 @@ export interface GameTeamResult extends ExtensibleRecord {
   forfeitLoss?: boolean;
   tossupPoints?: number;
   bonusPoints?: number;
-  bonusBouncebackPoints?: number;
+  /** Null marks an explicit unknown (source supplied no bounceback breakdown, #748). */
+  bonusBouncebackPoints?: number | null;
   lightningPoints?: number;
   /** Early-buzz tier above power (for example 20-point superpowers). */
   superpowers?: number;
