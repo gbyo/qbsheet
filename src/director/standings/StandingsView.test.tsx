@@ -7,7 +7,7 @@
  */
 import { afterEach, expect, test, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { derivePlayerStandings, type DirectorState } from '../domain';
+import { derivePlayerStandings, playerHasAppearance, type DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   acceptedGame,
@@ -97,8 +97,10 @@ test('the ordering is the derivation’s, and the page says how many players it 
   // Player 0 scores the most and Player 11 the least, so their order in the table is the
   // derivation's ranking rather than the roster's insertion order.
   const generated = names.filter((name) => name?.startsWith('Player '));
+  // The expectation uses the same appearance rule as the view: bare GP > 0 would
+  // silently drop real scorers whose game TUH is unknown (#746).
   const expected = derivePlayerStandings(state)
-    .filter((standing) => standing.gamesPlayed > 0)
+    .filter(playerHasAppearance)
     .map((standing) => state.players.find((player) => player.id === standing.playerId)?.name ?? 'Unknown')
     .filter((name) => name.startsWith('Player '));
   expect(generated).toEqual(expected);
@@ -106,6 +108,23 @@ test('the ordering is the derivation’s, and the page says how many players it 
   // The count is on the view control, where a director choosing between the two
   // tables can already see it.
   expect(screen.getByRole('button', { name: 'Players 14' })).toBeTruthy();
+});
+
+/**
+ * A scoring average needs games to be an average over.
+ *
+ * Player 0 has result lines but the games carry no tossups-read count, so GP
+ * is unknown rather than zero — and the PPG next to it is unknown too, not
+ * 0.0 next to real points (#746).
+ */
+test('a scorer with unknown participation shows unknown PPG, not 0.0', () => {
+  render(<StandingsView state={tournamentWithPlayers(1)} controller={controller} onAnnounce={vi.fn()} />);
+
+  const row = within(playerTable()).getByText('Player 0').closest('tr') as HTMLElement;
+  const cells = within(row).getAllByRole('cell');
+  // Player, Games, PPG
+  expect(cells[1]?.textContent).toBe('—');
+  expect(cells[2]?.textContent).toBe('—');
 });
 
 /**

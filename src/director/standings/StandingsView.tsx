@@ -21,7 +21,7 @@ import {
   type Column,
 } from '../components';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
-import { formatGamesPlayed, formatWinPct } from './statsDisplay';
+import { formatGamesPlayed, formatPlayerPpg, formatWinPct } from './statsDisplay';
 import { csvMediaType, downloadText } from '../format/downloadFile';
 import type { AnnounceInput } from '../notices';
 
@@ -159,7 +159,13 @@ export function StandingsView({
       align: 'right',
       render: (standing) => formatGamesPlayed(standing),
     },
-    { key: 'ppg', header: 'PPG', priority: 1, align: 'right', render: (standing) => standing.ppg.toFixed(1) },
+    {
+      key: 'ppg',
+      header: 'PPG',
+      priority: 1,
+      align: 'right',
+      render: (standing) => formatPlayerPpg(standing),
+    },
     {
       key: 'powers',
       header: 'Powers',

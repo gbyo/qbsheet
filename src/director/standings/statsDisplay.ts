@@ -119,6 +119,15 @@ export function formatGamesPlayed(
     : Number(standing.gamesPlayed.toFixed(2));
 }
 
+/**
+ * Points per game needs a known games denominator. A scorer with result lines
+ * but no game TUH renders "—" rather than 0.0 (#746).
+ */
+export function formatPlayerPpg(standing: Pick<PlayerStanding, 'gamesPlayedKnown' | 'ppg'>): string {
+  if (standing.gamesPlayedKnown === false) return UNKNOWN_STAT;
+  return standing.ppg.toFixed(1);
+}
+
 /** Points per tossup heard needs a known, nonzero denominator; otherwise "—". */
 export function formatPptuh(
   points: number,

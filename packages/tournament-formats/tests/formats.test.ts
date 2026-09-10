@@ -603,4 +603,31 @@ describe('derived statistics exports', () => {
       exportStatsHtml({ ...stats.value, tournament: { ...stats.value.tournament, name: '<Unsafe>' } }),
     ).toContain('&lt;Unsafe&gt;');
   });
+
+  test('leaves GP and PPG blank in exports when the game supplies no TUH denominator', () => {
+    const withoutTuh = {
+      ...tournament,
+      games: tournament.games.map((game) => {
+        const { tossupsRead: _dropped, ...result } = game.result;
+        return { ...game, result };
+      }),
+    };
+    const stats = buildStatsSnapshot(withoutTuh, { generatedAt: '2026-04-11T16:00:00.000Z' });
+    expect(stats.ok).toBe(true);
+    if (!stats.ok) return;
+    const sarah = stats.value.players.find((player) => player.playerName === "Sarah O'Brien");
+    expect(sarah).toEqual(expect.objectContaining({ gamesPlayedKnown: false, points: 115 }));
+    // CSV leaves unknown cells empty rather than printing a fabricated zero.
+    const parsed = parseCsvTable(exportPlayerStatsCsv(stats.value));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const header = parsed.value.headers ?? [];
+    const row = parsed.value.rows.find((cells) => cells.includes("Sarah O'Brien")) ?? [];
+    expect(row[header.indexOf('games_played')]).toBe('');
+    expect(row[header.indexOf('ppg')]).toBe('');
+    // The points column still carries what she scored.
+    expect(row[header.indexOf('points')]).toBe('115');
+    // HTML renders the unknown marker instead.
+    expect(exportStatsHtml(stats.value)).toContain('—');
+  });
 });
