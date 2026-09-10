@@ -103,11 +103,7 @@ import {
   type TransportEvent,
   type TransportState,
 } from '../qbtcp/QbtcpStream';
-import {
-  QbtcpStreamClient,
-  browserSocketFactory,
-  type QbtcpSocketFactory,
-} from '../qbtcp/QbtcpStreamClient';
+import { QbtcpStreamClient, browserSocketFactory, type QbtcpSocketFactory } from '../qbtcp/QbtcpStreamClient';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
@@ -884,7 +880,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         if (helpSendInFlight.current === send) helpSendInFlight.current = null;
       }
     },
-    [getActiveClient, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline],
+    [
+      getActiveClient,
+      helpIdentity,
+      helpStorageKey,
+      noteHelpCredentialProblem,
+      setControlRequestValue,
+      timeline,
+    ],
   );
 
   const retryControlRequest = useCallback(async (): Promise<HelpRequestResult | null> => {
@@ -924,7 +927,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     } finally {
       if (helpClearInFlight.current === clear) helpClearInFlight.current = null;
     }
-  }, [getActiveClient, helpIdentity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline]);
+  }, [
+    getActiveClient,
+    helpIdentity,
+    helpStorageKey,
+    noteHelpCredentialProblem,
+    setControlRequestValue,
+    timeline,
+  ]);
 
   /**
    * Reopen this room's session with the room capability it still holds.
@@ -1133,10 +1143,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
               // Assignment and session pushes are hints: refetch and let the revision
               // comparison decide. A stale relay push loses to newer LAN state by rule.
               if (frame.type === 'help-changed') void reconcileHelp();
-              else if (
-                frame.type === 'assignment-changed' ||
-                frame.type === 'session-changed'
-              )
+              else if (frame.type === 'assignment-changed' || frame.type === 'session-changed')
                 pollRef.current();
             },
             onResync: (reason) => {
@@ -1250,11 +1257,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           // this room right now, so a failed reconcile never latches the LAN by itself.
           // Everywhere else, repeated primary outages earn the fallback.
           const before = failoverRef.current;
-          const after = notePrimaryResult(
-            before,
-            classifyTransportFailure(result),
-            lanClient !== undefined,
-          );
+          const after = notePrimaryResult(before, classifyTransportFailure(result), lanClient !== undefined);
           failoverRef.current = after;
           if (after.lanActive && !before.lanActive && lanClient) {
             // The game did not move: same room, same session, same credentials — only the

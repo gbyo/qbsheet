@@ -226,7 +226,10 @@ export class QbtcpStreamClient {
    * trust). A `false` answer is not a refusal — the runtime retries over HTTP with the
    * same retry key, and the server dedupes.
    */
-  submitFinal(retryKey: string, qbj: unknown): Promise<{ delivered: boolean; receipt?: Record<string, unknown> }> {
+  submitFinal(
+    retryKey: string,
+    qbj: unknown,
+  ): Promise<{ delivered: boolean; receipt?: Record<string, unknown> }> {
     if (this.pendingFinal) {
       return Promise.resolve({ delivered: false });
     }
@@ -380,7 +383,9 @@ export class QbtcpStreamClient {
         return;
       }
       this.options.events?.onProtocolError?.(
-        validated.error.code === 'too-large' ? 'A stream frame exceeded the bound.' : 'A stream frame was malformed.',
+        validated.error.code === 'too-large'
+          ? 'A stream frame exceeded the bound.'
+          : 'A stream frame was malformed.',
       );
       return;
     }

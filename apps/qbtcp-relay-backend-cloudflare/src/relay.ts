@@ -1124,11 +1124,7 @@ export class QbtcpRelay extends DurableObject<Env> {
     // `match` is the normative QBTCP progress key (docs/QBTCP.md); `match_state` is the
     // relay's earlier spelling. Accept both so scorers speaking the documented protocol —
     // over HTTP or the stream — are not refused for a key alias.
-    return json(
-      await this.storeProgress(session, body.sequence, body.match_state ?? body.match),
-      200,
-      cors,
-    );
+    return json(await this.storeProgress(session, body.sequence, body.match_state ?? body.match), 200, cors);
   }
 
   /**
