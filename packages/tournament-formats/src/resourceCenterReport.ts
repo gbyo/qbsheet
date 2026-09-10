@@ -131,19 +131,21 @@ const MAX_BASE_NAME_LENGTH = 80;
  * Sanitize a report-set base name predictably. Unicode letters and numbers survive (NFC
  * normalized so composed/decomposed spellings map identically); path separators, controls,
  * filesystem-reserved characters (`<>:"/\|?*`), and all other punctuation/whitespace runs
- * collapse to one hyphen. Empty input falls back to `'report'`, so every report set still
- * shares one stable, filesystem-safe prefix.
+ * collapse to one hyphen. The result is capped at 80 Unicode code points (not UTF-16 code
+ * units) so a permitted astral letter/number is never split into an unpaired surrogate.
+ * Empty input falls back to `'report'`, so every report set still shares one stable,
+ * filesystem-safe prefix.
  */
 export function sanitizeResourceCenterBaseName(value: string): string {
   const normalized = value.normalize('NFC').trim();
   if (!normalized) return 'report';
   const withoutReserved = normalized.replace(/[<>:"/\\|?*]+/g, '-').replace(/\p{Cc}+/gu, '-');
-  const hyphenated = withoutReserved
+  const stripped = withoutReserved
     .replace(/[^\p{L}\p{N}._-]+/gu, '-')
     .replace(/-{2,}/g, '-')
-    .replace(/^[._-]+|[._-]+$/g, '')
-    .slice(0, MAX_BASE_NAME_LENGTH)
-    .replace(/[._-]+$/, '');
+    .replace(/^[._-]+|[._-]+$/g, '');
+  const truncated = Array.from(stripped).slice(0, MAX_BASE_NAME_LENGTH).join('');
+  const hyphenated = truncated.replace(/[._-]+$/, '');
   return hyphenated || 'report';
 }
 
