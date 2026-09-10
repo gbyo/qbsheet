@@ -164,6 +164,13 @@ its credentials, and keeps the result available for download throughout.
 - **Session repair.** A refused session credential is repaired exactly as over HTTP:
   reopen the same session with the room capability the room still holds. Both surfaces
   return the open session rather than creating a second one.
+- **Ordering.** Server sequences order server-to-scorer frames. Once a sequenced frame has
+  been applied, a frame from the same stream whose `sequence` is at or behind the stored
+  cursor MUST NOT mutate the client view — stale and equal-sequence (duplicate/replayed)
+  deliveries are ignored, while newer sequences update both the cursor and the relevant
+  state. Frames without a `sequence` carry no ordering information and are still applied.
+  Assignment state keeps its own (round revision, assignment revision) comparison on top
+  of this transport guard.
 - **Writer reconciliation.** Writer ownership is never transferred by a frame and never
   inferred from transport order. A person takes over explicitly, over either transport,
   and the previous writer learns of the loss at its next write.

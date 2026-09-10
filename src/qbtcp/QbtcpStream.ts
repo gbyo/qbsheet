@@ -342,13 +342,19 @@ export function isAssignmentNewer(
  * Fold one validated server frame into the client view, returning a new view.
  *
  * Never mutates its input, never throws, and never lets a stale or malformed frame move
- * the view backwards. Malformed frames are the validator's job to reject; this reducer
- * additionally ignores anything it cannot understand, so a bad frame cannot corrupt state
- * even if it arrives here unchecked.
+ * the view backwards. A sequenced frame whose `sequence` is at or behind the stored
+ * `serverSeq` cursor is ignored entirely — it advances nothing and mutates nothing — so a
+ * delayed, replayed, or duplicate delivery cannot overwrite newer state while the cursor
+ * still claims the newer sequence is current. Frames without a `sequence` carry no ordering
+ * information and are still applied. Malformed frames are the validator's job to reject;
+ * this reducer additionally ignores anything it cannot understand, so a bad frame cannot
+ * corrupt state even if it arrives here unchecked. Assignment adoption keeps its own
+ * (round revision, assignment revision) comparison on top of this transport-level guard.
  */
 export function applyServerFrame(view: IQbtcpStreamView, frame: IQbtcpStreamFrame): IQbtcpStreamView {
   const next: IQbtcpStreamView = { ...view };
-  if (typeof frame.sequence === 'number' && frame.sequence > next.serverSeq) {
+  if (typeof frame.sequence === 'number') {
+    if (frame.sequence <= next.serverSeq) return next;
     next.serverSeq = frame.sequence;
   }
   const payload = frame.payload ?? {};

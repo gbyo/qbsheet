@@ -335,6 +335,130 @@ describe('stream behavior', () => {
     // A degraded stream still reconciles over HTTP: the gap may have dropped a push.
     expect(selectAssignmentPollIntervalMs('stream-degraded')).toBe(STANDARD_POLL_INTERVAL_MS);
   });
+
+  test('a stale help-changed cannot move state backwards (#810)', () => {
+    const current = {
+      ...initialStreamView,
+      serverSeq: 131,
+      helpOpen: true,
+    };
+    const next = applyServerFrame(current, {
+      version: 1,
+      type: 'help-changed',
+      sequence: 130,
+      payload: { request: null },
+    });
+    expect(next.serverSeq).toBe(131);
+    expect(next.helpOpen).toBe(true);
+    expect(current.helpOpen).toBe(true);
+  });
+
+  test('a stale session-changed cannot regress session status (#810)', () => {
+    const newer = applyServerFrame(initialStreamView, {
+      version: 1,
+      type: 'session-changed',
+      sequence: 140,
+      payload: { status: 'final-received' },
+    });
+    expect(newer.sessionStatus).toBe('final-received');
+    const regressed = applyServerFrame(newer, {
+      version: 1,
+      type: 'session-changed',
+      sequence: 139,
+      payload: { status: 'open' },
+    });
+    expect(regressed.sessionStatus).toBe('final-received');
+    expect(regressed.serverSeq).toBe(140);
+  });
+
+  test('a replayed hello cannot clear degradation set by a newer shutdown (#810)', () => {
+    const degraded = applyServerFrame(initialStreamView, {
+      version: 1,
+      type: 'shutdown',
+      sequence: 200,
+      payload: { reason: 'relay-draining' },
+    });
+    expect(degraded.degraded).toBe('relay-draining');
+    const replayed = applyServerFrame(degraded, { version: 1, type: 'hello', sequence: 199 });
+    expect(replayed.serverSeq).toBe(200);
+    expect(replayed.degraded).toBe('relay-draining');
+  });
+
+  test('an equal-sequence duplicate with conflicting payload is ignored (#810)', () => {
+    const first = applyServerFrame(initialStreamView, {
+      version: 1,
+      type: 'help-changed',
+      sequence: 131,
+      payload: { request: { id: 'help-7', category: 'protest', status: 'open' } },
+    });
+    expect(first.helpOpen).toBe(true);
+    const duplicate = applyServerFrame(first, {
+      version: 1,
+      type: 'help-changed',
+      sequence: 131,
+      payload: { request: null },
+    });
+    expect(duplicate.helpOpen).toBe(true);
+    expect(duplicate.serverSeq).toBe(131);
+  });
+
+  test('newer frames still apply and assignment revision protection remains (#810)', () => {
+    const base = { ...initialStreamView, serverSeq: 500, roundRevision: 4, assignmentRevision: 9 };
+    const newer = applyServerFrame(base, {
+      version: 1,
+      type: 'assignment-changed',
+      sequence: 501,
+      payload: { round_revision: 4, assignment_revision: 10 },
+    });
+    expect(newer.serverSeq).toBe(501);
+    expect(newer.assignmentRevision).toBe(10);
+    // A newer transport sequence carrying a stale domain revision still loses on revisions.
+    const staleRevision = applyServerFrame(newer, {
+      version: 1,
+      type: 'assignment-changed',
+      sequence: 502,
+      payload: { round_revision: 3, assignment_revision: 12 },
+    });
+    expect(staleRevision.serverSeq).toBe(502);
+    expect(staleRevision.roundRevision).toBe(4);
+    expect(staleRevision.assignmentRevision).toBe(10);
+  });
+
+  test('unsequenced frames carry no ordering and are still applied (#810)', () => {
+    const cleared = applyServerFrame(
+      { ...initialStreamView, resyncRequired: true },
+      { version: 1, type: 'hello' },
+    );
+    expect(cleared.resyncRequired).toBe(false);
+    expect(cleared.serverSeq).toBe(0);
+    const flagged = applyServerFrame(initialStreamView, { version: 1, type: 'resync-required' });
+    expect(flagged.resyncRequired).toBe(true);
+  });
+
+  test('out-of-order reconnect delivery converges on the newest state (#810)', () => {
+    const opened = applyServerFrame(initialStreamView, {
+      version: 1,
+      type: 'help-changed',
+      sequence: 131,
+      payload: { request: { id: 'help-7', category: 'protest', status: 'open' } },
+    });
+    const shutdown = applyServerFrame(opened, {
+      version: 1,
+      type: 'shutdown',
+      sequence: 133,
+      payload: { reason: 'relay-draining' },
+    });
+    // A delayed replay of the older help-close arrives last and must not reopen/close wrongly.
+    const late = applyServerFrame(shutdown, {
+      version: 1,
+      type: 'help-changed',
+      sequence: 132,
+      payload: { request: null },
+    });
+    expect(late.serverSeq).toBe(133);
+    expect(late.helpOpen).toBe(true);
+    expect(late.degraded).toBe('relay-draining');
+  });
 });
 
 describe('failover', () => {
