@@ -608,6 +608,48 @@ describe('a morning of network failures', () => {
     vi.useFakeTimers();
   });
 
+  test('LAN failover uses credentials minted by the LAN authority, never relay credentials', async () => {
+    const primaryControl = new FakeControl();
+    primaryControl.offline = true;
+    const lanControl = new FakeControl();
+    const primary = primaryControl.asClient();
+    const lan = lanControl.asClient();
+    Object.assign(primary, { baseUrl: 'https://relay.example/tournament' });
+    Object.assign(lan, { baseUrl: 'http://192.168.1.24:3000' });
+    const lanAssignment = vi.spyOn(lan, 'assignment');
+    const lanFinal = vi.spyOn(lan, 'postFinal');
+    const lanIdentity = {
+      roomId: 'room-204',
+      token: 'lan-room-token',
+      deviceId: 'device-1',
+      roomName: 'Room 204',
+    };
+    const lanCredentials = { sessionId: 'lan-session-5', token: 'lan-session-token' };
+    const hook = renderHook(() =>
+      useConnectedRuntime({
+        client: primary,
+        identity: { ...lanIdentity, token: 'relay-room-token' },
+        credentials: { sessionId: 'relay-session-5', token: 'relay-session-token' },
+        scheduledMatchId: 'sched-5',
+        enabled: true,
+        timeline: new ConnectionTimeline(),
+        lanClient: lan,
+        lanIdentity,
+        lanCredentials,
+        socketFactory: null,
+      }),
+    );
+
+    await nextPoll();
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(lanAssignment).toHaveBeenCalledWith(lanIdentity);
+    await act(async () => {
+      await hook.result.current.submitFinal({ tossups_read: 20 });
+    });
+    expect(lanFinal).toHaveBeenCalledWith(lanCredentials, { tossups_read: 20 });
+    hook.unmount();
+  });
+
   test('Wi-Fi that drops and returns keeps scoring and resumes sending', async () => {
     const control = new FakeControl();
     const timeline = new ConnectionTimeline();

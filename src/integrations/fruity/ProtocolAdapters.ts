@@ -377,7 +377,7 @@ abstract class BaseAdapter implements IServerAdapter {
     return this.request(this.routes.pair, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(roomId ? { code, roomId } : { code }),
+      body: JSON.stringify(roomId ? { code, room_id: roomId } : { code }),
     });
   }
 
@@ -527,7 +527,7 @@ export class QbtcpAdapter extends BaseAdapter {
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};
-    const paired = stringOf(body.roomId);
+    const paired = stringOf(body.room_id) ?? stringOf(body.roomId);
     const token = stringOf(body.token) ?? stringOf(body.accessToken);
     if (!paired || !token) {
       return { ok: false, error: 'Tournament control accepted the code but did not pair this room.' };
@@ -536,7 +536,7 @@ export class QbtcpAdapter extends BaseAdapter {
       ok: true,
       value: {
         roomId: paired,
-        roomName: stringOf(body.roomName) ?? paired,
+        roomName: stringOf(body.room_name) ?? stringOf(body.roomName) ?? paired,
         ...(stringOf(body.roomDescription) ? { roomDescription: stringOf(body.roomDescription) } : {}),
         accessToken: token,
       },

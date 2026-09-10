@@ -53,13 +53,14 @@ export interface IPairedRoom {
   /**
    * Optional LAN fallback for the same room authority. Normalized, no trailing slash.
    *
-   * Kept as a secondary endpoint under this pairing — not a second pairing — so the same
-   * room and session credentials apply on either path. A tournament-owned Internet endpoint
-   * is the normal primary; this is the venue-network address used when the primary is
-   * unreachable. Absent for rooms paired before the fallback existed, which stay
-   * primary-only.
+   * Kept as a secondary endpoint under the same logical room, with its independently minted
+   * credentials below. A tournament-owned Internet endpoint is the normal primary; this is the
+   * venue-network address used when the primary is unreachable. Absent for rooms paired before
+   * the fallback existed, which stay primary-only.
    */
   lanBaseUrl?: string;
+  /** Room capability issued independently by the LAN Director for the same room. */
+  lanRoomToken?: string;
 }
 
 export interface IConnectedSession extends IPairedRoom {
@@ -67,6 +68,9 @@ export interface IConnectedSession extends IPairedRoom {
   /** Set once a game has been started, so a reload resumes the same session. */
   sessionId?: string;
   sessionToken?: string;
+  /** LAN session credentials are endpoint-specific and must never be replaced by relay credentials. */
+  lanSessionId?: string;
+  lanSessionToken?: string;
   /**
    * The local game record this connection belongs to.
    *
@@ -103,6 +107,7 @@ export function pairedRoomOf(session: IConnectedSession | null): IPairedRoom | n
     roomToken: session.roomToken,
     deviceId: session.deviceId,
     ...(session.lanBaseUrl !== undefined ? { lanBaseUrl: session.lanBaseUrl } : {}),
+    ...(session.lanRoomToken !== undefined ? { lanRoomToken: session.lanRoomToken } : {}),
   };
 }
 
@@ -170,6 +175,8 @@ export function readConnection(
       deviceId: typeof parsed.deviceId === 'string' ? parsed.deviceId : newDeviceId(),
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
       sessionToken: typeof parsed.sessionToken === 'string' ? parsed.sessionToken : undefined,
+      lanSessionId: typeof parsed.lanSessionId === 'string' ? parsed.lanSessionId : undefined,
+      lanSessionToken: typeof parsed.lanSessionToken === 'string' ? parsed.lanSessionToken : undefined,
       gameRecordId: typeof parsed.gameRecordId === 'string' ? parsed.gameRecordId : undefined,
       progressSequence:
         typeof parsed.progressSequence === 'number' && Number.isFinite(parsed.progressSequence)
@@ -177,6 +184,9 @@ export function readConnection(
           : undefined,
       tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
       ...(lanBaseUrl !== undefined ? { lanBaseUrl } : {}),
+      ...(lanBaseUrl !== undefined && typeof parsed.lanRoomToken === 'string' && parsed.lanRoomToken
+        ? { lanRoomToken: parsed.lanRoomToken }
+        : {}),
       updatedAt: parsed.updatedAt,
     };
   } catch {

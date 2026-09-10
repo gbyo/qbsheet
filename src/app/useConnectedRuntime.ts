@@ -112,6 +112,8 @@ export const assignmentPollIntervalMs = 10_000;
 export interface ICredentialRepair {
   sessionId?: string;
   sessionToken?: string;
+  lanSessionId?: string;
+  lanSessionToken?: string;
 }
 
 export interface IConnectedRuntimeInput {
@@ -150,10 +152,13 @@ export interface IConnectedRuntimeInput {
    *
    * Optional: rooms paired without a fallback stay primary-only and this hook behaves as
    * before. When present and the primary stops answering, assignment, progress, and finals
-   * move to this client with the same room and session credentials — one logical
-   * room/session, two paths — and stay there until the preferred path proves healthy again.
+   * move to this client with its endpoint-specific credentials — one logical room/game,
+   * two authorities — and stay there until the preferred path proves healthy again.
    */
   lanClient?: FruityServerClient;
+  /** Credentials minted by the LAN authority; required before LAN can be selected. */
+  lanIdentity?: IRoomIdentity;
+  lanCredentials?: ISessionCredentials;
   /**
    * How the realtime stream is opened. Defaults to the browser WebSocket; `null`
    * disables the stream (honest HTTP-only operation); tests inject a fake.
@@ -445,6 +450,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     onProgressSequence,
     timeline = connectionTimeline,
     lanClient,
+    lanIdentity,
+    lanCredentials,
     socketFactory,
   } = input;
 
@@ -524,12 +531,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     transportRef.current = transport;
   }, [transport]);
 
+  const lanReady = Boolean(lanClient && lanIdentity && lanCredentials);
   const endpoints = useMemo<IQbtcpEndpoints>(
     () => ({
       primary: client.baseUrl,
-      ...(lanClient ? { lan: lanClient.baseUrl } : {}),
+      ...(lanReady && lanClient ? { lan: lanClient.baseUrl } : {}),
     }),
-    [client, lanClient],
+    [client, lanClient, lanReady],
   );
 
   /**
@@ -555,8 +563,16 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
 
   /** Which client serves the next HTTP operation: the LAN once it has taken over. */
   const getActiveClient = useCallback(
-    () => (failoverRef.current.lanActive && lanClient ? lanClient : client),
-    [client, lanClient],
+    () => (failoverRef.current.lanActive && lanReady && lanClient ? lanClient : client),
+    [client, lanClient, lanReady],
+  );
+  const getActiveIdentity = useCallback(
+    () => (failoverRef.current.lanActive && lanReady && lanIdentity ? lanIdentity : identity),
+    [identity, lanIdentity, lanReady],
+  );
+  const getActiveCredentials = useCallback(
+    () => (failoverRef.current.lanActive && lanReady && lanCredentials ? lanCredentials : credentials),
+    [credentials, lanCredentials, lanReady],
   );
   const [serverSnapshotAt, setServerSnapshotAt] = useState<number | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
@@ -735,7 +751,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     const readVersion = helpMutationVersion.current;
     const mutationInFlightAtRead = helpSendInFlight.current !== null || helpClearInFlight.current !== null;
     const read = Promise.resolve()
-      .then(() => getActiveClient().readHelp(helpIdentity))
+      .then(() => getActiveClient().readHelp(getActiveIdentity()))
       .catch((): HelpReadResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
     helpReadInFlight.current = read;
     try {
@@ -804,8 +820,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     }
   }, [
     getActiveClient,
+    getActiveIdentity,
     enabled,
-    helpIdentity,
     helpStorageKey,
     noteHelpCredentialProblem,
     setControlRequestValue,
@@ -827,7 +843,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       setControlRequestValue({ kind: 'sending', ...draft });
 
       const send = Promise.resolve()
-        .then(() => getActiveClient().requestHelp(helpIdentity, draft.category, draft.message))
+        .then(() => getActiveClient().requestHelp(getActiveIdentity(), draft.category, draft.message))
         .catch((): HelpRequestResult => ({
           kind: 'unreachable',
           error: 'Could not reach tournament control.',
@@ -882,7 +898,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     },
     [
       getActiveClient,
-      helpIdentity,
+      getActiveIdentity,
       helpStorageKey,
       noteHelpCredentialProblem,
       setControlRequestValue,
@@ -907,7 +923,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     if (helpClearInFlight.current) return helpClearInFlight.current;
     helpMutationVersion.current += 1;
     const clear = Promise.resolve()
-      .then(() => getActiveClient().cancelHelp(helpIdentity, current.request.id as string))
+      .then(() => getActiveClient().cancelHelp(getActiveIdentity(), current.request.id as string))
       .catch((): HelpClearResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
     helpClearInFlight.current = clear;
     try {
@@ -929,7 +945,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     }
   }, [
     getActiveClient,
-    helpIdentity,
+    getActiveIdentity,
     helpStorageKey,
     noteHelpCredentialProblem,
     setControlRequestValue,
@@ -948,7 +964,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       setRepairMessage('This game has no scheduled match to reopen. Finish it and hand the QBJ over.');
       return false;
     }
-    const opened = await getActiveClient().openSession(identity, scheduledMatchId);
+    const activeClient = getActiveClient();
+    const opened = await activeClient.openSession(getActiveIdentity(), scheduledMatchId);
     if (!opened.ok) {
       noteWrite(opened);
       setRepairMessage(opened.error);
@@ -970,12 +987,25 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     // that did not change means that effect never runs. Without this, a session refused twice in
     // one game would silently stop repairing itself after the first.
     autoRepairAttempted.current = false;
-    onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
+    onCredentialsRepaired?.(
+      activeClient === client
+        ? { sessionId: opened.value.sessionId, sessionToken: opened.value.token }
+        : { lanSessionId: opened.value.sessionId, lanSessionToken: opened.value.token },
+    );
     return true;
-  }, [getActiveClient, identity, scheduledMatchId, onCredentialsRepaired, noteWrite, timeline]);
+  }, [
+    getActiveClient,
+    getActiveIdentity,
+    client,
+    scheduledMatchId,
+    onCredentialsRepaired,
+    noteWrite,
+    timeline,
+  ]);
 
   const takeOverWriter = useCallback(async () => {
-    const result = await getActiveClient().takeWriter(identity, credentials);
+    const activeClient = getActiveClient();
+    const result = await activeClient.takeWriter(getActiveIdentity(), getActiveCredentials());
     if (!result.ok) {
       noteWrite(result);
       setRepairMessage(result.error);
@@ -984,8 +1014,20 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     setRepairMessage(undefined);
     setWriterConflict(null);
     timeline.record('writer-taken');
-    onCredentialsRepaired?.({ sessionId: result.value.sessionId, sessionToken: result.value.token });
-  }, [getActiveClient, identity, credentials, onCredentialsRepaired, noteWrite, timeline]);
+    onCredentialsRepaired?.(
+      activeClient === client
+        ? { sessionId: result.value.sessionId, sessionToken: result.value.token }
+        : { lanSessionId: result.value.sessionId, lanSessionToken: result.value.token },
+    );
+  }, [
+    getActiveClient,
+    getActiveIdentity,
+    getActiveCredentials,
+    client,
+    onCredentialsRepaired,
+    noteWrite,
+    timeline,
+  ]);
 
   /**
    * One unattended reopen per session problem, and no more.
@@ -1032,7 +1074,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         return;
       }
       const activeClient = getActiveClient();
-      const result = await activeClient.putSnapshot(credentials, qbj, nextSequence());
+      const result = await activeClient.putSnapshot(getActiveCredentials(), qbj, nextSequence());
       if (result.ok) {
         setServerSnapshotAt(Date.now());
         setSnapshotError(undefined);
@@ -1046,7 +1088,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         noteWrite(result);
       }
     },
-    [client, credentials, noteWrite, nextSequence, timeline, getActiveClient],
+    [client, noteWrite, nextSequence, timeline, getActiveClient, getActiveCredentials],
   );
   /*
    * The sender is built by an effect and held in a ref, not memoized into render.
@@ -1213,7 +1255,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
    * then the LAN keeps serving — stability over chasing.
    */
   useEffect(() => {
-    if (!enabled || !lanClient || transport.kind !== 'lan') return undefined;
+    if (!enabled || !lanReady || !lanClient || transport.kind !== 'lan') return undefined;
     let cancelled = false;
     const check = async () => {
       const result = await client.assignment(identity);
@@ -1229,7 +1271,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       cancelled = true;
       clearInterval(timer);
     };
-  }, [enabled, lanClient, transport.kind, client, identity, applyTransportEvent, timeline]);
+  }, [enabled, lanReady, lanClient, transport.kind, client, identity, applyTransportEvent, timeline]);
 
   // The assignment poll. Its only outputs are state; it can neither start nor stop a game.
   useEffect(() => {
@@ -1242,7 +1284,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (forbiddenRef.current !== null) return;
       const activeClient = getActiveClient();
       const viaPrimary = activeClient === client;
-      const result = await activeClient.assignment(identity);
+      const result = await activeClient.assignment(getActiveIdentity());
       if (cancelled) return;
       const classified = classifyPoll(result);
       setConnection(classified.connection);
@@ -1261,11 +1303,11 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           // this room right now, so a failed reconcile never latches the LAN by itself.
           // Everywhere else, repeated primary outages earn the fallback.
           const before = failoverRef.current;
-          const after = notePrimaryResult(before, classifyTransportFailure(result), lanClient !== undefined);
+          const after = notePrimaryResult(before, classifyTransportFailure(result), lanReady);
           failoverRef.current = after;
           if (after.lanActive && !before.lanActive && lanClient) {
-            // The game did not move: same room, same session, same credentials — only the
-            // path changed, and the poll restarting below reconciles onto it.
+            // The game did not move: both endpoint-specific sessions name the same match.
+            // The poll restarting below reconciles onto the LAN authority.
             timeline.record('lan-fallback', describeTransport({ kind: 'lan', endpoint: lanClient.baseUrl }));
             applyTransportEvent('http-ok');
           }
@@ -1342,8 +1384,10 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     timeline,
     transport.kind,
     getActiveClient,
+    getActiveIdentity,
     applyTransportEvent,
     lanClient,
+    lanReady,
   ]);
 
   /*
@@ -1489,7 +1533,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         // bytes, and let fingerprint idempotency converge the two paths.
       }
       const activeClient = getActiveClient();
-      const delivered = await deliverFinalResult(activeClient, credentials, qbj, noteWrite);
+      const delivered = await deliverFinalResult(activeClient, getActiveCredentials(), qbj, noteWrite);
       if (delivered.delivery === 'sent') {
         timeline.record(
           delivered.duplicate ? 'final-duplicate' : 'final-sent',
@@ -1502,22 +1546,22 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       return delivered;
     },
-    [client, credentials, forbidden, noteWrite, timeline, writerConflict, getActiveClient],
+    [client, forbidden, noteWrite, timeline, writerConflict, getActiveClient, getActiveCredentials],
   );
 
   const recoverFromServer = useCallback(async () => {
-    const result = await getActiveClient().recover(credentials);
+    const result = await getActiveClient().recover(getActiveCredentials());
     if (!result.ok) {
       throw new Error(result.detail ?? result.error);
     }
     return result.value;
-  }, [getActiveClient, credentials]);
+  }, [getActiveClient, getActiveCredentials]);
 
   const syncRosterPlayer = useCallback(
     async (teamName: string, playerName: string, teamId?: string, questionNumber?: number) => {
       const result = await getActiveClient().addRosterPlayer(
-        identity,
-        credentials,
+        getActiveIdentity(),
+        getActiveCredentials(),
         teamName,
         playerName,
         teamId,
@@ -1531,7 +1575,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // network problem the room can try again. The scorer says different things about each.
       return { ok: false, error: result.error, rejected: result.status !== undefined };
     },
-    [getActiveClient, identity, credentials, timeline],
+    [getActiveClient, getActiveIdentity, getActiveCredentials, timeline],
   );
 
   return {

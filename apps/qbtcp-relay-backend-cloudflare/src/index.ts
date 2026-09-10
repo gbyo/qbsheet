@@ -83,8 +83,16 @@ export default {
       /^\/qbtcp\/v1\/tournaments\/([^/]+)\/(discovery|assignment(?:\/status)?|pair|sessions(?:\/.*)?|presence|help(?:\/.*)?|stream)$/.exec(
         url.pathname,
       );
-    if (tournamentMatch) {
-      const [, rawId, action] = tournamentMatch;
+    // FruityServerClient treats the tournament-scoped URL as its server base and appends the
+    // canonical QBTCP surface. Keep the short public routes above, and accept that generic-client
+    // form as an exact alias so the link Director emits is directly consumable by Scorer.
+    const clientMatch =
+      /^\/qbtcp\/v1\/tournaments\/([^/]+)\/qbtcp\/v1(?:\/(assignment(?:\/status)?|pair|sessions(?:\/.*)?|presence|help(?:\/.*)?|stream))?$/.exec(
+        url.pathname,
+      );
+    if (tournamentMatch || clientMatch) {
+      const [, rawId, matchedAction] = tournamentMatch ?? clientMatch!;
+      const action = matchedAction ?? 'discovery';
       const tournamentId = tournamentIdFromPath(rawId);
       if (!tournamentId) {
         return new RelayError(404, 'not-found', 'No such tournament.').toResponse({});
@@ -170,10 +178,12 @@ function withStreamPath(headers: Headers, pathname: string): Headers {
   // it from the tournament id, but the Worker states the path it actually routes, so a mount
   // under a different prefix could never advertise a stale endpoint.
   const copy = new Headers(headers);
-  const streamPath = pathname.replace(
-    /\/(discovery|assignment(?:\/status)?|pair|sessions(?:\/.*)?|presence|help(?:\/.*)?|stream)$/,
-    '/stream',
-  );
+  const streamPath = pathname.endsWith('/qbtcp/v1')
+    ? `${pathname.slice(0, -'/qbtcp/v1'.length)}/stream`
+    : pathname.replace(
+        /\/(discovery|assignment(?:\/status)?|pair|sessions(?:\/.*)?|presence|help(?:\/.*)?|stream)$/,
+        '/stream',
+      );
   copy.set('x-relay-stream-path', streamPath);
   return copy;
 }

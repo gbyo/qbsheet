@@ -209,15 +209,29 @@ export default function ScoringScreen(props: {
   /**
    * The tournament-supplied LAN fallback under the same pairing, if any.
    *
-   * A separate client because the address differs; the authority does not, so the same
-   * room and session credentials travel on either path and no second pairing exists.
+   * A separate client and separate capabilities because relay and LAN mint authority
+   * independently. They still name one logical room and game.
    */
   // `live` gates on the connection belonging to this game; hoisting the address out keeps
   // the memo key a plain value the compiler can verify instead of a deep property access.
   const lanBaseUrl = live ? connection?.lanBaseUrl : undefined;
+  const lanRoomToken = live ? connection?.lanRoomToken : undefined;
+  const lanSessionId = live ? connection?.lanSessionId : undefined;
+  const lanSessionToken = live ? connection?.lanSessionToken : undefined;
   const lanClient = useMemo(
-    () => (lanBaseUrl ? new FruityServerClient(lanBaseUrl) : undefined),
-    [lanBaseUrl],
+    () =>
+      lanBaseUrl && lanRoomToken && lanSessionId && lanSessionToken
+        ? new FruityServerClient(lanBaseUrl)
+        : undefined,
+    [lanBaseUrl, lanRoomToken, lanSessionId, lanSessionToken],
+  );
+  const lanIdentity = useMemo(
+    () => (live && lanRoomToken ? { ...live.identity, token: lanRoomToken } : undefined),
+    [lanRoomToken, live],
+  );
+  const lanCredentials = useMemo(
+    () => (lanSessionId && lanSessionToken ? { sessionId: lanSessionId, token: lanSessionToken } : undefined),
+    [lanSessionId, lanSessionToken],
   );
 
   /**
@@ -232,6 +246,8 @@ export default function ScoringScreen(props: {
       onConnectionRepaired({
         ...(repair.sessionId !== undefined ? { sessionId: repair.sessionId } : {}),
         ...(repair.sessionToken !== undefined ? { sessionToken: repair.sessionToken } : {}),
+        ...(repair.lanSessionId !== undefined ? { lanSessionId: repair.lanSessionId } : {}),
+        ...(repair.lanSessionToken !== undefined ? { lanSessionToken: repair.lanSessionToken } : {}),
       });
     },
     [onConnectionRepaired],
@@ -256,6 +272,8 @@ export default function ScoringScreen(props: {
     progressSequence: connection?.progressSequence,
     onProgressSequence,
     lanClient,
+    lanIdentity,
+    lanCredentials,
   });
 
   /**

@@ -37,6 +37,7 @@ export interface IConnectedStart {
   room: IPairedRoom;
   identity: IRoomIdentity;
   credentials: ISessionCredentials;
+  lanCredentials?: ISessionCredentials;
   tournamentKey?: string;
   definition: IGameDefinition;
   /** False once the room that owns this start transaction has unmounted or changed. */
@@ -150,6 +151,24 @@ function identityFor(room: IPairedRoom, operatorName: string): IRoomIdentity {
     roomName: room.roomName,
     ...(operatorName.trim() !== '' ? { operatorName: operatorName.trim() } : {}),
   };
+}
+
+function lanIdentityFor(room: IPairedRoom, operatorName: string): IRoomIdentity | null {
+  if (!room.lanRoomToken) return null;
+  return { ...identityFor(room, operatorName), token: room.lanRoomToken };
+}
+
+/** Open the same match on LAN with LAN-minted authority; absence/failure leaves Internet usable. */
+export async function openLanFallbackSession(
+  room: IPairedRoom,
+  operatorName: string,
+  matchId: string,
+  clientFactory: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
+): Promise<ISessionCredentials | undefined> {
+  const identity = lanIdentityFor(room, operatorName);
+  if (!room.lanBaseUrl || !identity) return undefined;
+  const opened = await clientFactory(room.lanBaseUrl).openSession(identity, matchId);
+  return opened.ok ? { sessionId: opened.value.sessionId, token: opened.value.token } : undefined;
 }
 
 function progressFor(record: IStoredGameRecord): string {
@@ -464,10 +483,12 @@ export default function ConnectedRoom(props: {
         );
         return;
       }
+      const lanCredentials = await openLanFallbackSession(pairedRoom, operatorName, expectedMatchId);
       const outcome = await onStart({
         room: pairedRoom,
         identity,
         credentials: { sessionId: session.value.sessionId, token: session.value.token },
+        ...(lanCredentials ? { lanCredentials } : {}),
         ...(currentValue.tournamentKey ? { tournamentKey: currentValue.tournamentKey } : {}),
         definition: currentValue.definition,
         isCurrent,

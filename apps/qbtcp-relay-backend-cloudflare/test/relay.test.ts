@@ -329,6 +329,17 @@ describe('discovery', () => {
     const response = await SELF.fetch(`${tournamentBase(freshTournamentId())}/discovery`);
     expect(response.status).toBe(404);
   });
+
+  it('serves discovery at the generic-client path appended to the tournament base', async () => {
+    const { tournamentId } = await setupRoom();
+    const response = await SELF.fetch(`${tournamentBase(tournamentId)}/qbtcp/v1`);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      protocol: 'QBTCP',
+      version: 1,
+      stream: { endpoint: `/qbtcp/v1/tournaments/${tournamentId}/stream` },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -487,6 +498,17 @@ describe('pairing', () => {
     expect(paired.status).toBe(200);
     expect(paired.body.room_id).toBe('room-a');
     expect(paired.body.token).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('accepts pairing at the generic-client path appended to the tournament base', async () => {
+    const { tournamentId } = await setupRoom('room-a', '42424242');
+    const response = await SELF.fetch(`${tournamentBase(tournamentId)}/qbtcp/v1/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': `client-${tournamentId}` },
+      body: JSON.stringify({ code: '42424242', roomId: 'room-a' }),
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ room_id: 'room-a', token: expect.any(String) });
   });
 });
 

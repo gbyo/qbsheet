@@ -1034,9 +1034,13 @@ export default function App() {
       roomId: next.roomId,
       roomName: next.roomName,
       roomToken: next.roomToken,
+      lanBaseUrl: next.lanBaseUrl,
+      lanRoomToken: next.lanRoomToken,
       deviceId: next.deviceId,
       sessionId: next.sessionId,
       sessionToken: next.sessionToken,
+      lanSessionId: next.lanSessionId,
+      lanSessionToken: next.lanSessionToken,
       gameRecordId: next.gameRecordId,
       tournamentKey: next.tournamentKey,
       progressSequence: next.progressSequence,
@@ -1097,6 +1101,12 @@ export default function App() {
         ...start.room,
         sessionId: start.credentials.sessionId,
         sessionToken: start.credentials.token,
+        ...(start.lanCredentials
+          ? {
+              lanSessionId: start.lanCredentials.sessionId,
+              lanSessionToken: start.lanCredentials.token,
+            }
+          : {}),
         gameRecordId: record.id,
         tournamentKey: start.tournamentKey,
       };
@@ -1341,6 +1351,9 @@ export default function App() {
           connection?.roomToken,
           connection?.sessionToken,
           connection?.sessionId,
+          connection?.lanRoomToken,
+          connection?.lanSessionToken,
+          connection?.lanSessionId,
           connection?.roomId,
           connection?.deviceId,
         ].filter((value): value is string => typeof value === 'string' && value !== '')}

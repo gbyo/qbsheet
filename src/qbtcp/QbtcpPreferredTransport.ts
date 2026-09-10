@@ -67,8 +67,8 @@ export interface IQbtcpEndpoints {
   /** Normalized, no trailing slash. The address scorers pair against and QR codes carry. */
   primary: string;
   /**
-   * Normalized, no trailing slash. The same tournament/room authority on the venue network —
-   * not a second pairing, so the same room and session credentials apply on either path.
+   * Normalized, no trailing slash. The same logical tournament room on the venue network.
+   * Relay and LAN credentials are independently minted even though the game identity is shared.
    */
   lan?: string;
 }
