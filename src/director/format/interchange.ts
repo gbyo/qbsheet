@@ -310,7 +310,7 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
     bonusPoints: number(team.bonusPoints) ?? 0,
     bouncebacks: number(team.bonusBouncebackPoints) ?? 0,
     // YellowFruit parity (#747): unknown lightning stays unknown through interchange.
-    ...(number(team.lightningPoints) !== undefined ? { lightningPoints: number(team.lightningPoints) } : {}),
+    ...(typeof team.lightningPoints === 'number' ? { lightningPoints: team.lightningPoints } : {}),
   }));
 }
 

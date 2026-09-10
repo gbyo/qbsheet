@@ -317,8 +317,7 @@ function teamAggregate(
     gets,
     negs,
     bonuses: finiteNumber(entry.bonuses_heard) ?? finiteNumber(entry.bonuses) ?? 0,
-    bonusPoints:
-      finiteNumber(entry.bonus_points) ?? points - tossupPoints - bouncebacks - (lightning ?? 0),
+    bonusPoints: finiteNumber(entry.bonus_points) ?? points - tossupPoints - bouncebacks - (lightning ?? 0),
     bouncebacks,
     lightningPoints: lightning ?? null,
   };
