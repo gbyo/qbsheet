@@ -156,11 +156,14 @@ const CREDENTIAL_KEY_PATTERN = /token|code|secret|password|credential|bearer/i;
 /**
  * Read the stream descriptor from a discovery document.
  *
- * Strict about the fields the client acts on (endpoint shape, frame version, bounds) and
- * forgiving about the rest: unknown descriptor fields are ignored so a future relay does not
- * break this client. Returns null when the server does not advertise the stream, and also
- * null — rather than a half-understood descriptor — when the advertisement is malformed or
- * carries anything credential-shaped.
+ * Strict about the fields the client acts on (endpoint shape, frame version, bounds, and the
+ * replay feature list) and forgiving about the rest: unknown descriptor fields are ignored so
+ * a future relay does not break this client, but a replay entry that is not a known v1 feature
+ * makes the whole descriptor unusable — replay is negotiation metadata, and guessing across a
+ * version gap would let two implementations disagree about whether a relay is stream-capable.
+ * Returns null when the server does not advertise the stream, and also null — rather than a
+ * half-understood descriptor — when the advertisement is malformed or carries anything
+ * credential-shaped.
  */
 export function readStreamDescriptor(discovery: IQbtcpDiscovery | null): IQbtcpStreamDescriptor | null {
   if (!supportsStream(discovery)) return null;
@@ -174,13 +177,13 @@ export function readStreamDescriptor(discovery: IQbtcpDiscovery | null): IQbtcpS
   if (typeof raw.frames !== 'number' || !Number.isInteger(raw.frames) || raw.frames !== STREAM_FRAME_VERSION)
     return null;
   if (typeof raw.retains_finals !== 'boolean' || typeof raw.mirrors_assignment !== 'boolean') return null;
-  const replay = Array.isArray(raw.replay)
-    ? raw.replay.filter(
-        (entry): entry is StreamReplayFeature =>
-          typeof entry === 'string' && (STREAM_REPLAY_FEATURES as readonly string[]).includes(entry),
-      )
-    : null;
-  if (replay === null) return null;
+  if (!Array.isArray(raw.replay)) return null;
+  const replay: StreamReplayFeature[] = [];
+  for (const entry of raw.replay) {
+    if (typeof entry !== 'string' || !(STREAM_REPLAY_FEATURES as readonly string[]).includes(entry))
+      return null;
+    replay.push(entry as StreamReplayFeature);
+  }
   const maxFrameBytes =
     typeof raw.max_frame_bytes === 'number' &&
     Number.isInteger(raw.max_frame_bytes) &&

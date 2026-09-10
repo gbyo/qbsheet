@@ -35,6 +35,9 @@ fn fixture(name: &str) -> Value {
         "discovery" => {
             include_str!("../../../tests/fixtures/qbtcp-stream/discovery-with-stream.json")
         }
+        "discovery-unknown-replay" => {
+            include_str!("../../../tests/fixtures/qbtcp-stream/discovery-with-unknown-replay.json")
+        }
         "unsupported-version" => {
             include_str!("../../../tests/fixtures/qbtcp-stream/frame-unsupported-version.json")
         }
@@ -72,6 +75,51 @@ fn discovery_fixture_advertises_a_complete_descriptor() {
             ticket: false,
         }
     );
+}
+
+#[test]
+fn unknown_replay_feature_rejects_the_whole_descriptor() {
+    // Shared conformance fixture: TypeScript must reject this exact document too (#806).
+    assert!(matches!(
+        read_stream_descriptor(&fixture("discovery-unknown-replay")),
+        Err(StreamDescriptorError::Malformed(_))
+    ));
+    let discovery = fixture("discovery");
+    // Known subsets stay usable, including the empty subset.
+    for replay in [
+        serde_json::json!(["sequence"]),
+        serde_json::json!(["resync"]),
+        serde_json::json!(["sequence", "resync"]),
+        serde_json::json!([]),
+    ] {
+        let mut patched = discovery.clone();
+        patched["stream"]["replay"] = replay;
+        assert!(
+            read_stream_descriptor(&patched).unwrap().is_some(),
+            "known replay subset must stay usable"
+        );
+    }
+    // Unknown strings mixed with known values and non-string entries are all rejected,
+    // matching the TypeScript mirror exactly.
+    for replay in [
+        serde_json::json!(["sequence", "future-replay-mode"]),
+        serde_json::json!(["future-replay-mode"]),
+        serde_json::json!(["sequence", 42]),
+        serde_json::json!(["sequence", null]),
+        serde_json::json!([["sequence"]]),
+        serde_json::json!("sequence"),
+    ] {
+        let mut patched = discovery.clone();
+        patched["stream"]["replay"] = replay;
+        assert!(
+            read_stream_descriptor(&patched).is_err(),
+            "unknown replay value must reject the descriptor"
+        );
+    }
+    // Duplicate known entries carry no new meaning and stay usable on both sides.
+    let mut patched = discovery.clone();
+    patched["stream"]["replay"] = serde_json::json!(["sequence", "sequence"]);
+    assert!(read_stream_descriptor(&patched).unwrap().is_some());
 }
 
 #[test]

@@ -104,6 +104,34 @@ describe('discovery', () => {
     });
   });
 
+  test('an unknown replay feature makes the whole descriptor unusable (#806)', () => {
+    // Shared conformance fixture: Rust must reject this exact document too.
+    expect(readStreamDescriptor(readDiscovery(fixture('discovery-with-unknown-replay.json')))).toBeNull();
+    const base = fixture('discovery-with-stream.json') as Record<string, unknown>;
+    const stream = base.stream as Record<string, unknown>;
+    // Known subsets stay usable, including the empty subset.
+    for (const replay of [['sequence'], ['resync'], ['sequence', 'resync'], []]) {
+      expect(readStreamDescriptor(readDiscovery({ ...base, stream: { ...stream, replay } }))).not.toBeNull();
+    }
+    // Unknown strings mixed with known values, non-strings, and wrong shapes are all rejected.
+    for (const replay of [
+      ['sequence', 'future-replay-mode'],
+      ['future-replay-mode'],
+      ['sequence', 42],
+      ['sequence', null],
+      [['sequence']],
+      'sequence',
+    ]) {
+      expect(readStreamDescriptor(readDiscovery({ ...base, stream: { ...stream, replay } }))).toBeNull();
+    }
+    // Duplicate known entries carry no new meaning and stay usable.
+    expect(
+      readStreamDescriptor(
+        readDiscovery({ ...base, stream: { ...stream, replay: ['sequence', 'sequence'] } }),
+      ),
+    ).not.toBeNull();
+  });
+
   test('a descriptor carrying anything credential-shaped is rejected outright', () => {
     const base = fixture('discovery-with-stream.json') as Record<string, unknown>;
     const stream = { ...(base.stream as Record<string, unknown>) };
