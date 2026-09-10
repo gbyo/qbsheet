@@ -510,6 +510,11 @@ function toInterchangeGame(state: DirectorState, game: GameRecord): InterchangeG
     status: game.status,
     result: {
       teams: scores,
+      // Exact match TUH round-trips as native result fields; unknown stays absent (#746).
+      ...(typeof game.tossupsRead === 'number' ? { tossupsRead: game.tossupsRead } : {}),
+      ...(typeof game.overtimeTossupsRead === 'number'
+        ? { overtimeTossupsRead: game.overtimeTossupsRead }
+        : {}),
       players: game.playerStats.map((player) => ({
         playerId: player.playerId,
         teamId: player.teamId,
@@ -1046,6 +1051,11 @@ function fromInterchange(data: DirectorTournament): DirectorState {
         }
       : {}),
     scores: resultScores(game),
+    // Exact match TUH restores from native result fields; absent stays unknown (#746).
+    ...(typeof game.result?.tossupsRead === 'number' ? { tossupsRead: game.result.tossupsRead } : {}),
+    ...(typeof game.result?.overtimeTossupsRead === 'number'
+      ? { overtimeTossupsRead: game.result.overtimeTossupsRead }
+      : {}),
     playerStats: (game.result?.players ?? []).map((player) => ({
       playerId: player.playerId,
       teamId: player.teamId,

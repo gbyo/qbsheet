@@ -169,6 +169,9 @@ function detailState(): DirectorState {
       ],
       source: 'manual',
       detailedStats: 'complete',
+      // Canonical per-game team TUH is the exact match count, not summed lines (#746).
+      tossupsRead: 20,
+      overtimeTossupsRead: 0,
     },
     {
       id: 'game-2',
@@ -196,8 +199,8 @@ describe('canonical per-game report detail', () => {
       poolId: 'pool-a',
       packetId: 'packet-1',
       packetName: 'Packet 1',
-      tossupsRead: null,
-      overtimeTossupsRead: null,
+      tossupsRead: 20,
+      overtimeTossupsRead: 0,
     });
     expect(game.teamStats).toEqual([
       {

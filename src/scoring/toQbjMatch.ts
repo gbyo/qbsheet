@@ -251,7 +251,10 @@ export default function toQbjMatch(
     // A forfeit has no questions. FileParser clears tossupsRead for one anyway; not emitting it
     // keeps the payload from claiming something the game did not do.
     tossups_read: forfeit ? undefined : game.tossupsRead,
-    overtime_tossups_read: forfeit || game.overtimeTossupsRead === 0 ? undefined : game.overtimeTossupsRead,
+    // YellowFruit parity (#746): an explicit overtime zero is data, not noise. Canonical team
+    // regulation TUH treats a missing overtime count as unknown unless the game's own rules
+    // have no overtime period, so omitting the zero would poison regulation denominators.
+    overtime_tossups_read: forfeit ? undefined : game.overtimeTossupsRead,
     location: meta.location,
     moderator: meta.moderator,
     scorekeeper: meta.scorekeeper,

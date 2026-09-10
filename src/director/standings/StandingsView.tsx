@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   derivePlayerStandings,
   deriveTeamStandings,
+  playerHasAppearance,
   totalAcceptedResults,
   type DirectorState,
 } from '../domain';
@@ -21,6 +22,7 @@ import {
   type Column,
 } from '../components';
 import { playerStatsCsv, standingsFileStem, teamStandingsCsv } from '../format/standingsCsv';
+
 import { csvMediaType, downloadText } from '../format/downloadFile';
 import {
   UNKNOWN_STAT,
@@ -188,9 +190,8 @@ export function StandingsView({
   // Both tables derive from the same canonical scope selector: Director never
   // re-scopes or re-derives statistics locally (#750).
   const teamStandings = deriveTeamStandings(state, undefined, scopeOptions);
-  const playerStandings = derivePlayerStandings(state, scopeOptions).filter(
-    (standing) => standing.gamesPlayed > 0,
-  );
+  // Anyone with any appearance qualifies; bare GP > 0 would drop lined players on unknown TUH (#746).
+  const playerStandings = derivePlayerStandings(state, scopeOptions).filter(playerHasAppearance);
   const rankOf = new Map(teamStandings.map((standing, index) => [standing.teamId, index + 1]));
 
   if (state.teams.length === 0) {

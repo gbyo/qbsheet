@@ -34,7 +34,12 @@ import {
   type ResultSubmission,
   type TeamGameScore,
 } from '../domain/model';
-import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, isCanonicalCount } from '../domain';
+import {
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
+  invalidTeamGameScoreOvertimePoints,
+  isCanonicalCount,
+} from '../domain';
 import {
   activeDefinitionSnapshot,
   embeddedAnswerValuesFromRawQbj,
@@ -181,6 +186,13 @@ export interface ResultAssessment {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   /**
+   * Exact match tossups-read counts for the canonical game record (#746). Present whenever
+   * statistics were derived; absent on early returns that derive none. Null means the source
+   * result supplied no exact count — unknown, not zero.
+   */
+  tossupsRead?: number | null;
+  overtimeTossupsRead?: number | null;
+  /**
    * Which scoring truth the statistics above were derived under (#671). Present whenever
    * statistics were derived; absent on early returns that derive none.
    */
@@ -322,8 +334,80 @@ function teamAggregate(
     bonusPoints:
       finiteNumber(entry.bonus_points) ?? points - tossupPoints - (bouncebacks ?? 0) - (lightning ?? 0),
     bouncebacks,
+    overtimePoints: readOvertimePoints(entry, warnings),
     lightningPoints: lightning ?? null,
   };
+}
+
+/**
+ * Per-team overtime tossup points from the result's own overtime-buzz breakdown (#746).
+ *
+ * Each breakdown entry carries its answer value, so the figure is exact in both directions —
+ * never estimated from counts times live rules. An absent breakdown is silently unknown
+ * (MODAQ exports and manual results lose it; the scorer omits it when nobody converted in
+ * overtime); a present-but-malformed one warns and reads as unknown rather than partial.
+ */
+function readOvertimePoints(entry: Record<string, unknown>, warnings: string[]): number | null {
+  const data = entry.YfData;
+  if (!isRecord(data)) return null;
+  const buzzes = data.overTimeBuzzes;
+  if (buzzes === undefined) return null;
+  const validCount = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' &&
+    Number.isInteger(candidate) &&
+    Number.isFinite(candidate) &&
+    candidate >= 0;
+  const validValue = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' && Number.isFinite(candidate);
+  if (!Array.isArray(buzzes)) {
+    warnings.push(ingestWarnings.invalidStatisticCount);
+    return null;
+  }
+  let total = 0;
+  for (const buzz of buzzes) {
+    if (!isRecord(buzz)) {
+      warnings.push(ingestWarnings.invalidStatisticCount);
+      return null;
+    }
+    const answerType = buzz.answer_type;
+    const count = buzz.number;
+    const value = isRecord(answerType) ? answerType.value : undefined;
+    if (!validCount(count) || !validValue(value)) {
+      warnings.push(ingestWarnings.invalidStatisticCount);
+      return null;
+    }
+    total += count * value;
+  }
+  return total;
+}
+
+/**
+ * Exact match tossups-read counts from a result document (#746).
+ *
+ * Both teams hear the same tossups, so team TUH aggregates this match fact, never player
+ * lines. A present-but-malformed count warns and reads as unknown rather than zero; an
+ * absent count is silently unknown (legacy/manual detail).
+ */
+function readMatchTossups(
+  match: Record<string, unknown> | undefined,
+  warnings: string[],
+): { tossupsRead: number | null; overtimeTossupsRead: number | null } {
+  const valid = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' &&
+    Number.isInteger(candidate) &&
+    Number.isFinite(candidate) &&
+    candidate >= 0;
+  let tossupsRead: number | null = null;
+  let overtimeTossupsRead: number | null = null;
+  if (match?.tossups_read !== undefined) {
+    if (valid(match.tossups_read)) tossupsRead = match.tossups_read;
+    else warnings.push(ingestWarnings.invalidStatisticCount);
+  }
+  if (match?.overtime_tossups_read !== undefined) {
+    if (valid(match.overtime_tossups_read)) overtimeTossupsRead = match.overtime_tossups_read;
+    else warnings.push(ingestWarnings.invalidStatisticCount);
+  }
+  return { tossupsRead, overtimeTossupsRead };
 }
 
 /**
@@ -340,6 +424,8 @@ export function readResultStatistics(
 ): {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  tossupsRead: number | null;
+  overtimeTossupsRead: number | null;
   warnings: string[];
   definition: HistoricalDefinition;
 } {
@@ -353,6 +439,7 @@ export function readResultStatistics(
     ...(embeddedAnswerValues(value) ? { embeddedAnswerValues: embeddedAnswerValues(value) } : {}),
   });
   const match = matchObject(value);
+  const { tossupsRead, overtimeTossupsRead } = readMatchTossups(match, warnings);
   const entries = Array.isArray(match?.match_teams) ? match.match_teams : [];
   const scores = entries
     .map((entry) => {
@@ -362,6 +449,7 @@ export function readResultStatistics(
       if (!teamId || score === undefined) return null;
       const candidate = { teamId, score, ...teamAggregate(entry, definition, warnings) };
       if (invalidTeamGameScoreCountField(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
+      if (invalidTeamGameScoreOvertimePoints(candidate)) warnings.push(ingestWarnings.invalidStatisticCount);
       return candidate;
     })
     .filter((entry): entry is TeamGameScore => entry !== null);
@@ -399,7 +487,7 @@ export function readResultStatistics(
       return [stat];
     });
   });
-  return { scores, playerStats, warnings, definition };
+  return { scores, playerStats, tossupsRead, overtimeTossupsRead, warnings, definition };
 }
 
 /**
@@ -418,6 +506,8 @@ export function readResultStatisticsForAssociation(
 ): {
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
+  tossupsRead: number | null;
+  overtimeTossupsRead: number | null;
   warnings: string[];
   definition: HistoricalDefinition;
   positionalAssociation: boolean;
@@ -716,6 +806,8 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
       ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
       scores: statistics.scores,
       playerStats: statistics.playerStats,
+      tossupsRead: statistics.tossupsRead,
+      overtimeTossupsRead: statistics.overtimeTossupsRead,
       definition: statistics.definition,
       duplicateOfSubmissionId: duplicate.id,
       existingGameId: duplicate.gameId,
@@ -738,6 +830,8 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     ...(scheduled ? { scheduledGameId: scheduled.id } : {}),
     scores: statistics.scores,
     playerStats: statistics.playerStats,
+    tossupsRead: statistics.tossupsRead,
+    overtimeTossupsRead: statistics.overtimeTossupsRead,
     definition: statistics.definition,
     ...(conflict ? { conflictWithSubmissionId: conflict.id, existingGameId: conflict.gameId } : {}),
   };
@@ -887,6 +981,11 @@ export function stageIncomingDocument(
     status: 'submitted',
     scores: assessment.scores,
     playerStats: assessment.playerStats,
+    // Exact match TUH persists on the canonical record; corrections replace it like scores (#746).
+    ...(assessment.tossupsRead === undefined ? {} : { tossupsRead: assessment.tossupsRead }),
+    ...(assessment.overtimeTossupsRead === undefined
+      ? {}
+      : { overtimeTossupsRead: assessment.overtimeTossupsRead }),
     source: document.sourceKind === 'qbtcp' ? 'qbtcp' : 'qbj',
     ...(document.transportResultId ? { transportResultId: document.transportResultId } : {}),
     // Provenance echoed by the room; absent on legacy/generic documents (#670). Statistics

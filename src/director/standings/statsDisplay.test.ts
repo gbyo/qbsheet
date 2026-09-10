@@ -131,6 +131,10 @@ describe('shared cell values', () => {
       bouncebacksKnown: true,
       lightningPoints: 0,
       lightningKnown: true,
+      tossupsHeardRegulation: 40,
+      tossupsHeardRegulationKnown: true,
+      overtimePoints: 0,
+      overtimePointsKnown: true,
       gamesPlayed: 1,
       headToHead: 0,
     };
@@ -148,6 +152,7 @@ describe('shared cell values', () => {
       playerId: 'player-a',
       teamId: 'team-a',
       gamesPlayed: 1,
+      gamesPlayedKnown: true,
       tossupsHeard: 20,
       superpowers: 0,
       powers: 4,
@@ -161,5 +166,26 @@ describe('shared cell values', () => {
     expect(playerStatCell('pptuh', played)).toBe('8.50');
     expect(playerStatCell('tuh', { ...played, tossupsHeardKnown: false })).toBe('—');
     expect(playerStatCell('pptuh', { ...played, tossupsHeardKnown: false })).toBe('—');
+  });
+
+  test('the individual mapping renders unknown participation as unknown, not zero', () => {
+    const played = {
+      playerId: 'player-a',
+      teamId: 'team-a',
+      gamesPlayed: 0,
+      gamesPlayedKnown: false,
+      tossupsHeard: 20,
+      superpowers: 0,
+      powers: 4,
+      gets: 8,
+      negs: 1,
+      bonusPoints: 130,
+      points: 170,
+      ppg: 0,
+    };
+    // Lined players with no game denominator keep their row; G and PPG stay unknown (#746).
+    expect(playerStatCell('games', played)).toBe('—');
+    expect(playerStatCell('ppg', played)).toBe('—');
+    expect(playerStatCell('points', played)).toBe('170');
   });
 });

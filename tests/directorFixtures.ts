@@ -143,6 +143,7 @@ export function acceptedGame(
   scheduledGameId: string,
   scores: TeamGameScore[],
   playerStats: PlayerGameStat[] = [],
+  overrides: Partial<GameRecord> = {},
 ): GameRecord {
   return {
     id,
@@ -155,6 +156,7 @@ export function acceptedGame(
     source: 'manual',
     detailedStats: 'complete',
     acceptedAt: at,
+    ...overrides,
   };
 }
 
@@ -180,6 +182,8 @@ export function playedTournament(): DirectorState {
         playerStat('player-a', 'team-a', { powers: 4, gets: 8, negs: 1, bonusPoints: 130 }),
         playerStat('player-b', 'team-b', { powers: 1, gets: 9, negs: 3, bonusPoints: 90 }),
       ],
+      // Canonical team TUH and fractional GP need the exact match count (#746).
+      { tossupsRead: 20, overtimeTossupsRead: 0 },
     ),
   );
   return state;

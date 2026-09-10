@@ -329,10 +329,12 @@ export function buildPlayerStatisticsTable(
       cells: [
         { value: name, entityId: standing.playerId },
         { value: naming.teamName(standing.teamId), entityId: standing.teamId },
-        integer(standing.gamesPlayed),
+        // Fractional GP needs both player and game TUH: without a game denominator the
+        // participation is unknown, not zero, and PPG with it (#746).
+        standing.gamesPlayedKnown ? integer(standing.gamesPlayed) : { value: null, display: '—' },
         ...tiers.map((tier) => integer(standing[tier.id])),
         integer(points),
-        decimal(standing.ppg, 1),
+        standing.gamesPlayedKnown ? decimal(standing.ppg, 1) : { value: null, display: '—' },
       ],
     });
   }

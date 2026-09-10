@@ -26,9 +26,33 @@ export interface TeamStanding {
   /** False when any contributing game's detailed gets are unknown. */
   getsKnown: boolean;
   negs: number;
+  /**
+   * Team tossups heard: the sum of exact game tossups-read denominators (#746).
+   *
+   * This is match TUH from each accepted game, not summed player exposure. Pure-forfeit games
+   * contribute W/L but no TUH denominator.
+   */
   tossupsHeard: number;
-  /** False when any contributing scoresheet omitted tossups-heard. */
+  /** False when any contributing non-forfeit game lacked an exact tossups-read count. */
   tossupsHeardKnown: boolean;
+  /**
+   * Regulation tossups heard: total TUH minus known overtime (#746).
+   *
+   * Known only when total TUH is known and overtime is known for every contributing game
+   * (an explicit zero, or rules without overtime for that game).
+   */
+  tossupsHeardRegulation: number;
+  /** False when regulation TUH cannot be derived exactly for some contributing game. */
+  tossupsHeardRegulationKnown: boolean;
+  /**
+   * Overtime tossup points across contributing games (#746).
+   *
+   * Unknown when any contributing game's source supplied no overtime-buzz breakdown — except
+   * games played under rules without overtime, which contribute a known zero.
+   */
+  overtimePoints: number;
+  /** False when any contributing game left overtime points unknown. */
+  overtimePointsKnown: boolean;
   bonuses: number;
   bonusPoints: number;
   /**
@@ -52,7 +76,15 @@ export interface TeamStanding {
 export interface PlayerStanding {
   playerId: DirectorId;
   teamId: DirectorId;
+  /**
+   * Fractional games played: the sum over games of player TUH / game TUH (#746).
+   *
+   * A full game contributes 1.0; a substitute who heard half contributes 0.5. This matches
+   * YellowFruit's participation denominator rather than counting result-line appearances.
+   */
   gamesPlayed: number;
+  /** False when some appearance cannot be expressed fractionally (unknown player or game TUH). */
+  gamesPlayedKnown: boolean;
   tossupsHeard: number;
   /** False when at least one contributing scoresheet did not report TUH. */
   tossupsHeardKnown?: boolean;
@@ -237,6 +269,10 @@ export function deriveTeamStandings(
       negs: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
+      tossupsHeardRegulation: 0,
+      tossupsHeardRegulationKnown: true,
+      overtimePoints: 0,
+      overtimePointsKnown: true,
       bonuses: 0,
       bonusPoints: 0,
       bouncebackPoints: 0,
@@ -270,8 +306,10 @@ export function deriveTeamStandings(
       leftStanding.getsKnown = false;
       rightStanding.getsKnown = false;
     }
-    addTeamTossupsHeard(leftStanding, game.playerStats, left.teamId);
-    addTeamTossupsHeard(rightStanding, game.playerStats, right.teamId);
+    addTeamGameTuh(state, leftStanding, game);
+    addTeamGameTuh(state, rightStanding, game);
+    addTeamGameOvertimePoints(state, leftStanding, left.teamId, game);
+    addTeamGameOvertimePoints(state, rightStanding, right.teamId, game);
     leftStanding.powers += left.powers;
     leftStanding.gets += left.gets;
     leftStanding.negs += left.negs;
@@ -592,6 +630,7 @@ export function derivePlayerStandings(
       playerId: player.id,
       teamId: player.teamId,
       gamesPlayed: 0,
+      gamesPlayedKnown: true,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
       superpowers: 0,
@@ -606,10 +645,13 @@ export function derivePlayerStandings(
   const games = acceptedGameRecords(state, options);
   for (const game of games) {
     const values = scoringValuesForGame(state, game);
+    // Fractional GP uses the same game-TUH convention YellowFruit uses; a forfeit supplies no
+    // denominator, so any line it carries keeps GP unknown rather than inventing participation.
+    const gameTuh = gameTotalTuh(game);
     for (const stat of game.playerStats) {
       const standing = byPlayer.get(stat.playerId);
       if (!standing) continue;
-      addPlayerGame(standing, stat);
+      addPlayerGame(standing, stat, gameTuh);
       standing.points += playerPoints(stat, values);
     }
   }
@@ -634,27 +676,157 @@ function addTeamLightning(standing: TeamStanding, lightningPoints: number | null
 }
 
 /**
+ * Full scoring rules applicable to one stored game: its pinned definition snapshot when the
+ * record names one, else live tournament rules (#671 precedence, full-rules granularity).
+ *
  * Team tossups-heard comes from the team's own scoresheet lines. A game with
  * no lines for the team, or any line without a count, makes the team's total
  * unknown rather than a fabricated partial sum.
  */
-function addTeamTossupsHeard(
-  standing: TeamStanding,
-  playerStats: readonly PlayerGameStat[],
-  teamId: DirectorId,
-): void {
-  const lines = playerStats.filter((stat) => stat.teamId === teamId);
-  if (lines.length === 0) {
+function rulesForGame(state: DirectorState, game: GameRecord): TournamentRules | undefined {
+  if (game.definitionDigest) {
+    const snapshot = state.gameDefinitions.find(
+      (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
+    );
+    if (snapshot) return snapshot.rules;
+  }
+  return state.tournament?.rules;
+}
+
+function validTuh(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && Number.isFinite(value) && value >= 0;
+}
+
+/**
+ * Exact total TUH for a game, or null when unknown (#746).
+ *
+ * Forfeit games never supply a denominator: they count in W/L and record games but must not
+ * fabricate tossups heard, PPX denominators, or conversion rates.
+ */
+function gameTotalTuh(game: GameRecord): number | null {
+  if (game.status === 'forfeit') return null;
+  return validTuh(game.tossupsRead) ? game.tossupsRead : null;
+}
+
+/**
+ * Exact overtime TUH for a game, or null when unknown (#746).
+ *
+ * An absent overtime count is a known zero only when that game's own rules have no overtime
+ * period; otherwise the game may simply predate overtime tracking.
+ */
+function gameOvertimeTuh(state: DirectorState, game: GameRecord): number | null {
+  if (game.status === 'forfeit') return null;
+  if (validTuh(game.overtimeTossupsRead)) return game.overtimeTossupsRead;
+  if (rulesForGame(state, game)?.overtime === false) return 0;
+  return null;
+}
+
+/**
+ * Team TUH comes from exact match tossups-read denominators, never summed player exposure.
+ *
+ * Several players hear the same tossup and substitutions change summed exposure, so player
+ * lines cannot stand in for the match count. A non-forfeit game without an exact count marks
+ * the aggregate unknown rather than contributing a partial-subset sum.
+ */
+function addTeamGameTuh(state: DirectorState, standing: TeamStanding, game: GameRecord): void {
+  if (game.status === 'forfeit') return;
+  const total = gameTotalTuh(game);
+  if (total === null) {
     standing.tossupsHeardKnown = false;
+    standing.tossupsHeardRegulationKnown = false;
     return;
   }
-  for (const line of lines) {
-    if (line.tossupsHeard === null) {
-      standing.tossupsHeardKnown = false;
-      continue;
-    }
-    standing.tossupsHeard += line.tossupsHeard;
+  standing.tossupsHeard += total;
+  const overtime = gameOvertimeTuh(state, game);
+  if (overtime === null || overtime > total) {
+    standing.tossupsHeardRegulationKnown = false;
+    return;
   }
+  standing.tossupsHeardRegulation += total - overtime;
+}
+
+/**
+ * Exact overtime tossup points for one team in a game, or null when unknown (#746).
+ *
+ * An absent breakdown is a known zero only when that game's own rules have no overtime
+ * period — mirroring gameOvertimeTuh: otherwise the game may simply predate overtime
+ * tracking. A forfeit played no overtime, so it contributes a known zero.
+ */
+function gameOvertimePointsForTeam(
+  state: DirectorState,
+  game: GameRecord,
+  teamId: DirectorId,
+): number | null {
+  if (game.status === 'forfeit') return 0;
+  const score = game.scores.find((entry) => entry.teamId === teamId);
+  if (typeof score?.overtimePoints === 'number' && Number.isFinite(score.overtimePoints)) {
+    return score.overtimePoints;
+  }
+  if (rulesForGame(state, game)?.overtime === false) return 0;
+  return null;
+}
+
+function addTeamGameOvertimePoints(
+  state: DirectorState,
+  standing: TeamStanding,
+  teamId: DirectorId,
+  game: GameRecord,
+): void {
+  const overtime = gameOvertimePointsForTeam(state, game, teamId);
+  if (overtime === null) {
+    standing.overtimePointsKnown = false;
+    return;
+  }
+  standing.overtimePoints += overtime;
+}
+
+export interface TeamRegulationDerivation {
+  /**
+   * Overtime tossup points, or null when any contributing game left them unknown (never a
+   * verified zero).
+   */
+  overtimePoints: number | null;
+  /**
+   * Regulation points: total points minus known overtime points. Null when overtime is
+   * unknown, or when the split contradicts the total (overtime exceeding points means the
+   * source data disagrees with itself — fail closed, never a negative).
+   */
+  regulationPoints: number | null;
+  /**
+   * Points per regulation tossup heard. Null unless regulation points and regulation TUH are
+   * both fully known and at least one regulation tossup was heard.
+   */
+  pointsPerRegulationTossup: number | null;
+}
+
+/**
+ * Per-team regulation/overtime points splits with the normalized denominator facts (#746).
+ *
+ * Regulation points are a residual (total minus overtime), so adjustments and other
+ * period-less scoring stay in the regulation bucket by construction.
+ */
+export function regulationDerivationForTeam(
+  standing: Pick<
+    TeamStanding,
+    | 'pointsFor'
+    | 'overtimePoints'
+    | 'overtimePointsKnown'
+    | 'tossupsHeardRegulation'
+    | 'tossupsHeardRegulationKnown'
+  >,
+): TeamRegulationDerivation {
+  const overtime = standing.overtimePointsKnown ? standing.overtimePoints : null;
+  const regulationPoints =
+    overtime !== null && overtime <= standing.pointsFor ? standing.pointsFor - overtime : null;
+  const regulationTuh = standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null;
+  return {
+    overtimePoints: overtime,
+    regulationPoints,
+    pointsPerRegulationTossup:
+      regulationPoints !== null && regulationTuh !== null && regulationTuh > 0
+        ? regulationPoints / regulationTuh
+        : null,
+  };
 }
 
 /**
@@ -676,8 +848,19 @@ export function playerPoints(
   );
 }
 
-function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat): void {
-  standing.gamesPlayed += 1;
+/**
+ * One player result line: fractional participation plus exposure and buckets (#746).
+ *
+ * GP accrues player TUH / game TUH, so a half game is 0.5 GP. Either side unknown (or a
+ * degenerate zero game denominator) keeps GP unknown rather than counting an appearance.
+ * A bench player with no line gains nothing.
+ */
+function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat, gameTuh: number | null): void {
+  if (stat.tossupsHeard !== null && gameTuh !== null && gameTuh > 0) {
+    standing.gamesPlayed += stat.tossupsHeard / gameTuh;
+  } else {
+    standing.gamesPlayedKnown = false;
+  }
   if (stat.tossupsHeard !== null) standing.tossupsHeard += stat.tossupsHeard;
   else standing.tossupsHeardKnown = false;
   standing.superpowers += stat.superpowers;
@@ -689,6 +872,20 @@ function addPlayerGame(standing: PlayerStanding, stat: PlayerGameStat): void {
 
 export function totalAcceptedResults(state: DirectorState): number {
   return acceptedGameRecords(state).length;
+}
+
+/**
+ * Individual tables list anyone with any appearance (#746).
+ *
+ * Positive fractional GP always qualifies; a zero GP with unknown participation also qualifies
+ * because the player does have result lines — only a bench player (known zero, no lines)
+ * stays out. Filtering on bare `gamesPlayed > 0` would silently drop real scorers whose game
+ * TUH is unknown.
+ */
+export function playerHasAppearance(
+  standing: Pick<PlayerStanding, 'gamesPlayed' | 'gamesPlayedKnown'>,
+): boolean {
+  return standing.gamesPlayed > 0 || standing.gamesPlayedKnown === false;
 }
 
 /**

@@ -413,8 +413,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 13,
@@ -425,8 +425,8 @@
               "display": "150"
             },
             {
-              "value": 14.25,
-              "display": "14.25"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -587,8 +587,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 8,
@@ -599,8 +599,8 @@
               "display": "90"
             },
             {
-              "value": 9.5,
-              "display": "9.50"
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -745,8 +745,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 13,
@@ -757,8 +757,8 @@
               "display": "150"
             },
             {
-              "value": 14.25,
-              "display": "14.25"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -919,8 +919,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 8,
@@ -931,8 +931,8 @@
               "display": "90"
             },
             {
-              "value": 9.5,
-              "display": "9.50"
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -1077,8 +1077,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 13,
@@ -1089,8 +1089,8 @@
               "display": "150"
             },
             {
-              "value": 14.25,
-              "display": "14.25"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -1251,8 +1251,8 @@
               "display": "1"
             },
             {
-              "value": 20,
-              "display": "20"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 8,
@@ -1263,8 +1263,8 @@
               "display": "90"
             },
             {
-              "value": 9.5,
-              "display": "9.50"
+              "value": null,
+              "display": "—"
             }
           ]
         }
@@ -2000,8 +2000,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2020,8 +2020,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2039,8 +2039,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -2059,8 +2059,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2686,8 +2686,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -2706,8 +2706,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -2725,8 +2725,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -2745,8 +2745,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -3372,8 +3372,8 @@
               "entityId": "team-a"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 3,
@@ -3392,8 +3392,8 @@
               "display": "85"
             },
             {
-              "value": 85,
-              "display": "85.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
@@ -3411,8 +3411,8 @@
               "entityId": "team-b"
             },
             {
-              "value": 1,
-              "display": "1"
+              "value": null,
+              "display": "—"
             },
             {
               "value": 1,
@@ -3431,8 +3431,8 @@
               "display": "40"
             },
             {
-              "value": 40,
-              "display": "40.0"
+              "value": null,
+              "display": "—"
             }
           ]
         },
