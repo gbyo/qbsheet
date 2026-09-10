@@ -494,6 +494,72 @@ describe('resource center document structure', () => {
       }
     }
   });
+
+  test('rebases only href destinations so filename-like report data survives', () => {
+    const teams = standardTeams().map((row, index) =>
+      index === 0 ? { ...row, teamName: 'games.html' } : { ...row, teamName: 'standings.html Rivals & Co.' },
+    );
+    const players = standardPlayers().map((row, index) =>
+      index === 0
+        ? { ...row, playerName: 'teamdetail.html Star', teamId: 'team-a', teamName: 'games.html' }
+        : {
+            ...row,
+            playerName: 'playerdetail.html <Ace>',
+            teamId: 'team-b',
+            teamName: 'standings.html Rivals & Co.',
+          },
+    );
+    const games = standardGames().map((game) => ({
+      ...game,
+      teamOneId: 'team-a',
+      teamOneName: 'games.html',
+      teamTwoId: 'team-b',
+      teamTwoName: 'standings.html Rivals & Co.',
+      teamStats: (game.teamStats ?? []).map((row) =>
+        row.teamId === 'team-a'
+          ? { ...row, teamName: 'games.html' }
+          : { ...row, teamName: 'standings.html Rivals & Co.' },
+      ),
+      playerStats: (game.playerStats ?? []).map((row) =>
+        row.playerId === 'player-a'
+          ? { ...row, playerName: 'teamdetail.html Star', teamName: 'games.html' }
+          : { ...row, playerName: 'playerdetail.html <Ace>', teamName: 'standings.html Rivals & Co.' },
+      ),
+    }));
+    const snap = snapshotFor({ tournament: 'rounds.html Classic', teams, players, games });
+    const artifact = buildResourceCenterReport(snap, { baseName: 'my-tournament' });
+    const names = resourceCenterFileNames('my-tournament');
+
+    for (const file of artifact.files) {
+      // Visible report data keeps its literal filename-like text.
+      expect(file.content).toContain('games.html');
+      // No printable href destination survives rebasing.
+      for (const stale of [
+        'href="standings.html',
+        'href="individuals.html',
+        'href="games.html',
+        'href="rounds.html',
+        'href="teamdetail.html',
+        'href="playerdetail.html',
+      ]) {
+        expect(file.content).not.toContain(stale);
+      }
+    }
+
+    const standings = fileOf(artifact, 'standings').content;
+    // Cross-links (including anchors) point at the upload filenames.
+    expect(standings).toContain(`href="${names.teamDetail}#`);
+    expect(fileOf(artifact, 'teamDetail').content).toContain(`href="${names.scoreboard}#`);
+    expect(standings).toContain(`href="${names.standings}">Standings</a>`);
+    // Link text is data, not a destination: it stays literal.
+    expect(standings).toContain('>games.html</a>');
+    expect(standings).toContain('standings.html Rivals &amp; Co.');
+    expect(standings).not.toContain('standings.html Rivals & Co.');
+    expect(standings).not.toContain('my-tournament_games.html</a>');
+    // Escaped tournament/player data is not reinterpreted as markup.
+    expect(fileOf(artifact, 'individuals').content).toContain('playerdetail.html &lt;Ace&gt;');
+    expect(fileOf(artifact, 'individuals').content).toContain('teamdetail.html Star');
+  });
 });
 
 describe('resource center canonical semantics', () => {

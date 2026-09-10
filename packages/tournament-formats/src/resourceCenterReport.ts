@@ -190,11 +190,20 @@ function resourceCenterNav(
   return `<nav aria-label="Resource Center reports"><ul>${items}</ul></nav>`;
 }
 
+function escapeRebasePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Rebase shared-renderer output onto upload filenames: rewrite printable cross-links to the
  * `<base>_<role>.html` names and swap the printable nav (Index/Games/Rounds/Teams/Players)
  * for the Resource Center nav (Scoreboard/Team Detail/Player Detail/Round Report/…). Page
  * bodies — and every number in them — pass through untouched.
+ *
+ * Only `href` link destinations are rewritten. Report data (team/player/tournament names,
+ * escaped text, and any other HTML content) passes through byte-for-byte so a name such as
+ * `games.html` is never mistaken for a link target. Anchors (`#…`) and query strings (`?...`)
+ * on a link destination are preserved.
  */
 function rebaseReportLinks(
   content: string,
@@ -203,7 +212,9 @@ function rebaseReportLinks(
 ): string {
   // Rebase body cross-links first: upload filenames contain the printable names as
   // substrings (`<base>_standings.html` contains `standings.html`), so the nav swap must
-  // come last or its already-correct hrefs would be prefixed a second time.
+  // come last or its already-correct hrefs would be prefixed a second time. Matching the
+  // `href="…"` prefix (rather than the bare filename) keeps already-rebased destinations
+  // distinct from printable ones and leaves report data untouched.
   let rebased = content;
   const pairs: Array<[string, string]> = [
     [printableFileNames.standings, fileNames.standings],
@@ -214,7 +225,9 @@ function rebaseReportLinks(
     [printableFileNames.rounds, fileNames.rounds],
   ];
   for (const [from, to] of pairs) {
-    if (from !== to) rebased = rebased.split(from).join(to);
+    if (from === to) continue;
+    const pattern = new RegExp(`href=(["'])${escapeRebasePattern(from)}(?=[#?"'])`, 'g');
+    rebased = rebased.replace(pattern, `href=$1${to}`);
   }
   return rebased.replace(/<nav aria-label="Stat reports">.*?<\/nav>/s, resourceCenterNav(fileNames, kinds));
 }
