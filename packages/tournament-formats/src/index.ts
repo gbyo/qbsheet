@@ -15,3 +15,4 @@ export * from './stageAwareStandingsReport';
 export * from './reportPresentation';
 export * from './boxScoreReport';
 export * from './printableStatReport';
+export * from './resourceCenterReport';

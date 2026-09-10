@@ -10,6 +10,7 @@ import { errorNotice, infoNotice, warningNotice, type AnnounceInput } from '../n
 import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
+import { buildCanonicalResourceCenterReport } from '../reports/resourceCenterExport';
 import { ReportOptionsDialog } from './ReportOptionsDialog';
 
 export function PublishView({
@@ -74,6 +75,12 @@ export function PublishView({
               action="Download report"
               secondaryAction={{ label: 'Report options', onClick: () => setReportOptionsOpen(true) }}
               onClick={() => void downloadStatReport(state, onAnnounce, reportOptions)}
+            />
+            <ExportAction
+              title="Resource Center report"
+              description="Six upload-ready HTML files with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus an optional stat-key companion, all from the canonical snapshot."
+              action="Download ZIP"
+              onClick={() => void downloadResourceCenterReport(state, onAnnounce, reportOptions)}
             />
             <ExportAction
               title="Team standings HTML"
@@ -213,6 +220,28 @@ export async function downloadStatReport(
   } catch (reason: unknown) {
     onAnnounce(
       errorNotice(reason instanceof Error ? reason.message : 'Printable stat report could not be exported.'),
+    );
+  }
+}
+
+export async function downloadResourceCenterReport(
+  state: DirectorState,
+  onAnnounce: (announcement: AnnounceInput) => void,
+  options: ReportOptions = defaultReportOptions,
+): Promise<void> {
+  try {
+    const artifact = buildCanonicalResourceCenterReport(state, new Date().toISOString(), options);
+    await saveOrDownloadBytes(
+      artifact.bytes,
+      artifact.fileName,
+      'application/zip',
+      onAnnounce,
+      'Resource Center report exported',
+      'Resource Center report save cancelled.',
+    );
+  } catch (reason: unknown) {
+    onAnnounce(
+      errorNotice(reason instanceof Error ? reason.message : 'Resource Center report could not be exported.'),
     );
   }
 }

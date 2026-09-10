@@ -22,3 +22,14 @@ test('the standalone standings HTML is described as a view of the canonical repo
   const row = screen.getByText('Team standings HTML').closest('[role="listitem"]') as HTMLElement;
   expect(row.textContent).toContain('same canonical snapshot and renderer');
 });
+
+test('Exports offers the Resource Center report as a first-class download', () => {
+  render(<PublishView state={playedTournament()} onAnnounce={vi.fn()} />);
+
+  const row = screen.getByText('Resource Center report').closest('[role="listitem"]') as HTMLElement;
+  expect(row).toBeTruthy();
+  expect(within(row).getByRole('button', { name: 'Download ZIP' })).toBeTruthy();
+  expect(row.textContent).toContain('standings');
+  expect(row.textContent).toContain('scoreboard');
+  expect(row.textContent).toContain('stat-key');
+});
