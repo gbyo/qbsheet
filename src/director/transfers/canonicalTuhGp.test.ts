@@ -8,12 +8,7 @@
  * denominators.
  */
 import { describe, expect, test } from 'vitest';
-import {
-  derivePlayerStandings,
-  deriveTeamStandings,
-  isoNow,
-  type GameRecord,
-} from '../domain/model';
+import { derivePlayerStandings, deriveTeamStandings, isoNow, type GameRecord } from '../domain/model';
 import { buildCanonicalSnapshot } from '../reports/canonicalReports';
 import { digestText } from './canonical';
 import { assessIncomingDocument, stageIncomingDocument, type IncomingDocument } from './ingest';

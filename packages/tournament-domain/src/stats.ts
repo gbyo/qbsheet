@@ -640,10 +640,7 @@ function gameOvertimePointsForTeam(
 ): number | null {
   if (game.status === 'forfeit') return 0;
   const score = game.scores.find((entry) => entry.teamId === teamId);
-  if (
-    typeof score?.overtimePoints === 'number' &&
-    Number.isFinite(score.overtimePoints)
-  ) {
+  if (typeof score?.overtimePoints === 'number' && Number.isFinite(score.overtimePoints)) {
     return score.overtimePoints;
   }
   if (rulesForGame(state, game)?.overtime === false) return 0;
@@ -689,19 +686,20 @@ export interface TeamRegulationDerivation {
  * Regulation points are a residual (total minus overtime), so adjustments and other
  * period-less scoring stay in the regulation bucket by construction.
  */
-export function regulationDerivationForTeam(standing: Pick<
-  TeamStanding,
-  | 'pointsFor'
-  | 'overtimePoints'
-  | 'overtimePointsKnown'
-  | 'tossupsHeardRegulation'
-  | 'tossupsHeardRegulationKnown'
->): TeamRegulationDerivation {
+export function regulationDerivationForTeam(
+  standing: Pick<
+    TeamStanding,
+    | 'pointsFor'
+    | 'overtimePoints'
+    | 'overtimePointsKnown'
+    | 'tossupsHeardRegulation'
+    | 'tossupsHeardRegulationKnown'
+  >,
+): TeamRegulationDerivation {
   const overtime = standing.overtimePointsKnown ? standing.overtimePoints : null;
   const regulationPoints =
     overtime !== null && overtime <= standing.pointsFor ? standing.pointsFor - overtime : null;
-  const regulationTuh =
-    standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null;
+  const regulationTuh = standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null;
   return {
     overtimePoints: overtime,
     regulationPoints,

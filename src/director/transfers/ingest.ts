@@ -34,7 +34,12 @@ import {
   type ResultSubmission,
   type TeamGameScore,
 } from '../domain/model';
-import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, invalidTeamGameScoreOvertimePoints, isCanonicalCount } from '../domain';
+import {
+  invalidPlayerGameStatCountField,
+  invalidTeamGameScoreCountField,
+  invalidTeamGameScoreOvertimePoints,
+  isCanonicalCount,
+} from '../domain';
 import {
   activeDefinitionSnapshot,
   embeddedAnswerValuesFromRawQbj,
