@@ -9,6 +9,7 @@
 import { StrictMode, useState } from 'react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { advancementBasisToken } from '../domain';
 import type { DirectorState, ReissueDefinitionResult } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
@@ -413,6 +414,48 @@ describe('per-game definition visibility and reissue (#672)', () => {
     // The live game has an actions menu (forfeit/cancel) but no reissue item.
     fireEvent.click(screen.getByRole('button', { name: /game actions$/i }));
     expect(screen.queryByRole('option', { name: 'Reissue with current defaults…' })).toBeNull();
+  });
+
+  test('the correction dialog previews which advancement it would invalidate', () => {
+    const state = playedTournament();
+    state.submissions.push({
+      id: 'submission-1',
+      gameId: 'game-1',
+      receivedAt: '2026-09-05T14:00:00.000Z',
+      fingerprint: 'fingerprint-1',
+      status: 'accepted',
+      rawSubmission: {},
+      acceptedAt: '2026-09-05T14:01:00.000Z',
+    });
+    const phase = state.phases[0]!;
+    state.audit.push({
+      id: 'audit-commit-1',
+      at: '2026-09-05T15:00:00.000Z',
+      actor: 'Director',
+      type: 'advancement-committed',
+      summary: 'Moved 1 team.',
+      entityId: 'phase-2',
+      details: {
+        sourcePhaseId: 'phase-1',
+        basisToken: advancementBasisToken(state, phase),
+        qualifierTeamIds: ['team-a'],
+        assignments: [{ teamId: 'team-a', targetPoolId: 'pool-2' }],
+      },
+    });
+    renderResults(<ResultsView state={state} controller={controllerWith()} onAnnounce={vi.fn()} />);
+    showView(/^History/);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ninety Six result actions' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Correct accepted result…' }));
+
+    // Untouched scores: nothing downstream depends on an identical rewrite.
+    expect(screen.getByText(/No downstream impact/)).toBeVisible();
+    // Flipping the winner invalidates the committed advancement.
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Greenwood' }), {
+      target: { value: '400' },
+    });
+    expect(screen.getByText(/would invalidate/)).toBeVisible();
+    expect(screen.getByText(/Advancement from Preliminary/)).toBeVisible();
   });
 
   test('an unissued game has no scoring-rules line and no reissue shortcut', () => {

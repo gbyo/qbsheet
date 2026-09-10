@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
   definitionMatchesDefaults,
+  planResultCorrectionImpact,
   resultDecisionIssue,
   type DirectorState,
   type ProtestScoreAdjustment,
+  type ResultCorrectionImpact,
   type TeamGameScore,
 } from '../domain';
 import type { AdministrativeResultReplacement, DirectorController } from '../state/useDirectorController';
@@ -442,6 +444,44 @@ function SubmissionItem({
   );
 }
 
+/**
+ * What saving a correction would invalidate, shown before anything is applied (#673).
+ *
+ * Advisory: the correction path re-verifies guards at commit, so a race with an
+ * arriving result still refuses safely. A blocking issue disables Save outright.
+ */
+function CorrectionImpactNote({ impact }: { impact: ResultCorrectionImpact }) {
+  if (impact.issue) {
+    return (
+      <Callout tone="warning" title="This correction cannot be saved as entered">
+        {impact.issue}
+      </Callout>
+    );
+  }
+  if (impact.staleAdvancement.length === 0 && impact.bracketUpdates.length === 0) {
+    return (
+      <Callout tone="info" title="No downstream impact">
+        No committed advancement or bracket games depend on this result.
+      </Callout>
+    );
+  }
+  return (
+    <Callout tone="warning" title="Saving this correction would invalidate">
+      <ul className="director-compact-list">
+        {impact.staleAdvancement.map((entry) => (
+          <li key={entry.phaseId}>
+            Advancement from {entry.phaseName}
+            {entry.qualifiersChange ? ' (the qualifier set changes)' : ' (basis changes)'}
+          </li>
+        ))}
+        {impact.bracketUpdates.map((update) => (
+          <li key={update.scheduledGameId}>Bracket game {update.scheduledGameId} would be re-seeded</li>
+        ))}
+      </ul>
+    </Callout>
+  );
+}
+
 function SubmissionActionDialog({
   mode,
   state,
@@ -479,6 +519,27 @@ function SubmissionActionDialog({
   const currentForfeitingTeam = game.forfeitedTeamId ?? scheduled?.leftTeamId ?? '';
   const [correctionKind, setCorrectionKind] = useState<AdministrativeResultReplacement['kind']>('reopen');
   const [correctionForfeitingTeamId, setCorrectionForfeitingTeamId] = useState(currentForfeitingTeam);
+  // What saving the edited scores would invalidate, recomputed as the operator types (#673).
+  // Advisory only: the correction path re-verifies everything at commit.
+  const correctionImpact = useMemo(() => {
+    if (mode !== 'edit' || !scheduled) return null;
+    const nextLeft = Number(left);
+    const nextRight = Number(right);
+    if (!left.trim() || !right.trim() || !Number.isInteger(nextLeft) || !Number.isInteger(nextRight)) {
+      return null;
+    }
+    return planResultCorrectionImpact(
+      state,
+      game.id,
+      game.scores.map((entry) =>
+        entry.teamId === scheduled.leftTeamId
+          ? { ...entry, score: nextLeft }
+          : entry.teamId === scheduled.rightTeamId
+            ? { ...entry, score: nextRight }
+            : entry,
+      ),
+    );
+  }, [mode, scheduled, state, game, left, right]);
 
   if (mode === 'reject') {
     return (
@@ -681,7 +742,9 @@ function SubmissionActionDialog({
           if (saved) onClose();
         }}
         submitLabel="Save correction"
+        submitDisabled={Boolean(correctionImpact?.issue)}
       >
+        {correctionImpact && !correctionImpact.empty && <CorrectionImpactNote impact={correctionImpact} />}
         <FieldGrid>
           <Field label={teamLabel(state, scheduled.leftTeamId)}>
             <NumberInput step={1} value={left} onChange={(event) => setLeft(event.target.value)} />

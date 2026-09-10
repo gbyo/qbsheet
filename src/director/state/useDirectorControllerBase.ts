@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   activeTournamentTeams,
   assignmentEditBlocker,
+  bracketCorrectionUpdates,
   closeRound,
   defaultRules,
   effectiveRoundDeliveryMode,
@@ -17,6 +18,7 @@ import {
   nextDayOrder,
   orderDayItems,
   phaseCanComplete,
+  planBracketCorrection,
   planTeamRestore,
   pinIssuedDefinitions,
   plannedEliminationGameForTeam,
@@ -40,6 +42,7 @@ import {
   packetRetirementImpact,
   retiredPacketBlocker,
   resultDecisionIssue,
+  winnerAndLoser,
   releasedGameRoomMoveBlocker,
   roundScheduleIsValid,
   rosterAmendmentId,
@@ -55,6 +58,7 @@ import {
   type DirectorId,
   type DirectorState,
   type AdvancementRule,
+  type BracketCorrectionPlan,
   type OperationalAssignmentKind,
   type PlanRoundOptions,
   type FormatKind,
@@ -7990,17 +7994,6 @@ function applyAcceptedResultCorrection(
   return replacementId;
 }
 
-interface BracketCorrectionUpdate {
-  scheduledGameId: DirectorId;
-  leftTeamId: DirectorId;
-  rightTeamId: DirectorId;
-}
-
-interface BracketCorrectionPlan {
-  updates: BracketCorrectionUpdate[];
-  issue?: string;
-}
-
 function planAdministrativeResultCorrection(
   state: DirectorState,
   scheduledGameId: DirectorId,
@@ -8050,53 +8043,6 @@ function planAdministrativeResultCorrection(
   return bracketCorrectionUpdates(state, format.bracket, scheduled.bracketKey, after, scheduledGameId);
 }
 
-function bracketCorrectionUpdates(
-  state: DirectorState,
-  bracket: NonNullable<DirectorState['formats'][number]['bracket']>,
-  sourceKey: string,
-  after: NonNullable<ReturnType<typeof resolveDirectorBracket>>,
-  sourceScheduledGameId: DirectorId,
-): BracketCorrectionPlan {
-  const updates: BracketCorrectionUpdate[] = [];
-  for (const key of dependentBracketKeys(bracket, sourceKey)) {
-    const expected = after.games.find((candidate) => candidate.key === key);
-    const dependents = state.scheduledGames.filter((candidate) => candidate.bracketKey === key);
-    for (const dependent of dependents) {
-      if (
-        expected?.ready &&
-        dependent.leftTeamId === expected.slotA.teamId &&
-        dependent.rightTeamId === expected.slotB.teamId
-      ) {
-        continue;
-      }
-      if (!expected?.ready) {
-        return {
-          updates: [],
-          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} is no longer resolvable.`,
-        };
-      }
-      const hasUnresolvedRecord = state.games.some(
-        (candidate) =>
-          candidate.scheduledGameId === dependent.id &&
-          candidate.status !== 'rejected' &&
-          candidate.status !== 'cancelled',
-      );
-      if (dependent.status !== 'scheduled' || hasUnresolvedRecord) {
-        return {
-          updates: [],
-          issue: `Cannot correct ${sourceScheduledGameId}: dependent bracket game ${dependent.id} has already been released or has a result.`,
-        };
-      }
-      updates.push({
-        scheduledGameId: dependent.id,
-        leftTeamId: expected.slotA.teamId as DirectorId,
-        rightTeamId: expected.slotB.teamId as DirectorId,
-      });
-    }
-  }
-  return { updates };
-}
-
 function outcomeForGame(
   game: Pick<GameRecord, 'status' | 'scores' | 'forfeitedTeamId'>,
   scheduled: Pick<ScheduledGame, 'leftTeamId' | 'rightTeamId'>,
@@ -8111,119 +8057,6 @@ function outcomeForGame(
     return { winnerTeamId, loserTeamId: game.forfeitedTeamId };
   }
   return winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
-}
-
-function planBracketCorrection(
-  state: DirectorState,
-  gameId: DirectorId,
-  scores: TeamGameScore[],
-): BracketCorrectionPlan {
-  const game = state.games.find((entry) => entry.id === gameId);
-  const scheduled = game
-    ? state.scheduledGames.find((entry) => entry.id === game.scheduledGameId)
-    : undefined;
-  const round = scheduled ? state.rounds.find((entry) => entry.id === scheduled.roundId) : undefined;
-  const phase = round ? state.phases.find((entry) => entry.id === round.phaseId) : undefined;
-  const format = phase ? state.formats.find((entry) => entry.id === phase.formatId) : undefined;
-  if (!game || !scheduled || !format || format.kind !== 'single-elimination' || !scheduled.bracketKey) {
-    return { updates: [] };
-  }
-
-  const previousOutcome = winnerAndLoser(game.scores, scheduled.leftTeamId, scheduled.rightTeamId);
-  const correctedOutcome = winnerAndLoser(scores, scheduled.leftTeamId, scheduled.rightTeamId);
-  if (correctedOutcome.winnerTeamId === null || correctedOutcome.loserTeamId === null) {
-    return {
-      updates: [],
-      issue: `Cannot correct ${scheduled.id}: a single-elimination result must remain decisive.`,
-    };
-  }
-  if (
-    previousOutcome.winnerTeamId === correctedOutcome.winnerTeamId &&
-    previousOutcome.loserTeamId === correctedOutcome.loserTeamId
-  ) {
-    return { updates: [] };
-  }
-
-  const corrected = structuredClone(state);
-  const correctedGame = corrected.games.find((entry) => entry.id === gameId);
-  if (correctedGame) correctedGame.scores = structuredClone(scores);
-  const after = resolveDirectorBracket(corrected, format.id);
-  if (!after || !format.bracket) return { updates: [] };
-
-  const dependentKeys = dependentBracketKeys(format.bracket, scheduled.bracketKey);
-  const updates: BracketCorrectionUpdate[] = [];
-  for (const key of dependentKeys) {
-    const expected = after.games.find((candidate) => candidate.key === key);
-    const dependents = state.scheduledGames.filter((candidate) => candidate.bracketKey === key);
-    for (const dependent of dependents) {
-      if (
-        expected?.ready &&
-        dependent.leftTeamId === expected.slotA.teamId &&
-        dependent.rightTeamId === expected.slotB.teamId
-      ) {
-        continue;
-      }
-      if (!expected?.ready) {
-        return {
-          updates: [],
-          issue: `Cannot correct ${scheduled.id}: dependent bracket game ${dependent.id} is no longer resolvable.`,
-        };
-      }
-      const hasUnresolvedRecord = state.games.some(
-        (candidate) =>
-          candidate.scheduledGameId === dependent.id &&
-          candidate.status !== 'rejected' &&
-          candidate.status !== 'cancelled',
-      );
-      if (dependent.status !== 'scheduled' || hasUnresolvedRecord) {
-        return {
-          updates: [],
-          issue: `Cannot correct ${scheduled.id}: dependent bracket game ${dependent.id} has already been released or has a result.`,
-        };
-      }
-      updates.push({
-        scheduledGameId: dependent.id,
-        leftTeamId: expected.slotA.teamId as DirectorId,
-        rightTeamId: expected.slotB.teamId as DirectorId,
-      });
-    }
-  }
-  return { updates };
-}
-
-function winnerAndLoser(
-  scores: readonly TeamGameScore[],
-  leftTeamId: DirectorId,
-  rightTeamId: DirectorId | null,
-): { winnerTeamId: DirectorId | null; loserTeamId: DirectorId | null } {
-  if (!rightTeamId) return { winnerTeamId: null, loserTeamId: null };
-  const left = scores.find((score) => score.teamId === leftTeamId);
-  const right = scores.find((score) => score.teamId === rightTeamId);
-  if (!left || !right || left.score === right.score) return { winnerTeamId: null, loserTeamId: null };
-  return left.score > right.score
-    ? { winnerTeamId: leftTeamId, loserTeamId: rightTeamId }
-    : { winnerTeamId: rightTeamId, loserTeamId: leftTeamId };
-}
-
-function dependentBracketKeys(
-  bracket: NonNullable<DirectorState['formats'][number]['bracket']>,
-  root: string,
-): Set<string> {
-  const seen = new Set<string>();
-  const pending = [root];
-  while (pending.length > 0) {
-    const source = pending.shift() as string;
-    for (const node of bracket.nodes) {
-      if (seen.has(node.key)) continue;
-      const dependsOnSource = [node.slotA, node.slotB].some(
-        (slot) => slot.kind !== 'seed' && slot.gameKey === source,
-      );
-      if (!dependsOnSource) continue;
-      seen.add(node.key);
-      pending.push(node.key);
-    }
-  }
-  return seen;
 }
 
 function expireQbtcpSessions(state: DirectorState): boolean {

@@ -1,4 +1,5 @@
 export * from './advancement';
+export * from './correctionImpact';
 export * from './field';
 export * from './lifecycle';
 export * from './model';
