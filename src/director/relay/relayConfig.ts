@@ -32,6 +32,8 @@ export interface RelayConfig {
   baseUrl: string;
   /** The tournament's relay id. Names one Durable Object on the deployment. */
   tournamentId: string;
+  /** The local Director tournament this pointer belongs to. Absent only on pre-runtime configs. */
+  directorTournamentId?: string;
   /** Which keychain account holds the management credential. Always the tournament id. */
   keychainAccount: string;
   /** Set when the relay origin is a custom domain rather than `workers.dev`. */

@@ -91,6 +91,7 @@ export function localStorageRelayPanelStore(key = defaultStoreKey): RelayPanelSt
             enabled: config.enabled,
             baseUrl: config.baseUrl,
             tournamentId: config.tournamentId,
+            directorTournamentId: config.directorTournamentId,
             keychainAccount: config.tournamentId,
             customDomain: config.customDomain,
             claimedAt: config.claimedAt,
@@ -136,6 +137,7 @@ export function RelayPanel({
   qbliveOrigin = null,
   roomsMirrored = null,
   store,
+  directorTournamentId,
   onPointerChange,
   onAnnounce,
 }: {
@@ -143,6 +145,7 @@ export function RelayPanel({
   qbliveOrigin?: string | null;
   roomsMirrored?: { mirrored: number; total: number } | null;
   store?: RelayPanelStore;
+  directorTournamentId?: string;
   /** Structural pointer changes (claimed, disabled, destroyed) for parents showing pairings. */
   onPointerChange?: (config: RelayConfig | null) => void;
   onAnnounce: (announcement: AnnounceInput) => void;
@@ -272,6 +275,7 @@ export function RelayPanel({
         enabled: true,
         baseUrl: normalized.value,
         tournamentId: trimmedId,
+        ...(directorTournamentId ? { directorTournamentId } : {}),
         keychainAccount: trimmedId,
         customDomain: !isWorkersDevOrigin(normalized.value),
         claimedAt: new Date().toISOString(),
