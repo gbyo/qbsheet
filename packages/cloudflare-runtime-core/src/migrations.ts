@@ -55,15 +55,14 @@ export function runMigrations(db: SqlDatabase, migrations: Migration[]): Migrati
   if (new Set(versions).size !== versions.length) {
     throw new Error('Duplicate migration version: migrations are append-only.');
   }
-  const sorted = [...migrations].sort((a, b) => a.version - b.version);
-  for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index].version <= sorted[index - 1].version) {
+  for (let index = 1; index < migrations.length; index += 1) {
+    if (migrations[index].version <= migrations[index - 1].version) {
       throw new Error('Migration versions must be strictly increasing.');
     }
   }
   const applied = readAppliedVersions(db);
   const newlyApplied: number[] = [];
-  for (const migration of sorted) {
+  for (const migration of migrations) {
     if (applied.has(migration.version)) continue;
     for (const statement of migration.sql) {
       db.exec(statement);
