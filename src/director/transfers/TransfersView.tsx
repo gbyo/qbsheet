@@ -1,5 +1,5 @@
 /** Delivery moves assignments out; Results decides what a return means. */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { DirectorState } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
@@ -96,6 +96,23 @@ export function TransfersView({
   const [dropActive, setDropActive] = useState(false);
   const [selected, setSelected] = useState<DirectorId[]>([]);
 
+  // Selections address current-round rows only. When the operational round
+  // changes, previously visible rows disappear and their IDs must not linger
+  // where the operator can no longer see or uncheck them (#756).
+  const roundId = delivery.round?.id;
+  useEffect(() => {
+    setSelected([]);
+  }, [roundId]);
+
+  // Defense in depth: the effective selection is the intersection of the
+  // stored selection and the currently displayed rows, so a game removed or
+  // regenerated within the same round is also excluded from counts and
+  // device actions (#756).
+  const effectiveSelected = useMemo(() => {
+    const visible = new Set(delivery.rows.map((row) => row.scheduledGameId));
+    return selected.filter((gameId) => visible.has(gameId));
+  }, [delivery, selected]);
+
   const toggleSelected = useCallback((gameId: string) => {
     setSelected((previous) =>
       previous.includes(gameId) ? previous.filter((entry) => entry !== gameId) : [...previous, gameId],
@@ -191,7 +208,7 @@ export function TransfersView({
         transfers={transfers}
         state={state}
         delivery={delivery}
-        selected={selected}
+        selected={effectiveSelected}
         onAnnounce={onAnnounce}
       />
 
