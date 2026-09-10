@@ -19,9 +19,7 @@ vi.mock('../platform/native', () => ({
 const mockedIsNativeDirector = vi.mocked(isNativeDirector);
 const mockedSaveNativeFile = vi.mocked(saveNativeFile);
 
-function renderDialog(
-  onAnnounce: (announcement: AnnounceInput) => void,
-): void {
+function renderDialog(onAnnounce: (announcement: AnnounceInput) => void): void {
   render(
     <PrepareHsqbDialog
       state={playedTournament()}
