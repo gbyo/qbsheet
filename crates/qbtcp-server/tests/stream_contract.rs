@@ -42,6 +42,12 @@ fn fixture(name: &str) -> Value {
             include_str!("../../../tests/fixtures/qbtcp-stream/frame-unsupported-version.json")
         }
         "malformed" => include_str!("../../../tests/fixtures/qbtcp-stream/frame-malformed.json"),
+        "unicode-bmp" => {
+            include_str!("../../../tests/fixtures/qbtcp-stream/frame-unicode-bmp.json")
+        }
+        "unicode-astral" => {
+            include_str!("../../../tests/fixtures/qbtcp-stream/frame-unicode-astral.json")
+        }
         _ => panic!("unknown stream fixture {name}"),
     };
     serde_json::from_str(path).expect("stream fixture must parse")
@@ -240,6 +246,56 @@ fn oversize_frames_fail_before_they_are_read() {
         validate_stream_frame(&frame, 32),
         Err(StreamFrameError::TooLarge { .. })
     ));
+}
+
+#[test]
+fn frame_limits_are_utf8_bytes_on_both_sides() {
+    // Compact JSON is 93 characters but 133 UTF-8 bytes: this must fail a 100-byte limit
+    // exactly as the TypeScript mirror does (#809).
+    let bmp =
+        serde_json::json!({"version": 1, "type": "progress", "payload": {"note": "é".repeat(40)}});
+    assert_eq!(serde_json::to_vec(&bmp).unwrap().len(), 133);
+    assert_eq!(
+        validate_stream_frame(&bmp, 100),
+        Err(StreamFrameError::TooLarge {
+            size: 133,
+            max_bytes: 100
+        })
+    );
+    // The shared BMP corpus fixture agrees with the inline vector.
+    assert_eq!(
+        validate_stream_frame(&fixture("unicode-bmp"), 100),
+        Err(StreamFrameError::TooLarge {
+            size: 133,
+            max_bytes: 100
+        })
+    );
+    // Non-BMP (astral) text: 4 UTF-8 bytes per emoji, same 133-byte total.
+    let astral =
+        serde_json::json!({"version": 1, "type": "progress", "payload": {"note": "😀".repeat(20)}});
+    assert_eq!(serde_json::to_vec(&astral).unwrap().len(), 133);
+    assert_eq!(
+        validate_stream_frame(&astral, 100),
+        Err(StreamFrameError::TooLarge {
+            size: 133,
+            max_bytes: 100
+        })
+    );
+    assert!(matches!(
+        validate_stream_frame(&fixture("unicode-astral"), 100),
+        Err(StreamFrameError::TooLarge { size: 133, .. })
+    ));
+    // ASCII boundary: at the limit passes, one byte over fails.
+    let ascii = serde_json::json!({"version": 1, "type": "hello"});
+    let ascii_size = serde_json::to_vec(&ascii).unwrap().len();
+    assert!(validate_stream_frame(&ascii, ascii_size).is_ok());
+    assert!(matches!(
+        validate_stream_frame(&ascii, ascii_size - 1),
+        Err(StreamFrameError::TooLarge { .. })
+    ));
+    // Generous limits and the default 1 MiB bound still accept normal frames.
+    assert!(validate_stream_frame(&bmp, 133).is_ok());
+    assert!(validate_stream_frame(&bmp, DEFAULT_MAX_STREAM_FRAME_BYTES).is_ok());
 }
 
 #[test]
