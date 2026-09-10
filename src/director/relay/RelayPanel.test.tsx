@@ -130,30 +130,43 @@ describe('Internet QBTCP setup', () => {
   it('claims, validates every step, and reports ready with the relay as primary address', async () => {
     installKeychain();
     vi.stubGlobal('fetch', relayFetch());
-    const { onAnnounce, store } = renderPanel({});
+    // The mount-check effect must not chase the config object it refreshes: every
+    // refresh persists a new `lastContactAt`, so an effect depending on the live
+    // config re-renders forever (React's "Maximum update depth exceeded").
+    const renderLoop: unknown[][] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      renderLoop.push(args);
+    };
+    try {
+      const { onAnnounce, store } = renderPanel({});
 
-    fireEvent.change(screen.getByLabelText('Relay address'), { target: { value: baseUrl } });
-    fireEvent.change(screen.getByLabelText('Tournament id'), { target: { value: tournamentId } });
-    fireEvent.change(screen.getByLabelText('One-time setup secret'), {
-      target: { value: 'one-time-secret' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: /claim and validate/i }));
+      fireEvent.change(screen.getByLabelText('Relay address'), { target: { value: baseUrl } });
+      fireEvent.change(screen.getByLabelText('Tournament id'), { target: { value: tournamentId } });
+      fireEvent.change(screen.getByLabelText('One-time setup secret'), {
+        target: { value: 'one-time-secret' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /claim and validate/i }));
 
-    await waitFor(() => {
-      expect(screen.getByTestId('relay-panel-status')).toBeInTheDocument();
-    });
-    expect(screen.getByText(/Primary scoring address/)).toBeInTheDocument();
-    expect(screen.getByTestId('relay-panel-status').textContent).toContain(baseUrl);
-    // The healthy summary sits inside the collapsed diagnostics; the warning test below
-    // covers LAN fallback where it is expanded by default.
-    expect(onAnnounce).toHaveBeenCalledWith(expect.stringMatching(/ready/i));
-    expect((store as unknown as { saved: RelayConfig[] }).saved.at(-1)).toMatchObject({
-      enabled: true,
-      baseUrl,
-      tournamentId,
-    });
-    // The setup secret field unmounted with the wizard; nothing renders it.
-    expect(screen.queryByLabelText('One-time setup secret')).toBeNull();
+      await waitFor(() => {
+        expect(screen.getByTestId('relay-panel-status')).toBeInTheDocument();
+      });
+      expect(screen.getByText(/Primary scoring address/)).toBeInTheDocument();
+      expect(screen.getByTestId('relay-panel-status').textContent).toContain(baseUrl);
+      // The healthy summary sits inside the collapsed diagnostics; the warning test below
+      // covers LAN fallback where it is expanded by default.
+      expect(onAnnounce).toHaveBeenCalledWith(expect.stringMatching(/ready/i));
+      expect((store as unknown as { saved: RelayConfig[] }).saved.at(-1)).toMatchObject({
+        enabled: true,
+        baseUrl,
+        tournamentId,
+      });
+      // The setup secret field unmounted with the wizard; nothing renders it.
+      expect(screen.queryByLabelText('One-time setup secret')).toBeNull();
+    } finally {
+      console.error = originalError;
+    }
+    expect(renderLoop.flat().join('\n')).not.toMatch(/Maximum update depth exceeded/);
   });
 
   it('shows validation failures instead of reporting ready', async () => {

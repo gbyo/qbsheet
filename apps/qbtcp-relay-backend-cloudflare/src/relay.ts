@@ -40,6 +40,7 @@
  * platform limits so an operator sees pressure before Cloudflare says no.
  */
 
+import { clampPage } from '@qbsheet/cloudflare-runtime-core';
 import { DurableObject } from 'cloudflare:workers';
 
 import { utf8ByteLength } from './protocol/bytes';
@@ -3238,11 +3239,10 @@ function validRevision(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-function clampPage(value: number, low: number, high: number): number {
-  if (!Number.isFinite(value)) return low;
-  return Math.min(high, Math.max(low, Math.trunc(value)));
-}
-
+// Row counting stays service-typed: the Durable Object's `SqlStorage` cursor is not
+// interchangeable with the shared `SqlDatabase` test interface, and this helper runs at
+// every health read. Shared counting utilities live in `@qbsheet/cloudflare-runtime-core`
+// for harnesses and future services that speak the narrower interface.
 function countRows(sql: SqlStorage, table: string, where = '1 = 1'): number {
   return (
     sql.exec<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).toArray()[0]

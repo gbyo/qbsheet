@@ -14,6 +14,10 @@
  * receipt carries the same fingerprint the Rust contract would compute.
  */
 
+import { randomToken, sha256Hex, timingSafeEqual } from '@qbsheet/cloudflare-runtime-core';
+
+export { randomToken, sha256Hex, timingSafeEqual };
+
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 const TRANSPORT_KEYS = new Set([
@@ -140,32 +144,6 @@ function canonicalWithoutTransport(value: unknown): string {
  */
 export async function resultFingerprint(value: unknown): Promise<string> {
   return sha256Hex(canonicalWithoutTransport(value));
-}
-
-export async function sha256Hex(value: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
-}
-
-/**
- * Length-independent comparison of two hex digests.
- *
- * Both operands are SHA-256 output, so they are the same length whenever the input was well
- * formed; the length check is for the malformed case and does not leak anything about the secret.
- */
-export function timingSafeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
-  }
-  return difference === 0;
-}
-
-export function randomToken(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
