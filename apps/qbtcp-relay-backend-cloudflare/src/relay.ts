@@ -907,21 +907,26 @@ export class QbtcpRelay extends DurableObject<Env> {
 
     const source = this.pairingSource(request);
     const nowMs = Date.now();
-    this.sql.exec('DELETE FROM pair_hit WHERE at_ms < ?', nowMs - PAIRING_WINDOW_MS);
-    this.sql.exec('INSERT INTO pair_hit (source, at_ms) VALUES (?, ?)', source, nowMs);
-    this.wrote(2);
-    const attempts =
-      this.sql
-        .exec<{ count: number }>('SELECT COUNT(*) AS count FROM pair_hit WHERE source = ?', source)
-        .toArray()[0]?.count ?? 0;
+    this.sql.exec('DELETE FROM pair_hit WHERE at_ms <= ?', nowMs - PAIRING_WINDOW_MS);
+    this.wrote();
+    const window = this.sql
+      .exec<{ count: number; oldest: number | null }>(
+        'SELECT COUNT(*) AS count, MIN(at_ms) AS oldest FROM pair_hit WHERE source = ?',
+        source,
+      )
+      .toArray()[0];
+    const attempts = window?.count ?? 0;
     this.bump('pairing_attempts');
     if (attempts >= PAIRING_MAX_ATTEMPTS) {
-      const retryAfter = Math.max(1, Math.ceil(PAIRING_WINDOW_MS / 1000));
+      const oldest = window?.oldest ?? nowMs;
+      const retryAfter = Math.max(1, Math.ceil((oldest + PAIRING_WINDOW_MS - nowMs) / 1000));
       this.bump('pairing_rate_limited');
       throw new RelayError(429, 'rate_limited', 'Too many pairing attempts. Try again shortly.', {
         retry_after_secs: retryAfter,
       });
     }
+    this.sql.exec('INSERT INTO pair_hit (source, at_ms) VALUES (?, ?)', source, nowMs);
+    this.wrote();
 
     const code = typeof body.code === 'string' ? body.code : null;
     const requestedRoomId = typeof body.room_id === 'string' ? body.room_id : null;

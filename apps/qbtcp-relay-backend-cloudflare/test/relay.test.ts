@@ -400,30 +400,85 @@ describe('pairing', () => {
     expect(revoked.body).toEqual({ error: 'pairing_refused', message: 'The pairing code is not valid.' });
   });
 
-  it('rate-limits pairing per source with a retryable answer', async () => {
+  it('allows the configured final pairing attempt and limits the next one', async () => {
     const tournamentId = freshTournamentId();
     const management = await claim(tournamentId);
     await mirrorRoom(management, tournamentId, 'room-a', { code: '42424242' });
     const source = `ratelimit-${tournamentId.slice(0, 12)}`;
-    let limited = 0;
-    for (let attempt = 0; attempt < 40; attempt += 1) {
+    for (let attempt = 1; attempt <= 32; attempt += 1) {
       const response = await SELF.fetch(`${tournamentBase(tournamentId)}/pair`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-forwarded-for': source },
         body: JSON.stringify({ code: '00000000' }),
       });
-      if (response.status === 429) {
-        limited += 1;
-        const body = (await response.json()) as Record<string, unknown>;
-        expect(body.error).toBe('rate_limited');
-        expect(body.retry_after_secs).toBeGreaterThan(0);
-        expect(response.headers.get('retry-after')).not.toBeNull();
-      } else {
-        expect(response.status).toBe(401);
-      }
-      await response.text().catch(() => undefined);
+      expect(response.status, `attempt ${attempt}`).toBe(401);
     }
-    expect(limited).toBeGreaterThan(0);
+
+    const limited = await SELF.fetch(`${tournamentBase(tournamentId)}/pair`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': source },
+      body: JSON.stringify({ code: '00000000' }),
+    });
+    expect(limited.status).toBe(429);
+    const body = (await limited.json()) as Record<string, unknown>;
+    expect(body.error).toBe('rate_limited');
+    expect(body.retry_after_secs).toBeGreaterThan(0);
+    expect(limited.headers.get('retry-after')).toBe(String(body.retry_after_secs));
+  });
+
+  it('uses the oldest hit for retry timing without extending the rolling lockout', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+    await mirrorRoom(management, tournamentId, 'room-a', { code: '42424242' });
+    const sourceHeader = `rolling-${tournamentId.slice(0, 12)}`;
+    const storedSource = `fwd:${sourceHeader}`;
+    const seededAt = Date.now();
+    const oldestAt = seededAt - 55_000;
+    const stub = env.QBTCP_RELAY.get(env.QBTCP_RELAY.idFromName(tournamentId));
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec('INSERT INTO pair_hit (source, at_ms) VALUES (?, ?)', storedSource, oldestAt);
+      for (let attempt = 1; attempt < 32; attempt += 1) {
+        state.storage.sql.exec('INSERT INTO pair_hit (source, at_ms) VALUES (?, ?)', storedSource, seededAt);
+      }
+    });
+
+    const attempt = () =>
+      SELF.fetch(`${tournamentBase(tournamentId)}/pair`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': sourceHeader },
+        body: JSON.stringify({ code: '00000000' }),
+      });
+    const first = await attempt();
+    expect(first.status).toBe(429);
+    const firstBody = (await first.json()) as { retry_after_secs: number };
+    expect(firstBody.retry_after_secs).toBeGreaterThan(0);
+    expect(firstBody.retry_after_secs).toBeLessThan(60);
+
+    const second = await attempt();
+    expect(second.status).toBe(429);
+    const secondBody = (await second.json()) as { retry_after_secs: number };
+    expect(secondBody.retry_after_secs).toBeLessThanOrEqual(firstBody.retry_after_secs);
+    const retained = await runInDurableObject(
+      stub,
+      async (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number; newest: number }>(
+            'SELECT COUNT(*) AS count, MAX(at_ms) AS newest FROM pair_hit WHERE source = ?',
+            storedSource,
+          )
+          .toArray()[0],
+    );
+    expect(retained).toEqual({ count: 32, newest: seededAt });
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        'UPDATE pair_hit SET at_ms = ? WHERE source = ? AND at_ms = ?',
+        Date.now() - 60_001,
+        storedSource,
+        oldestAt,
+      );
+    });
+    expect((await attempt()).status).toBe(401);
   });
 
   it('pairs a mirrored code into a room-scoped token', async () => {
