@@ -48,6 +48,7 @@ async function serve(overrides: Overrides = {}): Promise<string> {
       response.writeHead(status, {
         'content-type': 'application/json',
         'access-control-allow-origin': '*',
+        'cache-control': 'no-cache',
       });
       response.end(JSON.stringify(body));
     };

@@ -22,6 +22,8 @@ on:
       - 'apps/live-web/**'
       - 'src/director/live/**'
       - 'apps/director/src-tauri/src/live*.rs'
+      - 'apps/director/src-tauri/Cargo.toml'
+      - 'crates/qblive-server/**'
       - 'ios/**'
       - 'docs/QBLIVE*.md'
       - 'docs/QBTCP-STREAM.md'
@@ -38,6 +40,8 @@ on:
       - 'apps/live-web/**'
       - 'src/director/live/**'
       - 'apps/director/src-tauri/src/live*.rs'
+      - 'apps/director/src-tauri/Cargo.toml'
+      - 'crates/qblive-server/**'
       - 'ios/**'
       - 'docs/QBLIVE*.md'
       - 'docs/QBTCP-STREAM.md'
@@ -368,6 +372,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             apps/director/src-tauri/target
+            crates/qblive-server/target
           key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-live-
       - name: Format
@@ -378,4 +383,13 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Test
         working-directory: apps/director/src-tauri
+        run: cargo test --all-targets --all-features
+      - name: Format the hosting-neutral server core
+        working-directory: crates/qblive-server
+        run: cargo fmt --all -- --check
+      - name: Clippy the hosting-neutral server core
+        working-directory: crates/qblive-server
+        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Test the hosting-neutral server core
+        working-directory: crates/qblive-server
         run: cargo test --all-targets --all-features

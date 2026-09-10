@@ -221,6 +221,12 @@ describe('the Rust crates are independent, except where Cargo says otherwise', (
     expect(affected(['crates/qbtcp-server/src/main.rs'])).toEqual(['rust-director', 'rust-qbtcp']);
   });
 
+  it('runs the Director crate for a qblive-server change, because it path-depends on it', () => {
+    // apps/director/src-tauri/Cargo.toml: qblive-server = { path = "../../../crates/qblive-server" }
+    expect(affected(['crates/qblive-server/src/lib.rs'])).toEqual(['rust-director']);
+    expect(affected(['crates/qblive-server/Cargo.toml'])).toEqual(['rust-director']);
+  });
+
   it('runs only the Director crate for a Director native change', () => {
     expect(affected(['apps/director/src-tauri/src/live.rs'])).toEqual(['rust-director']);
     expect(affected(['apps/director/src-tauri/Cargo.lock'])).toEqual(['rust-director']);
