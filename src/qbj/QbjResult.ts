@@ -152,11 +152,18 @@ export function buildResultMatch(options: IQbjResultOptions): QbjObject {
   });
 
   // The operational block. Round revision is the field that makes a stale result detectable, so it
-  // travels with the result and not only with the assignment.
+  // travels with the result and not only with the assignment. The definition identity travels
+  // too: it says which competitive truth this result was actually scored under (#670).
   return withQbtcpExtension(match, {
     roundRevision: definition.round.revision,
     ...(definition.round.assignmentRevision !== undefined
       ? { assignmentRevision: definition.round.assignmentRevision }
+      : {}),
+    ...(definition.definition
+      ? {
+          definitionRevision: definition.definition.revision,
+          definitionDigest: definition.definition.digest,
+        }
       : {}),
     roomId: definition.room?.id,
     ...(definition.procedure ? { procedure: definition.procedure } : {}),

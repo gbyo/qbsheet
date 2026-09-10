@@ -86,6 +86,19 @@ export interface IGamePackageRoom {
   name?: string;
 }
 
+/**
+ * The identity of the issued competitive definition a package was cut from (#670).
+ *
+ * The revision is convenient and auditable; the digest proves equality. Both travel so a
+ * result can say exactly which truth it was scored under, not merely which pairing.
+ */
+export interface GameDefinitionIdentity {
+  /** 1-based revision within the scheduled game. */
+  revision: number;
+  /** Deterministic digest over the canonical competitive semantics. */
+  digest: string;
+}
+
 export interface IGamePackageTeam extends ITeamRoster {
   /**
    * Who starts, when the source already knows.
@@ -119,6 +132,15 @@ export interface IGamePackage {
   right: IGamePackageTeam;
   /** The tournament's scoring rules, as structural data. See `IScorekeeperFormat`. */
   scorekeeperFormat: IScorekeeperFormat;
+  /**
+   * The issued competitive-definition identity this package was cut from (#670).
+   *
+   * Present exactly when Director issued the game from a pinned snapshot. The room echoes it
+   * in its result so ingest can prove the game was scored under the expected truth rather than
+   * merely under the same pairing. Absent on legacy/hand-made packages, which ingest treats as
+   * weaker provenance, never as equivalence.
+   */
+  definition?: GameDefinitionIdentity;
   /** How the room runs the game — halves, clock, timeouts. Absent means it runs none of it. */
   procedure?: IRoomProcedure;
   /**

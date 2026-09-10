@@ -130,6 +130,34 @@ describe('identity', () => {
 
     expect(second).toBe(first);
   });
+
+  test('a well-formed definition identity passes through validation', () => {
+    const result = validateGamePackage(validPackage({ definition: { revision: 2, digest: 'digest-two' } }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.definition).toEqual({ revision: 2, digest: 'digest-two' });
+  });
+
+  test('a malformed definition identity is refused, never silently dropped', () => {
+    expect(errorsFor(validPackage({ definition: { revision: 0, digest: 'digest-two' } }))).toContain(
+      'The issued competitive-definition identity is not usable.',
+    );
+    expect(errorsFor(validPackage({ definition: { revision: 2, digest: '   ' } }))).toContain(
+      'The issued competitive-definition identity is not usable.',
+    );
+    expect(errorsFor(validPackage({ definition: { revision: 2 } as never }))).toContain(
+      'The issued competitive-definition identity is not usable.',
+    );
+  });
+
+  test('a legacy package with no definition identity still validates', () => {
+    const result = validateGamePackage(validPackage({ definition: undefined }));
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.definition).toBeUndefined();
+  });
 });
 
 describe('rosters', () => {

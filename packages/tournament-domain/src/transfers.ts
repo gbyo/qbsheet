@@ -104,6 +104,10 @@ export interface IncomingArtifact {
   parsedMatchId?: string;
   roundRevision?: number;
   assignmentRevision?: number;
+  /** Issued definition revision echoed by the room, when the document carried one (#670). */
+  definitionRevision?: number;
+  /** Digest over the competitive semantics the room actually scored under (#670). */
+  definitionDigest?: string;
 
   classification: ArtifactClassification;
   /** Machine-readable reasons, shared with the QBTCP path. See `ingest.ts`. */

@@ -16,6 +16,11 @@ import {
 import { parseTransferJson, hasScoringContent, maxJsonDepth } from './parse';
 import { importTransferDocuments, type ImportInput } from './state';
 import { assignmentFor, directorFixture, scoreAssignment } from './testFixtures';
+import {
+  activeDefinitionSnapshot,
+  pinIssuedDefinitions,
+  reissueGameDefinition,
+} from '../domain/gameDefinitions';
 import type { DirectorState } from '../domain/model';
 
 function documentFor(qbj: unknown, overrides: Partial<IncomingDocument> = {}): IncomingDocument {
@@ -286,6 +291,100 @@ describe('a batch', () => {
     const second = importTransferDocuments(state, [input]);
     expect(second.skipped).toBe(1);
     expect(state.submissions).toHaveLength(1);
+  });
+});
+
+describe('definition identity', () => {
+  it('a result echoing the pinned digest is ready with no definition warning', () => {
+    const state = directorFixture();
+    pinIssuedDefinitions(state, ['game-5-1']);
+    const document = documentFor(scoreAssignment(assignmentFor(state, 'game-5-1').document));
+
+    const assessment = assessIncomingDocument(state, document);
+
+    expect(assessment.classification).toBe('ready');
+    expect(assessment.warnings).toEqual([]);
+  });
+
+  it('the same pairing and assignment revision with an unknown digest is never ready', () => {
+    const state = directorFixture();
+    pinIssuedDefinitions(state, ['game-5-1']);
+    const document = documentFor(
+      scoreAssignment(assignmentFor(state, 'game-5-1').document, {
+        definitionDigest: 'a-truth-director-never-issued',
+      }),
+    );
+
+    const assessment = assessIncomingDocument(state, document);
+
+    expect(assessment.classification).toBe('needs-review');
+    expect(assessment.warnings).toContain('definition-mismatch');
+  });
+
+  it('a superseded digest stages for review as a stale definition, not a mismatch', () => {
+    const state = directorFixture();
+    pinIssuedDefinitions(state, ['game-5-1'], '2026-08-10T00:00:00.000Z');
+    const firstDigest = activeDefinitionSnapshot(state, 'game-5-1')!.digest;
+    state.tournament!.rules.powerValue = 20;
+    const reissued = reissueGameDefinition(state, 'game-5-1', 'Director', '2026-08-11T00:00:00.000Z');
+    expect(reissued.ok).toBe(true);
+    const document = documentFor(
+      scoreAssignment(assignmentFor(state, 'game-5-1').document, {
+        definitionRevision: 1,
+        definitionDigest: firstDigest,
+      }),
+    );
+
+    const assessment = assessIncomingDocument(state, document);
+
+    expect(assessment.classification).toBe('needs-review');
+    expect(assessment.warnings).toContain('stale-definition-revision');
+    expect(assessment.warnings).not.toContain('definition-mismatch');
+  });
+
+  it('a missing digest on a pinned game stages for review as weaker provenance', () => {
+    const state = directorFixture();
+    pinIssuedDefinitions(state, ['game-5-1']);
+    const document = documentFor(
+      scoreAssignment(assignmentFor(state, 'game-5-1').document, {
+        definitionRevision: null,
+        definitionDigest: null,
+      }),
+    );
+
+    const assessment = assessIncomingDocument(state, document);
+
+    expect(assessment.classification).toBe('needs-review');
+    expect(assessment.warnings).toContain('missing-definition-identity');
+  });
+
+  it('an unpinned game with no digest keeps legacy behavior', () => {
+    const state = directorFixture();
+    const document = documentFor(scoreAssignment(assignmentFor(state, 'game-5-1').document));
+
+    const assessment = assessIncomingDocument(state, document);
+
+    expect(assessment.classification).toBe('ready');
+    expect(assessment.warnings).toEqual([]);
+  });
+
+  it('staged provenance lands on the submission and the game', () => {
+    const state = directorFixture();
+    pinIssuedDefinitions(state, ['game-5-1']);
+    const expected = activeDefinitionSnapshot(state, 'game-5-1')!;
+    const document = documentFor(scoreAssignment(assignmentFor(state, 'game-5-1').document));
+
+    const assessment = assessIncomingDocument(state, document);
+    const staged = stageIncomingDocument(state, document, assessment);
+    const submission = state.submissions.find((entry) => entry.id === staged.submissionId);
+    expect(submission?.definitionRevision).toBe(expected.revision);
+    expect(submission?.definitionDigest).toBe(expected.digest);
+    expect(state.games.find((game) => game.id === staged.gameId)).toMatchObject({
+      definitionRevision: expected.revision,
+      definitionDigest: expected.digest,
+    });
+    expect(staged.artifact.definitionRevision).toBe(expected.revision);
+    expect(staged.artifact.definitionDigest).toBe(expected.digest);
   });
 });
 

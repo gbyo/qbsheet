@@ -26,6 +26,7 @@
  * is a denial of service against a room, whatever the intent behind it was.
  */
 import {
+  GameDefinitionIdentity,
   IGamePackage,
   IGamePackageTeam,
   gamePackageFormat,
@@ -263,6 +264,21 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
     errors.push('The scheduled game identifier is not usable.');
   }
 
+  // A malformed definition identity is refused, not dropped: when the field is present it is
+  // required to establish the scorer contract, and scoring without it would silently run the
+  // game under whatever the room assumes. Absent stays absent for legacy packages.
+  if (raw.definition !== undefined) {
+    const definition = raw.definition as Partial<GameDefinitionIdentity>;
+    if (
+      !isPlainObject(raw.definition) ||
+      !Number.isInteger(definition.revision) ||
+      Number(definition.revision) < 1 ||
+      !nonBlankString(definition.digest)
+    ) {
+      errors.push('The issued competitive-definition identity is not usable.');
+    }
+  }
+
   if (raw.handoffInstruction !== undefined) {
     if (
       typeof raw.handoffInstruction !== 'string' ||
@@ -322,6 +338,14 @@ export function validateGamePackage(value: unknown): GamePackageValidation {
         name: raw.tournament!.name,
       },
       ...(raw.scheduledMatchId ? { scheduledMatchId: raw.scheduledMatchId } : {}),
+      ...(raw.definition && isPlainObject(raw.definition)
+        ? {
+            definition: {
+              revision: (raw.definition as Partial<GameDefinitionIdentity>).revision as number,
+              digest: (raw.definition as Partial<GameDefinitionIdentity>).digest as string,
+            },
+          }
+        : {}),
       round: {
         number: round.number,
         name: round.name,

@@ -35,6 +35,7 @@ import {
   type TeamGameScore,
 } from '../domain/model';
 import { invalidPlayerGameStatCountField, invalidTeamGameScoreCountField, isCanonicalCount } from '../domain';
+import { activeDefinitionSnapshot } from '../domain/gameDefinitions';
 import { resultFingerprint } from './canonical';
 import { hasScoringContent, matchObject, readQbjIdentity, type QbjIdentity } from './parse';
 import {
@@ -62,6 +63,10 @@ export const ingestWarnings = {
   matchedByTeams: 'matched-by-teams',
   staleRoundRevision: 'stale-round-revision',
   staleAssignmentRevision: 'stale-assignment-revision',
+  missingDefinitionIdentity: 'missing-definition-identity',
+  staleDefinitionRevision: 'stale-definition-revision',
+  definitionMismatch: 'definition-mismatch',
+  correctedDefinitionReview: 'corrected-definition-review',
   resultConflict: 'result-conflict',
   rosterMismatch: 'roster-mismatch',
   cancelledGame: 'cancelled-game',
@@ -96,6 +101,14 @@ export function describeWarning(code: string): string {
       return 'Scored from an older revision of this round.';
     case ingestWarnings.staleAssignmentRevision:
       return 'Scored from an older issue of this assignment.';
+    case ingestWarnings.missingDefinitionIdentity:
+      return 'The result does not say which issued competitive definition it was scored under.';
+    case ingestWarnings.staleDefinitionRevision:
+      return 'Scored under a superseded issue of this game’s competitive definition.';
+    case ingestWarnings.definitionMismatch:
+      return 'Scored under a competitive definition Director never issued for this game.';
+    case ingestWarnings.correctedDefinitionReview:
+      return 'Scored under a room-corrected definition that needs Director review.';
     case ingestWarnings.resultConflict:
       return 'A different result already exists for this game.';
     case ingestWarnings.rosterMismatch:
@@ -558,6 +571,29 @@ export function assessIncomingDocument(state: DirectorState, document: IncomingD
     identity.assignmentRevision < revisions.assignmentRevision
   )
     warnings.add(ingestWarnings.staleAssignmentRevision);
+  // Definition comparison runs before any statistics derivation below: a pairing can be
+  // current while the scoring truth differs, so match/round/assignment identity matching
+  // alone must never classify a result as current. Any warning here forces needs-review
+  // through the classification below.
+  const expectedDefinition = scheduled ? activeDefinitionSnapshot(state, scheduled.id) : undefined;
+  if (scheduled && expectedDefinition) {
+    if (!identity.definitionDigest) {
+      // No identity to compare. QBSheet-produced results always echo one; generic third-party
+      // QBJ never does. Both stay importable, neither is silently equivalent: #671 proves
+      // embedded-rules equivalence for the generic path, until then review decides.
+      warnings.add(ingestWarnings.missingDefinitionIdentity);
+    } else if (identity.definitionDigest === expectedDefinition.digest) {
+      // Exact digest match is the proof; the echoed revision number is informational.
+    } else if (
+      state.gameDefinitions.some(
+        (entry) => entry.scheduledGameId === scheduled.id && entry.digest === identity.definitionDigest,
+      )
+    ) {
+      warnings.add(ingestWarnings.staleDefinitionRevision);
+    } else {
+      warnings.add(ingestWarnings.definitionMismatch);
+    }
+  }
   if (scheduled?.status === 'cancelled') warnings.add(ingestWarnings.cancelledGame);
 
   const statistics = readResultStatistics(document.qbj, state, scheduled);
@@ -704,6 +740,12 @@ export function stageIncomingDocument(
     ...(assessment.identity.assignmentRevision === undefined
       ? {}
       : { assignmentRevision: assessment.identity.assignmentRevision }),
+    ...(assessment.identity.definitionRevision === undefined
+      ? {}
+      : { definitionRevision: assessment.identity.definitionRevision }),
+    ...(assessment.identity.definitionDigest === undefined
+      ? {}
+      : { definitionDigest: assessment.identity.definitionDigest }),
     classification: assessment.classification,
     warnings: assessment.warnings,
     status: 'detected',
@@ -723,6 +765,12 @@ export function stageIncomingDocument(
       receivedAt: now,
       fingerprint: assessment.fingerprint,
       status: 'duplicate',
+      ...(assessment.identity.definitionRevision === undefined
+        ? {}
+        : { definitionRevision: assessment.identity.definitionRevision }),
+      ...(assessment.identity.definitionDigest === undefined
+        ? {}
+        : { definitionDigest: assessment.identity.definitionDigest }),
       rawSubmission: { source: document.sourceKind, fileName: document.fileName, qbj: document.qbj },
       warnings: assessment.warnings,
       reason: `Backup copy from ${document.sourceLabel} matches the existing result.`,
@@ -756,6 +804,14 @@ export function stageIncomingDocument(
     playerStats: assessment.playerStats,
     source: document.sourceKind === 'qbtcp' ? 'qbtcp' : 'qbj',
     ...(document.transportResultId ? { transportResultId: document.transportResultId } : {}),
+    // Provenance echoed by the room; absent on legacy/generic documents (#670). Statistics
+    // resolution under the right definition arrives with #671.
+    ...(assessment.identity.definitionRevision === undefined
+      ? {}
+      : { definitionRevision: assessment.identity.definitionRevision }),
+    ...(assessment.identity.definitionDigest === undefined
+      ? {}
+      : { definitionDigest: assessment.identity.definitionDigest }),
     rawQbj: document.qbj,
     finishedAt: now,
   };
@@ -769,6 +825,12 @@ export function stageIncomingDocument(
     receivedAt: now,
     fingerprint: assessment.fingerprint,
     status: assessment.classification === 'ready' ? 'received' : 'review',
+    ...(assessment.identity.definitionRevision === undefined
+      ? {}
+      : { definitionRevision: assessment.identity.definitionRevision }),
+    ...(assessment.identity.definitionDigest === undefined
+      ? {}
+      : { definitionDigest: assessment.identity.definitionDigest }),
     rawSubmission: {
       source: document.sourceKind,
       sourceLabel: document.sourceLabel,

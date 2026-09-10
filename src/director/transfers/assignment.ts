@@ -26,7 +26,9 @@
  * builder provably cannot leak" is a property of today's builder.
  */
 import {
+  activeDefinitionSnapshot,
   definitionRulesFor,
+  deriveDefinitionSnapshot,
   orderDayItems,
   type DirectorId,
   type DirectorState,
@@ -375,6 +377,18 @@ export function buildAssignment(
   if (state.players.filter((player) => player.teamId === scheduled.rightTeamId).length === 0)
     warnings.push(`${rightName} has no roster; the room will enter players by hand.`);
 
+  // The definition identity the room must score under and echo back (#670). The file path
+  // builds its bytes before `recordPreparedAssignments` pins the issue, so an unpinned game
+  // stamps the identity the pin is about to persist: `deriveDefinitionSnapshot` is a pure
+  // function of this same state, and the pin derives from the unchanged draft, so the stamped
+  // digest is the persisted digest and the room's echo classifies ready. If the draft changes
+  // between build and pin the echo lands as a stale definition for review instead of silently
+  // matching, which is the safe direction. A game derivation cannot describe carries no
+  // identity, exactly as before.
+  const activeDefinition = activeDefinitionSnapshot(state, scheduled.id);
+  const derivedDefinition = activeDefinition ? null : deriveDefinitionSnapshot(state, scheduled.id);
+  const issuedDefinition =
+    activeDefinition ?? (derivedDefinition && derivedDefinition.ok ? derivedDefinition.snapshot : null);
   const matchObject: Record<string, unknown> = {
     type: 'Match',
     id: scheduled.id,
@@ -386,6 +400,12 @@ export function buildAssignment(
       version: 1,
       round_revision: round.revision > 0 ? round.revision : 1,
       assignment_revision: scheduled.assignmentRevision > 0 ? scheduled.assignmentRevision : 1,
+      ...(issuedDefinition
+        ? {
+            definition_revision: issuedDefinition.revision,
+            definition_digest: issuedDefinition.digest,
+          }
+        : {}),
       ...(room ? { room_id: room.id } : {}),
       ...(options.handoffInstruction ? { handoff_instruction: options.handoffInstruction } : {}),
       scorekeeper: { timed: rules.timed },

@@ -131,6 +131,10 @@ export interface QbjIdentity {
   matchId?: string;
   roundRevision?: number;
   assignmentRevision?: number;
+  /** Issued definition revision echoed by the room, when the assignment carried one (#670). */
+  definitionRevision?: number;
+  /** Digest over the competitive semantics the room actually scored under (#670). */
+  definitionDigest?: string;
   roomId?: string;
   location?: string;
 }
@@ -157,6 +161,10 @@ export function readQbjIdentity(value: unknown): QbjIdentity {
     ...(finite(extension?.assignment_revision)
       ? { assignmentRevision: finite(extension?.assignment_revision) }
       : {}),
+    ...(finite(extension?.definition_revision)
+      ? { definitionRevision: finite(extension?.definition_revision) }
+      : {}),
+    ...(text(extension?.definition_digest) ? { definitionDigest: text(extension?.definition_digest) } : {}),
     ...(text(extension?.room_id) ? { roomId: text(extension?.room_id) } : {}),
     ...(text(match?.location) ? { location: text(match?.location) } : {}),
   };

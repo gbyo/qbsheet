@@ -16,7 +16,12 @@ import { defineGame, orderCandidates, readQbjSource } from '../src/qbj/ParseQbjA
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { buildResultDocument, buildLegacyMatchOnly, qbjFileName } from '../src/qbj/QbjResult';
 import { qbjSerializationVersion, isPlainObject, QbjObject } from '../src/qbj/QbjSerialization';
-import { qbtcpExtensionKey, qbtcpExtensionVersion, readQbtcpExtension } from '../src/qbj/QbtcpExtension';
+import {
+  qbtcpExtensionKey,
+  qbtcpExtensionVersion,
+  buildQbtcpExtension,
+  readQbtcpExtension,
+} from '../src/qbj/QbtcpExtension';
 import { roomProcedureVersion } from '../src/scoring/RoomProcedure';
 import {
   acfPowersScoringRules,
@@ -826,5 +831,67 @@ describe('round numbers', () => {
 
     // `assignmentDocument` writes `number` alongside the name.
     expect(source.value.candidates[0].roundNumber).toBe(9);
+  });
+});
+
+describe('definition identity', () => {
+  function definedMatch(qbtcp: object) {
+    return matchObject({
+      id: 'Match_sm-4471',
+      left: ninetySix,
+      right: greenwood,
+      qbtcp: { scorekeeper: { timed: false }, ...qbtcp },
+    });
+  }
+
+  test('the extension carries the issued revision and digest and reads them back', () => {
+    const built = buildQbtcpExtension({ definitionRevision: 2, definitionDigest: 'digest-two' });
+    expect(built).not.toBeNull();
+    const read = readQbtcpExtension({ [qbtcpExtensionKey]: built });
+    expect(read).toMatchObject({ definitionRevision: 2, definitionDigest: 'digest-two' });
+  });
+
+  test('an assignment threads the issued identity into the game definition', () => {
+    const { definition } = openOne(
+      assignmentDocument({
+        matches: [definedMatch({ definition_revision: 2, definition_digest: 'digest-two' })],
+      }),
+    );
+
+    expect(definition.definition).toEqual({ revision: 2, digest: 'digest-two' });
+  });
+
+  test('half an identity is no identity: revision without digest is dropped', () => {
+    const { definition } = openOne(
+      assignmentDocument({ matches: [definedMatch({ definition_revision: 2 })] }),
+    );
+
+    expect(definition.definition).toBeUndefined();
+  });
+
+  test('the result echoes the identity it was scored under', () => {
+    const { definition } = openOne(
+      assignmentDocument({
+        matches: [definedMatch({ definition_revision: 2, definition_digest: 'digest-two' })],
+      }),
+    );
+    const format = definition.scorekeeperFormat;
+    const game = deriveGame(format, setupFor(definition), representativeEvents(format));
+
+    const match = objectOfType(buildResultDocument({ definition, format, game }), 'Match');
+    const extension = readQbtcpExtension(match);
+    expect(extension).toMatchObject({ definitionRevision: 2, definitionDigest: 'digest-two' });
+  });
+
+  test('a legacy assignment with no identity produces a result with none', () => {
+    const { definition } = openOne(assignmentDocument());
+    expect(definition.definition).toBeUndefined();
+    const format = definition.scorekeeperFormat;
+    const game = deriveGame(format, setupFor(definition), representativeEvents(format));
+
+    const match = objectOfType(buildResultDocument({ definition, format, game }), 'Match');
+    const extension = readQbtcpExtension(match);
+    expect(extension?.definitionRevision).toBeUndefined();
+    expect(extension?.definitionDigest).toBeUndefined();
   });
 });
