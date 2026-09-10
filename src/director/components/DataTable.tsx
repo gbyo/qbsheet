@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 
 /**
  * The shared Director table contract.
@@ -46,6 +46,13 @@ export interface Column<T> {
   optional?: boolean;
 }
 
+/** The small set of row attributes shared by tables that support deep links or selection. */
+export type DataTableRowProps = Pick<HTMLAttributes<HTMLTableRowElement>, 'className' | 'tabIndex'> & {
+  'data-selected'?: boolean;
+  'data-director-navigation-id'?: string;
+  'data-director-navigation-focus'?: boolean;
+};
+
 export function DataTable<T>({
   items,
   columns,
@@ -66,7 +73,7 @@ export function DataTable<T>({
   ariaLabel?: string;
   /** DOM id for the row, so deep links and search highlighting can find it. */
   rowId?: (item: T) => string | undefined;
-  rowProps?: (item: T) => { className?: string; 'data-selected'?: boolean };
+  rowProps?: (item: T) => DataTableRowProps;
   /** Read-only detail rendered under the row. Editing belongs in a dialog. */
   rowDetail?: (item: T) => ReactNode;
   empty?: ReactNode;
@@ -123,6 +130,9 @@ export function DataTable<T>({
                   id={rowId?.(item)}
                   className={extra.className}
                   data-selected={extra['data-selected'] || undefined}
+                  data-director-navigation-id={extra['data-director-navigation-id']}
+                  data-director-navigation-focus={extra['data-director-navigation-focus'] || undefined}
+                  tabIndex={extra.tabIndex}
                 >
                   {visible.map((column) => (
                     <td

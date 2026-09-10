@@ -1,7 +1,7 @@
 /**
  * Room-centric delivery derivation for #702.
  *
- * The Delivery & Results page reads per-scheduled-game operational state from
+ * The Delivery page reads per-scheduled-game operational state from
  * here instead of scattering `.filter()` calls through JSX or treating the
  * round-level `deliveryMode` as per-game truth. Three concerns stay separate:
  *
@@ -367,7 +367,14 @@ export interface CurrentRoundDelivery {
   needingReview: GameDeliveryStatus[];
 }
 
-/** The primary Delivery page model: one row per non-bye current-round game, gaps first. */
+/**
+ * The primary Delivery page model: one stable row per non-bye current-round game.
+ *
+ * The order is deliberately independent of readiness/result state. A director may be following a
+ * room while its scorer connects or a result arrives; moving that room because its state changed
+ * makes the board harder to operate at exactly the moment it is most useful. Consumers may offer
+ * an explicit attention filter, but the canonical list never sorts by urgency.
+ */
 export function deriveCurrentRoundDelivery(state: DirectorState): CurrentRoundDelivery {
   const round = currentOperationalRound(state);
   const games = round
@@ -394,14 +401,11 @@ export function deriveCurrentRoundDelivery(state: DirectorState): CurrentRoundDe
       needsFile: assignment.state === 'file-needed' || assignment.state === 'needs-reprepare',
     };
   });
-  const rank = (row: GameDeliveryStatus): number => {
-    if (row.assignment.state === 'problem') return 0;
-    if (row.assignment.state === 'needs-reprepare') return 1;
-    if (row.result.state === 'conflict' || row.result.state === 'review') return 2;
-    if (row.assignment.state === 'file-needed') return 3;
-    return 4;
-  };
-  rows.sort((a, b) => rank(a) - rank(b) || a.roomName.localeCompare(b.roomName));
+  rows.sort(
+    (a, b) =>
+      a.roomName.localeCompare(b.roomName, undefined, { numeric: true }) ||
+      a.scheduledGameId.localeCompare(b.scheduledGameId),
+  );
   return {
     round,
     rows,

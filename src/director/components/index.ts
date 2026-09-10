@@ -97,7 +97,7 @@ export {
   useFilterState,
   useTextFilter,
 } from './Filters';
-export { DataTable, IdentityCell, RowDetail, type Column } from './DataTable';
+export { DataTable, IdentityCell, RowDetail, type Column, type DataTableRowProps } from './DataTable';
 export { FilePicker, type PickedFile } from './FilePicker';
 export { ReorderHandle, ReorderNotice, ReorderToggle, useDragReorder, useReorderMode } from './Reorder';
 export { TimeZoneField, isValidTimeZone, supportedTimeZones } from './TimeZoneField';

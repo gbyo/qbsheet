@@ -43,3 +43,28 @@
   border: 1px solid var(--director-border);
   border-radius: var(--director-radius);
 }
+
+.director-results-import-dropzone {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2) var(--director-space-3);
+  align-items: baseline;
+  padding: var(--director-space-3) var(--director-panel-inset);
+  color: var(--director-muted);
+  border: 1px dashed var(--director-border-strong);
+  border-radius: var(--director-radius);
+}
+
+.director-results-import-dropzone strong {
+  color: var(--director-ink-strong);
+}
+
+.director-results-import-dropzone.is-active {
+  color: var(--director-ink);
+  background: var(--director-accent-soft);
+  border-color: var(--director-accent);
+}
+
+.director-results-import-problems {
+  margin-bottom: var(--director-space-4);
+}

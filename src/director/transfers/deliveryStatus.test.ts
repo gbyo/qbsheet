@@ -296,17 +296,33 @@ describe('result status (#702)', () => {
 });
 
 describe('current-round delivery rows (#702)', () => {
-  test('gaps sort first and counts separate files, problems, and reviews', () => {
+  test('rows stay in room order while counts separate files, problems, and reviews', () => {
     const state = mixedState();
     const delivery = deriveCurrentRoundDelivery(state);
     expect(delivery.round?.id).toBe('round-1');
     expect(delivery.rows).toHaveLength(6);
-    // Problems and stale files outrank healthy rooms.
-    expect(delivery.rows[0]!.assignment.state).toBe('problem');
+    // Readiness changes must not move a room under an operator's eyes.
+    expect(delivery.rows.map((row) => row.scheduledGameId)).toEqual([
+      'game-101',
+      'game-102',
+      'game-103',
+      'game-104',
+      'game-105',
+      'game-106',
+    ]);
     expect(delivery.needingFiles.map((row) => row.scheduledGameId).sort()).toEqual(['game-103', 'game-106']);
     expect(delivery.qbtcpProblem.map((row) => row.scheduledGameId)).toEqual(['game-105']);
     const row101 = delivery.rows.find((row) => row.scheduledGameId === 'game-101')!;
     expect(row101.roomName).toBe('Room 101');
     expect(row101.matchup).toBe('Aiken vs Dorman');
+
+    state.scheduledGames.find((game) => game.id === 'game-101')!.deliveryIntent = {
+      primary: 'file',
+      fallbacks: [],
+    };
+    const afterStatusChange = deriveCurrentRoundDelivery(state);
+    expect(afterStatusChange.rows.map((row) => row.scheduledGameId)).toEqual(
+      delivery.rows.map((row) => row.scheduledGameId),
+    );
   });
 });

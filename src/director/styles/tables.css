@@ -135,6 +135,20 @@
   font-size: var(--director-text-secondary);
 }
 
+/* Dense state cells keep the label and its forensic context together without
+   turning the table into a wall of prose. */
+.director-table-state-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--director-space-1);
+  min-width: 0;
+}
+
+.director-table-state-cell > small {
+  color: var(--director-muted);
+  font-size: var(--director-text-meta);
+}
+
 /* The actions column. A row gets at most one visible action plus an overflow
    menu — never a toolbar. */
 .director-cell-actions {
@@ -186,6 +200,23 @@
   background: var(--director-surface);
   border: 1px solid var(--director-border-subtle);
   border-radius: var(--director-radius);
+}
+
+.director-row-detail-header {
+  display: flex;
+  gap: var(--director-space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.director-row-detail-header p {
+  margin: var(--director-space-1) 0 0;
+}
+
+.director-row-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--director-space-2);
 }
 
 /* A dense table for genuinely numeric grids (stats). Smaller row padding, same
