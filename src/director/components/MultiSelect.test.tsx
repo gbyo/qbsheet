@@ -2,6 +2,7 @@
  * @vitest-environment jsdom
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
 import { MultiSelect } from './MultiSelect';
 
@@ -98,6 +99,40 @@ describe('MultiSelect', () => {
     expect(screen.getByRole('button', { name: 'Select all' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Select all' }));
     expect(onChange).toHaveBeenCalledWith(['alpha', 'bravo']);
+  });
+
+  test('tabbing out of the open popover closes it (#724)', async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <MultiSelect values={[]} options={options} onChange={vi.fn()} />
+        <button type="button">After</button>
+      </>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Select…' }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Filter…')).toHaveFocus();
+    // Search, three checkboxes, Select all, Done, then out.
+    for (let step = 0; step < 6; step += 1) {
+      await user.tab();
+    }
+    expect(screen.getByRole('button', { name: 'After' })).toHaveFocus();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Select…' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  test('tabbing within the popover keeps it open (#724)', async () => {
+    const user = userEvent.setup();
+    render(<MultiSelect values={[]} options={options} onChange={vi.fn()} />);
+    await user.click(screen.getByRole('button', { name: 'Select…' }));
+    await user.tab();
+    expect(screen.getByRole('checkbox', { name: 'Alpha' })).toHaveFocus();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    // Back out the top lands on the trigger, which is inside the control.
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+    expect(screen.getByRole('button', { name: 'Select…' })).toHaveFocus();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   test('keeps a newly disabled selection out of the selectable count', () => {
