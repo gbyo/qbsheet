@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "type": "authenticate",
+  "payload": {
+    "room_token": "<opaque room token>",
+    "session_token": "<opaque session token>",
+    "device_id": "device-1"
+  }
+}

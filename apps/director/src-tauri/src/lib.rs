@@ -3,7 +3,9 @@
 mod commands;
 mod live;
 mod live_server;
+mod relay;
 mod server;
+mod sleep;
 mod store;
 mod transfers;
 
@@ -42,6 +44,9 @@ pub fn run() {
             // The QBSheet Live management credential goes to the operating system's credential
             // store, never to the tournament database. See `live.rs`.
             app.manage(commands::LiveCredentials::default());
+            // Same for the Internet QBTCP relay management credential, under its own keychain
+            // service so forgetting one never revokes the other. See `relay.rs`.
+            app.manage(commands::RelayCredentials::default());
             app.manage(live_server::LiveServerRuntime::default());
             Ok(())
         })
@@ -69,6 +74,10 @@ pub fn run() {
             commands::director_probe_live_credential_store,
             commands::director_read_live_credential,
             commands::director_forget_live_credential,
+            commands::director_store_relay_credential,
+            commands::director_probe_relay_credential_store,
+            commands::director_read_relay_credential,
+            commands::director_forget_relay_credential,
             commands::director_live_status,
             commands::director_start_live_server,
             commands::director_stop_live_server,

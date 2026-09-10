@@ -45,21 +45,40 @@ function stateDefinitions(state: DirectorState): ReportScoringDefinition[] {
   return definitions;
 }
 
+export interface ReportPresentationInput {
+  metadata: {
+    tournamentName: string;
+    startDate?: string;
+    endDate?: string;
+    venue?: string;
+    questionSet?: string;
+    organizer?: string;
+    scopeLabel: string;
+    generatedAt: string;
+  };
+  definitions: readonly ReportScoringDefinition[];
+  options: ReportOptions;
+  capabilities: {
+    bouncebacksRecorded: boolean;
+    packetRecorded: boolean;
+    stageRecorded: boolean;
+    lightningRecorded: boolean;
+  };
+}
+
 /**
- * Apply report-only presentation metadata without mutating competitive Director state.
- *
- * The canonical result rows remain the source of truth. This adapter adds only display semantics:
- * answer-tier identities, public event metadata, selected pages/columns, and derived presentation
- * values such as points-per-X. Report preferences never enter tournament persistence or audit.
+ * The shared presentation input for any report page, so the stage-aware Standings page consumes
+ * the same definitions/options/capabilities as every other page instead of a second fixed
+ * vocabulary (#751). Row enrichment stays with each page adapter; this is only the contract.
  */
-export function withReportPresentation(
+export function describeReportInput(
   state: DirectorState,
   snapshot: StatsSnapshot,
   rawOptions: ReportOptions = defaultReportOptions,
   historicalDefinitions?: readonly ReportScoringDefinition[],
-): StatsSnapshot {
+): ReportPresentationInput | null {
   const tournament = state.tournament;
-  if (!tournament) return snapshot;
+  if (!tournament) return null;
 
   // Per-game issued definitions feed the renderer's mixed-value columns (#671). An explicit
   // override still wins when a caller scopes the report to a subset of history.
@@ -70,7 +89,7 @@ export function withReportPresentation(
   const phaseIds = new Set(
     snapshot.games.map((game) => game.phaseId).filter((value): value is string => Boolean(value)),
   );
-  const presentation = buildReportPresentation({
+  return {
     metadata: {
       tournamentName: tournament.name,
       ...(tournament.date ? { startDate: tournament.date } : {}),
@@ -95,7 +114,25 @@ export function withReportPresentation(
       // lightning round is therefore not enough to print a permanent zero column.
       lightningRecorded: false,
     },
-  });
+  };
+}
+
+/**
+ * Apply report-only presentation metadata without mutating competitive Director state.
+ *
+ * The canonical result rows remain the source of truth. This adapter adds only display semantics:
+ * answer-tier identities, public event metadata, selected pages/columns, and derived presentation
+ * values such as points-per-X. Report preferences never enter tournament persistence or audit.
+ */
+export function withReportPresentation(
+  state: DirectorState,
+  snapshot: StatsSnapshot,
+  rawOptions: ReportOptions = defaultReportOptions,
+  historicalDefinitions?: readonly ReportScoringDefinition[],
+): StatsSnapshot {
+  const input = describeReportInput(state, snapshot, rawOptions, historicalDefinitions);
+  if (!input) return snapshot;
+  const presentation = buildReportPresentation(input);
   const x = presentation.pointsNormalization?.tossups ?? null;
 
   return {

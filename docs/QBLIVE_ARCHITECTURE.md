@@ -53,9 +53,18 @@ The one-page answer to "what did this add, and where does it live".
 Cloudflare Worker: Workers Static Assets serves the Vite build, and its SPA fallback maps `/t/*` to
 `index.html` while preserving the bootstrap URL. It has no request handler and only tells a client
 where the tournament's backend is before getting out of the way. `push.qbsheet.com` is the separate
-dynamic APNs Worker and exists only because an APNs provider key cannot be distributed. Tournament
-QBLive backends are also separate Workers, owned and operated in tournament/director-controlled
-infrastructure.
+dynamic APNs Worker and exists only because an APNs provider key cannot be distributed.
+
+QBLive is a protocol between Director's sanitized public projection and a
+compatible publication backend. Cloudflare Durable Objects, QBServer, and
+local-only Director are implementations with different deployment/capability
+profiles — not separate Live products. The diagram above shows the Cloudflare
+deployment profile; a self-hosted QBServer behind a reverse proxy, or
+Director's local-only LAN server with no internet, serves the same protocol
+from the same projection. The normative server contract is
+[`QBLIVE_SERVER_CONTRACT.md`](QBLIVE_SERVER_CONTRACT.md), implemented in
+`crates/qblive-server` and checked by `packages/qblive-conformance` against
+every host.
 
 ---
 
@@ -63,18 +72,18 @@ infrastructure.
 
 **`DirectorState` in `@qbsheet/tournament-domain` is the single authoritative tournament document.**
 
-| Consumer | How it uses the document |
-| --- | --- |
-| Director React | reads and mutates it directly |
-| Tauri SQLite store | persists it whole, and projects it into normalized rows in the same transaction |
-| Portable archive / QBJ / SQBS | serializes it |
-| **QBSheet Live** | projects a sanitized public view of it |
+| Consumer                      | How it uses the document                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------- |
+| Director React                | reads and mutates it directly                                                   |
+| Tauri SQLite store            | persists it whole, and projects it into normalized rows in the same transaction |
+| Portable archive / QBJ / SQBS | serializes it                                                                   |
+| **QBSheet Live**              | projects a sanitized public view of it                                          |
 
 Before this work `DirectorState` lived in `src/director/domain`, inside the scorer's source tree,
 where a package could not import it without importing the scorer. It moved to a package;
 `src/director/domain` re-exports it, so several hundred existing imports keep resolving against one
 definition. Standings and statistics derivation moved with it, so Live and Director compute
-placement with the *same code* rather than with two implementations that agree today.
+placement with the _same code_ rather than with two implementations that agree today.
 
 `@qbsheet/tournament-core` stays what it was: a planning and derivation engine — scheduling,
 brackets, advancement, division placement — that takes inputs adapted from the document and returns
@@ -117,21 +126,21 @@ the sweep vacuous for it.
 
 ### The visibility matrix
 
-| Setting | Default | Publishes |
-| --- | --- | --- |
-| `teamNames` | **on** | Team display names and organization short names. Off substitutes `Seed N`. |
-| `playerNames` | **off** | Public rosters. |
-| `playerStatistics` | **off** | Individual statistics. Requires `playerNames`. |
-| `releasedSchedule` | **on** | Games in released rounds only. |
-| `roomLocations` | **on** | Room names, and room references on games. |
-| `roomDirections` | **on** | Free-text directions. |
-| `acceptedResults` | **on** | Final scores of accepted games in released rounds. |
-| `liveGameStatus` | **on** | That a game is in progress. |
-| `liveScores` | **off** | The running score of a game in progress. |
-| `liveProgress` | **off** | Tossups read so far. |
-| `announcements` | **on** | Director announcements. |
-| `standings` | **on** | Standings tables. |
-| `teamStatistics` | **on** | Team statistics tables. |
+| Setting            | Default | Publishes                                                                  |
+| ------------------ | ------- | -------------------------------------------------------------------------- |
+| `teamNames`        | **on**  | Team display names and organization short names. Off substitutes `Seed N`. |
+| `playerNames`      | **off** | Public rosters.                                                            |
+| `playerStatistics` | **off** | Individual statistics. Requires `playerNames`.                             |
+| `releasedSchedule` | **on**  | Games in released rounds only.                                             |
+| `roomLocations`    | **on**  | Room names, and room references on games.                                  |
+| `roomDirections`   | **on**  | Free-text directions.                                                      |
+| `acceptedResults`  | **on**  | Final scores of accepted games in released rounds.                         |
+| `liveGameStatus`   | **on**  | That a game is in progress.                                                |
+| `liveScores`       | **off** | The running score of a game in progress.                                   |
+| `liveProgress`     | **off** | Tossups read so far.                                                       |
+| `announcements`    | **on**  | Director announcements.                                                    |
+| `standings`        | **on**  | Standings tables.                                                          |
+| `teamStatistics`   | **on**  | Team statistics tables.                                                    |
 
 Anything a paper schedule taped to a wall already said is on. Anything that is a new disclosure is
 off.
@@ -143,8 +152,8 @@ internal audit history, staff information, equipment inventory, packet security 
 unreleased packet information, Director-only notes, private protest information, update-signing
 credentials, APNs credentials.
 
-**Schedule visibility.** A game reaches the projection only when its round is *released* or
-*closed*. A phase whose rounds are all unreleased contributes no standings scope either, because a
+**Schedule visibility.** A game reaches the projection only when its round is _released_ or
+_closed_. A phase whose rounds are all unreleased contributes no standings scope either, because a
 scope label ("Championship bracket") is itself a disclosure.
 
 **Player privacy.** Many QBSheet tournaments involve students, so player names and individual
@@ -177,8 +186,7 @@ is correct locally and silently stale to every spectator.
 
 **Retry policy.** Transient failures back off exponentially with full jitter — a conference centre's
 worth of Directors must not all retry in the same millisecond. A revision conflict discards the
-queued update and queues a full snapshot at the backend's revision. A fatal failure (401, 403, 404,
-410) stops the loop, because retrying a wrong credential every minute for eight hours drains a
+queued update and queues a full snapshot at the backend's revision. A fatal failure (401, 403, 404, 410) stops the loop, because retrying a wrong credential every minute for eight hours drains a
 laptop and buries the one message a Director needs to read.
 
 **Bounded.** Consecutive transient-only updates coalesce to the newest — a reconnecting spectator
@@ -194,49 +202,51 @@ local write succeeds throughout.
 
 ## 5. What was built
 
-| Component | Path | Notes |
-| --- | --- | --- |
-| Canonical domain | `packages/tournament-domain` | `DirectorState`, timezone, timeline, publication settings, standings derivation |
-| QBLive protocol | `packages/qblive-protocol` | Types, bounded validators, bootstrap URL, client, JSON Schema, shared fixtures |
-| Public projection | `packages/qblive-projection` | The privacy boundary, plus section diffing |
-| Activity shard state | `packages/qblive-activity` | The compact broadcast encoding and its size measurements |
-| Conformance suite | `packages/qblive-conformance` | Runs against any QBLive server; also the load harness |
-| Cloudflare backend | `apps/qblive-backend-cloudflare` | Worker + SQLite Durable Object, "Deploy to Cloudflare" ready |
-| Push gateway | `apps/qblive-push` | The APNs boundary and nothing else |
-| APNs prototype | `apps/qblive-push-prototype` | The transport probe; results in `QBLIVE_PUSH_PROTOTYPE.md` |
-| Live Web | `apps/live-web` | 57 kB gzipped, five tabs, no service worker |
-| iOS app + App Clip | `ios/` | iOS 18, SwiftUI, one shared dependency-free package |
-| Director Live UI | `src/director/live` | Setup, visibility, sync health, QR, announcements, lifecycle |
-| Director native Live | `apps/director/src-tauri/src/live.rs`, `live_server.rs` | Keychain credential, schema v5, local-network server |
+| Component                   | Path                                                    | Notes                                                                                              |
+| --------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Canonical domain            | `packages/tournament-domain`                            | `DirectorState`, timezone, timeline, publication settings, standings derivation                    |
+| QBLive protocol             | `packages/qblive-protocol`                              | Types, bounded validators, bootstrap URL, client, JSON Schema, shared fixtures                     |
+| Public projection           | `packages/qblive-projection`                            | The privacy boundary, plus section diffing                                                         |
+| Activity shard state        | `packages/qblive-activity`                              | The compact broadcast encoding and its size measurements                                           |
+| Conformance suite           | `packages/qblive-conformance`                           | Hosting-neutral contract; setup/claim hook; full/local/basic profiles; load harness                |
+| Hosting-neutral server core | `crates/qblive-server`                                  | Protocol bounds, storage trait, public/management routes, stream logic for QBServer and local mode |
+| Cloudflare backend          | `apps/qblive-backend-cloudflare`                        | One implementation: Worker + SQLite Durable Object, "Deploy to Cloudflare" ready                   |
+| Push gateway                | `apps/qblive-push`                                      | The APNs boundary and nothing else                                                                 |
+| APNs prototype              | `apps/qblive-push-prototype`                            | The transport probe; results in `QBLIVE_PUSH_PROTOTYPE.md`                                         |
+| Live Web                    | `apps/live-web`                                         | 57 kB gzipped, five tabs, no service worker                                                        |
+| iOS app + App Clip          | `ios/`                                                  | iOS 18, SwiftUI, one shared dependency-free package                                                |
+| Director Live UI            | `src/director/live`                                     | Setup, visibility, sync health, QR, announcements, lifecycle                                       |
+| Director native Live        | `apps/director/src-tauri/src/live.rs`, `live_server.rs` | Keychain credential, schema v5, local-network server                                               |
 
 ### Test counts
 
-| Suite | Tests |
-| --- | --- |
-| Root (scorer + Director) | 2 141 |
-| QBLive protocol | 44 |
-| Public projection privacy | 18 (one sweeps 8 192 settings combinations) |
-| Activity shard payloads | 12 |
-| Conformance suite | 14 |
-| Live Web | 14 |
-| Cloudflare backend (real `workerd`) | 25 |
-| Push gateway (real `workerd`) | 39 |
-| Swift shared kit (iOS Simulator) | 28 |
-| Director native (Rust) | 38 |
+| Suite                               | Tests                                       |
+| ----------------------------------- | ------------------------------------------- |
+| Root (scorer + Director)            | 2 141                                       |
+| QBLive protocol                     | 44                                          |
+| Public projection privacy           | 18 (one sweeps 8 192 settings combinations) |
+| Activity shard payloads             | 12                                          |
+| Conformance suite                   | 14                                          |
+| Live Web                            | 14                                          |
+| Cloudflare backend (real `workerd`) | 25                                          |
+| Push gateway (real `workerd`)       | 39                                          |
+| Swift shared kit (iOS Simulator)    | 28                                          |
+| Director native (Rust)              | 38                                          |
 
 ---
 
 ## 6. Documents
 
-| | |
-| --- | --- |
-| [`QBLIVE.md`](QBLIVE.md) | The normative QBLive v1 specification |
-| [`QBLIVE_IOS.md`](QBLIVE_IOS.md) | iOS targets, AASA, App Store Connect checklist |
-| [`QBLIVE_ACTIVITY.md`](QBLIVE_ACTIVITY.md) | Sharding, measured payload sizes, cadence |
-| [`QBLIVE_PUSH_PROTOTYPE.md`](QBLIVE_PUSH_PROTOTYPE.md) | The APNs transport measurement and its verdict |
-| [`QBLIVE_LOAD.md`](QBLIVE_LOAD.md) | Load results, the measurement artifact, channel modelling |
-| [`../apps/qblive-backend-cloudflare/README.md`](../apps/qblive-backend-cloudflare/README.md) | Deploying a tournament backend |
-| [`../apps/qblive-push/README.md`](../apps/qblive-push/README.md) | The push gateway |
+|                                                                                              |                                                                                                                           |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [`QBLIVE.md`](QBLIVE.md)                                                                     | The normative QBLive v1 specification                                                                                     |
+| [`QBLIVE_SERVER_CONTRACT.md`](QBLIVE_SERVER_CONTRACT.md)                                     | The hosting-neutral server contract: Cloudflare, QBServer, and local-only mode are implementations, not separate products |
+| [`QBLIVE_IOS.md`](QBLIVE_IOS.md)                                                             | iOS targets, AASA, App Store Connect checklist                                                                            |
+| [`QBLIVE_ACTIVITY.md`](QBLIVE_ACTIVITY.md)                                                   | Sharding, measured payload sizes, cadence                                                                                 |
+| [`QBLIVE_PUSH_PROTOTYPE.md`](QBLIVE_PUSH_PROTOTYPE.md)                                       | The APNs transport measurement and its verdict                                                                            |
+| [`QBLIVE_LOAD.md`](QBLIVE_LOAD.md)                                                           | Load results, the measurement artifact, channel modelling                                                                 |
+| [`../apps/qblive-backend-cloudflare/README.md`](../apps/qblive-backend-cloudflare/README.md) | Deploying a tournament backend                                                                                            |
+| [`../apps/qblive-push/README.md`](../apps/qblive-push/README.md)                             | The push gateway                                                                                                          |
 
 ---
 

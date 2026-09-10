@@ -299,20 +299,41 @@ pub async fn director_open_tournament(
     store: State<'_, DirectorStore>,
     server: State<'_, ServerRuntime>,
 ) -> Result<Value, CommandError> {
-    open_tournament_with_runtime(&tournament_id, &store, &server, DEFAULT_QBTCP_PORT).await
+    open_tournament_with_runtime(
+        &tournament_id,
+        &store,
+        &server,
+        DEFAULT_QBTCP_PORT,
+        DEFAULT_QBTCP_PORT,
+    )
+    .await
 }
 
 async fn open_tournament_with_runtime(
     tournament_id: &str,
     store: &DirectorStore,
     server: &ServerRuntime,
+    target_port: u16,
     rollback_port: u16,
 ) -> Result<Value, CommandError> {
+    let target_id = tournament_id.trim();
     let restart_server = server.status().running;
+    // Capture the outgoing durable identity before touching anything: if the
+    // target activates in storage but its QBTCP restart fails afterward, the
+    // switch must roll back to this document (#786).
+    let outgoing_id = store
+        .load_state()
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(|state| state.get("tournament"))
+        .and_then(|tournament| tournament.get("id"))
+        .and_then(|id| id.as_str())
+        .map(str::to_owned);
     if restart_server {
         server.stop();
     }
-    let state = match store.open_tournament(tournament_id.trim()) {
+    let state = match store.open_tournament(target_id) {
         Ok(state) => state,
         Err(open_error) => {
             if restart_server {
@@ -344,12 +365,85 @@ async fn open_tournament_with_runtime(
         }
     };
     if restart_server {
-        server
-            .start_with_store(Some(state.clone()), std::sync::Arc::new(store.clone()))
+        if let Err(start_error) = server
+            .start_with_store_on_port(
+                Some(state.clone()),
+                std::sync::Arc::new(store.clone()),
+                target_port,
+            )
             .await
-            .map_err(CommandError::server)?;
+        {
+            // Storage already committed the target, so a plain error return
+            // would leave native storage on B while React stays on A. Treat
+            // activation + service handoff as one recoverable transition.
+            return rollback_failed_switch(
+                store,
+                server,
+                outgoing_id.as_deref(),
+                target_id,
+                &start_error.to_string(),
+                rollback_port,
+            )
+            .await;
+        }
     }
     Ok(state)
+}
+
+/// Restore the outgoing document after the target activated in storage but
+/// its QBTCP restart failed. Always returns `Err`: the switch did not happen.
+/// Every branch names the authoritative document state explicitly so a
+/// React/storage split can never hide behind a bare startup error (#786).
+async fn rollback_failed_switch(
+    store: &DirectorStore,
+    server: &ServerRuntime,
+    outgoing_id: Option<&str>,
+    target_id: &str,
+    start_error: &str,
+    rollback_port: u16,
+) -> Result<Value, CommandError> {
+    let server_error = |message: String| CommandError {
+        code: "server",
+        message,
+    };
+    let Some(outgoing_id) = outgoing_id else {
+        return Err(server_error(format!(
+            "Tournament {target_id} could not be opened operationally because QBTCP could not restart: {start_error}. The outgoing tournament document is unavailable, so no rollback was possible. Review recovery diagnostics before continuing."
+        )));
+    };
+    let restored = match store.open_tournament(outgoing_id) {
+        Ok(restored) => restored,
+        Err(error) => {
+            let current = store
+                .load_state()
+                .ok()
+                .flatten()
+                .as_ref()
+                .and_then(|state| state.get("tournament"))
+                .and_then(|tournament| tournament.get("id"))
+                .and_then(|id| id.as_str())
+                .map(str::to_owned);
+            return Err(server_error(format!(
+                "Tournament {target_id}'s QBTCP startup failed: {start_error}, and Director could not fully restore Tournament {outgoing_id}: {error}. The durable active document reads as {}. Review recovery diagnostics before continuing.",
+                current.as_deref().unwrap_or("<unreadable>")
+            )));
+        }
+    };
+    if let Err(error) = server
+        .start_with_store_on_port(
+            Some(restored),
+            std::sync::Arc::new(store.clone()),
+            rollback_port,
+        )
+        .await
+    {
+        return Err(server_error(format!(
+            "Tournament {target_id} could not be opened operationally because QBTCP could not restart: {start_error}. Tournament {outgoing_id} was restored as the active document, but its QBTCP service could not be restarted: {error}."
+        )));
+    }
+    Err(server_error(format!(
+        "Tournament {target_id} could not be opened operationally because QBTCP could not restart: {start_error}. Tournament {outgoing_id} was restored."
+    )))
 }
 
 #[tauri::command]
@@ -937,7 +1031,7 @@ mod tests {
             .await
             .expect("initial server starts");
 
-        let result = open_tournament_with_runtime("missing", &store, &server, 0).await;
+        let result = open_tournament_with_runtime("missing", &store, &server, 0, 0).await;
 
         let error = result.expect_err("missing tournament must fail");
         assert_eq!(error.code, "store");
@@ -974,7 +1068,8 @@ mod tests {
             .expect("rollback blocker address is available")
             .port();
 
-        let result = open_tournament_with_runtime("missing", &store, &server, rollback_port).await;
+        let result =
+            open_tournament_with_runtime("missing", &store, &server, 0, rollback_port).await;
 
         let error = result.expect_err("missing tournament must fail");
         assert_eq!(error.code, "server");
@@ -991,6 +1086,252 @@ mod tests {
             "tournament-a"
         );
         drop(blocker);
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// Occupy an ephemeral wildcard port and hand it back blocked.
+    fn blocked_port() -> (std::net::TcpListener, u16) {
+        let blocker = std::net::TcpListener::bind((std::net::Ipv4Addr::UNSPECIFIED, 0))
+            .expect("blocker listener binds");
+        let port = blocker
+            .local_addr()
+            .expect("blocker address is available")
+            .port();
+        (blocker, port)
+    }
+
+    fn active_tournament_id(store: &DirectorStore) -> String {
+        store.load_state().expect("state reads").unwrap()["tournament"]["id"]
+            .as_str()
+            .expect("tournament id")
+            .to_owned()
+    }
+
+    /// #786: a clean A -> B handoff moves storage and QBTCP to the target.
+    #[tokio::test(flavor = "current_thread")]
+    async fn successful_switch_moves_storage_and_qbtcp_to_the_target() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x43; 32]);
+        server
+            .start_on_port(Some(document("tournament-a", "Tournament A")), 0)
+            .await
+            .expect("initial server starts");
+
+        let state = open_tournament_with_runtime("tournament-b", &store, &server, 0, 0)
+            .await
+            .expect("switch succeeds");
+
+        assert_eq!(state["tournament"]["id"], "tournament-b");
+        assert_eq!(active_tournament_id(&store), "tournament-b");
+        assert!(server.status().running, "QBTCP serves the target");
+        server.stop();
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// #786: target storage opens but its QBTCP restart fails -> the outgoing
+    /// document and its service are restored and the error says so.
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_open_qbtcp_failure_restores_the_outgoing_document_and_service() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x44; 32]);
+        server
+            .start_on_port(Some(document("tournament-a", "Tournament A")), 0)
+            .await
+            .expect("initial server starts");
+        let (_blocker, target_port) = blocked_port();
+
+        let result =
+            open_tournament_with_runtime("tournament-b", &store, &server, target_port, 0).await;
+
+        let error = result.expect_err("failed restart must fail the switch");
+        assert_eq!(error.code, "server");
+        assert!(
+            error
+                .message
+                .contains("Tournament tournament-a was restored"),
+            "unexpected message: {error:?}"
+        );
+        assert_eq!(active_tournament_id(&store), "tournament-a");
+        assert!(
+            server.status().running,
+            "outgoing QBTCP is restored after rollback"
+        );
+        server.stop();
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// #786: rollback restores A in storage but A's QBTCP restart also fails ->
+    /// the document/service split is explicit, never silent.
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_open_failure_with_blocked_rollback_reports_unrestored_service() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x45; 32]);
+        server
+            .start_on_port(Some(document("tournament-a", "Tournament A")), 0)
+            .await
+            .expect("initial server starts");
+        let (_target_blocker, target_port) = blocked_port();
+        let (_rollback_blocker, rollback_port) = blocked_port();
+
+        let result = open_tournament_with_runtime(
+            "tournament-b",
+            &store,
+            &server,
+            target_port,
+            rollback_port,
+        )
+        .await;
+
+        let error = result.expect_err("failed restart must fail the switch");
+        assert_eq!(error.code, "server");
+        assert!(
+            error
+                .message
+                .contains("was restored as the active document")
+                && error.message.contains("could not be restarted"),
+            "unexpected message: {error:?}"
+        );
+        assert_eq!(active_tournament_id(&store), "tournament-a");
+        assert!(
+            !server.status().running,
+            "unrestored service must read as stopped"
+        );
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// #786: the outgoing catalog row is gone when rollback runs -> the error
+    /// names both failures and the currently active durable document.
+    #[tokio::test(flavor = "current_thread")]
+    async fn post_open_failure_with_missing_outgoing_catalog_reports_rollback_failure() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x46; 32]);
+        server
+            .start_on_port(Some(document("tournament-a", "Tournament A")), 0)
+            .await
+            .expect("initial server starts");
+        // Simulate catalog loss for the outgoing tournament: its row is gone,
+        // so the storage half of the rollback cannot run.
+        rusqlite::Connection::open(&path)
+            .expect("direct connection opens")
+            .execute(
+                "DELETE FROM tournament_documents WHERE id = 'tournament-a'",
+                [],
+            )
+            .expect("outgoing catalog row deletes");
+        let (_blocker, target_port) = blocked_port();
+
+        let result =
+            open_tournament_with_runtime("tournament-b", &store, &server, target_port, 0).await;
+
+        let error = result.expect_err("failed restart must fail the switch");
+        assert_eq!(error.code, "server");
+        assert!(
+            error
+                .message
+                .contains("could not fully restore Tournament tournament-a"),
+            "unexpected message: {error:?}"
+        );
+        assert!(
+            error.message.contains("tournament-b"),
+            "diagnostics must name the durable active document: {error:?}"
+        );
+        assert_eq!(active_tournament_id(&store), "tournament-b");
+        assert!(!server.status().running);
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// #786: with QBTCP stopped, a switch is a plain storage open with no
+    /// rollback behavior.
+    #[tokio::test(flavor = "current_thread")]
+    async fn switch_without_running_qbtcp_opens_the_target_directly() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x47; 32]);
+
+        let state = open_tournament_with_runtime("tournament-b", &store, &server, 0, 0)
+            .await
+            .expect("switch succeeds");
+
+        assert_eq!(state["tournament"]["id"], "tournament-b");
+        assert_eq!(active_tournament_id(&store), "tournament-b");
+        assert!(!server.status().running);
+        drop(store);
+        cleanup(&path);
+    }
+
+    /// #786: repeated failed switches behave identically and never strand a
+    /// running server the status cannot see.
+    #[tokio::test(flavor = "current_thread")]
+    async fn repeated_failed_switches_restore_consistently() {
+        let _guard = OPEN_TOURNAMENT_ROLLBACK_TEST_MUTEX.lock().await;
+        let path = temporary_database_path();
+        let store = DirectorStore::open(path.clone()).expect("database opens");
+        store
+            .save_state(&document("tournament-a", "Tournament A"))
+            .expect("A saves");
+        store
+            .save_document(&document("tournament-b", "Tournament B"), false)
+            .expect("B catalogs");
+        let server = ServerRuntime::with_key([0x48; 32]);
+        server
+            .start_on_port(Some(document("tournament-a", "Tournament A")), 0)
+            .await
+            .expect("initial server starts");
+
+        for _ in 0..2 {
+            let (_blocker, target_port) = blocked_port();
+            let result =
+                open_tournament_with_runtime("tournament-b", &store, &server, target_port, 0).await;
+            assert!(result.is_err());
+            assert_eq!(active_tournament_id(&store), "tournament-a");
+            assert!(server.status().running);
+        }
+        server.stop();
+        assert!(!server.status().running);
         drop(store);
         cleanup(&path);
     }
@@ -1163,6 +1504,139 @@ pub fn director_forget_live_credential(
     }
     credentials.store.forget(&publication_id)?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Internet QBTCP relay
+// ---------------------------------------------------------------------------
+
+/// The credential store for relay management credentials.
+///
+/// A separate state from [`LiveCredentials`] on purpose: the two credentials authorize
+/// different backends, and forgetting one must never revoke the other.
+pub struct RelayCredentials {
+    store: Box<dyn crate::relay::CredentialStore>,
+}
+
+impl Default for RelayCredentials {
+    fn default() -> Self {
+        Self {
+            store: Box::new(crate::relay::KeychainCredentialStore),
+        }
+    }
+}
+
+/// Prove secure persistence is available before Director consumes a one-time setup secret.
+#[tauri::command]
+pub fn director_probe_relay_credential_store(
+    credentials: State<'_, RelayCredentials>,
+) -> Result<(), CommandError> {
+    credentials.store.probe()?;
+    Ok(())
+}
+
+impl RelayCredentials {
+    #[cfg(test)]
+    pub fn with_store(store: Box<dyn crate::relay::CredentialStore>) -> Self {
+        Self { store }
+    }
+}
+
+impl From<crate::relay::RelayError> for CommandError {
+    fn from(value: crate::relay::RelayError) -> Self {
+        CommandError {
+            code: "relay",
+            message: value.to_string(),
+        }
+    }
+}
+
+/// Store a relay management credential.
+///
+/// The tournament id is validated before it becomes a keychain account name: it arrives over
+/// the bridge, and an unvalidated value would name an arbitrary keychain entry.
+#[tauri::command]
+pub fn director_store_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+    token: String,
+) -> Result<(), CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    credentials.store.store(&tournament_id, &token)?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn director_read_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+) -> Result<Option<String>, CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    Ok(credentials.store.read(&tournament_id)?)
+}
+
+#[tauri::command]
+pub fn director_forget_relay_credential(
+    credentials: State<'_, RelayCredentials>,
+    tournament_id: String,
+) -> Result<(), CommandError> {
+    if !crate::relay::is_tournament_id(&tournament_id) {
+        return Err(crate::relay::RelayError::InvalidTournamentId.into());
+    }
+    credentials.store.forget(&tournament_id)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod relay_tests {
+    use super::*;
+    use crate::relay::MemoryCredentialStore;
+
+    #[test]
+    fn a_relay_credential_round_trips_through_the_store() {
+        let credentials = RelayCredentials::with_store(Box::new(MemoryCredentialStore::default()));
+        let tournament = "bcdfghjkmnpqrstvwxyz1234";
+        assert!(crate::relay::is_tournament_id(tournament));
+        assert_eq!(credentials.store.read(tournament).expect("read"), None);
+        credentials
+            .store
+            .store(tournament, "management-token")
+            .expect("store");
+        assert_eq!(
+            credentials.store.read(tournament).expect("read").as_deref(),
+            Some("management-token")
+        );
+        credentials.store.forget(tournament).expect("forget");
+        assert_eq!(credentials.store.read(tournament).expect("read"), None);
+    }
+
+    #[test]
+    fn relay_and_live_credentials_are_independent_states() {
+        let relay = RelayCredentials::with_store(Box::new(MemoryCredentialStore::default()));
+        let live =
+            LiveCredentials::with_store(Box::new(crate::live::MemoryCredentialStore::default()));
+        relay
+            .store
+            .store("bcdfghjkmnpqrstvwxyz1234", "relay-token")
+            .expect("store relay");
+        // Forgetting the live credential cannot touch the relay one: different state, different
+        // keychain service.
+        live.store
+            .forget("bcdfghjkmnpqrstvwxyz1234")
+            .expect("forget live");
+        assert_eq!(
+            relay
+                .store
+                .read("bcdfghjkmnpqrstvwxyz1234")
+                .expect("read")
+                .as_deref(),
+            Some("relay-token")
+        );
+    }
 }
 
 /// The publication as the normalized tables see it.

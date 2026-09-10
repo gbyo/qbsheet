@@ -40,6 +40,9 @@ import {
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { isNativeDirector, issueNativeRoomPairing, resetNativeQbtcpCredentials } from '../platform/native';
+import { buildInternetPairing } from '../relay/relayPairing';
+import { localStorageRelayPanelStore, RelayPanel } from '../relay/RelayPanel';
+import type { RelayConfig } from '../relay/relayConfig';
 import type { NativeServerState } from '../server/useNativeServerStatus';
 import {
   deriveQbtcpOperationalHealth,
@@ -179,6 +182,16 @@ export function RoomsView({
   const qbtcpNeedsAttention =
     nativeDirector && qbtcpOperationalHealth ? qbtcpHealthNeedsAttention(qbtcpOperationalHealth) : false;
   const invitations = qbtcpStatus?.pairingInvitations ?? [];
+  // The claimed relay pointer, shared by the operator panel (which edits it) and the room
+  // invitations (which pair from it). The sync engine (#773) will move this into the
+  // tournament document; until then the panel's store is the source of truth.
+  const [relayPointer, setRelayPointer] = useState<RelayConfig | null>(() =>
+    localStorageRelayPanelStore().load(),
+  );
+  const internetRelay =
+    relayPointer?.enabled && relayPointer.baseUrl && relayPointer.tournamentId
+      ? { baseUrl: relayPointer.baseUrl, tournamentId: relayPointer.tournamentId }
+      : null;
   const assignableRoomIds = useMemo(
     () => new Set(state.rooms.filter((room) => roomIsAssignable(state, room.id)).map((room) => room.id)),
     [state],
@@ -512,6 +525,31 @@ export function RoomsView({
             onIssue={(roomId) => void issuePairing(roomId)}
             onCopy={(url, message) => void copyPairingLink(url, message)}
             onSetAddress={setAdvertisedAddress}
+            internetRelay={internetRelay}
+          />
+        </AdvancedSection>
+      )}
+
+      {nativeServer && (
+        <AdvancedSection
+          label="Internet QBTCP"
+          hint="Tournament-owned relay as the primary scoring address, with LAN fallback"
+          icon="network"
+          defaultOpen={false}
+        >
+          <RelayPanel
+            lan={{
+              available: qbtcpRunning && Boolean(qbtcpStatus?.address),
+              address:
+                qbtcpRunning && qbtcpStatus?.address
+                  ? `${qbtcpStatus.address}${qbtcpStatus.port ? `:${qbtcpStatus.port}` : ''}`
+                  : null,
+              // The native status carries no local-network permission signal today; the
+              // relay status model already warns when one is reported.
+              permissionIssue: null,
+            }}
+            onPointerChange={setRelayPointer}
+            onAnnounce={onAnnounce}
           />
         </AdvancedSection>
       )}
@@ -1301,6 +1339,7 @@ function QbtcpNetwork({
   onIssue,
   onCopy,
   onSetAddress,
+  internetRelay = null,
 }: {
   state: DirectorState;
   nativeServer: NativeServerState;
@@ -1319,6 +1358,8 @@ function QbtcpNetwork({
   onIssue: (roomId: string) => void;
   onCopy: (url: string, message: string) => void;
   onSetAddress: (address: string) => Promise<void>;
+  /** Enabled tournament relay pointer: invitations copy the Internet link as primary. */
+  internetRelay?: { baseUrl: string; tournamentId: string } | null;
 }) {
   const status = nativeServer.status;
   const now = useNow(1000);
@@ -1353,6 +1394,11 @@ function QbtcpNetwork({
       {qbtcpOperationalHealth?.kind === 'unverified' && (
         <Callout tone="warning" title="QBTCP snapshot sync not verified">
           The server is running, but Director has not ingested its first snapshot yet.
+        </Callout>
+      )}
+      {qbtcpRunning && status?.sleepPrevention?.warning && (
+        <Callout tone="warning" title="Host sleep protection unavailable">
+          {status.sleepPrevention.warning}
         </Callout>
       )}
       <div className="director-actions">
@@ -1409,6 +1455,10 @@ function QbtcpNetwork({
             value: qbtcpRunning ? (status?.pairedRooms ?? state.qbtcpSessions.length) : '—',
           },
           { term: 'Protocol', value: qbtcpRunning ? (status?.protocol ?? 'QBTCP v1') : '—' },
+          {
+            term: 'Host sleep',
+            value: qbtcpRunning ? (status?.sleepPrevention?.active ? 'Prevention active' : '—') : '—',
+          },
           {
             term: 'Snapshot sync',
             value: qbtcpOperationalHealth ? qbtcpHealthSummary(qbtcpOperationalHealth) : 'Not available',
@@ -1477,6 +1527,22 @@ function QbtcpNetwork({
                 // Who the round expects here, so the invitation is handed to the right person
                 // rather than to whoever is standing nearest the laptop.
                 const expected = expectedScorekeeperName(state, room.id);
+                // Internet-primary pairing: the same code and room, served from the tournament
+                // relay. A stored pointer that no longer validates falls back to the LAN link
+                // rather than minting a broken one.
+                let internetUrl: string | null = null;
+                if (internetRelay && invitation) {
+                  try {
+                    internetUrl = buildInternetPairing({
+                      baseUrl: internetRelay.baseUrl,
+                      tournamentId: internetRelay.tournamentId,
+                      code: invitation.pairingCode,
+                      roomId: room.id,
+                    }).url;
+                  } catch {
+                    internetUrl = null;
+                  }
+                }
                 return (
                   <SummaryItem
                     key={room.id}
@@ -1494,7 +1560,7 @@ function QbtcpNetwork({
                         {expected && <span>Expected scorekeeper: {expected} · </span>}
                         <span>
                           {invitation
-                            ? `Code ${invitation.pairingCode} · ${formatPairingRemaining(remainingSeconds ?? 0)}`
+                            ? `Code ${invitation.pairingCode} · ${formatPairingRemaining(remainingSeconds ?? 0)}${internetUrl ? ' · Internet primary' : ''}`
                             : expired
                               ? 'The old code and link are no longer usable. Issue a fresh invitation.'
                               : 'Issue a room-specific invitation when the scorekeeper is ready to connect.'}
@@ -1503,15 +1569,41 @@ function QbtcpNetwork({
                     }
                     actions={
                       <div className="director-actions">
-                        {invitation?.pairingUrl && (
-                          <Button
-                            variant="secondary"
-                            onClick={() =>
-                              onCopy(invitation.pairingUrl ?? '', `${room.name} pairing link copied.`)
-                            }
-                          >
-                            Copy link
-                          </Button>
+                        {internetUrl ? (
+                          <>
+                            <Button
+                              variant="secondary"
+                              onClick={() =>
+                                onCopy(internetUrl ?? '', `${room.name} Internet pairing link copied.`)
+                              }
+                            >
+                              Copy Internet link
+                            </Button>
+                            {invitation?.pairingUrl && (
+                              <Button
+                                variant="quiet"
+                                onClick={() =>
+                                  onCopy(
+                                    invitation.pairingUrl ?? '',
+                                    `${room.name} LAN fallback link copied.`,
+                                  )
+                                }
+                              >
+                                LAN fallback
+                              </Button>
+                            )}
+                          </>
+                        ) : (
+                          invitation?.pairingUrl && (
+                            <Button
+                              variant="secondary"
+                              onClick={() =>
+                                onCopy(invitation.pairingUrl ?? '', `${room.name} pairing link copied.`)
+                              }
+                            >
+                              Copy link
+                            </Button>
+                          )
                         )}
                         <Button
                           variant={invitation ? 'quiet' : 'primary'}

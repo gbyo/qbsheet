@@ -291,3 +291,85 @@ describe('Delivery page (#757)', () => {
     expect(screen.queryByText('Import problems')).toBeNull();
   });
 });
+
+/**
+ * Selection freshness (#756) in the rebuilt Delivery queue (#757).
+ *
+ * The page itself carries no persistent selection — checkboxes exist only
+ * inside the prepare dialog — so the stale-selection hazard moved with it: a
+ * round turnover (or game removal) while the dialog is open must not leave
+ * invisible game IDs in the pending preparation run.
+ */
+describe('Delivery selection freshness (#756)', () => {
+  function roundTwoState(): DirectorState {
+    const state = mixedState();
+    state.rounds.push({ ...state.rounds[0]!, id: 'round-2', name: 'Round 2', number: 2 });
+    state.rooms.push(room('room-201', 'Room 201'));
+    state.scheduledGames.push(
+      scheduledGame('game-201', 'team-a', 'team-b', {
+        roundId: 'round-2',
+        roomId: 'room-201',
+        status: 'released',
+      }),
+    );
+    state.tournament!.currentRoundId = 'round-2';
+    return state;
+  }
+
+  function renderWithDialog(state: DirectorState, transfers: TransfersRuntime) {
+    const controller = stubController();
+    const rendered = render(
+      <TransfersView
+        transfers={transfers}
+        state={state}
+        controller={controller}
+        onNavigate={vi.fn()}
+        onAnnounce={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Prepare needed files (1)' }));
+    expect(screen.getByRole('heading', { name: 'Prepare assignment files' })).toBeTruthy();
+    const remount = (next: DirectorState) => {
+      rendered.rerender(
+        <TransfersView
+          transfers={transfers}
+          state={next}
+          controller={controller}
+          onNavigate={vi.fn()}
+          onAnnounce={vi.fn()}
+        />,
+      );
+    };
+    return { ...rendered, remount };
+  }
+
+  test('advancing the current round mid-dialog excludes the stale selection', () => {
+    const transfers = stubRuntime();
+    const mounted = renderWithDialog(mixedState(), transfers);
+    // The dialog preselects the one game needing a file; the submit counts it.
+    expect(screen.getByRole('button', { name: 'Prepare 1 file' })).toBeTruthy();
+
+    mounted.remount(roundTwoState());
+
+    // The Round 1 rows are gone, so nothing may still claim their selection.
+    expect(screen.queryByRole('button', { name: 'Prepare 1 file' })).toBeNull();
+    expect((screen.getByRole('button', { name: 'Prepare 0 files' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(transfers.prepareTo).not.toHaveBeenCalled();
+  });
+
+  test('removing a selected game mid-dialog excludes its stale ID', () => {
+    const transfers = stubRuntime();
+    const mounted = renderWithDialog(mixedState(), transfers);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Room 101, Aiken vs Dorman' }));
+    expect(screen.getByRole('button', { name: 'Prepare 2 files' })).toBeTruthy();
+
+    const next = mixedState();
+    next.scheduledGames = next.scheduledGames.filter((game) => game.id !== 'game-101');
+    mounted.remount(next);
+
+    expect(screen.queryByRole('checkbox', { name: 'Room 101, Aiken vs Dorman' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Prepare 2 files' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Prepare 1 file' })).toBeTruthy();
+    expect(transfers.prepareTo).not.toHaveBeenCalled();
+  });
+});

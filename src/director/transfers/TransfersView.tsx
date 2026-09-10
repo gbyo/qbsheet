@@ -870,9 +870,15 @@ function PrepareFilesDialog({
   const [selectedIds, setSelectedIds] = useState<DirectorId[]>(() =>
     initialIds.filter((id) => rows.some((row) => row.scheduledGameId === id)),
   );
+  // Selections address the currently displayed rows only. If the operational
+  // round turns over (or a game disappears) while the dialog is open, IDs that
+  // are no longer visible must not linger where the operator can no longer see
+  // or uncheck them (#756).
+  const visibleIds = useMemo(() => new Set(rows.map((row) => row.scheduledGameId)), [rows]);
+  const effectiveIds = selectedIds.filter((id) => visibleIds.has(id));
   const writable = state.transfers.locations.filter((location) => location.connected && !location.readOnly);
   const [destinationId, setDestinationId] = useState(writable.length === 1 ? writable[0]!.id : '');
-  const selectedCount = selectedIds.length;
+  const selectedCount = effectiveIds.length;
   const descriptor = mode === 'backup' ? 'assignment file backups' : 'assignment files';
   const submitLabel =
     mode === 'backup'
@@ -893,11 +899,11 @@ function PrepareFilesDialog({
       size="lg"
       onClose={onClose}
       onSubmit={() => {
-        if (selectedIds.length === 0) {
+        if (effectiveIds.length === 0) {
           onAnnounce(infoNotice(`Select at least one game to prepare ${descriptor}.`));
           return;
         }
-        const selection: AssignmentSelection = { kind: 'games', scheduledGameIds: selectedIds };
+        const selection: AssignmentSelection = { kind: 'games', scheduledGameIds: effectiveIds };
         if (writable.length === 0) {
           if (!transfers.native) {
             const count = transfers.downloadAssignments(selection);

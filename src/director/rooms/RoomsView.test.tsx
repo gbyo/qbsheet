@@ -273,6 +273,53 @@ describe('room operations visibility', () => {
   });
 });
 
+describe('host sleep protection (#745)', () => {
+  function serverWithStatus(status: NativeServerState['status']): NativeServerState {
+    return {
+      status,
+      loading: false,
+      refresh: vi.fn(),
+      toggle: vi.fn(),
+      addInvitation: vi.fn(),
+      setAdvertisedAddress: vi.fn(),
+      apply: vi.fn(),
+    } as unknown as NativeServerState;
+  }
+
+  function renderWithServer(status: NativeServerState['status']) {
+    render(
+      <ConfirmProvider>
+        <RoomsView
+          state={tournamentState()}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          server={serverWithStatus(status)}
+        />
+      </ConfirmProvider>,
+    );
+  }
+
+  test('a failed keep-awake acquisition surfaces the manual workaround', () => {
+    renderWithServer({
+      running: true,
+      sleepPrevention: {
+        active: false,
+        warning:
+          'Director could not prevent this computer from sleeping. Disable automatic sleep while QBTCP is running.',
+      },
+    });
+    expect(screen.getByText('Host sleep protection unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/Disable automatic sleep while QBTCP is running/)).toBeInTheDocument();
+  });
+
+  test('active protection is reported in diagnostics', () => {
+    renderWithServer({ running: true, sleepPrevention: { active: true } });
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(screen.getByText('Prevention active')).toBeInTheDocument();
+    expect(screen.queryByText('Host sleep protection unavailable')).toBeNull();
+  });
+});
+
 describe('QBTCP credential control', () => {
   test('requires explicit confirmation before resetting every pairing', async () => {
     const invoke = vi.fn(async (command: string) => {
@@ -313,5 +360,134 @@ describe('QBTCP credential control', () => {
 
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
     expect(apply).toHaveBeenCalledWith(expect.objectContaining({ running: true }));
+  });
+});
+
+describe('Internet-primary pairing invitations (#774)', () => {
+  const relayBaseUrl = 'https://qbtcp-relay-abc.xyz123.workers.dev';
+  const relayTournamentId = 'bcdfghjkmnpqrstvwxyz1234';
+
+  function seedRelayPointer() {
+    localStorage.setItem(
+      'qbsheet.internet-qbtcp',
+      JSON.stringify({
+        enabled: true,
+        baseUrl: relayBaseUrl,
+        tournamentId: relayTournamentId,
+        keychainAccount: relayTournamentId,
+        customDomain: false,
+        claimedAt: '2026-09-10T11:00:00.000Z',
+        lastContactAt: null,
+      }),
+    );
+  }
+
+  function stateWithRoom() {
+    const state = tournamentState();
+    state.rooms.push({
+      id: 'room-1',
+      name: 'Room 1',
+      status: 'available',
+      moderatorId: null,
+      scorekeeperId: null,
+      equipmentId: null,
+      available: true,
+    });
+    return state;
+  }
+
+  function serverWithInvitation() {
+    return {
+      status: {
+        running: true,
+        address: '192.168.1.10',
+        port: 8787,
+        pairingInvitations: [
+          {
+            roomId: 'room-1',
+            roomName: 'Room 1',
+            pairingCode: '48213906',
+            pairingUrl: 'https://qbsheet.com/#qbtcp-pair?v=1&server=lan&code=48213906&room=room-1',
+            issuedAt: '2026-09-10T11:59:00.000Z',
+            expiresAt: '2026-09-10T12:14:00.000Z',
+            expiresInSeconds: 900,
+          },
+        ],
+      },
+      loading: false,
+      refresh: vi.fn(),
+      toggle: vi.fn(),
+      addInvitation: vi.fn(),
+      setAdvertisedAddress: vi.fn(),
+      apply: vi.fn(),
+    } as unknown as NativeServerState;
+  }
+
+  function stubClipboard() {
+    const written: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn(async (text: string) => void written.push(text)) },
+    });
+    return written;
+  }
+
+  afterEach(() => {
+    localStorage.removeItem('qbsheet.internet-qbtcp');
+  });
+
+  function desktopDirector() {
+    // Room invitations render in the desktop app only.
+    window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+  }
+
+  test('a claimed relay makes the Internet link primary and keeps LAN as fallback', async () => {
+    desktopDirector();
+    seedRelayPointer();
+    const written = stubClipboard();
+    render(
+      <ConfirmProvider>
+        <RoomsView
+          state={stateWithRoom()}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          server={serverWithInvitation()}
+        />
+      </ConfirmProvider>,
+    );
+
+    expect(screen.getByText(/Internet primary/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy Internet link' }));
+    await waitFor(() => expect(written).toHaveLength(1));
+    const url = new URL(written[0] as string);
+    const fragment = new URLSearchParams(url.hash.replace(/^#qbtcp-pair\?/, ''));
+    expect(fragment.get('server')).toBe(`${relayBaseUrl}/qbtcp/v1/tournaments/${relayTournamentId}`);
+    expect(fragment.get('code')).toBe('48213906');
+    expect(fragment.get('room')).toBe('room-1');
+    // The fetchable URL carries no code: it stays fragment-only.
+    expect(url.search).toBe('');
+
+    fireEvent.click(screen.getByRole('button', { name: 'LAN fallback' }));
+    await waitFor(() => expect(written).toHaveLength(2));
+    expect(written[1]).toContain('server=lan');
+  });
+
+  test('without a relay the LAN link stays the only pairing', () => {
+    desktopDirector();
+    const written = stubClipboard();
+    render(
+      <ConfirmProvider>
+        <RoomsView
+          state={stateWithRoom()}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          server={serverWithInvitation()}
+        />
+      </ConfirmProvider>,
+    );
+    expect(screen.getByRole('button', { name: 'Copy link' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy Internet link' })).toBeNull();
+    expect(screen.queryByText(/Internet primary/)).toBeNull();
+    expect(written).toHaveLength(0);
   });
 });

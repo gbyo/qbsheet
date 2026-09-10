@@ -122,6 +122,11 @@ export const RULES = [
     why: 'a standalone crate; nothing else depends on it',
   },
   {
+    glob: 'crates/qblive-server/**',
+    domains: ['rust-director'],
+    why: 'apps/director/src-tauri/Cargo.toml path-depends on crates/qblive-server; its own fmt/clippy/tests run in the qblive.yml rust job',
+  },
+  {
     glob: 'apps/director/src-tauri/**',
     domains: ['rust-director'],
     why: 'the Director native crate',
@@ -137,6 +142,11 @@ export const RULES = [
     glob: 'apps/qblive-backend-cloudflare/**',
     domains: [],
     why: 'the Cloudflare backend runs in workerd, in qblive.yml',
+  },
+  {
+    glob: 'apps/qbtcp-relay-backend-cloudflare/**',
+    domains: [],
+    why: 'the QBTCP relay runs in workerd, in qblive.yml',
   },
   { glob: 'apps/qblive-push/**', domains: [], why: 'the push gateway runs in workerd, in qblive.yml' },
   { glob: 'apps/qblive-push-prototype/**', domains: [], why: 'a prototype, exercised by qblive.yml' },
@@ -166,6 +176,11 @@ export const RULES = [
     glob: 'packages/qblive-conformance/**',
     domains: [],
     why: 'the conformance suite, run against a real backend in qblive.yml',
+  },
+  {
+    glob: 'packages/qbtcp-relay-conformance/**',
+    domains: [],
+    why: 'the relay conformance suite, run against a real relay in qblive.yml',
   },
 
   // ---------------------------------------------------------------------------------------------

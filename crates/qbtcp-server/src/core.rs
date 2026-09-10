@@ -14,6 +14,10 @@ pub struct DiscoveryDocument {
     pub capabilities: Vec<String>,
     pub qbj_version: String,
     pub name: String,
+    /// The realtime/relay endpoint, when this server serves the `stream` capability (#770).
+    /// Absent by default: a client must never infer stream support from anything but this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream: Option<crate::stream::StreamDescriptor>,
 }
 
 #[derive(Clone, Serialize)]
@@ -376,6 +380,7 @@ impl QbtcpServer {
             } else {
                 tournament.name
             },
+            stream: self.config.stream.clone(),
         })
     }
 

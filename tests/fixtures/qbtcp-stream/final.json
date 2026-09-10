@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "type": "final",
+  "session_id": "sess-9f13",
+  "payload": {
+    "retry_key": "retry-6f2a",
+    "qbj": {"type": "Match", "id": "sm-4471"}
+  }
+}

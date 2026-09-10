@@ -108,6 +108,17 @@ advertise.
 Discovery carries no credential. It MUST NOT reveal the schedule, the room list, the team list, or any
 pairing code.
 
+### Realtime/relay extension
+
+A server MAY additionally advertise the optional `stream` capability with a `stream`
+descriptor, offering the same QBTCP conversation over a long-lived WebSocket with
+server-pushed updates instead of high-frequency polling. The capability is
+backwards-compatible: a client that does not implement it ignores the descriptor and
+keeps working over HTTP unchanged. The full contract — discovery, frames,
+authentication without URL credentials, reconnection, relay-versus-Director authority,
+dual Internet/LAN transport semantics, and the scorer transport-state table — is
+normative in [`QBTCP-STREAM.md`](QBTCP-STREAM.md).
+
 ## Authentication
 
 QBTCP uses **capability tokens**. A token is an opaque bearer string. Each token grants exactly one

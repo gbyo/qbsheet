@@ -1,8 +1,15 @@
-import type {
-  CanonicalStandingsReport,
-  StandingsAdvancementCell,
-  StandingsContextGame,
-  StandingsReportSection,
+import {
+  buildReportPresentation,
+  defaultReportOptions,
+  pointsPerX,
+  semanticAnswerCounts,
+  type CanonicalStandingsReport,
+  type ReportOptions,
+  type ReportPresentation,
+  type StandingsAdvancementCell,
+  type StandingsContextGame,
+  type StandingsReportSection,
+  type TeamStatsRow,
 } from '@qbsheet/tournament-formats';
 import {
   acceptedGameRecords,
@@ -17,6 +24,7 @@ import {
   type Pool,
 } from '../domain';
 import { buildCanonicalSnapshot, type CanonicalReportScope } from './canonicalReports';
+import { describeReportInput } from './reportPresentation';
 
 interface BuiltSection {
   section: StandingsReportSection;
@@ -472,9 +480,23 @@ function builtSections(
  * carryover game sets, and explicit final/tiebreaker result references. It never inspects raw
  * Director state or invents tournament progression.
  */
+/**
+ * Enrich section rows with the shared presentation values every other report page carries, so
+ * the stage-aware Standings table renders semantic answer tiers and the selected points metric
+ * instead of a second fixed vocabulary (#751).
+ */
+function presentTeamRow(row: TeamStatsRow, x: number | null): TeamStatsRow {
+  return {
+    ...row,
+    answerCounts: semanticAnswerCounts(row),
+    pointsPerX: pointsPerX(row.pptuh, x),
+  };
+}
+
 export function buildCanonicalStandingsReport(
   state: DirectorState,
   generatedAt = new Date().toISOString(),
+  rawOptions: ReportOptions = defaultReportOptions,
 ): CanonicalStandingsReport {
   const phases = activePhases(state);
   const poolsByPhase = new Map(phases.map((phase) => [phase.id, phasePools(state, phase)]));
@@ -540,10 +562,19 @@ export function buildCanonicalStandingsReport(
   attachContextGames(state, built);
   const displayRanks: Record<string, number> = {};
   addDisplayRanks(state, built, displayRanks);
+  // The overall snapshot covers every accepted game, so its definitions and capabilities
+  // describe the whole report — the same contract the other pages consume (#751).
+  const input = describeReportInput(stats, overall, rawOptions);
+  const presentation: ReportPresentation | undefined = input ? buildReportPresentation(input) : undefined;
+  const x = presentation?.pointsNormalization?.tossups ?? null;
   return {
     tournament: overall.tournament,
     generatedAt,
-    sections: built.map((entry) => entry.section),
+    sections: built.map((entry) => ({
+      ...entry.section,
+      teams: entry.section.teams.map((row) => presentTeamRow(row, x)),
+    })),
     displayRanks,
+    ...(presentation ? { presentation } : {}),
   };
 }

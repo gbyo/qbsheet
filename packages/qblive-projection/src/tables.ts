@@ -20,6 +20,7 @@ import {
   type DirectorState,
   type PlayerStanding,
   type TeamStanding,
+  type TournamentRules,
 } from '@qbsheet/tournament-domain';
 import type { QbliveCell, QbliveColumn, QbliveDataTable, QbliveRow } from '@qbsheet/qblive-protocol';
 
@@ -37,6 +38,14 @@ function decimal(value: number, precision: number): QbliveCell {
 
 function integer(value: number): QbliveCell {
   return { value, display: String(value) };
+}
+
+/**
+ * An unknown is a null value with an em-dash display, never a zero: clients render what they
+ * are given, so a fabricated zero here would publish a false statistic to every installed app.
+ */
+function unknown(): QbliveCell {
+  return { value: null, display: '—' };
 }
 
 /**
@@ -69,35 +78,114 @@ const teamStandingsColumns: QbliveColumn[] = [
     description: 'Points per game',
   },
   { id: 'margin', label: 'Marg', kind: 'integer', alignment: 'trailing', description: 'Point differential' },
-];
-
-const teamStatisticsColumns: QbliveColumn[] = [
-  { id: 'team', label: 'Team', kind: 'team', alignment: 'leading' },
   { id: 'games', label: 'G', kind: 'integer', alignment: 'trailing', description: 'Games played' },
-  { id: 'powers', label: '15', kind: 'integer', alignment: 'trailing', description: 'Powers' },
-  { id: 'gets', label: '10', kind: 'integer', alignment: 'trailing', description: 'Regular tossups' },
-  { id: 'negs', label: '−5', kind: 'integer', alignment: 'trailing', description: 'Negs' },
+  { id: 'tuh', label: 'TUH', kind: 'integer', alignment: 'trailing', description: 'Tossups heard' },
+  { id: 'bonuses', label: 'Bonuses', kind: 'integer', alignment: 'trailing', description: 'Bonuses heard' },
   {
-    id: 'ppb',
-    label: 'PPB',
+    id: 'bonuspoints',
+    label: 'Bonus pts',
+    kind: 'integer',
+    alignment: 'trailing',
+    description: 'Bonus points',
+  },
+  {
+    id: 'pptuh',
+    label: 'PPTUH',
     kind: 'decimal',
     precision: 2,
     alignment: 'trailing',
-    description: 'Points per bonus',
+    description: 'Points per tossup heard',
   },
-  { id: 'ppg', label: 'PPG', kind: 'decimal', precision: 1, alignment: 'trailing' },
 ];
 
-const playerStatisticsColumns: QbliveColumn[] = [
-  { id: 'player', label: 'Player', kind: 'player', alignment: 'leading' },
-  { id: 'team', label: 'Team', kind: 'team', alignment: 'leading' },
-  { id: 'games', label: 'G', kind: 'integer', alignment: 'trailing' },
-  { id: 'powers', label: '15', kind: 'integer', alignment: 'trailing' },
-  { id: 'gets', label: '10', kind: 'integer', alignment: 'trailing' },
-  { id: 'negs', label: '−5', kind: 'integer', alignment: 'trailing' },
-  { id: 'points', label: 'Pts', kind: 'integer', alignment: 'trailing' },
-  { id: 'ppg', label: 'PPG', kind: 'decimal', precision: 1, alignment: 'trailing' },
-];
+/**
+ * Tossup answer tiers published as table columns, YellowFruit parity (#753).
+ *
+ * Column identity is semantic (`superpowers`, not `20`): the label carries the configured point
+ * value while the id stays stable across formats. Tiers the format does not define (a null power
+ * or neg value) publish no column rather than a meaningless zero column; gets are always
+ * present because every format values an ordinary tossup get.
+ */
+export interface AnswerTierColumn {
+  id: 'superpowers' | 'powers' | 'gets' | 'negs';
+  label: string;
+  description: string;
+}
+
+function answerTierLabel(value: number): string {
+  return value < 0 ? `−${Math.abs(value)}` : String(value);
+}
+
+export function answerTierColumns(
+  rules:
+    Pick<TournamentRules, 'superpowerValue' | 'powerValue' | 'tossupValue' | 'negValue'> | null | undefined,
+): AnswerTierColumn[] {
+  const tiers: AnswerTierColumn[] = [];
+  if (rules?.superpowerValue != null) {
+    tiers.push({
+      id: 'superpowers',
+      label: answerTierLabel(rules.superpowerValue),
+      description: 'Superpowers',
+    });
+  }
+  if (rules?.powerValue != null) {
+    tiers.push({ id: 'powers', label: answerTierLabel(rules.powerValue), description: 'Powers' });
+  }
+  tiers.push({
+    id: 'gets',
+    label: answerTierLabel(rules?.tossupValue ?? 10),
+    description: 'Regular tossups',
+  });
+  if (rules?.negValue != null) {
+    tiers.push({ id: 'negs', label: answerTierLabel(rules.negValue), description: 'Negs' });
+  }
+  return tiers;
+}
+
+function answerTierColumnDefs(tiers: readonly AnswerTierColumn[]): QbliveColumn[] {
+  return tiers.map((tier): QbliveColumn => ({
+    id: tier.id,
+    label: tier.label,
+    kind: 'integer',
+    alignment: 'trailing',
+    description: tier.description,
+  }));
+}
+
+function teamStatisticsColumns(rules: Parameters<typeof answerTierColumns>[0]): QbliveColumn[] {
+  return [
+    { id: 'team', label: 'Team', kind: 'team', alignment: 'leading' },
+    { id: 'games', label: 'G', kind: 'integer', alignment: 'trailing', description: 'Games played' },
+    ...answerTierColumnDefs(answerTierColumns(rules)),
+    {
+      id: 'ppb',
+      label: 'PPB',
+      kind: 'decimal',
+      precision: 2,
+      alignment: 'trailing',
+      description: 'Points per bonus',
+    },
+    {
+      id: 'bb',
+      label: 'BB',
+      kind: 'integer',
+      alignment: 'trailing',
+      description: 'Bounceback points',
+    },
+    { id: 'ppg', label: 'PPG', kind: 'decimal', precision: 1, alignment: 'trailing' },
+  ];
+}
+
+function playerStatisticsColumns(rules: Parameters<typeof answerTierColumns>[0]): QbliveColumn[] {
+  return [
+    { id: 'player', label: 'Player', kind: 'player', alignment: 'leading' },
+    { id: 'team', label: 'Team', kind: 'team', alignment: 'leading' },
+    { id: 'games', label: 'G', kind: 'integer', alignment: 'trailing' },
+    ...answerTierColumnDefs(answerTierColumns(rules)),
+    { id: 'points', label: 'Pts', kind: 'integer', alignment: 'trailing' },
+    { id: 'ppg', label: 'PPG', kind: 'decimal', precision: 1, alignment: 'trailing' },
+  ];
+}
 
 export interface TableNaming {
   teamName(teamId: string): string;
@@ -141,11 +229,19 @@ export function buildStandingsTable(
       integer(index + 1),
       { value: naming.teamName(standing.teamId), entityId: standing.teamId },
       record(standing),
-      decimal(standing.winPercentage, 3),
+      // A team that has not played has no win rate: 0.000 would read as three decimals of losing.
+      standing.gamesPlayed > 0 ? decimal(standing.winPercentage, 3) : unknown(),
       integer(standing.pointsFor),
       integer(standing.pointsAgainst),
       decimal(standing.gamesPlayed > 0 ? standing.pointsFor / standing.gamesPlayed : 0, 1),
       integer(standing.margin),
+      integer(standing.gamesPlayed),
+      standing.tossupsHeardKnown ? integer(standing.tossupsHeard) : unknown(),
+      integer(standing.bonuses),
+      integer(standing.bonusPoints),
+      standing.tossupsHeardKnown && standing.tossupsHeard > 0
+        ? decimal(standing.pointsFor / standing.tossupsHeard, 2)
+        : unknown(),
     ],
   }));
   return {
@@ -172,20 +268,21 @@ export function buildTeamStatisticsTable(
       teamIds: scope.teamIds,
     }),
   );
+  const tiers = answerTierColumns(state.tournament?.rules);
   const rows: QbliveRow[] = standings.map((standing) => ({
     id: standing.teamId,
     teamId: standing.teamId,
     cells: [
       { value: naming.teamName(standing.teamId), entityId: standing.teamId },
       integer(standing.gamesPlayed),
-      integer(standing.powers),
-      integer(standing.gets),
-      integer(standing.negs),
+      ...tiers.map((tier) => integer(standing[tier.id])),
       // PPB with no bonuses heard is undefined, not zero: a manual result
       // without detail and a team that never heard a bonus both render "—".
       standing.bonuses > 0
         ? decimal(standing.bonusPoints / standing.bonuses, 2)
         : { value: null, display: '—' },
+      // Unknown bounceback breakdowns render "—", never a fabricated zero (#748).
+      standing.bouncebacksKnown ? integer(standing.bouncebackPoints) : { value: null, display: '—' },
       decimal(standing.gamesPlayed > 0 ? standing.pointsFor / standing.gamesPlayed : 0, 1),
     ],
   }));
@@ -194,7 +291,7 @@ export function buildTeamStatisticsTable(
     title: 'Team statistics',
     scope: scope.id,
     scopeLabel: scope.label,
-    columns: teamStatisticsColumns,
+    columns: teamStatisticsColumns(state.tournament?.rules),
     rows,
   };
 }
@@ -217,6 +314,7 @@ export function buildPlayerStatisticsTable(
     teamIds: scope.teamIds,
   });
   const rows: QbliveRow[] = [];
+  const tiers = answerTierColumns(state.tournament?.rules);
   for (const standing of standings) {
     const name = naming.playerName(standing.playerId);
     if (name === null) continue;
@@ -232,9 +330,7 @@ export function buildPlayerStatisticsTable(
         { value: name, entityId: standing.playerId },
         { value: naming.teamName(standing.teamId), entityId: standing.teamId },
         integer(standing.gamesPlayed),
-        integer(standing.powers),
-        integer(standing.gets),
-        integer(standing.negs),
+        ...tiers.map((tier) => integer(standing[tier.id])),
         integer(points),
         decimal(standing.ppg, 1),
       ],
@@ -245,7 +341,7 @@ export function buildPlayerStatisticsTable(
     title: 'Individual statistics',
     scope: scope.id,
     scopeLabel: scope.label,
-    columns: playerStatisticsColumns,
+    columns: playerStatisticsColumns(state.tournament?.rules),
     rows,
   };
 }

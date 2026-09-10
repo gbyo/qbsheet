@@ -12,6 +12,7 @@
  */
 
 import {
+  currentOperationsRound,
   effectiveAssignmentForGame,
   gameIsAutoRepairable,
   newDirectorId,
@@ -380,14 +381,28 @@ export function roundHasMovableGames(state: DirectorState, roundId: DirectorId):
 export function reconcileSessionStaffIdentity(state: DirectorState): boolean {
   let changed = false;
   for (const session of state.qbtcpSessions) {
-    const game = state.scheduledGames.find(
-      (entry) =>
-        (session.matchId && entry.id === session.matchId) ||
-        (!session.matchId &&
-          entry.roomId === session.roomId &&
-          !entry.bye &&
-          !['accepted', 'cancelled'].includes(entry.status)),
-    );
+    let game: ScheduledGame | undefined;
+    if (session.matchId) {
+      // An explicit match binding is authoritative: the room fallback must not override it.
+      game = state.scheduledGames.find((entry) => entry.id === session.matchId);
+    } else {
+      // Room-only sessions have no match binding yet. A room normally appears in many rounds,
+      // so scope the fallback to the current operational round instead of taking the first
+      // array-order match in `scheduledGames`. When the current round has no single game for
+      // the room, leave the expectation unset rather than manufacturing a mismatch against a
+      // future (or otherwise non-current) assignment.
+      const current = currentOperationsRound(state);
+      if (current) {
+        const candidates = state.scheduledGames.filter(
+          (entry) =>
+            entry.roundId === current.id &&
+            entry.roomId === session.roomId &&
+            !entry.bye &&
+            !['accepted', 'cancelled'].includes(entry.status),
+        );
+        game = candidates.length === 1 ? candidates[0] : undefined;
+      }
+    }
     const expected = game ? (effectiveAssignmentForGame(state, game).scorekeeperId ?? undefined) : undefined;
     if (session.expectedStaffId !== expected) {
       session.expectedStaffId = expected;

@@ -1794,7 +1794,8 @@ function ManualResultDialog({
           negs: 0,
           bonuses: 0,
           bonusPoints: 0,
-          bouncebacks: 0,
+          // Final-score-only manual entry carries no bounceback breakdown: unknown (#748).
+          bouncebacks: null,
         });
         const scores = [score(selected.leftTeamId, left), score(selected.rightTeamId, right)];
         const decisionIssue = resultDecisionIssue(state, selected, scores);
@@ -1904,7 +1905,7 @@ function scoreForTeam(game: DirectorState['games'][number], teamId: string): Tea
       negs: 0,
       bonuses: 0,
       bonusPoints: 0,
-      bouncebacks: 0,
+      bouncebacks: null,
     }
   );
 }

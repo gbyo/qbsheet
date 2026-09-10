@@ -43,11 +43,12 @@ pub enum LiveError {
 ///
 /// Twenty characters from a fixed vowel-free alphabet. The check is cheap and it is the only thing
 /// between a value that arrived over the Tauri bridge and a keychain entry named after it.
+///
+/// Delegates to the hosting-neutral [`qblive_server::is_publication_id`] so
+/// Director, QBServer, and the conformance fixtures cannot drift apart. See
+/// `docs/QBLIVE_SERVER_CONTRACT.md`.
 pub fn is_publication_id(value: &str) -> bool {
-    value.len() == 20
-        && value
-            .chars()
-            .all(|character| matches!(character, '0'..='9' | 'b'..='d' | 'f'..='h' | 'j'..='n' | 'p'..='t' | 'v'..='z'))
+    qblive_server::is_publication_id(value)
 }
 
 // ---------------------------------------------------------------------------

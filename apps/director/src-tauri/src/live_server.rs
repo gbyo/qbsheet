@@ -37,7 +37,10 @@ use tokio::net::TcpListener;
 /// Smaller than the Cloudflare backend's window on purpose: local mode runs in one building where a
 /// client that falls behind can simply refetch the snapshot over a fast local link, and Director's
 /// memory is a tournament laptop's rather than a data centre's.
-const REPLAY_WINDOW: usize = 64;
+///
+/// Mirrors [`qblive_server::REPLAY_WINDOW_LOCAL`]; the two must stay equal.
+/// See `docs/QBLIVE_SERVER_CONTRACT.md`.
+const REPLAY_WINDOW: usize = qblive_server::REPLAY_WINDOW_LOCAL;
 
 /// A production-built, self-contained Live Web application.
 ///
@@ -228,26 +231,12 @@ impl LiveServerRuntime {
     }
 }
 
+/// The publishable sections of a snapshot.
+///
+/// Delegates to the hosting-neutral [`qblive_server::sections_of`] so local
+/// mode and QBServer extract exactly the same section set.
 fn sections_of(snapshot: &Value) -> Value {
-    const SECTIONS: &[&str] = &[
-        "tournament",
-        "teams",
-        "rooms",
-        "timeline",
-        "schedule",
-        "results",
-        "liveGames",
-        "standings",
-        "statistics",
-        "announcements",
-    ];
-    let mut sections = serde_json::Map::new();
-    for name in SECTIONS {
-        if let Some(value) = snapshot.get(*name) {
-            sections.insert((*name).to_owned(), value.clone());
-        }
-    }
-    Value::Object(sections)
+    qblive_server::sections_of(snapshot)
 }
 
 type Shared = Arc<RwLock<Published>>;
@@ -421,15 +410,28 @@ async fn manifest(State(published): State<Shared>, Path(id): Path<String>) -> Re
 
 async fn snapshot(State(published): State<Shared>, Path(id): Path<String>) -> Response {
     match require(&published, &id) {
-        Ok(value) => ok_json(value),
+        Ok(value) => {
+            // `ETag: "<revision>"` matches the hosting-neutral contract; it
+            // is additive (clients may ignore it) and lets caches revalidate.
+            let revision = value.get("revision").and_then(Value::as_i64).unwrap_or(0);
+            let mut response = ok_json(value);
+            if let Ok(etag) = HeaderValue::from_str(&format!("\"{revision}\"")) {
+                response.headers_mut().insert(header::ETAG, etag);
+            }
+            response.headers_mut().insert(
+                header::ACCESS_CONTROL_EXPOSE_HEADERS,
+                HeaderValue::from_static("etag"),
+            );
+            response
+        }
         Err(response) => *response,
     }
 }
 
 #[derive(Deserialize)]
 struct EventsQuery {
-    after: Option<i64>,
-    limit: Option<usize>,
+    after: Option<String>,
+    limit: Option<String>,
 }
 
 async fn events(
@@ -440,15 +442,16 @@ async fn events(
     if let Err(response) = require(&published, &id) {
         return *response;
     }
-    let after = query.after.unwrap_or(0);
-    if after < 0 {
-        return error_json(
-            StatusCode::BAD_REQUEST,
-            "bad-request",
-            "`after` must be a non-negative integer.",
-        );
-    }
-    let limit = query.limit.unwrap_or(64).clamp(1, 256);
+    // Shared cursor/limit semantics with QBServer and the Cloudflare backend.
+    // A malformed cursor answers 400 JSON (not Axum's 422) so every host
+    // reports the same observable contract.
+    let after = match qblive_server::parse_after(query.after.as_deref()) {
+        Ok(after) => after,
+        Err(message) => {
+            return error_json(StatusCode::BAD_REQUEST, "bad-request", &message);
+        }
+    };
+    let limit = qblive_server::clamp_limit(query.limit.as_deref());
     let Ok(guard) = published.read() else {
         return error_json(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -460,9 +463,10 @@ async fn events(
         .events
         .front()
         .and_then(|event| event.get("revision").and_then(Value::as_i64));
-    // A client asking from before the window cannot be caught up by any page we could send, and a
-    // short page would look to it like being caught up. Say so instead.
-    let resync_required = after < guard.revision && oldest.is_some_and(|oldest| after < oldest - 1);
+    // Shared resync rule with QBServer and the Cloudflare backend: a client
+    // asking from before the window cannot be caught up by any page, and a
+    // short page would look like being caught up. Say so instead.
+    let resync_required = qblive_server::resync_required(after, guard.revision, oldest);
     let events: Vec<Value> = if resync_required {
         vec![]
     } else {
@@ -749,5 +753,52 @@ mod tests {
                 .map(|value| value.to_str().unwrap()),
             Some("*")
         );
+    }
+
+    #[tokio::test]
+    async fn local_contract_matches_the_hosting_neutral_core() {
+        // The shared core is the source of truth for validation, sections,
+        // replay, and capabilities. Local mode reuses it rather than
+        // re-implementing it.
+        assert_eq!(REPLAY_WINDOW, qblive_server::REPLAY_WINDOW_LOCAL);
+        assert!(qblive_server::is_publication_id(PUBLICATION));
+        assert!(!qblive_server::is_publication_id("aeiouaeiouaeiouaeiou"));
+        let shared: Value =
+            serde_json::from_str(qblive_server::LOCAL_CAPABILITIES_JSON).expect("shared");
+        let local: Value = serde_json::from_str(LOCAL_CAPABILITIES_JSON).expect("local");
+        assert_eq!(shared, local);
+        assert_eq!(
+            qblive_server::sections_of(&snapshot_at(1))["tournament"]["name"],
+            "Saturday Invitational"
+        );
+
+        let runtime = LiveServerRuntime::default();
+        runtime.publish(snapshot_at(1));
+        let app = router(Arc::clone(&runtime.published));
+        // Snapshots carry an ETag for the hosting-neutral cache contract.
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/qblive/v1/tournaments/{PUBLICATION}/snapshot"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert_eq!(
+            response
+                .headers()
+                .get(header::ETAG)
+                .map(|value| value.to_str().unwrap()),
+            Some("\"1\"")
+        );
+        // A malformed cursor is a 400 with a QBLive error body on every host.
+        let (status, body) = get(
+            &runtime,
+            &format!("/qblive/v1/tournaments/{PUBLICATION}/events?after=abc"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(body["error"], "bad-request");
     }
 }
