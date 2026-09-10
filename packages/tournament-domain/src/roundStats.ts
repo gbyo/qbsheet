@@ -1,7 +1,12 @@
-import type { DirectorId, DirectorState, GameRecord } from './model.js';
+import { type DirectorId, type DirectorState, defaultRules, type GameRecord } from './model.js';
 import { gameDetailedCountsKnown } from './canonicalStats.js';
 import { orderDayItems } from './dayOrder.js';
-import { acceptedGameRecords, type DirectorStandingsOptions } from './stats.js';
+import {
+  acceptedGameRecords,
+  bouncebackPartsHeardForTeam,
+  type DirectorStandingsOptions,
+  rulesForGame,
+} from './stats.js';
 
 export interface RoundStatsRow {
   roundId: DirectorId;
@@ -24,6 +29,23 @@ export interface RoundStatsRow {
   ppb: number | null;
   /** Bounceback points converted in the round; null unless every eligible game known (#748). */
   bouncebacks: number | null;
+  /**
+   * Bounceback parts heard in the round (opponents' unconverted bonus value in parts).
+   * Null unless every contributing game has the detail and regular rules the parts
+   * denominator requires; pure-forfeit placeholders are skipped, never unknowning.
+   */
+  bouncebackPartsHeard: number | null;
+  /** Bounceback parts converted in the round; null under the same conditions. */
+  bouncebackPartsConverted: number | null;
+  /** Bounceback conversion as a fraction of parts heard; null unless parts are known and heard. */
+  bouncebackConversion: number | null;
+  /**
+   * Total bonus conversion as a fraction (own + bounceback converted parts over own +
+   * bounceback parts heard); null unless every part of the denominator is known.
+   */
+  totalBonusConversion: number | null;
+  /** Contributing games whose bounceback parts are uncomputable (unknown detail or irregular rules). */
+  bouncebackUnknownGames: number;
   /** Exact tossups read are not yet persisted on Director GameRecord. */
   tossupsRead: number | null;
   /** Reserved for the normalized metric once exact per-game tossup denominators are canonical. */
@@ -116,6 +138,49 @@ export function deriveRoundStats(
               0,
             )
           : null;
+      // Parts scope: pure-forfeit placeholders are skipped without unknowning the round;
+      // every other eligible game must supply detail, regular rules, and a breakdown.
+      let bouncebackPartsHeard = 0;
+      let bouncebackPartsConverted = 0;
+      let ownPartsHeard = 0;
+      let ownPartsConverted = 0;
+      let bouncebackPartsKnown = true;
+      let bouncebackUnknownGames = 0;
+      for (const game of played) {
+        if (game.status === 'forfeit' && game.scores.every((score) => score.bouncebacks === null)) {
+          continue;
+        }
+        const rules = rulesForGame(state, game) ?? defaultRules;
+        const [left, right] = game.scores;
+        if (!left || !right) {
+          bouncebackPartsKnown = false;
+          bouncebackUnknownGames += 1;
+          continue;
+        }
+        const leftHeard = gameDetailedCountsKnown(game)
+          ? bouncebackPartsHeardForTeam(right.bonuses, right.bonusPoints, rules)
+          : null;
+        const rightHeard = gameDetailedCountsKnown(game)
+          ? bouncebackPartsHeardForTeam(left.bonuses, left.bonusPoints, rules)
+          : null;
+        if (
+          leftHeard === null ||
+          rightHeard === null ||
+          left.bouncebacks === null ||
+          right.bouncebacks === null ||
+          !(rules.bonusValue > 0)
+        ) {
+          bouncebackPartsKnown = false;
+          bouncebackUnknownGames += 1;
+          continue;
+        }
+        bouncebackPartsHeard += leftHeard + rightHeard;
+        bouncebackPartsConverted += ((left.bouncebacks ?? 0) + (right.bouncebacks ?? 0)) / rules.bonusValue;
+        ownPartsHeard += (left.bonuses + right.bonuses) * rules.bonusParts;
+        ownPartsConverted += (left.bonusPoints + right.bonusPoints) / rules.bonusValue;
+      }
+      const knownBbHeard = bouncebackPartsKnown ? bouncebackPartsHeard : null;
+      const knownBbConverted = bouncebackPartsKnown ? bouncebackPartsConverted : null;
       const packetIds = [
         ...new Set(roundGames.map((game) => game.packetId).filter((id): id is string => id !== null)),
       ];
@@ -135,6 +200,20 @@ export function deriveRoundStats(
         bonusesHeard,
         bonusPoints,
         bouncebacks,
+        bouncebackPartsHeard: knownBbHeard,
+        bouncebackPartsConverted: knownBbConverted,
+        bouncebackConversion:
+          knownBbConverted !== null && knownBbHeard !== null && knownBbHeard > 0
+            ? knownBbConverted / knownBbHeard
+            : null,
+        totalBonusConversion:
+          knownBbConverted !== null &&
+          knownBbHeard !== null &&
+          bouncebackPartsKnown &&
+          ownPartsHeard + bouncebackPartsHeard > 0
+            ? (ownPartsConverted + bouncebackPartsConverted) / (ownPartsHeard + bouncebackPartsHeard)
+            : null,
+        bouncebackUnknownGames,
         ppb:
           bonusesHeard !== null && bonusPoints !== null && bonusesHeard > 0
             ? bonusPoints / bonusesHeard
