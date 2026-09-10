@@ -413,6 +413,7 @@ export function readResultStatisticsForAssociation(
   scores: TeamGameScore[];
   playerStats: PlayerGameStat[];
   warnings: string[];
+  definition: HistoricalDefinition;
   positionalAssociation: boolean;
 } {
   const direct = readResultStatistics(value, state, scheduled);

@@ -131,7 +131,6 @@ import {
 import {
   assessIncomingDocument,
   ingestWarnings,
-  readResultStatistics,
   readResultStatisticsForAssociation,
   stageIncomingDocument,
   type IncomingDocument,
@@ -5161,12 +5160,12 @@ export function useDirectorController(repository = createDirectorRepository()): 
       // Re-derive statistics under the game's historical definition (#671). Staged stats may
       // have been bucketed under live defaults or an older resolution; what lands in the
       // canonical record is always derived under the resolved truth, with its provenance.
+      // The association-aware reader preserves the positional team remap of results a
+      // director explicitly associated; the plain reader would unmap them back to nothing.
       const rawQbj =
         game.rawQbj ?? (isRecordLike(submission.rawSubmission) ? submission.rawSubmission.qbj : undefined);
       const historical =
-        rawQbj === undefined
-          ? null
-          : readResultStatistics(rawQbj, snapshot, scheduled);
+        rawQbj === undefined ? null : readResultStatisticsForAssociation(rawQbj, snapshot, scheduled);
       const finalScores = historical ? historical.scores : game.scores;
       const finalPlayerStats = historical ? historical.playerStats : game.playerStats;
       const definitionSource =
