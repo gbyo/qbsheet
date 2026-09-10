@@ -4,6 +4,7 @@ import {
   buildRelayAckBody,
   buildRelayMirrorDocument,
   classifyRelayTransportFailure,
+  fetchOpenRelayHelp,
   fetchRelayEventsPage,
   fetchRelaySessionSnapshot,
   fetchUnackedRelayResults,
@@ -217,9 +218,30 @@ describe('replay and resync', () => {
       { sessionId: 's-terminal', updatedSequence: 9, status: 'final-received' },
     ];
     const { apply, ignoreStale } = reconcileRelaySessions(local, [
-      { sessionId: 's-new', roomId: 'r', matchId: 'm', status: 'open', updatedSequence: 9 },
-      { sessionId: 's-terminal', roomId: 'r', matchId: 'm', status: 'open', updatedSequence: 12 },
-      { sessionId: 's-fresh', roomId: 'r', matchId: 'm', status: 'open', updatedSequence: 1 },
+      {
+        sessionId: 's-new',
+        roomId: 'r',
+        matchId: 'm',
+        status: 'open',
+        updatedSequence: 9,
+        updatedAt: '2026-09-10T12:00:00Z',
+      },
+      {
+        sessionId: 's-terminal',
+        roomId: 'r',
+        matchId: 'm',
+        status: 'open',
+        updatedSequence: 12,
+        updatedAt: '2026-09-10T12:00:00Z',
+      },
+      {
+        sessionId: 's-fresh',
+        roomId: 'r',
+        matchId: 'm',
+        status: 'open',
+        updatedSequence: 1,
+        updatedAt: '2026-09-10T12:00:00Z',
+      },
     ]);
     expect(apply.map((entry) => entry.sessionId)).toEqual(['s-fresh']);
     expect(ignoreStale).toBe(2);
@@ -233,6 +255,28 @@ describe('replay and resync', () => {
 });
 
 describe('canonical result ingestion', () => {
+  it('fails closed when any durable result, help request, or session is malformed', async () => {
+    const invalidResults = (async () =>
+      jsonResponse(200, { revision: 1, results: [{}] })) as unknown as typeof fetch;
+    const invalidHelp = (async () =>
+      jsonResponse(200, { revision: 1, help: [{}] })) as unknown as typeof fetch;
+    const invalidSessions = (async () =>
+      jsonResponse(200, { revision: 1, sessions: [{}] })) as unknown as typeof fetch;
+    await expect(
+      fetchUnackedRelayResults({ ...connection, fetchImpl: invalidResults }),
+    ).rejects.toMatchObject({
+      code: 'invalid-result',
+    });
+    await expect(fetchOpenRelayHelp({ ...connection, fetchImpl: invalidHelp })).rejects.toMatchObject({
+      code: 'invalid-help',
+    });
+    await expect(
+      fetchRelaySessionSnapshot({ ...connection, fetchImpl: invalidSessions }),
+    ).rejects.toMatchObject({
+      code: 'invalid-session',
+    });
+  });
+
   it('feeds a relay final through the same pipeline so LAN + relay duplicates converge', async () => {
     const state = directorFixture();
     const result = scoreAssignment(assignmentFor(state, 'game-5-1').document);
@@ -274,7 +318,16 @@ describe('canonical result ingestion', () => {
       jsonResponse(200, {
         tournamentId: connection.tournamentId,
         revision: 182,
-        sessions: [{ session_id: 's', room_id: 'r', match_id: 'm', status: 'open', updated_sequence: 4 }],
+        sessions: [
+          {
+            session_id: 's',
+            room_id: 'r',
+            match_id: 'm',
+            status: 'open',
+            updated_sequence: 4,
+            updated_at: '2026-09-10T12:00:00Z',
+          },
+        ],
       })) as unknown as typeof fetch;
     const snapshot = await fetchRelaySessionSnapshot({ ...connection, fetchImpl });
     expect(snapshot.sessions).toHaveLength(1);

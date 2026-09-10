@@ -425,7 +425,17 @@ export async function fetchUnackedRelayResults(connection: RelaySyncConnection):
   if (!isRecord(body) || !Array.isArray(body.results)) {
     throw new RelaySyncError('The relay results response was not valid.', { code: 'invalid-body' });
   }
-  return body.results.map(readRelaySyncResult).filter((entry): entry is RelaySyncResult => entry !== null);
+  const results: RelaySyncResult[] = [];
+  for (const value of body.results) {
+    const result = readRelaySyncResult(value);
+    if (!result) {
+      throw new RelaySyncError('The relay results response contained an invalid result.', {
+        code: 'invalid-result',
+      });
+    }
+    results.push(result);
+  }
+  return results;
 }
 
 export interface RelaySyncHelp {
@@ -437,6 +447,9 @@ export interface RelaySyncHelp {
   message: string;
   status: string;
   createdAt: string;
+  updatedAt: string;
+  operatorName?: string;
+  currentMatchup?: Record<string, unknown>;
 }
 
 function readRelaySyncHelp(value: unknown): RelaySyncHelp | null {
@@ -445,7 +458,12 @@ function readRelaySyncHelp(value: unknown): RelaySyncHelp | null {
   if (typeof value.room_id !== 'string' || !value.room_id) return null;
   if (typeof value.device_id !== 'string' || !value.device_id) return null;
   if (typeof value.category !== 'string' || typeof value.message !== 'string') return null;
-  if (typeof value.status !== 'string' || typeof value.created_at !== 'string') return null;
+  if (
+    typeof value.status !== 'string' ||
+    typeof value.created_at !== 'string' ||
+    typeof value.updated_at !== 'string'
+  )
+    return null;
   return {
     id: value.id,
     roomId: value.room_id,
@@ -455,6 +473,9 @@ function readRelaySyncHelp(value: unknown): RelaySyncHelp | null {
     message: value.message,
     status: value.status,
     createdAt: value.created_at,
+    updatedAt: value.updated_at,
+    ...(typeof value.operator_name === 'string' ? { operatorName: value.operator_name } : {}),
+    ...(isRecord(value.current_matchup) ? { currentMatchup: value.current_matchup } : {}),
   };
 }
 
@@ -479,7 +500,17 @@ export async function fetchOpenRelayHelp(connection: RelaySyncConnection): Promi
   if (!isRecord(body) || !Array.isArray(body.help)) {
     throw new RelaySyncError('The relay help response was not valid.', { code: 'invalid-body' });
   }
-  return body.help.map(readRelaySyncHelp).filter((entry): entry is RelaySyncHelp => entry !== null);
+  const help: RelaySyncHelp[] = [];
+  for (const value of body.help) {
+    const request = readRelaySyncHelp(value);
+    if (!request) {
+      throw new RelaySyncError('The relay help response contained an invalid request.', {
+        code: 'invalid-help',
+      });
+    }
+    help.push(request);
+  }
+  return help;
 }
 
 export interface RelaySessionSnapshot {
@@ -488,6 +519,11 @@ export interface RelaySessionSnapshot {
   matchId: string;
   status: string;
   updatedSequence: number;
+  deviceId?: string;
+  updatedAt: string;
+  progressSequence?: number;
+  progressUpdatedAt?: string;
+  progress?: unknown;
 }
 
 /** Current coalesced session state, so Director converges without replaying history. */
@@ -514,20 +550,47 @@ export async function fetchRelaySessionSnapshot(
   }
   const sessions: RelaySessionSnapshot[] = [];
   for (const entry of body.sessions) {
-    if (!isRecord(entry)) continue;
+    if (!isRecord(entry)) {
+      throw new RelaySyncError('The relay sessions response contained an invalid session.', {
+        code: 'invalid-session',
+      });
+    }
     if (
       typeof entry.session_id !== 'string' ||
+      !entry.session_id ||
       typeof entry.room_id !== 'string' ||
-      typeof entry.match_id !== 'string'
+      !entry.room_id ||
+      typeof entry.match_id !== 'string' ||
+      !entry.match_id
     )
-      continue;
-    if (typeof entry.status !== 'string') continue;
+      throw new RelaySyncError('The relay sessions response contained an invalid session.', {
+        code: 'invalid-session',
+      });
+    if (
+      (entry.status !== 'open' && entry.status !== 'final-received' && entry.status !== 'abandoned') ||
+      typeof entry.updated_sequence !== 'number' ||
+      !Number.isInteger(entry.updated_sequence) ||
+      entry.updated_sequence < 0 ||
+      typeof entry.updated_at !== 'string'
+    )
+      throw new RelaySyncError('The relay sessions response contained an invalid session.', {
+        code: 'invalid-session',
+      });
     sessions.push({
       sessionId: entry.session_id,
       roomId: entry.room_id,
       matchId: entry.match_id,
       status: entry.status,
-      updatedSequence: typeof entry.updated_sequence === 'number' ? entry.updated_sequence : 0,
+      updatedSequence: entry.updated_sequence,
+      updatedAt: entry.updated_at,
+      ...(typeof entry.writer_device === 'string' ? { deviceId: entry.writer_device } : {}),
+      ...(typeof entry.progress_sequence === 'number' && Number.isInteger(entry.progress_sequence)
+        ? { progressSequence: entry.progress_sequence }
+        : {}),
+      ...(typeof entry.progress_updated_at === 'string'
+        ? { progressUpdatedAt: entry.progress_updated_at }
+        : {}),
+      ...(entry.progress !== undefined ? { progress: entry.progress } : {}),
     });
   }
   return { revision: body.revision, sessions };

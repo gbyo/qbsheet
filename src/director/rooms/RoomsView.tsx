@@ -129,6 +129,8 @@ export function RoomsView({
   navigationTarget,
   onClearNavigationTarget,
   server: nativeServer,
+  relayPointer: controlledRelayPointer,
+  onRelayPointerChange,
 }: {
   state: DirectorState;
   controller: DirectorController;
@@ -137,6 +139,8 @@ export function RoomsView({
   navigationTarget?: DirectorNavigationTarget | null;
   onClearNavigationTarget?: () => void;
   server?: NativeServerState;
+  relayPointer?: RelayConfig | null;
+  onRelayPointerChange?: (config: RelayConfig | null) => void;
 }) {
   const [view, setView] = useState<LogisticsView>('rooms');
   const [viewDirection, setViewDirection] = useState<'forward' | 'backward' | null>(null);
@@ -185,11 +189,20 @@ export function RoomsView({
   // The claimed relay pointer, shared by the operator panel (which edits it) and the room
   // invitations (which pair from it). The sync engine (#773) will move this into the
   // tournament document; until then the panel's store is the source of truth.
-  const [relayPointer, setRelayPointer] = useState<RelayConfig | null>(() =>
+  const [storedRelayPointer, setStoredRelayPointer] = useState<RelayConfig | null>(() =>
     localStorageRelayPanelStore().load(),
   );
+  const relayPointer = controlledRelayPointer === undefined ? storedRelayPointer : controlledRelayPointer;
+  const setRelayPointer = (config: RelayConfig | null) => {
+    setStoredRelayPointer(config);
+    onRelayPointerChange?.(config);
+  };
   const internetRelay =
-    relayPointer?.enabled && relayPointer.baseUrl && relayPointer.tournamentId
+    relayPointer?.enabled &&
+    (relayPointer.directorTournamentId === state.tournament?.id ||
+      (controlledRelayPointer === undefined && relayPointer.directorTournamentId === undefined)) &&
+    relayPointer.baseUrl &&
+    relayPointer.tournamentId
       ? { baseUrl: relayPointer.baseUrl, tournamentId: relayPointer.tournamentId }
       : null;
   const assignableRoomIds = useMemo(
@@ -538,6 +551,7 @@ export function RoomsView({
           defaultOpen={false}
         >
           <RelayPanel
+            directorTournamentId={state.tournament?.id}
             lan={{
               available: qbtcpRunning && Boolean(qbtcpStatus?.address),
               address:

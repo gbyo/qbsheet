@@ -110,7 +110,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderPanel(options: { store?: RelayPanelStore; lan?: typeof lan; qbliveOrigin?: string | null }) {
+function renderPanel(options: {
+  store?: RelayPanelStore;
+  lan?: typeof lan;
+  qbliveOrigin?: string | null;
+  directorTournamentId?: string;
+}) {
   const onAnnounce = vi.fn();
   const store = options.store ?? memoryStore();
   render(
@@ -119,6 +124,7 @@ function renderPanel(options: { store?: RelayPanelStore; lan?: typeof lan; qbliv
         lan={options.lan ?? lan}
         qbliveOrigin={options.qbliveOrigin ?? null}
         store={store}
+        directorTournamentId={options.directorTournamentId}
         onAnnounce={onAnnounce}
       />
     </ConfirmProvider>,
@@ -139,7 +145,7 @@ describe('Internet QBTCP setup', () => {
       renderLoop.push(args);
     };
     try {
-      const { onAnnounce, store } = renderPanel({});
+      const { onAnnounce, store } = renderPanel({ directorTournamentId: 'local-tournament-1' });
 
       fireEvent.change(screen.getByLabelText('Relay address'), { target: { value: baseUrl } });
       fireEvent.change(screen.getByLabelText('Tournament id'), { target: { value: tournamentId } });
@@ -160,6 +166,7 @@ describe('Internet QBTCP setup', () => {
         enabled: true,
         baseUrl,
         tournamentId,
+        directorTournamentId: 'local-tournament-1',
       });
       // The setup secret field unmounted with the wizard; nothing renders it.
       expect(screen.queryByLabelText('One-time setup secret')).toBeNull();

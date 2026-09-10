@@ -70,6 +70,9 @@ import {
 import { openTournamentFile } from './openTournament';
 import type { PickedFile } from '../components/FilePicker';
 import { useCloseGuard } from './useCloseGuard';
+import { localStorageRelayPanelStore } from '../relay/RelayPanel';
+import type { RelayConfig } from '../relay/relayConfig';
+import { useRelaySyncRuntime } from '../relay/relayRuntime';
 
 /**
  * The Director application.
@@ -140,6 +143,23 @@ function DirectorAppContent() {
     check: Extract<DocumentTransitionCheck, { ok: false }>;
     action: () => boolean | Promise<boolean>;
   } | null>(null);
+  const [relayPointer, setRelayPointer] = useState<RelayConfig | null>(() =>
+    localStorageRelayPanelStore().load(),
+  );
+
+  useRelaySyncRuntime({
+    active:
+      nativeDirector &&
+      !loading &&
+      state.tournament != null &&
+      relayPointer?.directorTournamentId === state.tournament.id &&
+      !controller.documentTransition,
+    config: relayPointer,
+    state,
+    invitations: nativeServer.status.pairingInvitations ?? [],
+    ingestor: controller,
+    onAnnounce: announce,
+  });
 
   const discardDirtyFormsBefore = useCallback(
     async (action: () => boolean | Promise<boolean>): Promise<boolean> => {
@@ -336,6 +356,8 @@ function DirectorAppContent() {
             navigationTarget={navigationTarget}
             onClearNavigationTarget={clearTarget}
             server={nativeServer}
+            relayPointer={relayPointer}
+            onRelayPointerChange={setRelayPointer}
           />
         );
       case 'packets':

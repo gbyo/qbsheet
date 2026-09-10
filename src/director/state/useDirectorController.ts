@@ -193,6 +193,12 @@ import {
   type NativeSessionSnapshot,
   type NativeSnapshotReadResult,
 } from '../platform/native';
+import {
+  relayResultToIncomingDocument,
+  type RelaySessionSnapshot,
+  type RelaySyncHelp,
+  type RelaySyncResult,
+} from '../relay/relaySync';
 
 export interface NewTournamentInput {
   name: string;
@@ -206,6 +212,21 @@ export interface NewTournamentInput {
    * who later opens the file on a laptop in another state must not move the schedule.
    */
   timeZone?: IanaTimeZone;
+}
+
+export interface RelayIngestInput {
+  tournamentId: string;
+  results: RelaySyncResult[];
+  help: RelaySyncHelp[];
+  sessions: RelaySessionSnapshot[];
+}
+
+export interface RelayIngestSummary {
+  durable: boolean;
+  resultIds: string[];
+  helpIds: string[];
+  resultsAdded: number;
+  helpAdded: number;
 }
 
 export interface NewTeamInput {
@@ -688,6 +709,8 @@ export interface DirectorController {
   ): boolean;
   ruleProtest(protestId: DirectorId, ruling: string, scoreAdjustment?: ProtestScoreAdjustment): boolean;
   syncQbtcp(): Promise<void>;
+  /** Persist relay observations through the canonical ingest path before the caller acknowledges them. */
+  ingestRelayItems(input: RelayIngestInput): Promise<RelayIngestSummary>;
   resolveQbtcpHelp(helpId: DirectorId): Promise<boolean>;
   qbtcpHealth: QbtcpIngestionHealth;
   /** Add or re-adopt a place assignments can be written to and results read from. */
@@ -6097,6 +6120,92 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const ingestRelayItems = useCallback(
+    async (input: RelayIngestInput): Promise<RelayIngestSummary> => {
+      const empty = { durable: false, resultIds: [], helpIds: [], resultsAdded: 0, helpAdded: 0 };
+      if (
+        documentTransitionRef.current ||
+        stateRef.current.tournament?.status === 'archived' ||
+        stateRef.current.tournament?.id !== input.tournamentId
+      ) {
+        return empty;
+      }
+      const next = structuredClone(stateRef.current);
+      let changed = false;
+      let resultsAdded = 0;
+      for (const result of input.results) {
+        if (next.submissions.some((submission) => submission.transportResultId === result.resultId)) continue;
+        const document = relayResultToIncomingDocument(result, input.tournamentId);
+        const assessment = assessIncomingDocument(next, document);
+        stageIncomingDocument(next, document, assessment);
+        resultsAdded += 1;
+        changed = true;
+      }
+
+      const relaySessions: NativeSessionSnapshot[] = input.sessions.map((session) => ({
+        sessionId: session.sessionId,
+        roomId: session.roomId,
+        matchId: session.matchId,
+        deviceId: session.deviceId,
+        status: session.status,
+        resumable: session.status !== 'final-received',
+        resultReceived: session.status === 'final-received',
+        updatedAt: session.updatedAt,
+      }));
+      changed = applyNativeSessions(next, relaySessions) || changed;
+      const relayProgress: NativeProgressSnapshot[] = input.sessions.flatMap((session) =>
+        session.progressSequence !== undefined && session.progress !== undefined
+          ? [
+              {
+                sessionId: session.sessionId,
+                roomId: session.roomId,
+                sequence: session.progressSequence,
+                matchState: session.progress,
+                receivedAt: session.progressUpdatedAt ?? session.updatedAt,
+              },
+            ]
+          : [],
+      );
+      changed = applyNativeProgress(next, relayProgress) || changed;
+
+      let helpAdded = 0;
+      for (const request of input.help) {
+        const current = next.qbtcpHelpRequests.find((entry) => entry.id === request.id);
+        const roomName = next.rooms.find((room) => room.id === request.roomId)?.name ?? request.roomId;
+        const record: NativeHelpSnapshot = {
+          id: request.id,
+          roomId: request.roomId,
+          roomName,
+          category: request.category,
+          message: request.message,
+          status: request.status,
+          createdAt: request.createdAt,
+          updatedAt: request.updatedAt,
+          deviceId: request.deviceId,
+          operatorName: request.operatorName,
+          currentMatchup: request.currentMatchup,
+        };
+        if (!current) helpAdded += 1;
+        const merged = next.qbtcpHelpRequests
+          .filter((entry) => entry.id !== request.id)
+          .map<NativeHelpSnapshot>((entry) => ({ ...entry }));
+        changed = applyNativeHelp(next, [...merged, record]) || changed;
+      }
+
+      if (changed) finalizeDirectorStateMutation(next);
+      await persistenceQueueRef.current;
+      const durable = canLeaveCurrentDocument().ok;
+      return {
+        durable,
+        resultIds: durable ? input.results.map((result) => result.resultId) : [],
+        helpIds: durable ? input.help.map((request) => request.id) : [],
+        resultsAdded,
+        helpAdded,
+      };
+    },
+    [canLeaveCurrentDocument, finalizeDirectorStateMutation],
+  );
+
   const dismissTransferArtifactAction = useCallback(
     (artifactId: DirectorId) => commit((draft) => dismissTransferArtifact(draft, artifactId)),
     [commit],
@@ -7747,6 +7856,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     addProtest,
     ruleProtest,
     syncQbtcp,
+    ingestRelayItems,
     resolveQbtcpHelp,
     qbtcpHealth,
     addTransferLocation: addTransferLocationAction,

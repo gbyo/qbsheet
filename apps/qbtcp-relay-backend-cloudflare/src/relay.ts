@@ -2197,6 +2197,7 @@ export class QbtcpRelay extends DurableObject<Env> {
         status: session.status,
         writer_device: session.writer_device,
         updated_sequence: session.updated_sequence,
+        updated_at: session.updated_at,
         ...(session.progress_sequence !== null
           ? { progress_sequence: session.progress_sequence, progress_updated_at: session.progress_updated_at }
           : {}),
