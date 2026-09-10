@@ -227,7 +227,9 @@ export function buildCanonicalSnapshot(
       powers: standing.powers,
       gets: standing.gets,
       negs: standing.negs,
-      tossupsHeard: standing.tossupsHeard,
+      // Unknown TUH is null, matching the player rows below: a partial sum must not
+      // masquerade as a whole-scope zero for consumers that do not check the flag (#754).
+      tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
       tossupsHeardKnown: standing.tossupsHeardKnown,
       pptuh:
         standing.tossupsHeardKnown && standing.tossupsHeard > 0
