@@ -54,6 +54,15 @@ describe('migrations', () => {
     ).toThrow(/append-only/);
   });
 
+  it('rejects migrations supplied out of version order', () => {
+    expect(() =>
+      runMigrations(fakeDb(), [
+        { version: 2, name: 'sessions', sql: [] },
+        { version: 1, name: 'rooms', sql: [] },
+      ]),
+    ).toThrow(/strictly increasing/);
+  });
+
   it('reads rows through the typed helpers', () => {
     const db = fakeDb();
     runMigrations(db, migrations);
