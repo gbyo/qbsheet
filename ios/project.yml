@@ -46,7 +46,12 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Icon Composer document. `type: file` keeps XcodeGen from descending into it as a group; the
+      # .icon is an opaque bundle that the asset compiler reads whole.
+      - path: QBSheetLive/AppIcon.icon
+        type: file
       - path: QBSheetLive
+        excludes: ["AppIcon.icon", "AppIcon.icon/**"]
       - path: Shared
     dependencies:
       - package: QBSheetLiveKit
@@ -73,9 +78,12 @@ targets:
     sources:
       - path: QBSheetLiveClip
       - path: Shared
-      # The App Clip must ship with the same icon as the full app. Keeping a single asset catalog
-      # prevents the two products from drifting and gives the Clip an AppIcon resource at archive time.
+      # The App Clip must ship with the same icon as the full app. Compiling the full app's asset
+      # catalog and Icon Composer document into the Clip as well is what keeps the two from drifting
+      # and gives the Clip an AppIcon resource at archive time.
       - path: QBSheetLive/Assets.xcassets
+      - path: QBSheetLive/AppIcon.icon
+        type: file
     dependencies:
       - package: QBSheetLiveKit
         product: QBSheetLiveKit

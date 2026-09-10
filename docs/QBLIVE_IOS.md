@@ -44,6 +44,16 @@ xcodebuild test -scheme QBSheetLiveKit -destination 'platform=iOS Simulator,name
 ./ios/scripts/measure-app-clip.sh
 ```
 
+The gate builds for `generic/platform=iOS` rather than the simulator. Apple's 15 MB is stated
+against a thinned, single-architecture install; a simulator build is fat x86_64 + arm64 and reads
+several megabytes heavy.
+
+`ios/QBSheetLive/AppIcon.icon` is an Icon Composer document, and it is compiled into **both**
+products — the App Clip must ship the same icon as the full app. It costs roughly 4.8 MB of
+`Assets.car` in each, because Icon Composer pre-renders every size for light, dark, tinted and clear
+appearances. That is most of the Clip's remaining headroom, so re-run the size gate after any icon
+change rather than assuming an icon is free.
+
 ## 3. The universal QR
 
 One code per tournament:
@@ -241,7 +251,9 @@ came from.
 - [ ] App ID `com.qbsheet.live` with **Associated Domains**, **Push Notifications**, **App Groups**.
 - [ ] App Clip ID `com.qbsheet.live.Clip` registered as an App Clip of the above.
 - [ ] App Group `group.com.qbsheet.live` created and assigned to all four targets.
-- [ ] `TEAMID` replaced in the AASA file and both entitlements files.
+- [ ] `TEAMID` replaced in `apps/live-web/public/.well-known/apple-app-site-association`. The
+      entitlements need no edit — they use `$(AppIdentifierPrefix)`.
+- [ ] `DEVELOPMENT_TEAM` set in `ios/project.yml` (committed empty) and the project regenerated.
 - [ ] AASA served from `live.qbsheet.com` as `application/json`, no redirect, verified with `curl -I`.
 - [ ] **Advanced App Clip Experience** registered for `https://live.qbsheet.com/t/*`, with the App
       Clip Code / QR image, title and subtitle. Without this the Clip does not appear from a code.
@@ -254,4 +266,5 @@ came from.
       analytics. The tournament data it displays is published by the tournament, not by QBSheet.
 - [ ] `./ios/scripts/measure-app-clip.sh` green against a real thinned archive, not just a
       simulator build.
+- [x] App icon. `ios/QBSheetLive/AppIcon.icon`, compiled into the full app and the Clip.
 - [ ] Screenshots and an App Clip card image.
