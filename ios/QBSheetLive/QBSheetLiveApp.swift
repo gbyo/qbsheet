@@ -26,7 +26,26 @@ struct QBSheetLiveApp: App {
         WindowGroup {
             Group {
                 if let bootstrap {
-                    LiveRootView(bootstrap: bootstrap, presentation: .fullApp, initialTab: initialTab)
+                    LiveRootView(
+                        bootstrap: bootstrap,
+                        presentation: .fullApp,
+                        initialTab: initialTab,
+                        liveActivityControls: LiveActivityControls(
+                            isRunning: activities.isRunning,
+                            activePublicationId: activities.activePublicationId,
+                            activeTeamId: activities.activeTeamId,
+                            explanation: activities.explanation,
+                            start: { snapshot, teamId in
+                                await activities.start(snapshot: snapshot, followedTeamId: teamId)
+                            },
+                            update: { snapshot, teamId in
+                                await activities.update(snapshot: snapshot, followedTeamId: teamId)
+                            },
+                            end: { publicationId in
+                                await activities.end(publicationId: publicationId)
+                            }
+                        )
+                    )
                 } else {
                     NoTournamentView(scanAction: canScan ? { scanningTournament = true } : nil)
                 }

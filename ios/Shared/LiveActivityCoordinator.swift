@@ -37,6 +37,8 @@ public final class LiveActivityCoordinator {
 
     public private(set) var availability: Availability = .unknown
     public private(set) var isRunning = false
+    public private(set) var activePublicationId: String?
+    public private(set) var activeTeamId: String?
 
     private let persistence: LivePersistence
     private let gateway: PushGatewayClient
@@ -44,6 +46,14 @@ public final class LiveActivityCoordinator {
     public init(persistence: LivePersistence = .shared, gateway: PushGatewayClient = PushGatewayClient()) {
         self.persistence = persistence
         self.gateway = gateway
+        #if canImport(ActivityKit)
+        if let activity = Activity<QBLiveActivityAttributes>.activities.first {
+            self.isRunning = true
+            self.activePublicationId = activity.attributes.publicationId
+            self.activeTeamId = activity.attributes.followedTeamId
+            self.availability = .available
+        }
+        #endif
     }
 
     /// The sentence Director's own status panel uses, adapted for a spectator.
@@ -65,7 +75,13 @@ public final class LiveActivityCoordinator {
             availability = .notPermitted
             return
         }
-        guard snapshot.capabilities.applePush else {
+        #if DEBUG
+        let permitsUnadvertisedPush = DebugLaunch.allowsUnadvertisedApplePush
+            && snapshot.publicationId == "d3m0d3m0d3m0d3m0d3m0"
+        #else
+        let permitsUnadvertisedPush = false
+        #endif
+        guard snapshot.capabilities.applePush || permitsUnadvertisedPush else {
             availability = .notEnabledForTournament
             return
         }
@@ -115,6 +131,8 @@ public final class LiveActivityCoordinator {
             persistence.activityChannelId = channelId
             availability = .available
             isRunning = true
+            activePublicationId = snapshot.publicationId
+            activeTeamId = followedTeamId
         } catch {
             availability = .channelUnavailable(error.localizedDescription)
         }
@@ -146,8 +164,18 @@ public final class LiveActivityCoordinator {
         where activity.attributes.publicationId == publicationId {
             await activity.end(nil, dismissalPolicy: .default)
         }
-        isRunning = false
-        persistence.activityChannelId = nil
+        if let remaining = Activity<QBLiveActivityAttributes>.activities.first(where: {
+            $0.attributes.publicationId != publicationId
+        }) {
+            isRunning = true
+            activePublicationId = remaining.attributes.publicationId
+            activeTeamId = remaining.attributes.followedTeamId
+        } else {
+            isRunning = false
+            activePublicationId = nil
+            activeTeamId = nil
+            persistence.activityChannelId = nil
+        }
         #endif
     }
 

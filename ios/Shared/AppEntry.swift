@@ -83,7 +83,9 @@ public struct LiveEntryPoint {
 /// screenshot job and a developer checking a layout drive the app without a UI test harness.
 ///
 /// `#if DEBUG`, and read exactly once at launch. Nothing here bypasses a privacy setting or a
-/// server response: the tournament still has to publish the team for `-qblive-team` to select it.
+/// server response unless `-qblive-test-apple-push` is explicitly supplied. That one argument is
+/// the narrow physical-device path for exercising the real sandbox gateway against the demo,
+/// whose production semantics correctly advertise no Apple push support.
 public enum DebugLaunch {
     public static func apply(to persistence: LivePersistence = .shared) {
         let arguments = ProcessInfo.processInfo.arguments
@@ -108,6 +110,12 @@ public enum DebugLaunch {
             return nil
         }
         return arguments[index + 1]
+    }
+
+    /// Exercise the real sandbox channel from the demo without making the demo advertise a
+    /// capability it does not normally provide. Compiled out of Release builds.
+    public static var allowsUnadvertisedApplePush: Bool {
+        ProcessInfo.processInfo.arguments.contains("-qblive-test-apple-push")
     }
 }
 #endif

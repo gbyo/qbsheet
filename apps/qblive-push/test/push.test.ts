@@ -231,6 +231,17 @@ describe('channel allocation', () => {
     expect(body.ceiling).toBeLessThan(10_000);
   });
 
+  it('reserves and releases the global budget through its internal routes', async () => {
+    const budget = env.PUSH_PUBLICATION.get(env.PUSH_PUBLICATION.idFromName('__budget__'));
+    const reserved = await budget.fetch('https://budget/budget/reserve', { method: 'POST' });
+    expect(reserved.status).toBe(200);
+    expect(await reserved.json()).toEqual({ used: 1, ceiling: pushLimits.globalChannelCeiling });
+
+    const released = await budget.fetch('https://budget/budget/release', { method: 'POST' });
+    expect(released.status).toBe(200);
+    expect(await released.json()).toEqual({ used: 0, ceiling: pushLimits.globalChannelCeiling });
+  });
+
   it('derives the allowed shard count from the team count', () => {
     expect(allowedShards(64, 16, 64)).toBe(4);
     expect(allowedShards(65, 16, 64)).toBe(5);

@@ -484,7 +484,7 @@ export class PushPublication extends DurableObject<Env> {
    */
   private async reserveGlobalBudget(): Promise<AllocationOutcome> {
     const stub = this.env.PUSH_PUBLICATION.get(this.env.PUSH_PUBLICATION.idFromName('__budget__'));
-    const response = await stub.fetch('https://budget/reserve', { method: 'POST' });
+    const response = await stub.fetch('https://budget/budget/reserve', { method: 'POST' });
     if (response.ok) return { granted: true, channelId: '', reused: false };
     const body = (await response.json().catch(() => ({}))) as { message?: string };
     return {
@@ -496,7 +496,7 @@ export class PushPublication extends DurableObject<Env> {
 
   private async releaseGlobalBudget(): Promise<void> {
     const stub = this.env.PUSH_PUBLICATION.get(this.env.PUSH_PUBLICATION.idFromName('__budget__'));
-    await stub.fetch('https://budget/release', { method: 'POST' }).catch(() => undefined);
+    await stub.fetch('https://budget/budget/release', { method: 'POST' }).catch(() => undefined);
   }
 
   /**
