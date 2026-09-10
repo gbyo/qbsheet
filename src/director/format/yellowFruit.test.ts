@@ -41,6 +41,10 @@ describe('yellowfruit Director import', () => {
     expect(state.tournament?.endDate).toBeUndefined();
     // Player years become structured school years, not notes.
     expect(state.players.some((player) => player.schoolYear === 12)).toBe(true);
+    // Player-level UG/D2 flags restore as explicit eligibility, never team classifications.
+    // This high-school file marks every player explicitly ineligible (false, not unknown).
+    expect(state.players.every((player) => player.undergraduateEligible === false)).toBe(true);
+    expect(state.players.every((player) => player.divisionTwoEligible === false)).toBe(true);
     // Every game links to a stage round with both sides resolved.
     for (const game of state.games) {
       expect(game.roundId).toBeTruthy();

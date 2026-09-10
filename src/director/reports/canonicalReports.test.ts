@@ -169,6 +169,25 @@ describe('canonical snapshot', () => {
     expect(snapshot.games[1]).toMatchObject({ roundName: 'Round 2', detail: 'partial' });
   });
 
+  test('player UG/D2 eligibility rides the snapshot row as tri-state (#749)', () => {
+    const state = reportState();
+    const starter = state.players.find((player) => player.id === 'player-a1');
+    if (!starter) throw new Error('fixture has no starter');
+    starter.undergraduateEligible = true;
+    starter.divisionTwoEligible = false;
+    const snapshot = buildCanonicalSnapshot(state, { label: 'Overall' }, generatedAt);
+    expect(snapshot.players[0]).toMatchObject({
+      playerId: 'player-a1',
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    });
+    const unknown = buildCanonicalSnapshot(reportState(), { label: 'Overall' }, generatedAt);
+    expect(unknown.players[0]).toMatchObject({
+      undergraduateEligible: null,
+      divisionTwoEligible: null,
+    });
+  });
+
   test('final placement reorders ranks and keeps calculated ranks', () => {
     const state = reportState();
     state.tournament!.finalPlacement = {
@@ -199,6 +218,8 @@ describe('CSV trio', () => {
     expect(teamB).toMatch(/,,/);
     const players = exportPlayerStatsCsv(snapshot);
     expect(players).toContain('school_year');
+    expect(players).toContain('undergraduate_eligible');
+    expect(players).toContain('division_2_eligible');
     expect(players).toContain('superpowers');
     const games = exportGameResultsCsv(snapshot);
     expect(games).toContain('round_name');

@@ -258,6 +258,11 @@ export function buildCanonicalSnapshot(
         teamId: standing.teamId,
         teamName: teamName(standing.teamId),
         ...(typeof player?.schoolYear === 'number' ? { schoolYear: player.schoolYear } : {}),
+        // YellowFruit parity (#749): tri-state eligibility; unknown stays null, never false.
+        undergraduateEligible:
+          typeof player?.undergraduateEligible === 'boolean' ? player.undergraduateEligible : null,
+        divisionTwoEligible:
+          typeof player?.divisionTwoEligible === 'boolean' ? player.divisionTwoEligible : null,
         gamesPlayed: standing.gamesPlayed,
         tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
         superpowers: standing.superpowers,

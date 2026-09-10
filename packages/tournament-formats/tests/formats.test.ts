@@ -604,6 +604,23 @@ describe('derived statistics exports', () => {
     ).toContain('&lt;Unsafe&gt;');
   });
 
+  test('carries roster UG/D2 eligibility onto player rows, unknown stays null (#749)', () => {
+    const input = structuredClone(tournament);
+    const roster = input.players.find((player) => player.id === 'p-sarah');
+    if (!roster) throw new Error('fixture has no Sarah O\u2019Brien');
+    roster.extensions = { undergraduateEligible: true, divisionTwoEligible: false };
+    const stats = buildStatsSnapshot(input, { generatedAt: '2026-04-11T16:00:00.000Z' });
+    expect(stats.ok).toBe(true);
+    if (!stats.ok) return;
+    const sarah = stats.value.players.find((row) => row.playerName === "Sarah O'Brien");
+    expect(sarah).toMatchObject({ undergraduateEligible: true, divisionTwoEligible: false });
+    for (const row of stats.value.players) {
+      if (row.playerName === "Sarah O'Brien") continue;
+      expect(row.undergraduateEligible).toBeNull();
+      expect(row.divisionTwoEligible).toBeNull();
+    }
+  });
+
   test('aggregates known lightning points and keeps missing breakdowns unknown (#747)', () => {
     const input = structuredClone(tournament);
     const game = input.games[0];

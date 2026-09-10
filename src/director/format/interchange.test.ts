@@ -114,6 +114,62 @@ describe('classifications, school year, and final placement round-trip', () => {
   });
 });
 
+describe('player UG/D2 eligibility round-trip (#749)', () => {
+  function eligibilityFixture() {
+    const state = directorFixture();
+    const [first, second, third] = state.players;
+    if (!first || !second || !third) throw new Error('fixture needs three players');
+    first.undergraduateEligible = true;
+    first.divisionTwoEligible = false;
+    second.undergraduateEligible = false;
+    second.divisionTwoEligible = false;
+    // The third player stays unknown: no flags at all.
+    return { state, first, second, third };
+  }
+
+  it('archive interchange preserves explicit true, explicit false, and unknown', () => {
+    const { state, first, second, third } = eligibilityFixture();
+    const restored = importDirectorTournament(toInterchange(state));
+    expect(restored.players.find((player) => player.id === first.id)).toMatchObject({
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    });
+    expect(restored.players.find((player) => player.id === second.id)).toMatchObject({
+      undergraduateEligible: false,
+      divisionTwoEligible: false,
+    });
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+
+  it('QBJ export carries the same tri-state through player extensions', () => {
+    const { state, first, third } = eligibilityFixture();
+    const report = importQbjText(exportQbj(state));
+    expect(report.errors).toEqual([]);
+    const restored = report.state;
+    if (!restored) throw new Error('qbj import produced no state');
+    expect(restored.players.find((player) => player.id === first.id)).toMatchObject({
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    });
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+
+  it('never invents player eligibility from team classifications', () => {
+    const { state, third } = eligibilityFixture();
+    const team = state.teams.find((entry) => entry.id === third.teamId);
+    if (!team) throw new Error('fixture player has no team');
+    team.classifications = ['undergraduate', 'division-2'];
+    const restored = importDirectorTournament(toInterchange(state));
+    const unknown = restored.players.find((player) => player.id === third.id);
+    expect(unknown?.undergraduateEligible).toBeUndefined();
+    expect(unknown?.divisionTwoEligible).toBeUndefined();
+  });
+});
+
 describe('lightning points round-trip (#747)', () => {
   function acceptedGameWithLightning() {
     const state = directorFixture();

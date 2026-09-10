@@ -62,6 +62,10 @@ export interface PlayerStatsRow {
   teamId: string;
   teamName: string;
   schoolYear?: number | null;
+  /** Player-level UG eligibility; null when unknown or not supplied (#749). */
+  undergraduateEligible: boolean | null;
+  /** Player-level D2 eligibility; null when unknown or not supplied (#749). */
+  divisionTwoEligible: boolean | null;
   gamesPlayed: number;
   /** Null when any contributing scoresheet omitted tossups-heard. */
   tossupsHeard: number | null;
@@ -160,6 +164,34 @@ function resultTeam(result: GameTeamResult | undefined): GameTeamResult | undefi
 
 function valueOrZero(value: number | null | undefined): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+/** Tri-state eligibility: only a real boolean is known, everything else is unknown (#749). */
+function eligibilityOrNull(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+/**
+ * Roster eligibility from extensions, with a YellowFruit YfData sidecar fallback (#749).
+ *
+ * Mirrors the Director interchange rule so a snapshot built directly from YFT-derived input
+ * agrees with the imported canonical state: QBSheet's own vocabulary wins, YfData fills gaps.
+ */
+function rosterEligibility(
+  extensions:
+    { undergraduateEligible?: unknown; divisionTwoEligible?: unknown; YfData?: unknown } | undefined,
+  key: 'undergraduateEligible' | 'divisionTwoEligible',
+  sidecarKey: 'isUG' | 'isD2',
+): boolean | null {
+  const own = eligibilityOrNull(extensions?.[key]);
+  if (own !== null) return own;
+  const sidecar =
+    extensions?.YfData !== null &&
+    typeof extensions?.YfData === 'object' &&
+    !Array.isArray(extensions?.YfData)
+      ? (extensions.YfData as Record<string, unknown>)
+      : undefined;
+  return eligibilityOrNull(sidecar?.[sidecarKey]);
 }
 
 function configTiebreakers(
@@ -289,11 +321,16 @@ export function buildStatsSnapshot(
     const existing = playerStats.get(result.playerId);
     if (existing) return existing;
     const team = teamById.get(result.teamId);
+    const roster = data.players.find((player) => player.id === result.playerId);
     const created: MutablePlayerStats = {
       playerId: result.playerId,
-      playerName: data.players.find((player) => player.id === result.playerId)?.name ?? result.playerId,
+      playerName: roster?.name ?? result.playerId,
       teamId: result.teamId,
       teamName: team?.name ?? result.teamId,
+      // YellowFruit parity (#749): roster-level eligibility rides the snapshot row; a
+      // player with no roster entry keeps both flags unknown rather than false.
+      undergraduateEligible: rosterEligibility(roster?.extensions, 'undergraduateEligible', 'isUG'),
+      divisionTwoEligible: rosterEligibility(roster?.extensions, 'divisionTwoEligible', 'isD2'),
       gamesPlayed: 0,
       tossupsHeard: 0,
       tossupsHeardKnown: true,
@@ -484,6 +521,8 @@ const playerStatHeaders = [
   'team_id',
   'team_name',
   'school_year',
+  'undergraduate_eligible',
+  'division_2_eligible',
   'games_played',
   'tossups_heard',
   'superpowers',
@@ -557,6 +596,8 @@ export function exportPlayerStatsCsv(snapshot: StatsSnapshot): string {
       row.teamId,
       row.teamName,
       row.schoolYear ?? null,
+      row.undergraduateEligible ?? null,
+      row.divisionTwoEligible ?? null,
       row.gamesPlayed,
       row.tossupsHeard,
       row.superpowers,
