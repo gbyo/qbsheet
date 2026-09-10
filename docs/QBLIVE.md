@@ -2,14 +2,15 @@
 
 **Status:** normative for QBLive v1.
 **Namespace:** `/qblive/v1/`
-**Reference implementations:** `apps/qblive-backend-cloudflare` (Cloudflare Worker + Durable Object), Director's local-only server (`apps/director/src-tauri/src/live_server.rs`).
+**Hosting-neutral contract:** [`QBLIVE_SERVER_CONTRACT.md`](QBLIVE_SERVER_CONTRACT.md).
+**Implementations:** `apps/qblive-backend-cloudflare` (Cloudflare Worker + Durable Object), the native core in `crates/qblive-server` (used by QBServer and Director local mode), Director's local-only server (`apps/director/src-tauri/src/live_server.rs`).
 **Machine-readable schema:** [`packages/qblive-protocol/schemas/qblive-v1.schema.json`](../packages/qblive-protocol/schemas/qblive-v1.schema.json)
 **Fixtures:** [`packages/qblive-protocol/fixtures/`](../packages/qblive-protocol/fixtures/)
 
 QBLive is the public, read-mostly protocol a quiz bowl tournament uses to publish itself. It is
 deliberately separate from [QBTCP](QBTCP.md), which is private operational infrastructure between
-Director and the scoring devices in rooms. QBTCP is how a tournament is *run*; QBLive is how a
-tournament is *shown*.
+Director and the scoring devices in rooms. QBTCP is how a tournament is _run_; QBLive is how a
+tournament is _shown_.
 
 QBLive is vendor-neutral. Nothing in this document requires Cloudflare, Apple, or qbsheet.com. A
 static file host serving two JSON documents is a conforming QBLive server.
@@ -60,11 +61,11 @@ provider key cannot be handed to arbitrary Directors. See [§13](#13-apple-push)
 
 A QBLive server declares what it can do in its manifest. All three levels are conforming.
 
-| Level | Requires | Notes |
-| --- | --- | --- |
-| **QBLive Basic** | `GET manifest`, `GET snapshot` | A static object host qualifies. Clients poll or refresh. |
-| **QBLive Realtime** | Basic + `GET events?after=`, `GET stream` | WebSocket push with replay. |
-| **QBLive Apple Push** | Realtime + registration with `push.qbsheet.com` | Optional. Never required for conformance. |
+| Level                 | Requires                                        | Notes                                                    |
+| --------------------- | ----------------------------------------------- | -------------------------------------------------------- |
+| **QBLive Basic**      | `GET manifest`, `GET snapshot`                  | A static object host qualifies. Clients poll or refresh. |
+| **QBLive Realtime**   | Basic + `GET events?after=`, `GET stream`       | WebSocket push with replay.                              |
+| **QBLive Apple Push** | Realtime + registration with `push.qbsheet.com` | Optional. Never required for conformance.                |
 
 A client MUST work against a Basic server. A client MUST NOT require `stream`.
 
@@ -84,7 +85,7 @@ GET /qblive/v1/tournaments/{publicationId}/stream        (WebSocket upgrade)
 
 `{publicationId}` is a 20-character identifier drawn from `0123456789bcdfghjkmnpqrstvwxyz`
 (vowel-free, no lookalikes), generated from a CSPRNG. It is public routing information and a
-capability to *read*, never to write.
+capability to _read_, never to write.
 
 `npm run qblive:demo` serves these four routes locally from a demo tournament that plays itself,
 which is how a client is exercised without deploying a backend or running a tournament. It is a
@@ -101,7 +102,15 @@ Small and cacheable. A client fetches it first to learn the revision and the cap
   "publicationId": "bcdfghjkmnpqrstvwxyz",
   "revision": 41,
   "generatedAt": "2026-09-05T14:30:00.000Z",
-  "tournament": { "id": "...", "name": "Saturday Invitational", "timeZone": "America/New_York", "status": "in-progress", "date": "2026-09-05", "venue": "...", "organizer": "..." },
+  "tournament": {
+    "id": "...",
+    "name": "Saturday Invitational",
+    "timeZone": "America/New_York",
+    "status": "in-progress",
+    "date": "2026-09-05",
+    "venue": "...",
+    "organizer": "..."
+  },
   "capabilities": { "snapshot": true, "events": true, "stream": true, "applePush": false },
   "endpoints": { "snapshot": "...", "events": "...", "stream": "..." },
   "final": false
@@ -220,7 +229,7 @@ background worker publishes, later, with retries
 ```
 
 The three writes commit atomically. The failure this prevents is specific and bad: Director accepts
-a result, the accept is durable, and the knowledge that the result *needs publishing* is lost.
+a result, the accept is durable, and the knowledge that the result _needs publishing_ is lost.
 
 Internet availability never affects a local mutation. See
 [`apps/director/src-tauri/src/live.rs`](../apps/director/src-tauri/src/live.rs).
@@ -233,7 +242,7 @@ Internet availability never affects a local mutation. See
 CanonicalTournamentState + LivePublicationSettings  →  LiveTournamentSnapshot
 ```
 
-The projection *constructs* a public document field by field. It never serializes the internal
+The projection _constructs_ a public document field by field. It never serializes the internal
 tournament and removes properties.
 
 That distinction is the design. A filter fails **open** — a new internal field appears and is
@@ -256,21 +265,21 @@ credentials · APNs credentials.
 
 ### 9.2 The visibility matrix
 
-| Setting | Default | Publishes |
-| --- | --- | --- |
-| `teamNames` | **on** | Team display names and organization short names. Off substitutes `Seed N`. |
-| `playerNames` | **off** | Public rosters. |
-| `playerStatistics` | **off** | Individual statistics tables. Requires `playerNames`. |
-| `releasedSchedule` | **on** | Games in released rounds only. |
-| `roomLocations` | **on** | Room names, and room references on games. |
-| `roomDirections` | **on** | Free-text directions. |
-| `acceptedResults` | **on** | Final scores of accepted games in released rounds. |
-| `liveGameStatus` | **on** | That a game is in progress. |
-| `liveScores` | **off** | The running score of a game in progress. |
-| `liveProgress` | **off** | Tossups read so far. |
-| `announcements` | **on** | Director announcements. |
-| `standings` | **on** | Standings tables. |
-| `teamStatistics` | **on** | Team statistics tables. |
+| Setting            | Default | Publishes                                                                  |
+| ------------------ | ------- | -------------------------------------------------------------------------- |
+| `teamNames`        | **on**  | Team display names and organization short names. Off substitutes `Seed N`. |
+| `playerNames`      | **off** | Public rosters.                                                            |
+| `playerStatistics` | **off** | Individual statistics tables. Requires `playerNames`.                      |
+| `releasedSchedule` | **on**  | Games in released rounds only.                                             |
+| `roomLocations`    | **on**  | Room names, and room references on games.                                  |
+| `roomDirections`   | **on**  | Free-text directions.                                                      |
+| `acceptedResults`  | **on**  | Final scores of accepted games in released rounds.                         |
+| `liveGameStatus`   | **on**  | That a game is in progress.                                                |
+| `liveScores`       | **off** | The running score of a game in progress.                                   |
+| `liveProgress`     | **off** | Tossups read so far.                                                       |
+| `announcements`    | **on**  | Director announcements.                                                    |
+| `standings`        | **on**  | Standings tables.                                                          |
+| `teamStatistics`   | **on**  | Team statistics tables.                                                    |
 
 Anything a paper schedule taped to a wall would already have said is on. Anything that is a new
 disclosure is off.
@@ -291,8 +300,8 @@ is deliberately **no** `'shown'` override: nothing publishes ahead of its round.
 
 Many QBSheet tournaments involve students. Player names and individual statistics are therefore a
 separate decision from everything else, default off, and Director shows a plain warning when they
-are turned on: *individual player information will become publicly accessible through the
-tournament's Live link.* No accounts, no legal claims — just an accurate sentence before the switch.
+are turned on: _individual player information will become publicly accessible through the
+tournament's Live link._ No accounts, no legal claims — just an accurate sentence before the switch.
 
 ---
 
@@ -314,11 +323,16 @@ it carries them.
     { "id": "ppb", "label": "PPB", "kind": "decimal", "precision": 2, "alignment": "trailing" }
   ],
   "rows": [
-    { "id": "team-a", "teamId": "team-a",
-      "cells": [ { "value": 1, "display": "1" },
-                 { "value": "Ninety Six A", "entityId": "team-a" },
-                 { "value": "7-1", "display": "7-1" },
-                 { "value": 18.4, "display": "18.40" } ] }
+    {
+      "id": "team-a",
+      "teamId": "team-a",
+      "cells": [
+        { "value": 1, "display": "1" },
+        { "value": "Ninety Six A", "entityId": "team-a" },
+        { "value": "7-1", "display": "7-1" },
+        { "value": 18.4, "display": "18.40" }
+      ]
+    }
   ]
 }
 ```
@@ -356,10 +370,10 @@ management credential. Only the short-lived value ever travels through a browser
 
 ### 11.1 Unpublish versus delete
 
-| | Public endpoints | Backend state | Push channels | Credentials |
-| --- | --- | --- | --- | --- |
-| **Unpublish** | `410 gone` | retained, recoverable | ended | still valid |
-| **Delete** | `404 not-found` | destroyed | deleted | revoked |
+|               | Public endpoints | Backend state         | Push channels | Credentials |
+| ------------- | ---------------- | --------------------- | ------------- | ----------- |
+| **Unpublish** | `410 gone`       | retained, recoverable | ended         | still valid |
+| **Delete**    | `404 not-found`  | destroyed             | deleted       | revoked     |
 
 Delete is irreversible and confirmed in Director.
 
@@ -385,7 +399,7 @@ channels** exclusively. Per-device token fanout for Live Activities is deliberat
 
 ### 13.1 Why a QBSheet-operated component exists at all
 
-An APNs provider key authenticates as *the QBSheet Live app*. It cannot be distributed to arbitrary
+An APNs provider key authenticates as _the QBSheet Live app_. It cannot be distributed to arbitrary
 Director installations or third-party QBLive servers. `push.qbsheet.com` is therefore the smallest
 possible trusted boundary: it holds the key, it constructs the APNs payloads itself, and it never
 carries ordinary tournament data.
@@ -411,7 +425,7 @@ Shard 3 → teams 25–32     Shard 7 → teams 57–64
 
 A user's Live Activity static attributes name their followed team; the broadcast `ContentState`
 carries compact state for the whole shard; the SwiftUI view renders only the followed team's entry.
-Channel count therefore scales with *active shards*, not with viewers.
+Channel count therefore scales with _active shards_, not with viewers.
 
 Channels are created **lazily** — only when somebody actually starts an Activity in that shard — and
 deleted when the tournament finalizes, when the publication is deleted, or when the channel exceeds
@@ -423,11 +437,11 @@ foreground-only realtime and says so; it does not break.
 
 ### 13.3 Cadence
 
-| Class | Examples | Coalescing | APNs priority |
-| --- | --- | --- | --- |
-| Routine | score change, tossup progress | ~15 s | 5 |
-| Transition | game starts, game final, late room change | prompt | 10 |
-| Announcement | Director announcement | its own flow | 10 |
+| Class        | Examples                                  | Coalescing   | APNs priority |
+| ------------ | ----------------------------------------- | ------------ | ------------- |
+| Routine      | score change, tossup progress             | ~15 s        | 5             |
+| Transition   | game starts, game final, late room change | prompt       | 10            |
+| Announcement | Director announcement                     | its own flow | 10            |
 
 Before enqueueing, the gateway hashes the normalized shard state and drops an unchanged one. APNs is
 best-effort; QBSheet Live never implies every score tick reaches a Lock Screen.
@@ -458,9 +472,21 @@ npm run conformance --workspace=@qbsheet/qblive-conformance -- \
   --origin https://my-backend.example --publication <id> --management-token <token>
 ```
 
+Against a fresh backend, claim first via the standard setup/claim hook so the
+same command tests Cloudflare, QBServer, or any third-party host:
+
+```bash
+npm run conformance --workspace=@qbsheet/qblive-conformance -- \
+  --origin https://my-backend.example --publication <id> \
+  --setup-token <secret> [--initial-snapshot snapshot.json] \
+  [--profile full|local|basic]
+```
+
 It covers manifest, snapshot, privacy, revisions, replay, WebSocket, reconnect, revision conflict,
 full resync, authentication, invalid management token, spectator write rejection, malformed input,
-oversized input, CORS, finalization, unpublish, and deletion.
+oversized input, CORS, cache/ETag, endpoint construction, forged ids, capability profiles,
+hosting neutrality, finalization, unpublish, and deletion. The normative server
+contract is [`QBLIVE_SERVER_CONTRACT.md`](QBLIVE_SERVER_CONTRACT.md).
 
 ---
 
