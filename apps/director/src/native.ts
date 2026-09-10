@@ -1,4 +1,10 @@
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import {
+  getCloseGuardRequest,
+  getClosePerformer,
+  registerClosePerformer,
+} from '../../../src/director/platform/closeGuard';
 
 export interface ApplicationPaths {
   appData: string;
@@ -76,6 +82,45 @@ export interface SaveFileRequest {
 
 export function isTauriRuntime(): boolean {
   return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+}
+
+async function closeCurrentWindow(): Promise<void> {
+  await getCurrentWindow().close();
+}
+
+/**
+ * Native close interception (#731). The first close request is prevented and
+ * handed to the registered Director close guard, which flushes the canonical
+ * persistence queue and only permits exit once the current revision is
+ * durable (or the operator explicitly quits without saving). The `bypass`
+ * flag is the one-shot escape for the programmatic close that follows a
+ * successful flush, so the guard never re-triggers on its own close.
+ *
+ * Outside Tauri this is a no-op: browser tabs keep the best-effort
+ * `beforeunload` warning owned by DirectorApp.
+ */
+export async function installCloseInterception(): Promise<() => void> {
+  if (!isTauriRuntime()) return () => undefined;
+  let bypass = false;
+  const performer = () => {
+    bypass = true;
+    void closeCurrentWindow();
+  };
+  registerClosePerformer(performer);
+  const unlisten = await getCurrentWindow().onCloseRequested(async (event) => {
+    if (bypass) return;
+    const requestClose = getCloseGuardRequest();
+    if (!requestClose) return;
+    event.preventDefault();
+    if (await requestClose()) {
+      bypass = true;
+      await closeCurrentWindow();
+    }
+  });
+  return () => {
+    if (getClosePerformer() === performer) registerClosePerformer(null);
+    unlisten();
+  };
 }
 
 function requireTauri(): void {

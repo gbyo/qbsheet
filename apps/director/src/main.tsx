@@ -1,6 +1,11 @@
 import { createRoot } from 'react-dom/client';
 import '../../../src/director/director.css';
 import DirectorApp from '../../../src/director/DirectorApp';
+import { installCloseInterception } from './native';
+
+// Guard the native close boundary (#731): the first close request flushes
+// the persistence queue and only exits once the current revision is durable.
+void installCloseInterception();
 
 /*
  * Director loads no webfont.
