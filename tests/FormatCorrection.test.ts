@@ -413,4 +413,196 @@ describe('correcting the scoring rules of a game already in progress', () => {
     expect(correction.unchanged).toBe(true);
     expect(correction.changes).toEqual([]);
   });
+
+  describe('historical post-validation backstop', () => {
+    /** A dead tossup, the quickest route to a played-out game. */
+    function dead(questionNumber: number): ScoreEvent {
+      return event({ type: 'tossup-dead', questionNumber });
+    }
+
+    function deadTossups(count: number, from = 1): ScoreEvent[] {
+      return Array.from({ length: count }, (_, index) => dead(from + index));
+    }
+
+    function timedFormat(): IScorekeeperFormat {
+      const rules = new ScoringRules(CommonRuleSets.NaqtTimed);
+      rules.maximumPlayersPerTeam = 2;
+      return scoringRulesToScorekeeperFormat(rules);
+    }
+
+    test('a benign repricing still applies with a setup present', () => {
+      const format = powersFormat();
+      const correction = correctFormat(format, repricedPower(format, 20), onePower(format), setup);
+      expect(correction.ok).toBe(true);
+    });
+
+    test('a completed regulation game survives a benign repricing', () => {
+      const format = powersFormat();
+      const events: ScoreEvent[] = [...onePower(format), ...deadTossups(19, 2)];
+      expect(deriveGame(format, setup, events).phase).toEqual({
+        kind: 'complete',
+        reason: 'regulation',
+      });
+      const correction = correctFormat(format, repricedPower(format, 20), events, setup);
+      expect(correction.ok).toBe(true);
+    });
+
+    test.each([
+      ['on', true],
+      ['off', false],
+    ])('bouncebacks cannot be switched %s after a bonus', (_direction, bounceBack) => {
+      const from: IScorekeeperFormat = {
+        ...powersFormat(),
+        bonus: { ...powersFormat().bonus, bounceBack: !bounceBack },
+      };
+      const to: IScorekeeperFormat = {
+        ...from,
+        bonus: { ...from.bonus, bounceBack },
+      };
+      const correction = correctFormat(from, to, onePower(from), setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/bounceback/i);
+    });
+
+    test('bouncebacks switch freely before any bonus exists', () => {
+      const from: IScorekeeperFormat = {
+        ...powersFormat(),
+        bonus: { ...powersFormat().bonus, bounceBack: false },
+      };
+      const to: IScorekeeperFormat = {
+        ...from,
+        bonus: { ...from.bonus, bounceBack: true },
+      };
+      const buzzOnly: ScoreEvent[] = [
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: typeIndex(from, 15),
+        }),
+      ];
+      const correction = correctFormat(from, to, buzzOnly, setup);
+      expect(correction.ok).toBe(true);
+    });
+
+    test('repricing bonus parts below a recorded total is refused', () => {
+      const format = powersFormat();
+      const events: ScoreEvent[] = [
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: typeIndex(format, 10),
+        }),
+        event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+      ];
+      expect(format.bonus.divisor).toBe(10);
+      // Bonus parts go from 10 to 15 points each (three parts, 45 max); the recorded 20
+      // can never have happened.
+      const to: IScorekeeperFormat = {
+        ...format,
+        bonus: { ...format.bonus, divisor: 15, pointsPerPart: 15, maximumScore: 45 },
+      };
+      const correction = correctFormat(format, to, events, setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/divisible by 15/i);
+    });
+
+    test('timed-to-untimed with an end-regulation marker is refused', () => {
+      const format = timedFormat();
+      const events: ScoreEvent[] = [
+        ...onePower(format),
+        dead(2),
+        event({ type: 'end-regulation', questionNumber: 2 }),
+      ];
+      expect(deriveGame(format, setup, events).phase).toEqual({
+        kind: 'complete',
+        reason: 'regulation',
+      });
+      const to: IScorekeeperFormat = {
+        ...format,
+        regulation: { ...format.regulation, timed: false, tossupCount: 20 },
+      };
+      const correction = correctFormat(format, to, events, setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/finished|in progress|invalid|regulation/i);
+    });
+
+    test('an overtime finish cannot be reclassified as regulation', () => {
+      const format: IScorekeeperFormat = {
+        ...powersFormat(),
+        overtime: { ...powersFormat().overtime, minimumQuestionCount: 1 },
+      };
+      const events: ScoreEvent[] = [
+        ...deadTossups(20),
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 21,
+          team: 'left',
+          playerName: 'Sarah Mitchell',
+          answerTypeIndex: typeIndex(format, 10),
+        }),
+      ];
+      expect(deriveGame(format, setup, events).phase).toEqual({
+        kind: 'complete',
+        reason: 'overtime',
+      });
+      // Lengthening regulation past the overtime questions is allowed by the matrix, but it
+      // would un-play overtime: question 21 becomes a regulation tossup of a game that never ends.
+      const to: IScorekeeperFormat = {
+        ...format,
+        regulation: { ...format.regulation, tossupCount: 24, maximumTossupCount: 24 },
+      };
+      const correction = correctFormat(format, to, events, setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/already finished|still be in progress/i);
+    });
+
+    test('post-validation never throws on hostile input', () => {
+      const format = powersFormat();
+      const hostile: ScoreEvent[][] = [
+        [],
+        [{ type: 'tossup-buzz', questionNumber: 1 } as unknown as ScoreEvent],
+        [event({ type: 'bonus', questionNumber: 99, team: 'left', controlledPoints: -5 })],
+        deadTossups(40),
+      ];
+      for (const events of hostile) {
+        let settled = false;
+        try {
+          const correction = correctFormat(format, repricedPower(format, 20), events, setup);
+          settled = correction.ok || !correction.ok;
+        } catch {
+          settled = false;
+        }
+        expect(settled).toBe(true);
+      }
+    });
+
+    test('a sudden-death checkpoint cannot be un-reached', () => {
+      const format: IScorekeeperFormat = {
+        ...powersFormat(),
+        overtime: { ...powersFormat().overtime, minimumQuestionCount: 3, suddenDeath: false },
+      };
+      const events: ScoreEvent[] = deadTossups(23);
+      expect(deriveGame(format, setup, events).phase).toEqual({
+        kind: 'checkpoint',
+        checkpoint: 'sudden-death',
+        afterQuestion: 23,
+      });
+      const to: IScorekeeperFormat = {
+        ...format,
+        regulation: { ...format.regulation, tossupCount: 24, maximumTossupCount: 24 },
+      };
+      const correction = correctFormat(format, to, events, setup);
+      expect(correction.ok).toBe(false);
+      if (correction.ok) return;
+      expect(correction.problems.join(' ')).toMatch(/sudden death/i);
+    });
+  });
 });

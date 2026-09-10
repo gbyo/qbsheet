@@ -50,9 +50,10 @@
  * scorekeeper corrects the earlier questions first — which is a thing the scorer already does well.
  */
 import { IScorekeeperAnswerType, IScorekeeperFormat, scorekeeperFormatProblems } from './ScorekeeperFormat';
-import { IGameSetup, startingLineup } from './deriveGame';
+import { IGameSetup, ScoringPhase, startingLineup } from './deriveGame';
 import { ScoreEvent } from './ScoreEvents';
 import { ICorrectionChange } from './gameCorrection';
+import { IScoresheetProblem, validateCorrectedHistory } from './validateScoresheet';
 
 /** Compare short labels the way a scorekeeper would: the characters, not the whitespace or the case. */
 function buttonKey(answerType: IScorekeeperAnswerType): string {
@@ -180,6 +181,78 @@ function usedAnswerTypes(events: ScoreEvent[]): Set<number> {
 }
 
 /** The highest cycle the history has anything recorded in, which is how far the game has got. */
+function blockerKey(blocker: IScoresheetProblem): string {
+  return `${blocker.code}@${blocker.questionNumber ?? ''}`;
+}
+
+/**
+ * A phase the corrected game must not be in, given where the recorded game stands.
+ *
+ * Returns the exact historical fact that blocks the correction, so the refusal names what
+ * happened rather than which rule moved. Null means the transition is monotone.
+ */
+function phaseRegression(before: ScoringPhase, after: ScoringPhase): string | null {
+  if (before.kind === 'complete' && after.kind !== 'complete') {
+    return 'The game already finished, but under the corrected rules it would still be in progress. Correct the record first, then change the rules.';
+  }
+  if (before.kind === 'complete' && after.kind === 'complete') {
+    if (before.reason === 'overtime' && after.reason !== 'overtime') {
+      return 'The game finished in overtime, but under the corrected rules it would have finished in regulation.';
+    }
+    return null;
+  }
+  const beforeOvertime =
+    (before.kind === 'tossup' || before.kind === 'bonus') && before.period === 'overtime';
+  const afterRegulation =
+    (after.kind === 'tossup' || after.kind === 'bonus') && after.period === 'regulation';
+  if (beforeOvertime && afterRegulation) {
+    return 'The game is in overtime, but under the corrected rules it would still be in regulation.';
+  }
+  if (
+    before.kind === 'checkpoint' &&
+    before.checkpoint === 'sudden-death' &&
+    after.kind !== 'complete' &&
+    !(after.kind === 'checkpoint' && after.checkpoint === 'sudden-death')
+  ) {
+    return 'The game reached sudden death, but under the corrected rules it would not be there.';
+  }
+  return null;
+}
+
+/**
+ * The backstop behind the correction matrix: validate exactly what would be written.
+ *
+ * Derives the corrected game from the remapped events and runs the correction-time validator,
+ * then refuses any blocker the original history did not already carry, plus any phase
+ * regression. A validator crash fails closed — an unvalidatable correction is not an
+ * acceptable one.
+ */
+function postValidateCorrection(
+  from: IScorekeeperFormat,
+  carried: IScorekeeperFormat,
+  setup: IGameSetup,
+  events: ScoreEvent[],
+  remapped: ScoreEvent[],
+  problems: string[],
+): void {
+  try {
+    const before = validateCorrectedHistory(from, setup, events);
+    const after = validateCorrectedHistory(carried, setup, remapped);
+    const baseline = new Set(before.blockers.map(blockerKey));
+    for (const blocker of after.blockers) {
+      if (!baseline.has(blockerKey(blocker))) {
+        problems.push(`Under the corrected rules this recorded history is invalid: ${blocker.message}`);
+      }
+    }
+    const regression = phaseRegression(before.game.phase, after.game.phase);
+    if (regression) problems.push(regression);
+  } catch {
+    problems.push(
+      'The corrected game could not be validated against its own history, so the correction was refused.',
+    );
+  }
+}
+
 export function lastRecordedQuestion(events: ScoreEvent[]): number {
   return events.reduce((highest, event) => Math.max(highest, event.questionNumber), 0);
 }
@@ -327,11 +400,22 @@ export default function correctFormat(
       }
     }
     if (from.bonus.bounceBack !== to.bonus.bounceBack) {
-      changes.push({
-        subject: 'Bouncebacks',
-        detail: to.bonus.bounceBack ? 'switched on' : 'switched off',
-        affectsRecordedScoring: bonusesRecorded,
-      });
+      // A completed bonus is an experiment that already ran. The history records what the
+      // controlling team did with each part, but nothing about what the other team would have
+      // done on a miss — so no future richer model can be proven from this event log, and the
+      // toggle is refused in both directions while any bonus stands (#668).
+      if (bonusesRecorded) {
+        problems.push(
+          'This game has a bonus recorded, so bouncebacks cannot be switched ' +
+            `${to.bonus.bounceBack ? 'on' : 'off'}. The history cannot prove what the other team would have done on a missed part.`,
+        );
+      } else {
+        changes.push({
+          subject: 'Bouncebacks',
+          detail: to.bonus.bounceBack ? 'switched on' : 'switched off',
+          affectsRecordedScoring: false,
+        });
+      }
     }
     // The shape of an irregular bonus, and the regular/irregular switch itself. Each of these
     // reprices bonuses already on the board, and none of them was being said out loud.
@@ -372,11 +456,21 @@ export default function correctFormat(
     'tossups',
   );
   if (from.regulation.timed !== to.regulation.timed) {
-    changes.push({
-      subject: 'Clock',
-      detail: to.regulation.timed ? 'timed round' : 'untimed round',
-      affectsRecordedScoring: false,
-    });
+    // An end-of-regulation marker recorded under timed rules has no meaning in an untimed
+    // game: there is no clock to call time on. Removing the clock would strand the marker as
+    // uninterpretable history, so the correction is refused while one stands (#668).
+    const endRegulation = events.find((event) => event.type === 'end-regulation');
+    if (!to.regulation.timed && endRegulation) {
+      problems.push(
+        `Time was already called to end regulation in this game (question ${endRegulation.questionNumber}), which has no meaning in an untimed game.`,
+      );
+    } else {
+      changes.push({
+        subject: 'Clock',
+        detail: to.regulation.timed ? 'timed round' : 'untimed round',
+        affectsRecordedScoring: false,
+      });
+    }
   }
 
   // --- lightning ------------------------------------------------------------------------------
@@ -462,8 +556,6 @@ export default function correctFormat(
     });
   }
 
-  if (problems.length > 0) return { ok: false, problems };
-
   /*
    * The two fields a correction carries across rather than replaces.
    *
@@ -499,6 +591,20 @@ export default function correctFormat(
           : event,
       )
     : events;
+
+  /*
+   * Historical post-validation backstop (#668). The branches above are a hand-written matrix, and
+   * a matrix is a claim about every interaction in advance. This step derives the corrected game
+   * from the exact events that would be written and validates it with the same validator the
+   * submit path uses, then refuses anything the original history did not already forbid: a new
+   * blocker, or a phase the game can never return to. Runs only with a setup, which the dialog
+   * always has; callers without rosters keep the matrix-only behavior they already had.
+   */
+  if (setup) {
+    postValidateCorrection(from, carried, setup, events, remapped, problems);
+  }
+
+  if (problems.length > 0) return { ok: false, problems };
 
   /*
    * Whether anything actually differs, asked of the whole structure rather than of `changes`.
