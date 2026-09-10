@@ -118,24 +118,37 @@ describe('definition pinning', () => {
     expect(definitionRulesFor(state, 'scheduled-1')?.powerValue).toBe(15);
   });
 
-  test('issued assignments carry the definition identity; previews carry none', () => {
+  test('assignments built before the pin stamp the identity the pin will persist', () => {
     const state = releasableTournament();
+    // The file path builds its bytes before `recordPreparedAssignments` pins the issue, so an
+    // unpinned build stamps the predicted identity. The pin must persist exactly that identity
+    // from the unchanged draft, or rooms echoing the file would never classify ready.
     const preview = buildAssignment(state, 'scheduled-1');
     expect(preview.ok).toBe(true);
     if (!preview.ok) return;
     const previewMatch = (
       preview.assignment.document as { objects: Array<Record<string, unknown>> }
     ).objects.find((entry) => entry.type === 'Match')!;
-    expect((previewMatch._qbtcp as Record<string, unknown>).definition_revision).toBeUndefined();
+    const previewIdentity = previewMatch._qbtcp as Record<string, unknown>;
+    expect(previewIdentity.definition_revision).toBe(1);
+    expect(typeof previewIdentity.definition_digest).toBe('string');
 
     pinIssuedDefinitions(state, ['scheduled-1']);
+    const snapshot = activeDefinitionSnapshot(state, 'scheduled-1')!;
+    expect({
+      definition_revision: snapshot.revision,
+      definition_digest: snapshot.digest,
+    }).toEqual({
+      definition_revision: previewIdentity.definition_revision,
+      definition_digest: previewIdentity.definition_digest,
+    });
+
     const issued = buildAssignment(state, 'scheduled-1');
     expect(issued.ok).toBe(true);
     if (!issued.ok) return;
     const issuedMatch = (
       issued.assignment.document as { objects: Array<Record<string, unknown>> }
     ).objects.find((entry) => entry.type === 'Match')!;
-    const snapshot = activeDefinitionSnapshot(state, 'scheduled-1')!;
     expect(issuedMatch._qbtcp).toMatchObject({
       definition_revision: snapshot.revision,
       definition_digest: snapshot.digest,
