@@ -2,8 +2,8 @@
 
 Sanitized reference report sets for the tournament formats the Quizbowl
 Resource Center accepts (per current ACF statkeeping guidance: YellowFruit or
-SQBS HTML). All team/player names are synthetic. No private tournament or
-question content is included.
+SQBS HTML). All team/player names in the checked-in fixtures are synthetic. No
+private tournament or question content is included.
 
 ## Sets
 
@@ -34,51 +34,77 @@ question content is included.
   are `<HTML>` documents with **no doctype and no declared charset**; the nav
   uses unquoted same-directory `HREF=` links; each page inlines its own
   `<style>` block; standings columns are `Rank Team W L Pct PP20TUH 15 10 -5
-  TUH PPB`. The uploader evidently accepts this shape, so compatibility tests
-  assert parser-relevant structure (roles, tables, links, identities) and
-  never require YellowFruit's exact shell.
-- Resource Center upload of this fixture: **not performed** (no operator
-  account in CI). See `docs/RESOURCE_CENTER_SMOKE_TEST.md`.
+  TUH PPB`. Compatibility tests assert parser-relevant structure (roles,
+  tables, links, identities) without requiring YellowFruit's exact shell.
+- Resource Center upload of this fixture: **not performed**. See
+  `docs/RESOURCE_CENTER_SMOKE_TEST.md`.
 - Date last verified (generated): **2026-09-10**.
 
-### `sqbs/naqt-synthetic/` — SQBS structural reference (not SQBS output)
+### `sqbs/naqt-synthetic/` — local SQBS structural reference (not SQBS output)
 
-- Software: **SQBS (version not observable here)**. SQBS is closed-source and
-  Windows-only, so no genuine SQBS HTML could be produced in this environment.
-  These files are **hand-authored structural references**, one per report
-  role, illustrating SQBS's documented conventions for the same synthetic
-  4-team tournament:
-  - one HTML document per report with the conventional
-    `<base>_<role>.html` suffixes — the same seven suffixes SQBS advertises
-    in its own `.sqbs` settings block (rounds, standings, individuals, games,
-    teamdetail, playerdetail, statkey; see `src/sqbs.ts`);
-  - a linked nav across the set; standings/individuals/scoreboard/team-detail/
-    player-detail/round-report/stat-key tables with internally coherent
-    records and scores (standings PF/PA reconcile with the scoreboard).
-- Each file carries an HTML comment stating it is not SQBS output. Replace
-  this set with genuine sanitized SQBS output (plus the SQBS version) the
-  next time an operator with SQBS access re-verifies.
-- Resource Center upload of this fixture: **not performed**.
-- Date last verified (authored): **2026-09-10**.
+These checked-in files are deliberately **not** represented as genuine SQBS output.
+They are hand-authored structural references for the same synthetic four-team
+tournament and carry an HTML comment saying so.
 
-## Fixture family coverage (issue #764 workstream A)
+They model the documented SQBS conventions used by QBSheet's compatibility tests:
 
-| Family                        | Covered by                                            |
-| ----------------------------- | ----------------------------------------------------- |
-| Standard powers/gets/negs + bonuses | Both sets (`naqt-synthetic`)                    |
-| No powers                     | QBSheet unit tests (`resourceCenterReport.test.ts`)   |
-| Divisions/pools               | YF set (Pool A) + QBSheet unit tests                  |
-| Multi-phase                   | Deferred — no combined exporter exists yet (see #764) |
-| Forfeits                      | QBSheet unit tests                                    |
-| Ties/overtime                 | QBSheet unit tests                                    |
-| Zero/empty stats              | QBSheet unit tests                                    |
-| Unicode/special characters    | QBSheet unit tests + preflight sanitizer tests        |
-| Partial detail                | QBSheet unit tests + preflight warnings               |
+- one HTML document per report with the conventional `<base>_<role>.html`
+  suffixes (standings, individuals, games, teamdetail, playerdetail, rounds,
+  statkey);
+- linked report navigation;
+- internally coherent standings, scoreboard, team/player detail, round report,
+  and stat-key content.
+
+This directory does **not** satisfy #764's requirement for a genuine sanitized
+SQBS-generated fixture. Replace or supplement it with actual SQBS output when an
+operator can generate a synthetic tournament through SQBS itself. Record the exact
+SQBS version and how the files were produced; never silently relabel these structural
+references.
+
+### Official SQBS-generated external reference
+
+SQBS's author-hosted site is the authoritative external reference currently used to
+cross-check the local structural model:
+
+- SQBS home/download page: `https://ai.stanford.edu/~csewell/sqbs/index.html`
+- Documentation: `https://ai.stanford.edu/~csewell/sqbs/sqbs4doc.htm`
+- Author-hosted **Example Web Report Generated by the Program**:
+  `https://ai.stanford.edu/~csewell/sqbs/example_standings.html`
+- Example stat key:
+  `https://ai.stanford.edu/~csewell/sqbs/example_statkey.html`
+
+The official site identifies **Version 4.0** as the latest Windows release and dates
+that release 2010-02-28. Its documentation describes the same seven conventional web
+report filenames, and the official example exposes the interlinked standings,
+individuals, scoreboard, team detail, individual detail, round report, and stat-key
+shape. This is genuine SQBS output hosted by the program author, but it contains a
+historical real tournament and therefore is **not copied into the sanitized fixture
+corpus**. It is evidence for structure, not a replacement for the required synthetic
+SQBS fixture.
+
+## Fixture family coverage
+
+| Family | Coverage |
+| ------ | -------- |
+| Standard powers/gets/negs + bonuses | Genuine YellowFruit + local SQBS structural reference |
+| No powers | QBSheet unit tests (`resourceCenterReport.test.ts`) |
+| Divisions/pools | YellowFruit fixture + QBSheet unit tests |
+| Multi-phase | QBSheet scope/unit tests (`resourceCenterScopes.test.ts`); live phase + Combined verification remains manual |
+| Forfeits | QBSheet unit tests |
+| Ties/overtime | QBSheet unit tests |
+| Zero/empty stats | QBSheet unit tests |
+| Unicode/special characters | QBSheet unit tests + preflight sanitizer tests |
+| Partial detail | QBSheet unit tests + preflight warnings |
+| Genuine SQBS-generated sanitized bytes | **Pending #764** |
 
 ## Rules
 
-- Never add real team/player names or private content to these fixtures.
-- Never commit credentials, cookies, CSRF tokens, or session material
-  alongside upload evidence. The live smoke test is a manual operator step
-  documented in `docs/RESOURCE_CENTER_SMOKE_TEST.md`.
-- CI stays offline: tests read these files from disk; no network.
+- Never add private tournament/question content to fixtures.
+- A genuine SQBS fixture should be generated from a deliberately synthetic tournament,
+  not sanitized by hand after generation if doing so would change parser-relevant
+  output. If redaction is unavoidable, document every transformation.
+- Never commit credentials, cookies, CSRF tokens, or session material alongside upload
+  evidence. The live smoke test is a manual operator step documented in
+  `docs/RESOURCE_CENTER_SMOKE_TEST.md`.
+- CI stays offline: tests read checked-in fixture files from disk; external references
+  are documentation/provenance only and are never fetched by CI.
