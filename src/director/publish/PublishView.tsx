@@ -11,14 +11,14 @@ import { saveOrDownloadBytes } from '../reports/downloads';
 import { loadReportOptions, saveReportOptions } from '../reports/reportPreferences';
 import { buildCanonicalStandingsHtml, buildCanonicalStatReport } from '../reports/statReportExport';
 import { buildCanonicalResourceCenterReport } from '../reports/resourceCenterExport';
-import { resourceCenterScopes } from '../reports/resourceCenterScopes';
 import { ReportOptionsDialog } from './ReportOptionsDialog';
-import { ResourceCenterScopesDialog } from './ResourceCenterScopesDialog';
+import { PrepareHsqbDialog } from './PrepareHsqbDialog';
 import { SqbsTournamentDialog } from './SqbsTournamentDialog';
 
 export function PublishView({
   state,
   onAnnounce,
+  onNavigate,
 }: {
   state: DirectorState;
   onAnnounce: (announcement: AnnounceInput) => void;
@@ -43,8 +43,7 @@ export function PublishView({
       : loadedReportOptions;
   const [reportOptionsOpen, setReportOptionsOpen] = useState(false);
   const [sqbsTournamentOpen, setSqbsTournamentOpen] = useState(false);
-  const [resourceCenterOpen, setResourceCenterOpen] = useState(false);
-  const resourceCenterScopeCount = useMemo(() => resourceCenterScopes(state).length, [state]);
+  const [prepareHsqbOpen, setPrepareHsqbOpen] = useState(false);
 
   return (
     <Page>
@@ -83,16 +82,10 @@ export function PublishView({
               onClick={() => void downloadStatReport(state, onAnnounce, reportOptions)}
             />
             <ExportAction
-              title="Resource Center report"
-              description="Preflighted HTML sets with conventional SQBS/YellowFruit names (standings, individuals, scoreboard, team detail, player detail, round report) plus a stat-key companion, all from the canonical snapshot. The set downloads only after its structural preflight passes; multi-phase tournaments offer every phase plus combined; live-upload compatibility is verified manually per the release checklist."
-              action="Download ZIP"
-              onClick={() => {
-                if (resourceCenterScopeCount > 1) {
-                  setResourceCenterOpen(true);
-                  return;
-                }
-                void downloadResourceCenterReport(state, onAnnounce, reportOptions);
-              }}
+              title="Quizbowl Resource Center"
+              description="Prepare official HTML statistics for hsquizbowl.org. QBSheet checks the report, creates the correct upload files, and shows where each file belongs."
+              action="Prepare for HSQuizbowl"
+              onClick={() => setPrepareHsqbOpen(true)}
             />
             <ExportAction
               title="Team standings HTML"
@@ -148,11 +141,12 @@ export function PublishView({
         />
       )}
 
-      {resourceCenterOpen && state.tournament && (
-        <ResourceCenterScopesDialog
+      {prepareHsqbOpen && state.tournament && (
+        <PrepareHsqbDialog
           state={state}
           onAnnounce={onAnnounce}
-          onClose={() => setResourceCenterOpen(false)}
+          onClose={() => setPrepareHsqbOpen(false)}
+          onNavigate={onNavigate}
         />
       )}
 

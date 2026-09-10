@@ -65,9 +65,12 @@
 import {
   buildResourceCenterReport,
   defaultReportOptions,
+  preflightResourceCenterReport,
   reportPageOrder,
   sanitizeResourceCenterBaseName,
   zipStatReportBundle,
+  type FormatError,
+  type FormatWarning,
   type ReportOptions,
   type ReportScoringDefinition,
   type ResourceCenterReportFile,
@@ -93,6 +96,10 @@ export interface ResourceCenterScope {
   /** Short preview detail, e.g. "3 games". */
   detail: string;
   gameCount: number;
+  /** Distinct teams with accepted games in this scope. */
+  teamCount: number;
+  /** Distinct rounds with accepted games in this scope. */
+  roundCount: number;
   /** Pool names when this scope has exactly one stage with several pools. */
   divisions: string[];
 }
@@ -110,6 +117,17 @@ export interface ResourceCenterScopeArtifact {
   teamCount: number;
   warnings: string[];
   errors: string[];
+  /**
+   * Structured #764 preflight for this set (issue #766 step 2). Blocking
+   * entries refuse the save; warning entries ride along. Kept alongside the
+   * flattened strings so the workflow can link each diagnostic at a fix.
+   */
+  blocking: FormatError[];
+  preflightWarnings: FormatWarning[];
+  /** ISO timestamp this set was generated, shown so repeat publishes stay comparable. */
+  generatedAt: string;
+  /** Short content hash of this set's files; changes when any file changes. */
+  revision: string;
 }
 
 export interface ResourceCenterScopeSets {
@@ -120,6 +138,23 @@ export interface ResourceCenterScopeSets {
   totalFiles: number;
   warnings: string[];
   errors: string[];
+  /** ISO timestamp the whole package was generated. */
+  generatedAt: string;
+  /** Short content hash of the ZIP; changes when any selected file changes. */
+  revision: string;
+}
+
+/**
+ * Short content hash (FNV-1a, hex) so an operator can tell two generated
+ * packages apart after a correction. Not cryptographic — only a revision tag.
+ */
+export function hashReportBytes(bytes: Uint8Array): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < bytes.length; index += 1) {
+    hash ^= bytes[index]!;
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
 }
 
 function activePhases(state: DirectorState): Phase[] {
@@ -160,12 +195,29 @@ function divisionsForPhase(state: DirectorState, phaseId: string): string[] {
   return livePools.length > 1 ? livePools.map((pool) => pool.name) : [];
 }
 
-function gameCountFor(state: DirectorState, phaseId?: string): number {
-  return acceptedGameRecords(state, phaseId ? { phaseId } : {}).length;
+export interface ResourceCenterScopeCounts {
+  gameCount: number;
+  teamCount: number;
+  roundCount: number;
 }
 
-function scopeDetail(gameCount: number): string {
-  return `${gameCount} game${gameCount === 1 ? '' : 's'}`;
+/** Accepted-games footprint of one scope: games, distinct teams, distinct rounds. */
+export function scopeCountsFor(state: DirectorState, phaseId?: string): ResourceCenterScopeCounts {
+  const games = acceptedGameRecords(state, phaseId ? { phaseId } : {});
+  const teams = new Set<string>();
+  const rounds = new Set<string>();
+  for (const game of games) {
+    rounds.add(game.roundId);
+    for (const score of game.scores) teams.add(score.teamId);
+  }
+  return { gameCount: games.length, teamCount: teams.size, roundCount: rounds.size };
+}
+
+function scopeDetail(counts: ResourceCenterScopeCounts): string {
+  const games = `${counts.gameCount} game${counts.gameCount === 1 ? '' : 's'}`;
+  const teams = `${counts.teamCount} team${counts.teamCount === 1 ? '' : 's'}`;
+  const rounds = `${counts.roundCount} round${counts.roundCount === 1 ? '' : 's'}`;
+  return `${teams} · ${games} · ${rounds}`;
 }
 
 /**
@@ -179,7 +231,7 @@ export function resourceCenterScopes(state: DirectorState): ResourceCenterScope[
   const phases = activePhases(state);
   const tournament = tournamentBase(state);
   if (phases.length <= 1) {
-    const gameCount = gameCountFor(state);
+    const counts = scopeCountsFor(state);
     return [
       {
         key: 'combined',
@@ -187,8 +239,10 @@ export function resourceCenterScopes(state: DirectorState): ResourceCenterScope[
         label: 'Overall',
         slug: 'combined',
         baseName: tournament,
-        detail: scopeDetail(gameCount),
-        gameCount,
+        detail: scopeDetail(counts),
+        gameCount: counts.gameCount,
+        teamCount: counts.teamCount,
+        roundCount: counts.roundCount,
         divisions: [],
       },
     ];
@@ -199,7 +253,7 @@ export function resourceCenterScopes(state: DirectorState): ResourceCenterScope[
     const slug = scopeSlugForPhase(phase);
     const proposed = sanitizeResourceCenterBaseName(`${state.tournament.name}-${phase.name}`);
     const baseName = uniqueBase(proposed === 'report' ? `${tournament}-${slug}` : proposed, used);
-    const gameCount = gameCountFor(state, phase.id);
+    const counts = scopeCountsFor(state, phase.id);
     scopes.push({
       key: `phase:${phase.id}`,
       kind: 'phase',
@@ -207,21 +261,25 @@ export function resourceCenterScopes(state: DirectorState): ResourceCenterScope[
       label: phase.name,
       slug,
       baseName,
-      detail: scopeDetail(gameCount),
-      gameCount,
+      detail: scopeDetail(counts),
+      gameCount: counts.gameCount,
+      teamCount: counts.teamCount,
+      roundCount: counts.roundCount,
       divisions: divisionsForPhase(state, phase.id),
     });
   }
   const combinedBase = uniqueBase(sanitizeResourceCenterBaseName(`${state.tournament.name}-combined`), used);
-  const combinedCount = gameCountFor(state);
+  const combinedCounts = scopeCountsFor(state);
   scopes.push({
     key: 'combined',
     kind: 'combined',
     label: 'Combined',
     slug: 'combined',
     baseName: combinedBase,
-    detail: scopeDetail(combinedCount),
-    gameCount: combinedCount,
+    detail: scopeDetail(combinedCounts),
+    gameCount: combinedCounts.gameCount,
+    teamCount: combinedCounts.teamCount,
+    roundCount: combinedCounts.roundCount,
     divisions: [],
   });
   return scopes;
@@ -402,7 +460,19 @@ function buildScopeSnapshot(
     standingsTeams = standings.teams;
     standingsPlayers = standings.players;
   }
-  const merged = { ...display, teams: standingsTeams, players: standingsPlayers };
+  // Issue #766: a scope set carries only teams with canonical results in the
+  // scope. The unfiltered canonical snapshot lists the whole roster, including
+  // teams with no accepted games yet; the #764 validator rightly refuses those
+  // rows (`team-missing-from-games`), which would otherwise make repeat
+  // mid-tournament publishing impossible. Filtering here matches the phase-set
+  // rule documented above and leaves the shared snapshot builder — and every
+  // Director/Live surface reading it — untouched.
+  const scopeTeamIds = new Set(standingsGames.flatMap((game) => game.scores.map((score) => score.teamId)));
+  const merged = {
+    ...display,
+    teams: standingsTeams.filter((team) => scopeTeamIds.has(team.teamId)),
+    players: standingsPlayers,
+  };
   const definitionGames = [...new Map([...standingsGames, ...stageGames].map((g) => [g.id, g])).values()];
   const definitions = definitionsForGames(state, definitionGames);
   const snapshot = withReportPresentation(state, merged, options, definitions);
@@ -489,6 +559,7 @@ export function buildCanonicalResourceCenterScopeArtifact(
   scopeKey: string,
   generatedAt = new Date().toISOString(),
   options: ReportOptions = { ...defaultReportOptions, pages: [...reportPageOrder] },
+  labelOverride?: string,
 ): ResourceCenterScopeArtifact {
   const scopes = resourceCenterScopes(state);
   const scope = scopes.find((entry) => entry.key === scopeKey);
@@ -503,15 +574,32 @@ export function buildCanonicalResourceCenterScopeArtifact(
       teamCount: 0,
       warnings: [],
       errors: [scope ? 'There is no tournament to export.' : `Unknown report scope "${scopeKey}".`],
+      blocking: [],
+      preflightWarnings: [],
+      generatedAt,
+      revision: hashReportBytes(new Uint8Array()),
     };
   }
+  const trimmedLabel = labelOverride?.trim() ?? '';
+  const effectiveScope = trimmedLabel ? { ...scope, label: trimmedLabel } : scope;
   const normalizedOptions: ReportOptions = { ...options, pages: [...reportPageOrder] };
-  const built = buildScopeSnapshot(state, scope, generatedAt, normalizedOptions);
+  const built = buildScopeSnapshot(state, effectiveScope, generatedAt, normalizedOptions);
   const artifact = buildResourceCenterReport(built.snapshot, {
     baseName: scope.baseName,
     includeStatKey: true,
   });
-  const warnings = warningsForScope(state, scope, built);
+  // Issue #764 gate, applied per set: the #763 multi-scope path must not skip
+  // the validator the single-scope path runs. Blocking diagnostics refuse the
+  // save; warnings ride along with it.
+  const preflight = preflightResourceCenterReport(artifact, built.snapshot);
+  const warnings = [
+    ...warningsForScope(state, effectiveScope, built),
+    ...preflight.warnings.map((entry) => entry.message),
+  ];
+  const errors = [
+    ...artifact.errors.map((entry) => entry.message),
+    ...preflight.blocking.map((entry) => entry.message),
+  ];
   return {
     scopeKey: scope.key,
     scopeLabel: built.scopeLabel,
@@ -521,7 +609,13 @@ export function buildCanonicalResourceCenterScopeArtifact(
     gameCount: built.stageGames.length,
     teamCount: built.snapshot.teams.length,
     warnings,
-    errors: [...artifact.errors.map((entry) => entry.message)],
+    errors,
+    blocking: [...artifact.errors, ...preflight.blocking],
+    preflightWarnings: [...preflight.warnings],
+    generatedAt,
+    revision: hashReportBytes(
+      new TextEncoder().encode(artifact.files.map((file) => `${file.fileName}\n${file.content}`).join('\n')),
+    ),
   };
 }
 
@@ -535,13 +629,30 @@ export function buildCanonicalResourceCenterScopeSets(
   scopeKeys: readonly string[],
   generatedAt = new Date().toISOString(),
   options: ReportOptions = { ...defaultReportOptions, pages: [...reportPageOrder] },
+  scopeLabels: Readonly<Record<string, string>> = {},
 ): ResourceCenterScopeSets {
   const uniqueKeys = [...new Set(scopeKeys)];
   const sets = uniqueKeys.map((key) =>
-    buildCanonicalResourceCenterScopeArtifact(state, key, generatedAt, options),
+    buildCanonicalResourceCenterScopeArtifact(state, key, generatedAt, options, scopeLabels[key]),
   );
   const errors = sets.flatMap((set) => set.errors);
   const warnings = sets.flatMap((set) => set.warnings.map((warning) => `${set.scopeLabel}: ${warning}`));
+  // Issue #766 report-name safety: two sets sharing one display label would be
+  // posted as two indistinguishable stat reports. Filenames stay unique via
+  // stable base prefixes; the collision is a warning, never a silent rename.
+  const seenLabels = new Map<string, string>();
+  for (const set of sets) {
+    const folded = set.scopeLabel.trim().toLocaleLowerCase();
+    const first = seenLabels.get(folded);
+    if (first !== undefined && first !== set.scopeKey) {
+      warnings.push(
+        `Duplicate report name "${set.scopeLabel}": two report sets share one display label. ` +
+          `Rename one before posting so each stat report stays distinguishable.`,
+      );
+    } else if (first === undefined) {
+      seenLabels.set(folded, set.scopeKey);
+    }
+  }
   const files = sets.flatMap((set) => set.files);
   const seen = new Set<string>();
   const deduped = files.filter((file) => {
@@ -551,9 +662,10 @@ export function buildCanonicalResourceCenterScopeSets(
   });
   const tournament = tournamentBase(state);
   const multi = sets.length > 1;
+  const bytes = zipStatReportBundle(deduped.map((file) => ({ name: file.fileName, content: file.content })));
   return {
     sets,
-    bytes: zipStatReportBundle(deduped.map((file) => ({ name: file.fileName, content: file.content }))),
+    bytes,
     fileName: multi
       ? `${tournament}-resource-center-all.zip`
       : `${sets[0]?.baseName ?? tournament}-resource-center.zip`,
@@ -561,5 +673,7 @@ export function buildCanonicalResourceCenterScopeSets(
     totalFiles: deduped.length,
     warnings,
     errors,
+    generatedAt,
+    revision: hashReportBytes(bytes),
   };
 }

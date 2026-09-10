@@ -143,7 +143,11 @@ describe('resource center scope enumeration', () => {
     const scopes = resourceCenterScopes(prelimPlayoffTournament());
     expect(scopes.map((scope) => scope.key)).toEqual(['phase:phase-1', 'phase:phase-2', 'combined']);
     expect(scopes.map((scope) => scope.label)).toEqual(['Prelims', 'Playoffs', 'Combined']);
-    expect(scopes.map((scope) => scope.detail)).toEqual(['1 game', '1 game', '2 games']);
+    expect(scopes.map((scope) => scope.detail)).toEqual([
+      '2 teams · 1 game · 1 round',
+      '2 teams · 1 game · 1 round',
+      '3 teams · 2 games · 2 rounds',
+    ]);
     // User-facing names never depend on raw internal IDs.
     for (const scope of scopes) {
       expect(scope.label).not.toContain('phase-1');
@@ -487,5 +491,96 @@ describe('resource center scope semantics', () => {
       expect(file.fileName.startsWith(`${artifact.baseName}_`)).toBe(true);
     }
     expect(fileOf(artifact, 'standings')).toContain('Ninety Six Invitational');
+  });
+});
+
+describe('prepare-for-HSQuizbowl workflow support (issue #766)', () => {
+  test('scopes carry team and round counts for the pre-export preview', () => {
+    const scopes = resourceCenterScopes(prelimPlayoffTournament());
+    expect(scopes.map((scope) => [scope.teamCount, scope.gameCount, scope.roundCount])).toEqual([
+      [2, 1, 1],
+      [2, 1, 1],
+      [3, 2, 2],
+    ]);
+    const single = resourceCenterScopes(playedTournament());
+    expect(single[0]).toMatchObject({ teamCount: 2, gameCount: 1, roundCount: 1 });
+  });
+
+  test('multi-scope sets run the structural preflight instead of skipping it', () => {
+    const state = playedTournament();
+    state.tournament!.name = '';
+    const sets = buildCanonicalResourceCenterScopeSets(state, ['combined'], generatedAt);
+    expect(sets.errors.join('\n')).toMatch(/no tournament name/);
+    expect(sets.sets[0]!.blocking.map((entry) => entry.code)).toContain('missing-tournament-identity');
+    expect(sets.sets[0]!.blocking[0]).toMatchObject({
+      code: expect.any(String),
+      path: expect.any(String),
+      message: expect.any(String),
+    });
+  });
+
+  test('preflight warnings ride along with multi-scope sets', () => {
+    const sets = buildCanonicalResourceCenterScopeSets(playedTournament(), ['combined'], generatedAt);
+    expect(sets.errors).toEqual([]);
+    expect(sets.sets[0]!.preflightWarnings.length).toBeGreaterThan(0);
+    expect(sets.warnings.join('\n')).toContain(sets.sets[0]!.preflightWarnings[0]!.message);
+  });
+
+  test('report labels are editable while filenames stay sanitized and stable', () => {
+    const state = prelimPlayoffTournament();
+    const sets = buildCanonicalResourceCenterScopeSets(
+      state,
+      ['phase:phase-1', 'combined'],
+      generatedAt,
+      undefined,
+      { 'phase:phase-1': 'Opening <b>Rounds</b>' },
+    );
+    const prelims = sets.sets[0]!;
+    expect(prelims.scopeLabel).toBe('Opening <b>Rounds</b>');
+    // Filenames ignore the display label; the label itself is HTML-escaped.
+    const unedited = buildCanonicalResourceCenterScopeArtifact(state, 'phase:phase-1', generatedAt);
+    expect(prelims.baseName).toBe(unedited.baseName);
+    for (const file of prelims.files) {
+      expect(file.fileName.startsWith(`${unedited.baseName}_`)).toBe(true);
+      expect(file.content).not.toContain('Opening <b>Rounds</b>');
+    }
+    expect(fileOf(prelims, 'standings')).toContain('Opening &lt;b&gt;Rounds&lt;/b&gt;');
+    // A blank override falls back to the scope default.
+    const fallback = buildCanonicalResourceCenterScopeArtifact(
+      state,
+      'phase:phase-1',
+      generatedAt,
+      undefined,
+      '   ',
+    );
+    expect(fallback.scopeLabel).toBe('Prelims');
+  });
+
+  test('duplicate report names warn without renaming files', () => {
+    const state = prelimPlayoffTournament();
+    const sets = buildCanonicalResourceCenterScopeSets(
+      state,
+      ['phase:phase-1', 'phase:phase-2', 'combined'],
+      generatedAt,
+      undefined,
+      { 'phase:phase-2': 'prelims' },
+    );
+    expect(sets.errors).toEqual([]);
+    expect(sets.warnings.join('\n')).toMatch(/Duplicate report name "prelims"/);
+    const bases = sets.sets.map((set) => set.baseName);
+    expect(new Set(bases).size).toBe(bases.length);
+  });
+
+  test('regeneration after a correction changes the revision and the counts', () => {
+    const state = playedTournament();
+    const before = buildCanonicalResourceCenterScopeSets(state, ['combined'], generatedAt);
+    addAcceptedGame(state, 'game-2', 'scheduled-2', 'round-1', 'team-b', 'team-a', 250, 240);
+    const after = buildCanonicalResourceCenterScopeSets(state, ['combined'], generatedAt);
+    expect(after.sets[0]!.gameCount).toBe(before.sets[0]!.gameCount + 1);
+    expect(after.revision).not.toBe(before.revision);
+    expect(after.sets[0]!.revision).not.toBe(before.sets[0]!.revision);
+    // Same input regenerates identically, so a revision always means a change.
+    const repeat = buildCanonicalResourceCenterScopeSets(state, ['combined'], generatedAt);
+    expect(repeat.revision).toBe(after.revision);
   });
 });
