@@ -40,7 +40,7 @@ import {
 import type { SectionId } from '../app/navigation';
 import type { DirectorNavigationTarget } from '../app/navigationTarget';
 import { isNativeDirector, issueNativeRoomPairing, resetNativeQbtcpCredentials } from '../platform/native';
-import { buildInternetPairing } from '../relay/relayPairing';
+import { buildInternetPairing, serverFromPairingLaunchUrl } from '../relay/relayPairing';
 import { localStorageRelayPanelStore, RelayPanel } from '../relay/RelayPanel';
 import type { RelayConfig } from '../relay/relayConfig';
 import type { NativeServerState } from '../server/useNativeServerStatus';
@@ -1547,11 +1547,15 @@ function QbtcpNetwork({
                 let internetUrl: string | null = null;
                 if (internetRelay && invitation) {
                   try {
+                    const lanServer = invitation.pairingUrl
+                      ? serverFromPairingLaunchUrl(invitation.pairingUrl)
+                      : null;
                     internetUrl = buildInternetPairing({
                       baseUrl: internetRelay.baseUrl,
                       tournamentId: internetRelay.tournamentId,
                       code: invitation.pairingCode,
                       roomId: room.id,
+                      ...(lanServer ? { lanServer } : {}),
                     }).url;
                   } catch {
                     internetUrl = null;

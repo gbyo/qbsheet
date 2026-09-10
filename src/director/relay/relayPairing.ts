@@ -58,8 +58,13 @@ export function internetServerForPairing(baseUrl: string, tournamentId: string):
  * (`{scoresheet}#qbtcp-pair?v=1&server=…&code=…&room=…`), with the Internet relay as the
  * server. The code stays in the fragment: never sent to a server, never logged by one.
  */
-export function buildPairingLaunchUrl(options: { server: string; code: string; roomId: string }): string {
-  const { server, code, roomId } = options;
+export function buildPairingLaunchUrl(options: {
+  server: string;
+  code: string;
+  roomId: string;
+  lanServer?: string;
+}): string {
+  const { server, code, roomId, lanServer } = options;
   if (!server || server.length > maxServerLength) {
     throw new RelayPairingError('That pairing server address is not valid.');
   }
@@ -69,11 +74,15 @@ export function buildPairingLaunchUrl(options: { server: string; code: string; r
   if (!roomId || roomId.length > maxRoomIdLength) {
     throw new RelayPairingError('That room is not valid for pairing.');
   }
+  if (lanServer !== undefined && (!lanServer || lanServer.length > maxServerLength)) {
+    throw new RelayPairingError('That LAN fallback address is not valid.');
+  }
   const query =
     `v=${pairingLaunchVersion}` +
     `&server=${encodeURIComponent(server)}` +
     `&code=${encodeURIComponent(code)}` +
-    `&room=${encodeURIComponent(roomId)}`;
+    `&room=${encodeURIComponent(roomId)}` +
+    (lanServer && lanServer !== server ? `&lan=${encodeURIComponent(lanServer)}` : '');
   return `${scoresheetOrigin}/#qbtcp-pair?${query}`;
 }
 
@@ -83,9 +92,28 @@ export function buildInternetPairing(options: {
   tournamentId: string;
   code: string;
   roomId: string;
+  lanServer?: string;
 }): { server: string; url: string } {
   const server = internetServerForPairing(options.baseUrl, options.tournamentId);
-  return { server, url: buildPairingLaunchUrl({ server, code: options.code, roomId: options.roomId }) };
+  return {
+    server,
+    url: buildPairingLaunchUrl({
+      server,
+      code: options.code,
+      roomId: options.roomId,
+      ...(options.lanServer ? { lanServer: options.lanServer } : {}),
+    }),
+  };
+}
+
+/** Read the LAN endpoint from a native pairing launch URL without retaining its code. */
+export function serverFromPairingLaunchUrl(url: string): string | null {
+  const marker = '#qbtcp-pair?';
+  const at = url.indexOf(marker);
+  if (at === -1) return null;
+  const server = new URLSearchParams(url.slice(at + marker.length)).get('server');
+  if (!server || server.length > maxServerLength || !/^https?:\/\//i.test(server)) return null;
+  return server;
 }
 
 /**
@@ -115,11 +143,13 @@ export function roomPairing(options: {
 }): RoomPairing {
   let internetUrl: string | null = null;
   if (options.internet) {
+    const lanServer = options.lanUrl ? serverFromPairingLaunchUrl(options.lanUrl) : null;
     internetUrl = buildInternetPairing({
       baseUrl: options.internet.baseUrl,
       tournamentId: options.internet.tournamentId,
       code: options.internet.code,
       roomId: options.roomId,
+      ...(lanServer ? { lanServer } : {}),
     }).url;
   }
   return {

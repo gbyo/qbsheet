@@ -407,7 +407,8 @@ describe('Internet-primary pairing invitations (#774)', () => {
             roomId: 'room-1',
             roomName: 'Room 1',
             pairingCode: '48213906',
-            pairingUrl: 'https://qbsheet.com/#qbtcp-pair?v=1&server=lan&code=48213906&room=room-1',
+            pairingUrl:
+              'https://qbsheet.com/#qbtcp-pair?v=1&server=http%3A%2F%2Flan&code=48213906&room=room-1',
             issuedAt: '2026-09-10T11:59:00.000Z',
             expiresAt: '2026-09-10T12:14:00.000Z',
             expiresInSeconds: 900,
@@ -464,12 +465,13 @@ describe('Internet-primary pairing invitations (#774)', () => {
     expect(fragment.get('server')).toBe(`${relayBaseUrl}/qbtcp/v1/tournaments/${relayTournamentId}`);
     expect(fragment.get('code')).toBe('48213906');
     expect(fragment.get('room')).toBe('room-1');
+    expect(fragment.get('lan')).toBe('http://lan');
     // The fetchable URL carries no code: it stays fragment-only.
     expect(url.search).toBe('');
 
     fireEvent.click(screen.getByRole('button', { name: 'LAN fallback' }));
     await waitFor(() => expect(written).toHaveLength(2));
-    expect(written[1]).toContain('server=lan');
+    expect(written[1]).toContain('server=http%3A%2F%2Flan');
   });
 
   test('without a relay the LAN link stays the only pairing', () => {

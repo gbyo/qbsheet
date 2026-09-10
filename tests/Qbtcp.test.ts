@@ -4,7 +4,7 @@
  * These are the tests that keep the migration honest in two directions: a server that has never
  * heard of QBTCP must keep working, and nothing that identifies a room or a device may reach a file.
  */
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   legacyRoutes,
   qbtcpPrefix,
@@ -17,6 +17,8 @@ import FruityServerClient, { qbjMediaType } from '../src/integrations/fruity/Fru
 import { readAssignmentStatus } from '../src/integrations/fruity/ProtocolAdapters';
 import { classifyPoll, classifyWrite } from '../src/app/useConnectedRuntime';
 import { RoomConnectionState } from '../src/app/ConnectionState';
+import { exchangePairingCode } from '../src/app/ControlPairing';
+import { openLanFallbackSession } from '../src/app/ConnectedRoom';
 import { IStoredGameRecord, needsHandoff } from '../src/game/GameStore';
 import { assignmentDocument } from './qbjDocuments';
 import {
@@ -565,12 +567,70 @@ describe('what the client puts on the wire', () => {
 
   test('the room capability is read under the name QBTCP gives it', async () => {
     const { fetchImpl } = qbtcpServer({
-      '/qbtcp/v1/pair': { body: { roomId: 'room-204', roomName: 'Room 204', token: 'opaque-room-token' } },
+      '/qbtcp/v1/pair': { body: { room_id: 'room-204', room_name: 'Room 204', token: 'opaque-room-token' } },
     });
 
     const joined = await new FruityServerClient('http://control.test', fetchImpl).join('48213906');
 
     expect(joined.ok && joined.value.accessToken).toBe('opaque-room-token');
+  });
+
+  test('Internet pairing keeps the independently minted LAN room credential', async () => {
+    const primary = {
+      baseUrl: 'https://relay.example',
+      join: vi.fn(async () => ({
+        ok: true as const,
+        value: { roomId: 'room-204', roomName: 'Room 204', accessToken: 'relay-room-token' },
+      })),
+    } as unknown as FruityServerClient;
+    const lanJoin = vi.fn(async () => ({
+      ok: true as const,
+      value: { roomId: 'room-204', roomName: 'Room 204', accessToken: 'lan-room-token' },
+    }));
+
+    const paired = await exchangePairingCode(
+      primary,
+      '48213906',
+      'room-204',
+      'device-1',
+      'http://192.168.1.24:3000',
+      () => ({ join: lanJoin }) as unknown as FruityServerClient,
+    );
+
+    expect(paired).toMatchObject({ ok: true });
+    expect(lanJoin).toHaveBeenCalledWith('48213906', 'room-204');
+    expect(paired.ok && paired.value).toMatchObject({
+      roomToken: 'relay-room-token',
+      lanBaseUrl: 'http://192.168.1.24:3000',
+      lanRoomToken: 'lan-room-token',
+    });
+  });
+
+  test('kickoff opens the LAN match with the LAN room credential', async () => {
+    const openSession = vi.fn(async () => ({
+      ok: true as const,
+      value: { sessionId: 'lan-session', token: 'lan-session-token', writer: true },
+    }));
+    const credentials = await openLanFallbackSession(
+      {
+        baseUrl: 'https://relay.example',
+        roomId: 'room-204',
+        roomName: 'Room 204',
+        roomToken: 'relay-room-token',
+        deviceId: 'device-1',
+        lanBaseUrl: 'http://192.168.1.24:3000',
+        lanRoomToken: 'lan-room-token',
+      },
+      'Alex',
+      'match-5',
+      () => ({ openSession }) as unknown as FruityServerClient,
+    );
+
+    expect(openSession).toHaveBeenCalledWith(
+      expect.objectContaining({ roomId: 'room-204', token: 'lan-room-token', operatorName: 'Alex' }),
+      'match-5',
+    );
+    expect(credentials).toEqual({ sessionId: 'lan-session', token: 'lan-session-token' });
   });
 
   test('an assignment and its operational state arrive as one normalized answer', async () => {

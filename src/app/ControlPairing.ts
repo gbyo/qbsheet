@@ -134,6 +134,7 @@ export async function exchangePairingCode(
    * primary-only pairing instead of a broken fallback.
    */
   lanServer?: string,
+  lanClientFactory: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
 ): Promise<PairingExchangeResult> {
   const trimmed = code.trim();
   if (trimmed === '') return { ok: false, error: 'Enter the pairing code for this room.' };
@@ -142,6 +143,16 @@ export async function exchangePairingCode(
   if (!joined.ok) return { ok: false, error: joined.error };
 
   const lanBaseUrl = readSecondaryEndpoint(lanServer, client.baseUrl);
+  let lanRoomToken: string | undefined;
+  if (lanBaseUrl) {
+    const lanJoined = await lanClientFactory(lanBaseUrl).join(
+      trimmed,
+      roomId === undefined || roomId === '' ? undefined : roomId,
+    );
+    if (lanJoined.ok && lanJoined.value.roomId === joined.value.roomId) {
+      lanRoomToken = lanJoined.value.accessToken;
+    }
+  }
   return {
     ok: true,
     value: {
@@ -150,7 +161,7 @@ export async function exchangePairingCode(
       roomName: joined.value.roomName,
       roomToken: joined.value.accessToken,
       deviceId: existingDeviceId ?? newDeviceId(),
-      ...(lanBaseUrl !== undefined ? { lanBaseUrl } : {}),
+      ...(lanBaseUrl !== undefined && lanRoomToken !== undefined ? { lanBaseUrl, lanRoomToken } : {}),
     },
   };
 }

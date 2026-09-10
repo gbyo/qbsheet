@@ -15,7 +15,13 @@ const server = `${baseUrl}/qbtcp/v1/tournaments/${tournamentId}`;
 
 describe('Internet pairing links', () => {
   it('uses the tournament relay as the primary server= value', () => {
-    const pairing = buildInternetPairing({ baseUrl, tournamentId, code: '48213906', roomId: 'room-204' });
+    const pairing = buildInternetPairing({
+      baseUrl,
+      tournamentId,
+      code: '48213906',
+      roomId: 'room-204',
+      lanServer: 'http://192.168.1.24:3000',
+    });
     expect(pairing.server).toBe(server);
     const parsed = new URL(pairing.url);
     expect(`${parsed.origin}${parsed.pathname}`).toBe('https://qbsheet.com/');
@@ -24,6 +30,7 @@ describe('Internet pairing links', () => {
     expect(fragment.get('code')).toBe('48213906');
     expect(fragment.get('room')).toBe('room-204');
     expect(fragment.get('v')).toBe('1');
+    expect(fragment.get('lan')).toBe('http://192.168.1.24:3000');
   });
 
   it('keeps the pairing code fragment-only: nothing secret in the fetchable URL', () => {
@@ -82,6 +89,7 @@ describe('LAN fallback association', () => {
     });
     expect(pairing.roomId).toBe('room-204');
     expect(pairing.internetUrl).toContain(encodeURIComponent(server));
+    expect(pairing.internetUrl).toContain(encodeURIComponent('http://192.168.1.24:3000'));
     expect(pairing.lanUrl).toContain(encodeURIComponent('http://192.168.1.24:3000'));
     // Same code, same room, both fragments: one pairing, two transports.
     for (const url of [pairing.internetUrl, pairing.lanUrl]) {
