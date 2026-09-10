@@ -18,6 +18,12 @@ export function safeReportName(value: string): string {
   );
 }
 
+export type SaveOrDownloadResult =
+  | { status: 'saved'; path?: string }
+  | { status: 'cancelled' }
+  | { status: 'unavailable' }
+  | { status: 'error'; message: string };
+
 export async function saveOrDownloadBytes(
   bytes: Uint8Array,
   name: string,
@@ -25,25 +31,28 @@ export async function saveOrDownloadBytes(
   onAnnounce: (announcement: AnnounceInput) => void,
   successMessage: string,
   cancelledMessage: string,
-): Promise<void> {
+): Promise<SaveOrDownloadResult> {
   try {
     if (isNativeDirector()) {
       const result = await saveNativeFile(name, bytes);
       if (result.status === 'cancelled') {
         onAnnounce(infoNotice(cancelledMessage));
-        return;
+        return { status: 'cancelled' };
       }
       if (result.status === 'unavailable') {
         onAnnounce(infoNotice('The native file-save dialog is unavailable.'));
-        return;
+        return { status: 'unavailable' };
       }
       onAnnounce(`${successMessage} Saved to ${result.path}.`);
-      return;
+      return { status: 'saved', path: result.path };
     }
     downloadBytes(bytes, name, mimeType);
     onAnnounce(`${successMessage}.`);
+    return { status: 'saved' };
   } catch (reason: unknown) {
-    onAnnounce(errorNotice(reason instanceof Error ? reason.message : `${successMessage} failed.`));
+    const message = reason instanceof Error ? reason.message : `${successMessage} failed.`;
+    onAnnounce(errorNotice(message));
+    return { status: 'error', message };
   }
 }
 
