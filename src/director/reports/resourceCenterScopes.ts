@@ -299,7 +299,9 @@ export function resourceCenterPresetScopeKeys(state: DirectorState, preset: Reso
   if (preset === 'combined-only') return ['combined'];
   if (preset === 'phases-only') return scopes.filter((scope) => scope.kind === 'phase').map((s) => s.key);
 
-  const playedPhases = scopes.filter((scope) => scope.kind === 'phase' && scope.gameCount > 0);
+  const playedPhases = scopes.filter(
+    (scope) => scope.kind === 'phase' && scope.gameCount > 0,
+  );
   const combined = scopes.find((scope) => scope.kind === 'combined');
   if (!combined) return playedPhases.map((scope) => scope.key);
   if (combined.gameCount === 0) return [combined.key];
@@ -659,7 +661,7 @@ export function buildCanonicalResourceCenterScopeSets(
     if (first !== undefined && first !== set.scopeKey) {
       warnings.push(
         `Duplicate report name "${set.scopeLabel}": two report sets share one display label. ` +
-          `Rename one before posting so each stat report stays distinguishishable.`,
+          `Rename one before posting so each stat report stays distinguishable.`,
       );
     } else if (first === undefined) {
       seenLabels.set(folded, set.scopeKey);
