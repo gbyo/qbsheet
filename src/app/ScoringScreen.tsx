@@ -399,6 +399,13 @@ export default function ScoringScreen(props: {
             baseUrl: live.client.baseUrl,
             sessionId: live.credentials.sessionId,
             sessionToken: live.credentials.token,
+            ...(lanBaseUrl !== undefined && lanCredentials !== undefined
+              ? {
+                  lanBaseUrl,
+                  lanSessionId: lanCredentials.sessionId,
+                  lanSessionToken: lanCredentials.token,
+                }
+              : {}),
           },
           completedAt,
         );
@@ -419,7 +426,18 @@ export default function ScoringScreen(props: {
         durablySaved: true,
       };
     },
-    [record.id, record.package, store, resultDelivery, live, runtime, onComplete, setRecordDurablyStored],
+    [
+      record.id,
+      record.package,
+      store,
+      resultDelivery,
+      live,
+      lanBaseUrl,
+      lanCredentials,
+      runtime,
+      onComplete,
+      setRecordDurablyStored,
+    ],
   );
 
   /**

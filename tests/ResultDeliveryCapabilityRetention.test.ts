@@ -28,6 +28,33 @@ const capability = {
 };
 
 describe('result delivery capability retention', () => {
+  test('round-trips the complete LAN authority without changing primary-only entries', () => {
+    const storage = new MemoryStorage();
+    const store = new ResultDeliveryCapabilityStore(storage, () => new Date('2026-08-11T14:05:00.000Z'));
+    expect(
+      store.remember(
+        'game-lan',
+        {
+          ...capability,
+          lanBaseUrl: 'http://lan.test',
+          lanSessionId: 'lan-session',
+          lanSessionToken: 'lan-secret',
+        },
+        '2026-08-11T14:00:00.000Z',
+      ),
+    ).toBe(true);
+    expect(store.remember('game-primary', capability, '2026-08-11T14:00:00.000Z')).toBe(true);
+
+    const reloaded = new ResultDeliveryCapabilityStore(storage, () => new Date('2026-08-11T14:05:00.000Z'));
+    expect(reloaded.get('game-lan')).toEqual({
+      ...capability,
+      lanBaseUrl: 'http://lan.test',
+      lanSessionId: 'lan-session',
+      lanSessionToken: 'lan-secret',
+    });
+    expect(reloaded.get('game-primary')).toEqual(capability);
+  });
+
   test('does not extend a private capability beyond retention when completion is future-dated', () => {
     let now = new Date('2026-08-11T14:00:00.000Z');
     const store = new ResultDeliveryCapabilityStore(new MemoryStorage(), () => now);
