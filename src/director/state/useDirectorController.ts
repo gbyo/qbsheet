@@ -9,7 +9,6 @@ import { finalPlacementCommitObserved } from './finalPlacementSafety';
 import {
   advancementCommitBlocker,
   advancementCorrectionBlocker,
-  assignmentRuleChangeBlocker,
   releasedRoundResultBlocker,
   scheduledGameIdForSubmission,
   unresolvedReleasedRoundBlocker,
@@ -128,12 +127,16 @@ export function useDirectorController(
         return base.ruleProtest(protestId, ruling, scoreAdjustment);
       },
       updateRules(changes) {
-        if (Object.keys(changes).length > 0) {
-          const blocker = assignmentRuleChangeBlocker(base.state);
-          if (blocker) return reject(blocker);
-        }
+        // Prospective by design (#672): saving defaults never mutates issued games — the
+        // base controller pins historical evidence and records the impact — so there is
+        // no circulation freeze here. The old "finish the round first" refusal is gone;
+        // live rooms keep playing under their pinned definitions.
         allow();
         return base.updateRules(changes);
+      },
+      updateTiebreakers(tiebreakers) {
+        allow();
+        return base.updateTiebreakers(tiebreakers);
       },
       setFinalPlacement(input) {
         const before = JSON.parse(base.exportSnapshot()) as typeof base.state;

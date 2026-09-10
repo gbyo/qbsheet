@@ -21,8 +21,10 @@ import {
   pinIssuedDefinitions,
   plannedEliminationGameForTeam,
   previewAdvancement,
+  pinAcceptedGameEvidence,
   reissueGameDefinition,
   resolveHistoricalDefinition,
+  scoringDefaultsImpact,
   advancementBasisToken,
   roundCloseBlockers,
   roomAssignmentConflicts,
@@ -564,6 +566,13 @@ export interface DirectorController {
   setPhaseArchived(phaseId: DirectorId, archived: boolean): boolean;
   setPoolArchived(poolId: DirectorId, archived: boolean): boolean;
   updateRules(changes: Partial<NonNullable<DirectorState['tournament']>['rules']>): boolean;
+  /**
+   * Standings-only tiebreaker reorder (#672). Tiebreakers are not part of the scorer's
+   * game definition: this never creates a definition revision and never touches issued
+   * games. Already-committed downstream advancement is guarded by the advancement
+   * dependency rules, not by a definition reissue.
+   */
+  updateTiebreakers(tiebreakers: NonNullable<DirectorState['tournament']>['rules']['tiebreakers']): boolean;
   reissueGameDefinition(scheduledGameId: DirectorId): ReissueDefinitionResult;
   generateSchedule(options?: {
     seed?: number;
@@ -4313,51 +4322,71 @@ export function useDirectorController(repository = createDirectorRepository()): 
         setError(validationError);
         return false;
       }
-      // Point values, bonus shapes, and game lengths reinterpret games that
-      // already exist: an accepted result scored under different values must
-      // keep its original meaning, so those fields lock once play starts.
-      // Procedure toggles (overtime, timers, lightning, bouncebacks) and
-      // tiebreakers only affect future games and stay editable.
-      const reinterpreted = (
-        [
-          'tossupValue',
-          'superpowerValue',
-          'powerValue',
-          'negValue',
-          'useBonuses',
-          'bonusValue',
-          'tossupCount',
-          'maximumTossupCount',
-          'bonusParts',
-          'minimumBonusParts',
-          'maximumBonusScore',
-          'bonusDivisor',
-          'maximumActivePlayers',
-        ] as const
-      ).some((key) => changes[key] !== undefined);
-      const acceptedCount = snapshot.games.filter((game) => game.status === 'accepted').length;
-      if (reinterpreted && acceptedCount > 0) {
-        setError(
-          `Scoring values are locked: ${acceptedCount} accepted result${acceptedCount === 1 ? '' : 's'} ` +
-            'already use them, and changing point values now would reinterpret those games. ' +
-            'To run a different format, start a new tournament.',
-        );
-        return false;
-      }
+      // Scoring settings are defaults for future unissued games (#672). They are always
+      // saveable: issued games keep their pinned snapshots, historical games keep their
+      // inferred or embedded definitions, and live games are untouched. The accepted-result
+      // count is deliberately not the safety boundary — assignments can escape long before
+      // any result exists, and per-game pins are what protect the past.
+      const impact = scoringDefaultsImpact(snapshot);
       return commit((draft) => {
         if (!draft.tournament) return;
+        // Pin historical evidence before the defaults move: an accepted game with no
+        // digest and no embedded rules would otherwise resolve against the new
+        // defaults and be silently reinterpreted. Stamps the issued snapshot's digest
+        // where the game was issued, else legacy-infers; idempotent.
+        pinAcceptedGameEvidence(draft);
         draft.tournament.rules = {
           ...draft.tournament.rules,
           ...changes,
           ...(changes.tiebreakers ? { tiebreakers: [...changes.tiebreakers] } : {}),
         };
         draft.tournament.updatedAt = isoNow();
+        const pinnedCount = impact.issuedPinned.length + impact.live.length + impact.completed.length;
         draft.audit.push({
           id: newDirectorId('audit'),
           at: isoNow(),
           actor: 'Director',
           type: 'tournament-updated',
-          summary: 'Tournament rules updated.',
+          summary:
+            pinnedCount === 0
+              ? 'Tournament scoring defaults updated for future games.'
+              : `Tournament scoring defaults updated for ${impact.unissued.length} future ` +
+                `game${impact.unissued.length === 1 ? '' : 's'}; ${pinnedCount} issued game` +
+                `${pinnedCount === 1 ? '' : 's'} keep${pinnedCount === 1 ? 's' : ''} existing rules.`,
+          entityId: draft.tournament.id,
+          details: {
+            unissued: impact.unissued.length,
+            issuedPinned: impact.issuedPinned.length,
+            live: impact.live.length,
+            completed: impact.completed.length,
+          },
+        });
+      });
+    },
+    [commit],
+  );
+
+  const updateTiebreakers = useCallback(
+    (tiebreakers: NonNullable<DirectorState['tournament']>['rules']['tiebreakers']): boolean => {
+      const snapshot = stateRef.current;
+      if (!snapshot.tournament) {
+        setError('Create a tournament before editing tiebreakers.');
+        return false;
+      }
+      if (!Array.isArray(tiebreakers) || tiebreakers.length === 0) {
+        setError('Tiebreaker order needs at least one criterion.');
+        return false;
+      }
+      return commit((draft) => {
+        if (!draft.tournament) return;
+        draft.tournament.rules = { ...draft.tournament.rules, tiebreakers: [...tiebreakers] };
+        draft.tournament.updatedAt = isoNow();
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: isoNow(),
+          actor: 'Director',
+          type: 'tournament-updated',
+          summary: 'Tiebreaker order updated. Standings only: issued scorer definitions are unchanged.',
           entityId: draft.tournament.id,
         });
       });
@@ -7404,6 +7433,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     setPhaseArchived,
     setPoolArchived,
     updateRules,
+    updateTiebreakers,
     reissueGameDefinition: reissueGameDefinitionAction,
     generateSchedule,
     prepareRound,

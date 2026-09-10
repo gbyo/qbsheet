@@ -19,9 +19,12 @@ import {
   fnv1a64,
   inferLegacyDefinitions,
   issuedRosterFor,
+  pinAcceptedGameEvidence,
   pinIssuedDefinitions,
   reissueGameDefinition,
   resolveDefinitionSnapshot,
+  scoringDefaultsImpact,
+  scoringValuesForGameRecord,
 } from './gameDefinitions';
 
 function releasableTournament() {
@@ -333,5 +336,111 @@ describe('legacy definition inference', () => {
 
     expect(inferLegacyDefinitions(state, '2026-09-10T00:00:00.000Z')).toEqual([]);
     expect(state.gameDefinitions).toEqual([]);
+  });
+});
+
+describe('prospective scoring defaults (#672)', () => {
+  function mixedLifecycle() {
+    const state = tournamentState();
+    state.teams.push(team('team-a', 'Ninety Six'), team('team-b', 'Greenwood'));
+    state.players.push(player('player-a', 'team-a', 'Gibson'), player('player-b', 'team-b', 'Emma'));
+    const ids = {
+      completed: ['scheduled-completed-1', 'scheduled-completed-2'],
+      live: ['scheduled-live-1', 'scheduled-live-2'],
+      pinned: ['scheduled-pinned-1', 'scheduled-pinned-2', 'scheduled-pinned-3'],
+      unissued: [
+        'scheduled-future-1',
+        'scheduled-future-2',
+        'scheduled-future-3',
+        'scheduled-future-4',
+        'scheduled-future-5',
+      ],
+    };
+    for (const id of ids.completed) {
+      state.scheduledGames.push(scheduledGame(id, 'team-a', 'team-b', { status: 'accepted' }));
+      state.games.push(acceptedGame(`game-${id}`, id, []));
+    }
+    for (const id of ids.live) {
+      state.scheduledGames.push(scheduledGame(id, 'team-a', 'team-b', { status: 'live' }));
+      state.games.push({ ...acceptedGame(`game-${id}`, id, []), status: 'live' });
+    }
+    for (const id of ids.pinned) {
+      state.scheduledGames.push(scheduledGame(id, 'team-a', 'team-b', { status: 'released' }));
+    }
+    pinIssuedDefinitions(state, ids.pinned, '2026-09-10T00:00:00.000Z');
+    for (const id of ids.unissued) {
+      state.scheduledGames.push(scheduledGame(id, 'team-a', 'team-b', { status: 'scheduled' }));
+    }
+    return { state, ids };
+  }
+
+  test('buckets 2 completed, 2 live, 3 pinned, 5 unissued', () => {
+    const { state, ids } = mixedLifecycle();
+    const impact = scoringDefaultsImpact(state);
+
+    expect(new Set(impact.completed)).toEqual(new Set(ids.completed));
+    expect(new Set(impact.live)).toEqual(new Set(ids.live));
+    expect(new Set(impact.issuedPinned)).toEqual(new Set(ids.pinned));
+    expect(new Set(impact.unissued)).toEqual(new Set(ids.unissued));
+  });
+
+  test('a session with progress makes an otherwise quiet game live', () => {
+    const { state } = mixedLifecycle();
+    const target = 'scheduled-future-1';
+    state.qbtcpSessions.push({
+      roomId: 'room-1',
+      sessionId: 'session-1',
+      matchId: target,
+      deviceId: 'device-1',
+      state: 'live',
+      lastSeenAt: '2026-09-10T00:00:00.000Z',
+      progressSequence: 4,
+      progress: { tossupsRead: 4, leftScore: 30, rightScore: 10 },
+      helpRequestId: null,
+    });
+
+    const impact = scoringDefaultsImpact(state);
+    expect(impact.live).toContain(target);
+    expect(impact.unissued).not.toContain(target);
+  });
+
+  test('pinning accepted-game evidence stamps the issued digest, not current defaults', () => {
+    const { state, ids } = mixedLifecycle();
+    const before = state.tournament!.rules.tossupValue;
+
+    // The save path pins before the defaults move; a later move must not reinterpret history.
+    const pinned = pinAcceptedGameEvidence(state);
+    expect(pinned).toHaveLength(2);
+    state.tournament!.rules.tossupValue = 99;
+    for (const id of ids.completed) {
+      const game = state.games.find((entry) => entry.scheduledGameId === id)!;
+      expect(game.definitionSource).toBe('legacy-inferred');
+      expect(scoringValuesForGameRecord(state, game)?.tossupValue).toBe(before);
+    }
+  });
+
+  test('pinning prefers the issued snapshot when the game was issued', () => {
+    const state = releasableTournament();
+    pinIssuedDefinitions(state, ['scheduled-1'], '2026-09-10T00:00:00.000Z');
+    const issuedDigest = state.gameDefinitions[0]!.digest;
+    state.games.push(acceptedGame('game-1', 'scheduled-1', []));
+    state.tournament!.rules.tossupValue = 99;
+
+    expect(pinAcceptedGameEvidence(state)).toEqual(['game-1']);
+    const game = state.games[0]!;
+    expect(game.definitionDigest).toBe(issuedDigest);
+    expect(game.definitionSource).toBe('issued');
+    expect(scoringValuesForGameRecord(state, game)?.tossupValue).not.toBe(99);
+  });
+
+  test('pinning is idempotent and never touches embedded-rule games', () => {
+    const { state } = mixedLifecycle();
+    state.games[0]!.rawQbj = {
+      objects: [{ type: 'ScoringRules', answer_types: [{ value: 15 }, { value: 10 }] }],
+    };
+
+    expect(pinAcceptedGameEvidence(state)).toHaveLength(1);
+    expect(state.games[0]!.definitionDigest).toBeUndefined();
+    expect(pinAcceptedGameEvidence(state)).toHaveLength(0);
   });
 });

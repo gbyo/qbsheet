@@ -548,6 +548,32 @@ export function inferLegacyDefinitions(draft: DirectorState, at: string = isoNow
   return inferred;
 }
 
+/**
+ * Stamp accepted games with the issued truth they were scored under (#672).
+ *
+ * An accepted game that carries no digest and no embedded rules resolves against live
+ * tournament defaults — harmless while defaults are frozen, silently reinterpreting
+ * history the moment they move. Before a defaults save, every such game gains evidence:
+ * the active issued snapshot's digest when the game was issued (`issued`), else the
+ * legacy inference path. Idempotent: games that already carry evidence are skipped.
+ */
+export function pinAcceptedGameEvidence(draft: DirectorState): DirectorId[] {
+  const evidencedBefore = new Set(draft.games.filter((game) => game.definitionDigest).map((game) => game.id));
+  inferLegacyDefinitions(draft);
+  for (const game of draft.games) {
+    if (game.status !== 'accepted' && game.status !== 'forfeit') continue;
+    if (game.definitionDigest || embeddedAnswerValuesFromRawQbj(game.rawQbj)) continue;
+    const snapshot = game.scheduledGameId ? activeDefinitionSnapshot(draft, game.scheduledGameId) : undefined;
+    if (!snapshot) continue;
+    game.definitionDigest = snapshot.digest;
+    game.definitionRevision = snapshot.revision;
+    game.definitionSource = 'issued';
+  }
+  return draft.games
+    .filter((game) => game.definitionDigest && !evidencedBefore.has(game.id))
+    .map((game) => game.id);
+}
+
 export function reissueGameDefinition(
   draft: DirectorState,
   scheduledGameId: DirectorId,
@@ -587,4 +613,65 @@ export function reissueGameDefinition(
     details: { revision: candidate.snapshot.revision, digest: candidate.snapshot.digest },
   });
   return { ok: true, snapshot: candidate.snapshot, created: true };
+}
+
+/**
+ * Lifecycle buckets for a tournament-defaults save (#672).
+ *
+ * Saving scoring defaults is prospective: only `unissued` games adopt the new defaults
+ * automatically. Every other bucket keeps its pinned or historical truth, and changing
+ * those games requires the explicit reissue/correction workflows, never a settings save.
+ */
+export interface ScoringDefaultsImpact {
+  /** No issued definition: adopts new defaults automatically. */
+  unissued: DirectorId[];
+  /** Issued but unstarted: pinned, keeps existing rules unless explicitly reissued. */
+  issuedPinned: DirectorId[];
+  /** In progress or awaiting review: never touched by a defaults edit. */
+  live: DirectorId[];
+  /** Accepted/completed: historical truth, immutable except through recovery. */
+  completed: DirectorId[];
+}
+
+export function scoringDefaultsImpact(state: DirectorState): ScoringDefaultsImpact {
+  const impact: ScoringDefaultsImpact = { unissued: [], issuedPinned: [], live: [], completed: [] };
+  for (const scheduled of state.scheduledGames) {
+    if (scheduled.bye || scheduled.status === 'cancelled' || !scheduled.rightTeamId) continue;
+    const records = state.games.filter((record) => record.scheduledGameId === scheduled.id);
+    if (
+      scheduled.status === 'accepted' ||
+      records.some((record) => record.status === 'accepted' || record.status === 'forfeit')
+    ) {
+      impact.completed.push(scheduled.id);
+      continue;
+    }
+    const recordIds = new Set(records.map((record) => record.id));
+    const hasPendingSubmission = state.submissions.some(
+      (submission) =>
+        recordIds.has(submission.gameId) &&
+        (submission.status === 'received' || submission.status === 'review'),
+    );
+    const session = state.qbtcpSessions.find((entry) => entry.matchId === scheduled.id);
+    const hasSessionProgress =
+      session &&
+      (session.state === 'result-received' ||
+        session.progress !== null ||
+        (session.progressSequence !== undefined && session.progressSequence > 0));
+    if (
+      scheduled.status === 'live' ||
+      scheduled.status === 'submitted' ||
+      records.some((record) => record.status === 'live' || record.status === 'submitted') ||
+      hasPendingSubmission ||
+      hasSessionProgress
+    ) {
+      impact.live.push(scheduled.id);
+      continue;
+    }
+    if (scheduled.definitionRevision !== undefined || scheduled.definitionSnapshotId) {
+      impact.issuedPinned.push(scheduled.id);
+      continue;
+    }
+    impact.unissued.push(scheduled.id);
+  }
+  return impact;
 }
