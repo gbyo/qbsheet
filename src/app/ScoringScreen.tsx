@@ -212,11 +212,12 @@ export default function ScoringScreen(props: {
    * A separate client because the address differs; the authority does not, so the same
    * room and session credentials travel on either path and no second pairing exists.
    */
+  // `live` gates on the connection belonging to this game; hoisting the address out keeps
+  // the memo key a plain value the compiler can verify instead of a deep property access.
+  const lanBaseUrl = live ? connection?.lanBaseUrl : undefined;
   const lanClient = useMemo(
-    () => (live && connection?.lanBaseUrl ? new FruityServerClient(connection.lanBaseUrl) : undefined),
-    // `live` gates on the connection belonging to this game; the address is the memo key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [live, connection?.lanBaseUrl],
+    () => (lanBaseUrl ? new FruityServerClient(lanBaseUrl) : undefined),
+    [lanBaseUrl],
   );
 
   /**
