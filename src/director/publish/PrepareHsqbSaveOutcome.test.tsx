@@ -3,7 +3,13 @@
  * an async function returning. Native cancellation/unavailability/failure must
  * never render the same confirmation as a completed write (#829).
  */
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { playedTournament } from '../../../tests/directorFixtures';
 import type { AnnounceInput } from '../notices';
@@ -18,7 +24,9 @@ vi.mock('../platform/native', () => ({
 const mockedIsNativeDirector = vi.mocked(isNativeDirector);
 const mockedSaveNativeFile = vi.mocked(saveNativeFile);
 
-function renderDialog(onAnnounce: (announcement: AnnounceInput) => void = vi.fn()): void {
+function renderDialog(
+  onAnnounce: (announcement: AnnounceInput) => void = vi.fn(),
+): void {
   render(
     <PrepareHsqbDialog
       state={playedTournament()}
@@ -31,13 +39,19 @@ function renderDialog(onAnnounce: (announcement: AnnounceInput) => void = vi.fn(
 
 function clickSave(): void {
   fireEvent.click(
-    screen.getByRole('button', { name: /Save Ninety-Six-Invitational-resource-center\.zip/ }),
+    screen.getByRole('button', {
+      name: /Save Ninety-Six-Invitational-resource-center\.zip/,
+    }),
   );
 }
 
 async function expectSaveEnabled(): Promise<void> {
   await waitFor(() => {
-    expect(screen.getByRole('button', { name: /Save .*\.zip/ }).hasAttribute('disabled')).toBe(false);
+    expect(
+      screen
+        .getByRole('button', { name: /Save .*\.zip/ })
+        .hasAttribute('disabled'),
+    ).toBe(false);
   });
 }
 
@@ -51,7 +65,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-test('confirmed native write shows Saved — not yet published', async () => {
+test('successful native write shows the saved confirmation', async () => {
   mockedSaveNativeFile.mockResolvedValue({
     status: 'saved',
     path: '/tmp/Ninety-Six-Invitational-resource-center.zip',
@@ -88,7 +102,7 @@ test('unavailable native save leaves the package unsaved', async () => {
   expect(screen.queryByText('Saved — not yet published')).toBeNull();
 });
 
-test('native write failure is announced without a false saved state', async () => {
+test('native write failure does not create a saved state', async () => {
   const onAnnounce: (announcement: AnnounceInput) => void = vi.fn();
   mockedSaveNativeFile.mockRejectedValue(new Error('disk full'));
   renderDialog(onAnnounce);
