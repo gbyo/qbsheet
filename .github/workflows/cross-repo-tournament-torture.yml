@@ -1,4 +1,8 @@
-name: Cross-repository tournament torture
+name: Cross-repository tournament torture / interop
+
+# This is the single owner for cross-repository YellowFruit coverage. The browser shard protects the
+# real QBTCP interop contract; the other shards exercise recovery, receipts, import, assignment, and
+# room safety. Run it weekly or dispatch it with a specific YellowFruit companion ref.
 
 on:
   schedule:

@@ -14,10 +14,9 @@ name: CI
 #
 # Three properties this workflow has to keep:
 #
-# * **The workflow itself is never path-filtered.** A workflow skipped by `paths-ignore` leaves its
-#   required checks Pending forever, which blocks merging. A *job* skipped by an `if` reports
-#   success. So the filtering lives on the jobs, and `verify` and `browser` — the two contexts the
-#   `main` ruleset requires — always resolve.
+# * **The workflow itself is never path-filtered.** Job-level routing keeps one stable `verify`
+#   result for every pull request, including documentation-only changes, while still skipping work
+#   that the changed files cannot affect.
 # * **`verify` is the aggregate.** It runs after everything, whatever happened, and fails if any
 #   relevant job failed or was cancelled. A skipped irrelevant job is a pass.
 # * **Uncertainty runs more, never less.** An unrecognised path, an unmapped workspace, or a
@@ -30,10 +29,15 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # -----------------------------------------------------------------------------------------------
@@ -479,7 +483,7 @@ jobs:
         run: cargo test --all-targets --all-features
 
   # -----------------------------------------------------------------------------------------------
-  # The aggregate, and the status check the ruleset requires.
+  # The aggregate status check.
   #
   # `if: always()` so it runs even when a job above was skipped or failed — without it, one skipped
   # optional job would leave the required check Pending. It passes only when every job it depends on
