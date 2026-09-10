@@ -7,6 +7,7 @@ import {
   team,
   tournamentState,
 } from '../../../tests/directorFixtures';
+import { derivePlayerStandings } from './stats';
 import { buildAssignment } from '../transfers/assignment';
 import { recordPreparedAssignments } from '../transfers/state';
 import {
@@ -16,6 +17,7 @@ import {
   deriveDefinitionSnapshot,
   digestGameDefinition,
   fnv1a64,
+  inferLegacyDefinitions,
   issuedRosterFor,
   pinIssuedDefinitions,
   reissueGameDefinition,
@@ -273,5 +275,63 @@ describe('definition reissue', () => {
     expect(deriveDefinitionSnapshot(state, 'missing').ok).toBe(false);
     state.scheduledGames.push(scheduledGame('scheduled-bye', 'team-a', 'team-b', { bye: true }));
     expect(deriveDefinitionSnapshot(state, 'scheduled-bye').ok).toBe(false);
+  });
+});
+
+describe('legacy definition inference', () => {
+  test('accepted games without history gain a marked revision-1 snapshot', () => {
+    const state = playedTournament();
+
+    expect(inferLegacyDefinitions(state, '2026-09-10T00:00:00.000Z')).toEqual(['scheduled-1']);
+    expect(state.gameDefinitions).toHaveLength(1);
+    const snapshot = state.gameDefinitions[0]!;
+    expect(snapshot.revision).toBe(1);
+    expect(snapshot.rules).toEqual(state.tournament!.rules);
+
+    const game = state.games[0]!;
+    expect(game.definitionDigest).toBe(snapshot.digest);
+    expect(game.definitionRevision).toBe(1);
+    expect(game.definitionSource).toBe('legacy-inferred');
+    // Never issued: scheduled refs stay absent so a future assignment build fails closed
+    // instead of rebuilding from an inference.
+    expect(state.scheduledGames[0]!.definitionSnapshotId).toBeUndefined();
+    expect(state.scheduledGames[0]!.definitionRevision).toBeUndefined();
+  });
+
+  test('games with embedded scoring rules keep resolving from the document', () => {
+    const state = playedTournament();
+    state.games[0]!.rawQbj = {
+      objects: [
+        {
+          type: 'ScoringRules',
+          answer_types: [{ value: 15 }, { value: 10 }, { value: -5 }],
+        },
+      ],
+    };
+
+    expect(inferLegacyDefinitions(state, '2026-09-10T00:00:00.000Z')).toEqual([]);
+    expect(state.gameDefinitions).toEqual([]);
+    expect(state.games[0]!.definitionDigest).toBeUndefined();
+    expect(state.games[0]!.definitionSource).toBeUndefined();
+  });
+
+  test('inference is stable across later defaults changes', () => {
+    const state = playedTournament();
+    inferLegacyDefinitions(state, '2026-09-10T00:00:00.000Z');
+    const digest = state.games[0]!.definitionDigest;
+    const before = derivePlayerStandings(state);
+
+    state.tournament!.rules.powerValue = 20;
+    expect(inferLegacyDefinitions(state, '2026-09-11T00:00:00.000Z')).toEqual([]);
+    expect(state.gameDefinitions).toHaveLength(1);
+    expect(state.games[0]!.definitionDigest).toBe(digest);
+    expect(derivePlayerStandings(state)).toEqual(before);
+  });
+
+  test('unplayed games gain no history', () => {
+    const state = releasableTournament();
+
+    expect(inferLegacyDefinitions(state, '2026-09-10T00:00:00.000Z')).toEqual([]);
+    expect(state.gameDefinitions).toEqual([]);
   });
 });

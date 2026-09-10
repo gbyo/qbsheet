@@ -1561,6 +1561,25 @@ function buildQbjDocument(
         'No ScoringRules object was available; the exported QBJ retains that omission.',
       ),
     );
+  // One tournament-level ScoringRules object cannot describe games scored under different
+  // truths (#671). Per-game provenance rides in each Match's extensions; say so explicitly
+  // rather than letting the single global object imply every match used it.
+  const definitionDigests = new Set(
+    games
+      .map((game) => game.extensions?.definitionDigest)
+      .filter((digest): digest is string => typeof digest === 'string' && digest.length > 0),
+  );
+  if (definitionDigests.size > 1) {
+    warnings.push(
+      warning(
+        'multiple-scoring-definitions',
+        'games',
+        `The exported games were scored under ${definitionDigests.size} different scoring ` +
+          `definitions. The tournament-level ScoringRules is the current default, not their shared ` +
+          `truth; each Match carries its own definition revision and digest in QBSheet extensions.`,
+      ),
+    );
+  }
   const gameObjects = mode === 'teams' ? [] : games.map((game) => matchObject(game, data, warnings));
   const phaseData = mode === 'tournament' || mode === 'games' || mode === 'results' ? data.phases : [];
   const phaseObjects = phaseData.map((phase) => phaseObject(phase, data, games));

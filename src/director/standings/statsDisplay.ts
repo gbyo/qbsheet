@@ -226,5 +226,9 @@ export function saveStatsColumnPrefs(tournamentId: string | undefined, prefs: St
 /** Superpower columns appear by default only when the tournament uses them. */
 export function superpowersInUse(state: DirectorState): boolean {
   if (typeof state.tournament?.rules.superpowerValue === 'number') return true;
+  // History outlives defaults (#671): a tournament that issued superpower definitions keeps the
+  // column even after the default moves on, and even when nobody has recorded one yet.
+  if (state.gameDefinitions.some((entry) => typeof entry.rules.superpowerValue === 'number'))
+    return true;
   return state.games.some((game) => game.scores.some((score) => score.superpowers > 0));
 }
