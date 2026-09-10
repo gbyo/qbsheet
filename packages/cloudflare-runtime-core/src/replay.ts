@@ -18,11 +18,12 @@
 
 /** Parse an `after` cursor: a non-negative integer, nothing else. */
 export function parseAfterCursor(raw: unknown): { ok: true; value: number } | { ok: false; error: string } {
-  const value = typeof raw === 'string' && raw !== '' ? Number(raw) : typeof raw === 'number' ? raw : NaN;
-  if (!Number.isInteger(value) || (value as number) < 0) {
+  const value =
+    typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : typeof raw === 'number' ? raw : NaN;
+  if (!Number.isSafeInteger(value) || value < 0) {
     return { ok: false, error: '`after` must be a non-negative integer.' };
   }
-  return { ok: true, value: value as number };
+  return { ok: true, value };
 }
 
 /** Clamp a page size into `[low, high]`; non-finite input takes the floor. */
