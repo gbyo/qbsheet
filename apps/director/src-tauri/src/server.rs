@@ -1815,15 +1815,31 @@ fn snapshot_for<'a>(
     best
 }
 
-/// Rules pinned at issue time for one scheduled game.
-///
-/// Returns the snapshot's stored rules object, which shares the Director camelCase shape
-/// `generated_scoring_rules` already accepts.
-fn snapshot_rules_for<'a>(
+/// What the pinned-definition lookup found for one scheduled game (#718).
+enum SnapshotRules<'a> {
+    /// No explicit pinned reference: derive from live snapshots or current defaults.
+    Unissued,
+    /// A pinned snapshot resolved; its stored rules object shares the Director
+    /// camelCase shape `generated_scoring_rules` already accepts.
+    Pinned(&'a Value),
+    /// An explicit `definitionSnapshotId` names a snapshot that cannot be
+    /// resolved (or carries no rules): fail closed, never fall back to mutable
+    /// tournament defaults.
+    Dangling,
+}
+
+/// Rules pinned at issue time for one scheduled game, preserving the
+/// distinction between unpinned and invalid pinned references (#718).
+fn snapshot_rules_status_for<'a>(
     root: &'a Map<String, Value>,
     scheduled: &Map<String, Value>,
-) -> Option<&'a Value> {
-    snapshot_for(root, scheduled).and_then(|entry| entry.get("rules"))
+) -> SnapshotRules<'a> {
+    let explicit = string_field(Some(scheduled), "definitionSnapshotId").is_some();
+    match snapshot_for(root, scheduled).and_then(|entry| entry.get("rules")) {
+        Some(rules) => SnapshotRules::Pinned(rules),
+        None if explicit => SnapshotRules::Dangling,
+        None => SnapshotRules::Unissued,
+    }
 }
 
 fn generated_assignment(
@@ -1887,10 +1903,13 @@ fn generated_assignment(
     // Interchange documents keep rules at the root; the native Director state keeps them under
     // `tournament`. Accept both shapes without guessing a missing timed flag. A pinned
     // definition snapshot always wins over either: the issued game keeps the truth it was
-    // issued under no matter how the tournament defaults moved since.
-    let rules_value = snapshot_rules_for(root, scheduled)
-        .or_else(|| root.get("rules"))
-        .or_else(|| tournament.get("rules"));
+    // issued under no matter how the tournament defaults moved since. A dangling pinned
+    // reference fails closed like the file/USB builder instead of adopting live defaults.
+    let rules_value = match snapshot_rules_status_for(root, scheduled) {
+        SnapshotRules::Pinned(rules) => Some(rules),
+        SnapshotRules::Dangling => return None,
+        SnapshotRules::Unissued => root.get("rules").or_else(|| tournament.get("rules")),
+    };
     let rules = generated_scoring_rules(rules_value, &rules_id);
     let mut qbtcp_extension = json!({
         "version": 1,
@@ -3524,6 +3543,84 @@ mod tests {
                 .get("regulation_tossup_count")
                 .and_then(Value::as_u64),
             Some(26)
+        );
+    }
+
+    #[test]
+    fn generated_assignment_refuses_dangling_definition_reference() {
+        // The game names an issued definition that is no longer present (#718):
+        // fail closed like the file/USB builder instead of adopting live defaults.
+        let root = json!({
+            "tournament": {
+                "id": "t-1",
+                "name": "Local Invitational",
+                "rules": {"tossupValue": 10, "tossupCount": 20, "bonusParts": 3}
+            },
+            "teams": [
+                {"id": "team-a", "name": "A"},
+                {"id": "team-b", "name": "B"}
+            ],
+            "gameDefinitions": []
+        });
+        let root_map = root.as_object().expect("root object");
+        let scheduled = json!({
+            "id": "scheduled-1",
+            "leftTeamId": "team-a",
+            "rightTeamId": "team-b",
+            "definitionSnapshotId": "def-issued-a"
+        });
+        let round = json!({"id": "round-1", "name": "Round 1", "number": 1, "phaseId": "phase-1"});
+        assert!(
+            generated_assignment(
+                root_map,
+                scheduled.as_object().expect("scheduled object"),
+                round.as_object().expect("round object"),
+                "room-101",
+            )
+            .is_none(),
+            "a dangling pinned reference must not fall back to tournament defaults"
+        );
+    }
+
+    #[test]
+    fn generated_assignment_refuses_pinned_snapshot_without_rules() {
+        // The referenced snapshot exists but carries no rules: still dangling (#718).
+        let root = json!({
+            "tournament": {
+                "id": "t-1",
+                "name": "Local Invitational",
+                "rules": {"tossupValue": 10, "tossupCount": 20, "bonusParts": 3}
+            },
+            "teams": [
+                {"id": "team-a", "name": "A"},
+                {"id": "team-b", "name": "B"}
+            ],
+            "gameDefinitions": [
+                {
+                    "id": "def-issued-a",
+                    "scheduledGameId": "scheduled-1",
+                    "revision": 1,
+                    "digest": "digest-a"
+                }
+            ]
+        });
+        let root_map = root.as_object().expect("root object");
+        let scheduled = json!({
+            "id": "scheduled-1",
+            "leftTeamId": "team-a",
+            "rightTeamId": "team-b",
+            "definitionSnapshotId": "def-issued-a"
+        });
+        let round = json!({"id": "round-1", "name": "Round 1", "number": 1, "phaseId": "phase-1"});
+        assert!(
+            generated_assignment(
+                root_map,
+                scheduled.as_object().expect("scheduled object"),
+                round.as_object().expect("round object"),
+                "room-101",
+            )
+            .is_none(),
+            "a pinned snapshot without rules must not fall back to tournament defaults"
         );
     }
 }
