@@ -1537,19 +1537,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
@@ -2220,19 +2223,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
@@ -2903,19 +2909,22 @@
           "id": "powers",
           "label": "15",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Powers"
         },
         {
           "id": "gets",
           "label": "10",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Regular tossups"
         },
         {
           "id": "negs",
           "label": "−5",
           "kind": "integer",
-          "alignment": "trailing"
+          "alignment": "trailing",
+          "description": "Negs"
         },
         {
           "id": "points",
