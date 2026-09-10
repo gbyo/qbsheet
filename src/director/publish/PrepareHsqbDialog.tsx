@@ -34,7 +34,7 @@ const presetOptions: Array<{ value: ResourceCenterPreset; label: string; hint: s
   {
     value: 'recommended',
     label: 'Recommended for Resource Center',
-    hint: 'Every phase plus combined, per current ACF guidance.',
+    hint: 'Played phases plus combined; future empty phases stay unselected.',
   },
   { value: 'phases-only', label: 'Selected phases only', hint: 'Phase sets without the combined set.' },
   {
