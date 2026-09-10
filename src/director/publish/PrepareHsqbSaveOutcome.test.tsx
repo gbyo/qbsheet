@@ -35,6 +35,12 @@ function clickSave(): void {
   );
 }
 
+async function expectSaveEnabled(): Promise<void> {
+  await waitFor(() => {
+    expect(screen.getByRole('button', { name: /Save .*\.zip/ }).hasAttribute('disabled')).toBe(false);
+  });
+}
+
 beforeEach(() => {
   mockedIsNativeDirector.mockReturnValue(true);
   mockedSaveNativeFile.mockReset();
@@ -66,7 +72,7 @@ test('cancelled native save leaves the package unsaved', async () => {
   clickSave();
 
   await waitFor(() => expect(mockedSaveNativeFile).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByRole('button', { name: /Save .*\.zip/ })).not.toBeDisabled());
+  await expectSaveEnabled();
   expect(screen.queryByText('Saved — not yet published')).toBeNull();
   expect(onAnnounce).toHaveBeenCalled();
 });
@@ -78,7 +84,7 @@ test('unavailable native save leaves the package unsaved', async () => {
   clickSave();
 
   await waitFor(() => expect(mockedSaveNativeFile).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByRole('button', { name: /Save .*\.zip/ })).not.toBeDisabled());
+  await expectSaveEnabled();
   expect(screen.queryByText('Saved — not yet published')).toBeNull();
 });
 
@@ -90,7 +96,7 @@ test('native write failure is announced without a false saved state', async () =
   clickSave();
 
   await waitFor(() => expect(mockedSaveNativeFile).toHaveBeenCalledTimes(1));
-  await waitFor(() => expect(screen.getByRole('button', { name: /Save .*\.zip/ })).not.toBeDisabled());
+  await expectSaveEnabled();
   expect(screen.queryByText('Saved — not yet published')).toBeNull();
   expect(onAnnounce).toHaveBeenCalled();
 });
