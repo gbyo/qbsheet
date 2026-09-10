@@ -94,7 +94,7 @@ function orderedAcceptedGames(state: DirectorState): GameRecord[] {
     });
 }
 
-function fieldTeamIds(state: DirectorState, phase: Phase, pool?: Pool): string[] {
+export function fieldTeamIds(state: DirectorState, phase: Phase, pool?: Pool): string[] {
   if (pool) return [...pool.teamIds];
   return phaseCompetitiveField(state, phase.id).teams.map((team) => team.id);
 }
@@ -126,7 +126,7 @@ function statInput(state: DirectorState): DirectorState {
   return { ...state, games: state.games.filter((game) => !ids.has(game.id)) };
 }
 
-function carryoverGames(state: DirectorState, phase: Phase, pool?: Pool): GameRecord[] {
+export function carryoverGames(state: DirectorState, phase: Phase, pool?: Pool): GameRecord[] {
   const field = new Set(fieldTeamIds(state, phase, pool));
   const phases = new Map(state.phases.map((entry) => [entry.id, entry]));
   return acceptedGameRecords(state).filter((game) => {

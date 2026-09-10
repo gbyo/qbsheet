@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import {
+  acceptedGameRecords,
+  canonicalCompetitionRanks,
   derivePlayerStandings,
   deriveTeamStandings,
   playerHasAppearance,
   totalAcceptedResults,
   type DirectorState,
 } from '../domain';
+import { carryoverGames, fieldTeamIds } from '../reports/standingsReport';
 import type { DirectorController } from '../state/useDirectorController';
 import {
   ActionMenu,
@@ -32,12 +35,19 @@ import {
   hasStoredStatsColumnPrefs,
   individualColumnsForState,
   loadStatsColumnPrefs,
+  orderByFinalPlacement,
+  playerRankTies,
   playerStatCell,
+  presentationForStats,
   saveStatsColumnPrefs,
   scopeOptionsFor,
+  teamClassificationsOf,
   teamColumnsForState,
   teamStatCell,
+  tiedTeamIds,
   type StatsColumn,
+  type StatsScope,
+  type TeamStatContext,
 } from './statsDisplay';
 import type { AnnounceInput } from '../notices';
 
@@ -82,10 +92,23 @@ function teamName(state: DirectorState, teamId: string): string {
   return state.teams.find((team) => team.id === teamId)?.displayName ?? 'Unknown';
 }
 
+function rankCell(rank: number | undefined, tied: boolean) {
+  if (rank === undefined) return UNKNOWN_STAT;
+  if (!tied) return rank;
+  return (
+    <>
+      <span title="Tied rank">{`${rank}=`}</span>
+      <span className="director-visually-hidden">tied</span>
+    </>
+  );
+}
+
 function teamTableColumns(
   state: DirectorState,
   schema: StatsColumn[],
   rankOf: Map<string, number>,
+  tied: Set<string>,
+  contextFor: (teamId: string) => TeamStatContext,
 ): Column<TeamStanding>[] {
   return [
     {
@@ -93,7 +116,7 @@ function teamTableColumns(
       header: '#',
       priority: 1,
       align: 'right',
-      render: (standing) => rankOf.get(standing.teamId) ?? '—',
+      render: (standing) => rankCell(rankOf.get(standing.teamId), tied.has(standing.teamId)),
     },
     {
       key: 'team',
@@ -107,20 +130,33 @@ function teamTableColumns(
       priority: column.priority,
       align: 'right',
       optional: column.priority === 3,
-      render: (standing) => statCell(teamStatCell(column.id, standing), column),
+      render: (standing) => statCell(teamStatCell(column.id, standing, contextFor(standing.teamId)), column),
     })),
   ];
 }
 
-function playerTableColumns(state: DirectorState, schema: StatsColumn[]): Column<PlayerStanding>[] {
+function playerTableColumns(
+  state: DirectorState,
+  schema: StatsColumn[],
+  rankOf: Map<string, number>,
+  tied: Set<string>,
+): Column<PlayerStanding>[] {
+  const playerById = new Map(state.players.map((player) => [player.id, player]));
   return [
+    {
+      key: 'rank',
+      header: '#',
+      priority: 1,
+      align: 'right',
+      render: (standing) => rankCell(rankOf.get(standing.playerId), tied.has(standing.playerId)),
+    },
     {
       key: 'player',
       header: 'Player',
       priority: 1,
       render: (standing) => (
         <IdentityCell
-          title={state.players.find((player) => player.id === standing.playerId)?.name ?? 'Unknown'}
+          title={playerById.get(standing.playerId)?.name ?? 'Unknown'}
           detail={teamName(state, standing.teamId)}
         />
       ),
@@ -131,9 +167,32 @@ function playerTableColumns(state: DirectorState, schema: StatsColumn[]): Column
       priority: column.priority,
       align: 'right',
       optional: column.priority === 3,
-      render: (standing) => statCell(playerStatCell(column.id, standing), column),
+      render: (standing) =>
+        statCell(playerStatCell(column.id, standing, playerById.get(standing.playerId)), column),
     })),
   ];
+}
+
+/**
+ * Resolve a stats scope to canonical standings options. Plain scopes filter by
+ * phase/pool; a carryover scope reuses the printable composition's carryover game
+ * set (plus its field teams); the final scope ranks the full accepted game set
+ * and orders rows by explicit placement at render time.
+ */
+function scopeStandingsOptions(
+  state: DirectorState,
+  scope: StatsScope,
+): { phaseId?: string; poolId?: string; gameIds?: string[]; teamIds?: string[] } {
+  if (!scope.carryover || !scope.phaseId) return scopeOptionsFor(scope);
+  const phase = state.phases.find((entry) => entry.id === scope.phaseId);
+  if (!phase) return scopeOptionsFor(scope);
+  const pool = scope.poolId ? state.pools.find((entry) => entry.id === scope.poolId) : undefined;
+  return {
+    // Canonical game scoping is by scheduled-game identity; resolve the shared
+    // carryover game set to the same key the printable composition narrows by.
+    gameIds: [...new Set(carryoverGames(state, phase, pool).map((game) => game.scheduledGameId))],
+    teamIds: fieldTeamIds(state, phase, pool),
+  };
 }
 
 function ColumnChooser({
@@ -183,16 +242,32 @@ export function StandingsView({
 
   const teamSchema = teamColumnsForState(state);
   const playerSchema = individualColumnsForState(state);
+  const statsPresentation = presentationForStats(state);
   const { scopes, showSelector } = buildStatsScopes(state);
   const scope = scopes.find((entry) => entry.id === scopeId) ??
     scopes[0] ?? { id: 'overall', label: 'Overall' };
-  const scopeOptions = scopeOptionsFor(scope);
-  // Both tables derive from the same canonical scope selector: Director never
-  // re-scopes or re-derives statistics locally (#750).
-  const teamStandings = deriveTeamStandings(state, undefined, scopeOptions);
+  const standingsOptions = scopeStandingsOptions(state, scope);
+  // Both tables derive from the same canonical scope selectors the printable
+  // composition uses: Director never re-scopes or re-derives statistics locally (#750).
+  const scopedGames = acceptedGameRecords(state, standingsOptions);
+  const calculatedStandings = deriveTeamStandings(state, undefined, standingsOptions);
+  const teamStandings = scope.final
+    ? orderByFinalPlacement(calculatedStandings, state.tournament?.finalPlacement?.order ?? [])
+    : calculatedStandings;
   // Anyone with any appearance qualifies; bare GP > 0 would drop lined players on unknown TUH (#746).
-  const playerStandings = derivePlayerStandings(state, scopeOptions).filter(playerHasAppearance);
-  const rankOf = new Map(teamStandings.map((standing, index) => [standing.teamId, index + 1]));
+  const playerStandings = derivePlayerStandings(state, standingsOptions).filter(playerHasAppearance);
+  // Ranks come from the canonical competition grouping (1, 1, 3 with `=` markers),
+  // except under explicit final placement, which is already a total order.
+  const rankOf = scope.final
+    ? new Map(teamStandings.map((standing, index) => [standing.teamId, index + 1]))
+    : canonicalCompetitionRanks(teamStandings, scopedGames, state.tournament?.rules.tiebreakers);
+  const tiedRanks = scope.final ? new Set<string>() : tiedTeamIds(rankOf);
+  const playerRankOf = new Map(playerStandings.map((standing, index) => [standing.playerId, index + 1]));
+  const tiedPlayerRanks = playerRankTies(playerStandings);
+  const teamContextFor = (teamId: string): TeamStatContext => ({
+    classifications: teamClassificationsOf(state, teamId),
+    pointsTossups: statsPresentation.pointsTossups,
+  });
 
   if (state.teams.length === 0) {
     return (
@@ -276,7 +351,18 @@ export function StandingsView({
       {view === 'teams' ? (
         <Panel
           title="Team standings"
-          description="Rank, team, and record stay visible first; further statistics are optional and stay available in the column chooser."
+          description={
+            <>
+              Rank, team, and record stay visible first; further statistics are optional and stay available in
+              the column chooser.
+              {statsPresentation.mixedDefinitionNote && (
+                <>
+                  <br />
+                  <span>{statsPresentation.mixedDefinitionNote}</span>
+                </>
+              )}
+            </>
+          }
           flush
         >
           <ColumnChooser
@@ -287,7 +373,7 @@ export function StandingsView({
           />
           <DataTable
             items={teamStandings}
-            columns={teamTableColumns(state, teamSchema, rankOf)}
+            columns={teamTableColumns(state, teamSchema, rankOf, tiedRanks, teamContextFor)}
             rowKey={(standing) => standing.teamId}
             ariaLabel="Team standings"
             enabledOptionalColumns={teamCols}
@@ -297,7 +383,17 @@ export function StandingsView({
       ) : (
         <Panel
           title="Player statistics"
-          description="Accepted games only. Team context stays attached to each player."
+          description={
+            <>
+              Accepted games only. Team context stays attached to each player.
+              {statsPresentation.mixedDefinitionNote && (
+                <>
+                  <br />
+                  <span>{statsPresentation.mixedDefinitionNote}</span>
+                </>
+              )}
+            </>
+          }
           flush
         >
           <ColumnChooser
@@ -315,7 +411,7 @@ export function StandingsView({
           ) : (
             <DataTable
               items={playerStandings}
-              columns={playerTableColumns(state, playerSchema)}
+              columns={playerTableColumns(state, playerSchema, playerRankOf, tiedPlayerRanks)}
               rowKey={(standing) => standing.playerId}
               ariaLabel="Player statistics"
               enabledOptionalColumns={playerCols}

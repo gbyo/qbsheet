@@ -208,21 +208,21 @@ test('the team table shows the schema core by default: GP, PPG, TUH, PPB', () =>
   ]);
   // PF/PA and answer tiers stay in the chooser until the director asks for them.
   expect(within(teamTable()).queryByRole('columnheader', { name: 'PF' })).toBeNull();
-  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).toBeNull();
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers (15)' })).toBeNull();
 });
 
 test('team context columns are individually toggleable and pinned when enabled', () => {
   render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
 
   openChooser('Team columns');
-  toggleColumn('Powers');
-  toggleColumn('Gets');
-  toggleColumn('Negs');
+  toggleColumn('Powers (15)');
+  toggleColumn('Gets (10)');
+  toggleColumn('Negs (-5)');
   toggleColumn('PF');
   toggleColumn('PA');
 
   const detailedTable = teamTable();
-  expectPinnedColumns(detailedTable, ['PF', 'PA', 'Powers', 'Gets', 'Negs'], '3');
+  expectPinnedColumns(detailedTable, ['PF', 'PA', 'Powers (15)', 'Gets (10)', 'Negs (-5)'], '3');
   expect(
     within(detailedTable)
       .getAllByRole('columnheader')
@@ -241,18 +241,18 @@ test('player context columns pin without changing the compact core', () => {
 
   fireEvent.click(screen.getByRole('button', { name: /^Players/ }));
   const table = screen.getByRole('table', { name: 'Player statistics' });
-  expect(headerNames(table)).toEqual(['Player', 'GP', 'Pts', 'PPG', 'TUH', 'PPTUH']);
+  expect(headerNames(table)).toEqual(['#', 'Player', 'GP', 'Pts', 'PPG', 'TUH', 'PPTUH']);
   expect(within(table).queryByRole('columnheader', { name: 'Bonus pts' })).toBeNull();
 
   openChooser('Player columns');
-  toggleColumn('Powers');
-  toggleColumn('Gets');
-  toggleColumn('Negs');
+  toggleColumn('Powers (15)');
+  toggleColumn('Gets (10)');
+  toggleColumn('Negs (-5)');
   toggleColumn('Bonus pts');
 
   const detailedTable = screen.getByRole('table', { name: 'Player statistics' });
-  expectPinnedColumns(detailedTable, ['Powers', 'Gets', 'Negs', 'Bonus pts'], '3');
-  expect(within(detailedTable).getAllByRole('columnheader')).toHaveLength(10);
+  expectPinnedColumns(detailedTable, ['Powers (15)', 'Gets (10)', 'Negs (-5)', 'Bonus pts'], '3');
+  expect(within(detailedTable).getAllByRole('columnheader')).toHaveLength(11);
 
   toggleColumn('Bonus pts');
   expect(
@@ -266,13 +266,13 @@ test('a column choice survives a fresh render of the same tournament', () => {
   const first = playedTournament();
   render(<StandingsView state={first} controller={controller} onAnnounce={vi.fn()} />);
   openChooser('Team columns');
-  toggleColumn('Powers');
-  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).not.toBeNull();
+  toggleColumn('Powers (15)');
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers (15)' })).not.toBeNull();
   cleanup();
 
   // A new render is a new component tree: only the persisted preference brings Powers back.
   render(<StandingsView state={playedTournament()} controller={controller} onAnnounce={vi.fn()} />);
-  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers' })).not.toBeNull();
+  expect(within(teamTable()).queryByRole('columnheader', { name: 'Powers (15)' })).not.toBeNull();
 });
 
 test('a second stage adds a scope selector that re-derives both tables', () => {
@@ -323,7 +323,157 @@ test('an enabled-but-scoreless superpower tier still gets its column', () => {
   state.tournament!.rules.superpowerValue = 20;
   render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
 
-  expect(headerNames(teamTable())).toContain('Superpowers');
+  expect(headerNames(teamTable())).toContain('Superpowers (20)');
+});
+
+test('a bounceback format exposes parts, conversion, and total bonus without leaving the page', () => {
+  const state = playedTournament();
+  state.tournament!.rules.bouncebacks = true;
+  state.games[0].scores[0].bouncebacks = 30;
+  state.games[0].scores[1].bouncebacks = 10;
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  openChooser('Team columns');
+  toggleColumn('BB pts');
+  toggleColumn('BB heard');
+  toggleColumn('BB %');
+  toggleColumn('Total bonus');
+
+  const table = teamTable();
+  // B heard 10 bonuses worth 90: (10*30-90)/10 = 21 parts; A converted 30/10 = 3.
+  expect(headerNames(table)).toContain('BB %');
+  const row = within(table).getByText('Ninety Six').closest('tr') as HTMLElement;
+  const cells = within(row).getAllByRole('cell');
+  const visibleText = (header: string) =>
+    cells[headerNames(table).indexOf(header)]?.childNodes[0]?.textContent;
+  expect(visibleText('BB pts')).toBe('30');
+  expect(visibleText('BB heard')).toBe('21');
+  expect(visibleText('BB %')).toBe('14.3%');
+  expect(visibleText('Total bonus')).toBe('28.1%');
+});
+
+test('an irregular bonus format shows unavailable BB rates rather than false values', () => {
+  const state = playedTournament();
+  state.tournament!.rules.bouncebacks = true;
+  state.tournament!.rules.minimumBonusParts = 2;
+  state.games[0].scores[0].bouncebacks = 30;
+  state.games[0].scores[1].bouncebacks = 10;
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  // Points stay known; only the parts-derived rates go unavailable.
+  openChooser('Team columns');
+  toggleColumn('BB pts');
+  toggleColumn('BB %');
+  const table = teamTable();
+  const row = within(table).getByText('Ninety Six').closest('tr') as HTMLElement;
+  const cells = within(row).getAllByRole('cell');
+  const visibleText = (header: string) =>
+    cells[headerNames(table).indexOf(header)]?.childNodes[0]?.textContent;
+  expect(visibleText('BB pts')).toBe('30');
+  expect(visibleText('BB %')).toBe('—');
+});
+
+test('teams tied through the canonical cascade share a marked rank', () => {
+  const state = playedTournament();
+  state.scheduledGames.push(scheduledGame('scheduled-2', 'team-a', 'team-b'));
+  state.games.push(
+    acceptedGame(
+      'game-2',
+      'scheduled-2',
+      [
+        score('team-a', 210, { powers: 1, gets: 9, negs: 3, bonuses: 10, bonusPoints: 90 }),
+        score('team-b', 300, { powers: 4, gets: 8, negs: 1, bonuses: 12, bonusPoints: 130 }),
+      ],
+      [],
+      { tossupsRead: 20, overtimeTossupsRead: 0 },
+    ),
+  );
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  // Both teams are 1–1 with identical points, margin, powers, and gets: rank 1, tied.
+  const rows = within(teamTable())
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
+  expect(rows).toEqual(['1=tied', '1=tied']);
+});
+
+test('the player table ranks every row in derivation order', () => {
+  render(<StandingsView state={tournamentWithPlayers(2)} controller={controller} onAnnounce={vi.fn()} />);
+
+  const table = playerTable();
+  expect(headerNames(table)[0]).toBe('#');
+  const ranks = within(table)
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => within(row).getAllByRole('cell')[0]?.textContent);
+  expect(ranks).toEqual(['1', '2', '3', '4']);
+});
+
+test('explicit final placement gets its own scope with placement order', () => {
+  const state = playedTournament();
+  state.tournament!.finalPlacement = {
+    order: ['team-b', 'team-a'],
+    actor: 'director',
+    at: '2026-09-05T12:00:00.000Z',
+  };
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Final' }));
+  const names = within(teamTable())
+    .getAllByRole('row')
+    .slice(1)
+    .map((row) => row.querySelector('strong')?.textContent);
+  expect(names).toEqual(['Greenwood', 'Ninety Six']);
+});
+
+test('a carryover phase offers an including-carryover scope over the same games', () => {
+  const state = playedTournament();
+  state.phases.push({
+    id: 'phase-2',
+    name: 'Playoffs',
+    kind: 'playoff',
+    order: 2,
+    formatId: 'format-1',
+    poolIds: ['pool-2'],
+    roundIds: [],
+    advancementRule: null,
+    carryover: true,
+    status: 'active',
+  });
+  state.pools.push({
+    id: 'pool-2',
+    phaseId: 'phase-2',
+    name: 'Championship',
+    teamIds: ['team-a', 'team-b'],
+    order: 1,
+  });
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  fireEvent.click(screen.getByRole('button', { name: 'Playoffs · Championship · including carryover' }));
+  // The phase-1 game between the field teams carries over: Ninety Six is 1–0 here too.
+  const table = teamTable();
+  expect(within(table).getByText('Ninety Six')).toBeTruthy();
+  const row = within(table).getByText('Ninety Six').closest('tr') as HTMLElement;
+  expect(within(row).getAllByRole('cell')[2]?.textContent).toBe('1–0');
+});
+
+test('column preferences never rewrite tournament state', () => {
+  const state = playedTournament();
+  const before = JSON.stringify(state);
+  render(<StandingsView state={state} controller={controller} onAnnounce={vi.fn()} />);
+
+  openChooser('Team columns');
+  toggleColumn('PF');
+  toggleColumn('Powers (15)');
+  playerTable();
+  // The team chooser's open state carries across the view switch through React
+  // reconciliation, so the player chooser starts open here: close it explicitly.
+  openChooser('Player columns');
+  openChooser('Player columns');
+  toggleColumn('Bonus pts');
+  expect(JSON.stringify(state)).toBe(before);
+  localStorage.clear();
 });
 
 test('an unknown TUH is announced as unavailable, not rendered as zero', () => {

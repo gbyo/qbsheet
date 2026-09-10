@@ -30,7 +30,7 @@ function scoringDefinition(rules: TournamentRules, id?: string): ReportScoringDe
  * from 15 to 20 mid-event prints one Power column with both values rather than silently picking
  * the current default. Tournaments with no issued history fall back to live defaults.
  */
-function stateDefinitions(state: DirectorState): ReportScoringDefinition[] {
+export function stateDefinitions(state: DirectorState): ReportScoringDefinition[] {
   if (state.gameDefinitions.length === 0) {
     const rules = state.tournament?.rules;
     return rules ? [scoringDefinition(rules)] : [];
