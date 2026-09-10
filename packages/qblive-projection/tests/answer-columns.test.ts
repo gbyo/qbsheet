@@ -148,6 +148,8 @@ describe('answer tier columns', () => {
       'gets',
       'negs',
       'ppb',
+      // Bounceback column (#748) survives the answer-tier rework; the tiers stay historical.
+      'bb',
       'ppg',
     ]);
     for (const row of teams.rows) expect(row.cells).toHaveLength(teams.columns.length);

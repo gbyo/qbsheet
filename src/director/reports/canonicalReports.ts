@@ -238,6 +238,8 @@ export function buildCanonicalSnapshot(
       bonusPoints: standing.bonusPoints,
       bonusesHeard: standing.bonuses,
       ppb: standing.bonuses > 0 ? standing.bonusPoints / standing.bonuses : null,
+      bouncebackPoints: standing.bouncebackPoints,
+      bouncebacksKnown: standing.bouncebacksKnown,
       // YellowFruit parity (#747): null marks unknown lightning, never a fabricated zero.
       lightningPoints: standing.lightningKnown ? standing.lightningPoints : null,
       lightningKnown: standing.lightningKnown,
@@ -309,7 +311,7 @@ export function buildCanonicalSnapshot(
         bonusesHeard: detailedCountsKnown ? score.bonuses : null,
         bonusPoints: detailedCountsKnown ? score.bonusPoints : null,
         ppb: detailedCountsKnown && score.bonuses > 0 ? score.bonusPoints / score.bonuses : null,
-        bouncebacks: detailedCountsKnown ? score.bouncebacks : null,
+        bouncebacks: detailedCountsKnown ? (score.bouncebacks ?? null) : null,
       };
     });
     const playerStats: GamePlayerStatsRow[] = game.playerStats.map((stat) => ({

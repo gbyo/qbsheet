@@ -138,6 +138,9 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
     (row) => row.calculatedRank !== undefined && row.calculatedRank !== row.rank,
   );
   const showClassifications = section.teams.some((row) => (row.classifications ?? []).length > 0);
+  // Bounceback points appear only when some team actually converted them: an unknown
+  // breakdown (manual/imported results) renders "—", never a fabricated zero (#748).
+  const showBouncebacks = section.teams.some((row) => row.bouncebacksKnown && row.bouncebackPoints > 0);
   const showAdvancement = section.advancement !== undefined;
   // Without a presentation contract the table keeps its legacy fixed vocabulary; with one,
   // PF/PA/Margin follow the shared report option and tiers/metric follow the schema (#751).
@@ -165,6 +168,7 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
         `<td class="num">${reportNumber(row.tossupsHeardKnown ? row.tossupsHeard : null)}</td>` +
         `<td class="num">${reportNumber(row.pptuh, 2)}</td>` +
         `<td class="num">${reportNumber(row.ppb, 2)}</td>` +
+        `${showBouncebacks ? `<td class="num">${row.bouncebacksKnown ? row.bouncebackPoints : '—'}</td>` : ''}` +
         `${showAdvancement ? `<td>${escapeHtml(advancementText(section.advancement?.[row.teamId]))}</td>` : ''}</tr>`
       );
     })
@@ -178,6 +182,7 @@ function sectionTable(report: CanonicalStandingsReport, section: StandingsReport
     `<th scope="col" class="num">${escapeHtml(scoringLabel)}</th>` +
     `${presentation ? reportAnswerHeaders(presentation) : legacyAnswerHeaders(showSuperpowers)}` +
     `<th scope="col" class="num">TUH</th><th scope="col" class="num">PPTUH</th><th scope="col" class="num">PPB</th>` +
+    `${showBouncebacks ? '<th scope="col" class="num">BB</th>' : ''}` +
     `${showAdvancement ? '<th scope="col">Advancement</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`
   );
 }

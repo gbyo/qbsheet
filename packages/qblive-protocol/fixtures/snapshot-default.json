@@ -1222,6 +1222,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1259,6 +1266,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1291,6 +1302,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1327,6 +1342,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1359,6 +1378,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,
@@ -1417,6 +1440,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1454,6 +1484,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1486,6 +1520,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1522,6 +1560,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1554,6 +1596,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,
@@ -1612,6 +1658,13 @@
           "description": "Points per bonus"
         },
         {
+          "id": "bb",
+          "label": "BB",
+          "kind": "integer",
+          "alignment": "trailing",
+          "description": "Bounceback points"
+        },
+        {
           "id": "ppg",
           "label": "PPG",
           "kind": "decimal",
@@ -1649,6 +1702,10 @@
               "display": "11.54"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 285,
               "display": "285.0"
             }
@@ -1681,6 +1738,10 @@
             {
               "value": 10,
               "display": "10.00"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 240,
@@ -1717,6 +1778,10 @@
               "display": "10.00"
             },
             {
+              "value": 0,
+              "display": "0"
+            },
+            {
               "value": 205,
               "display": "205.0"
             }
@@ -1749,6 +1814,10 @@
             {
               "value": 11.25,
               "display": "11.25"
+            },
+            {
+              "value": 0,
+              "display": "0"
             },
             {
               "value": 190,

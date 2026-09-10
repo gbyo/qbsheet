@@ -7795,7 +7795,8 @@ function zeroGameScore(teamId: DirectorId): TeamGameScore {
     negs: 0,
     bonuses: 0,
     bonusPoints: 0,
-    bouncebacks: 0,
+    // A documentary forfeit placeholder records no bounceback breakdown: unknown (#748).
+    bouncebacks: null,
   };
 }
 

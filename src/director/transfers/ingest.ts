@@ -306,7 +306,9 @@ function teamAggregate(
       tossupPoints += aggregate.tossupPoints;
     }
   }
-  const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ?? 0;
+  // A QBJ team without bonus_bounceback_points supplied no bounceback breakdown: the
+  // residual bonus-points estimate cannot subtract what was never reported (#748).
+  const bouncebacks = finiteNumber(entry.bonus_bounceback_points) ?? null;
   // YellowFruit parity (#747): retain lightning points on the canonical score instead of
   // discarding them. A missing breakdown stays unknown (null) rather than a verified zero.
   const lightning = finiteNumber(entry.lightning_points);
@@ -317,7 +319,8 @@ function teamAggregate(
     gets,
     negs,
     bonuses: finiteNumber(entry.bonuses_heard) ?? finiteNumber(entry.bonuses) ?? 0,
-    bonusPoints: finiteNumber(entry.bonus_points) ?? points - tossupPoints - bouncebacks - (lightning ?? 0),
+    bonusPoints:
+      finiteNumber(entry.bonus_points) ?? points - tossupPoints - (bouncebacks ?? 0) - (lightning ?? 0),
     bouncebacks,
     lightningPoints: lightning ?? null,
   };

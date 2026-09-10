@@ -31,6 +31,16 @@ export interface TeamStanding {
   tossupsHeardKnown: boolean;
   bonuses: number;
   bonusPoints: number;
+  /**
+   * Bounceback points earned across contributing scoresheets, YellowFruit parity (#748).
+   *
+   * Unknown when any contributing scoresheet (or the opponent scoresheet its opportunities
+   * come from) supplied no bounceback breakdown: manual/legacy results without
+   * bounceback columns are unknown, not verified zeros.
+   */
+  bouncebackPoints: number;
+  /** False when any contributing game lacked bounceback breakdowns. */
+  bouncebacksKnown: boolean;
   /** Sum of known per-game lightning points. Games with unknown lightning contribute nothing. */
   lightningPoints: number;
   /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
@@ -229,6 +239,8 @@ export function deriveTeamStandings(
       tossupsHeardKnown: true,
       bonuses: 0,
       bonusPoints: 0,
+      bouncebackPoints: 0,
+      bouncebacksKnown: true,
       lightningPoints: 0,
       lightningKnown: true,
       gamesPlayed: 0,
@@ -265,12 +277,16 @@ export function deriveTeamStandings(
     leftStanding.negs += left.negs;
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
+    leftStanding.bouncebackPoints += left.bouncebacks ?? 0;
+    if (left.bouncebacks === null) leftStanding.bouncebacksKnown = false;
     addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
+    rightStanding.bouncebackPoints += right.bouncebacks ?? 0;
+    if (right.bouncebacks === null) rightStanding.bouncebacksKnown = false;
     const leftOutcome = gameOutcomeForTeam(game, left.teamId);
     const rightOutcome = gameOutcomeForTeam(game, right.teamId);
     if (leftOutcome === 'win') leftStanding.wins += 1;
@@ -383,6 +399,85 @@ export function tiebreakerIsComparable(
   games: readonly GameRecord[],
 ): boolean {
   return group.every((standing) => teamTiebreakerValue(standing, key, group, games) !== null);
+}
+
+export interface TeamBouncebackDerivation {
+  /**
+   * Bounceback points earned, or null when any contributing game supplied no bounceback
+   * breakdown (unknown, never a verified zero).
+   */
+  bouncebackPoints: number | null;
+  /**
+   * Bounceback opportunities: the opponents' bonuses heard across contributing games.
+   * Null when any contributing game lacks the opponent bonus detail the denominator
+   * requires — opportunities are scoped to the other side's scoresheet, never inferred
+   * from point deltas or the converting team's own lines (#748).
+   */
+  bouncebackOpportunities: number | null;
+  /**
+   * Bounceback conversion in points per opportunity. Null unless both the numerator and
+   * the opponent-scoped denominator are fully known and at least one opportunity exists.
+   */
+  bouncebackConversion: number | null;
+  /**
+   * Points per bonus on the team's own bonuses only. Team bonusPoints never include
+   * bounceback points (the scorer and every ingest path keep the buckets separate), so
+   * PPB is inherently bounceback-free; it is null when no bonuses were heard.
+   */
+  ppbWithoutBouncebacks: number | null;
+}
+
+/**
+ * Derive a team's bounceback facts with opponent-scoped denominators (#748).
+ *
+ * Only accepted games in which the team appears contribute. A single game with an unknown
+ * bounceback breakdown — on either side — unknowns the facts it touches rather than
+ * contributing a zero.
+ */
+export function bouncebackDerivationForTeam(
+  teamId: DirectorId,
+  games: readonly GameRecord[],
+): TeamBouncebackDerivation {
+  let bouncebackPoints = 0;
+  let bouncebacksKnown = true;
+  let opportunities = 0;
+  let opportunitiesKnown = true;
+  let bonuses = 0;
+  let bonusPoints = 0;
+  let contributingGames = 0;
+  for (const game of games) {
+    const own = game.scores.find((score) => score.teamId === teamId);
+    if (!own) continue;
+    const opponent = game.scores.find((score) => score.teamId !== teamId);
+    if (!opponent) continue;
+    contributingGames += 1;
+    if (own.bouncebacks === null) bouncebacksKnown = false;
+    // An omitted breakdown is the legacy zero shorthand; only explicit null is unknown.
+    else bouncebackPoints += own.bouncebacks ?? 0;
+    if (own.bouncebacks === null || !gameDetailedCountsKnown(game)) opportunitiesKnown = false;
+    else opportunities += opponent.bonuses;
+    bonuses += own.bonuses;
+    bonusPoints += own.bonusPoints;
+  }
+  if (contributingGames === 0) {
+    return {
+      bouncebackPoints: 0,
+      bouncebackOpportunities: 0,
+      bouncebackConversion: null,
+      ppbWithoutBouncebacks: null,
+    };
+  }
+  const knownPoints = bouncebacksKnown ? bouncebackPoints : null;
+  const knownOpportunities = opportunitiesKnown ? opportunities : null;
+  return {
+    bouncebackPoints: knownPoints,
+    bouncebackOpportunities: knownOpportunities,
+    bouncebackConversion:
+      knownPoints !== null && knownOpportunities !== null && knownOpportunities > 0
+        ? knownPoints / knownOpportunities
+        : null,
+    ppbWithoutBouncebacks: bonuses > 0 ? bonusPoints / bonuses : null,
+  };
 }
 
 function headToHeadValue(

@@ -49,6 +49,13 @@ export interface TeamStatsRow {
   bonusesHeard: number;
   /** Null when no bonuses were heard: PPB is undefined, not zero. */
   ppb: number | null;
+  /**
+   * Bounceback points earned. Unknown (not zero) when any contributing result supplied no
+   * bounceback breakdown; see bouncebacksKnown (#748).
+   */
+  bouncebackPoints: number;
+  /** False when any contributing result lacked a bounceback breakdown. */
+  bouncebacksKnown: boolean;
   /** Sum of known per-game lightning points; null when any game lacked the breakdown. */
   lightningPoints: number | null;
   /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
@@ -311,6 +318,8 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       bonusPoints: 0,
       bonusesHeard: 0,
+      bouncebackPoints: 0,
+      bouncebacksKnown: true,
       lightningPoints: 0,
       lightningKnown: true,
     };
@@ -415,6 +424,12 @@ export function buildStatsSnapshot(
       else team.tossupsHeard = valueOrZero(team.tossupsHeard) + result.tossupsHeard;
       team.bonusPoints = valueOrZero(team.bonusPoints) + valueOrZero(result.bonusPoints);
       team.bonusesHeard = valueOrZero(team.bonusesHeard) + valueOrZero(result.bonusesHeard);
+      // An omitted breakdown is a legacy zero shorthand; an explicit null is an unknown
+      // manual/imported result, never a verified zero (#748).
+      if (result.bonusBouncebackPoints === null) team.bouncebacksKnown = false;
+      else
+        team.bouncebackPoints =
+          valueOrZero(team.bouncebackPoints) + valueOrZero(result.bonusBouncebackPoints);
       if (result.lightningPoints === undefined) team.lightningKnown = false;
       else team.lightningPoints = valueOrZero(team.lightningPoints ?? undefined) + result.lightningPoints;
     };
@@ -512,6 +527,7 @@ const teamStatHeaders = [
   'bonus_points',
   'bonuses_heard',
   'ppb',
+  'bounceback_points',
 ] as const;
 
 const playerStatHeaders = [
@@ -582,6 +598,7 @@ export function exportTeamStandingsCsv(snapshot: StatsSnapshot): string {
       row.bonusPoints,
       row.bonusesHeard,
       row.ppb,
+      row.bouncebacksKnown ? row.bouncebackPoints : null,
     ]),
   );
 }
@@ -702,6 +719,7 @@ export function exportStatsHtml(snapshot: StatsSnapshot): string {
     row.bonusPoints,
     row.bonusesHeard,
     fixedStatText(row.ppb, 2),
+    row.bouncebacksKnown ? row.bouncebackPoints : '—',
   ]);
   const playerTable = tableHtml('Player statistics', playerStatHeaders, snapshot.players, (row) => [
     row.rank,

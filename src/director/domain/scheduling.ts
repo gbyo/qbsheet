@@ -1277,6 +1277,8 @@ function emptyStanding(teamId: DirectorId): TeamStanding {
     negs: 0,
     bonuses: 0,
     bonusPoints: 0,
+    bouncebackPoints: 0,
+    bouncebacksKnown: true,
     lightningPoints: 0,
     lightningKnown: true,
     gamesPlayed: 0,
