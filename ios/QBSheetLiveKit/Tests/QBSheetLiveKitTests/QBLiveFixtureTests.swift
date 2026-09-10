@@ -184,4 +184,30 @@ struct QBLiveFixtureTests {
         #expect(snapshot.publishesPlayers)
         #expect(snapshot.statistics.contains { $0.id.hasPrefix("player-statistics") })
     }
+
+    @Test("the maximal tables render the parity vocabulary with no app change")
+    func maximalParityCells() throws {
+        // New statistics arrive as server display strings: the assertions below
+        // pin the contract, not any per-stat logic — there is none on this side.
+        let snapshot = try QBLiveCoding.decoder.decode(QBLiveSnapshot.self, from: Self.fixture("snapshot-maximal"))
+        func text(_ table: QBLiveDataTable, row: Int, column: String) throws -> String {
+            let index = try #require(table.columns.firstIndex { $0.id == column })
+            return table.rows[row].cells[index].text(precision: table.columns[index].precision)
+        }
+        let standings = try #require(snapshot.standings.first { $0.id == "standings:overall" })
+        #expect(try text(standings, row: 0, column: "record") == "1–0")
+        #expect(try text(standings, row: 0, column: "pct") == "100.0%")
+        #expect(try text(standings, row: 0, column: "margin") == "+95")
+        #expect(try text(standings, row: 0, column: "ppb") == "11.54")
+        #expect(try text(standings, row: 0, column: "powers") == "4")
+        #expect(try text(standings, row: 0, column: "tuh") == "—")
+        let players = try #require(snapshot.statistics.first { $0.id == "player-statistics:overall" })
+        #expect(try text(players, row: 0, column: "year") == "Grade 12")
+        #expect(try text(players, row: 0, column: "ug") == "Yes")
+        #expect(try text(players, row: 0, column: "d2") == "No")
+        #expect(try text(players, row: 0, column: "games") == "—")
+        #expect(try text(players, row: 0, column: "tuh") == "20")
+        #expect(try text(players, row: 0, column: "pptuh") == "4.25")
+        #expect(try text(players, row: 0, column: "rank") == "1")
+    }
 }

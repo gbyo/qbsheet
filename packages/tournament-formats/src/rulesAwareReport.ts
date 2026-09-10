@@ -62,6 +62,10 @@ function teamRowHtml(
     `${reportNumberCell(row.tossupsHeardKnown ? row.tossupsHeard : null)}${reportNumberCell(row.pptuh, presentation.precision.rate)}` +
     `${reportAnswerCells(row, presentation)}` +
     `${presentation.applicability.bonuses ? `${reportNumberCell(row.bonusesHeard)}${reportNumberCell(row.bonusPoints)}${reportNumberCell(row.ppb, presentation.precision.ppb)}` : ''}` +
+    // Same final stat set as the stage-aware standings (#751): applicable but
+    // unknown values render "—", never zeroes.
+    `${presentation.applicability.bouncebacks ? `${reportNumberCell(row.bouncebacksKnown ? row.bouncebackPoints : null)}${reportNumberCell(row.bouncebackPartsHeard, 0)}<td class="num">${reportPercent(row.bouncebackConversion, 1)}</td><td class="num">${reportPercent(row.totalBonusConversion, 1)}</td>` : ''}` +
+    `${presentation.applicability.lightning ? reportNumberCell(row.lightningKnown ? row.lightningPoints : null, 0) : ''}` +
     `${showClassifications ? `<td>${reportEscape((row.classifications ?? []).join('; ') || '—')}</td>` : ''}</tr>`
   );
 }
@@ -86,6 +90,8 @@ export function renderRulesAwareStandings(snapshot: StatsSnapshot): string {
     `${presentation.options.showPapg ? '<th scope="col" class="num">PAPG</th>' : ''}` +
     `<th scope="col" class="num">TUH</th><th scope="col" class="num">PPTUH</th>${reportAnswerHeaders(presentation)}` +
     `${presentation.applicability.bonuses ? '<th scope="col" class="num">BH</th><th scope="col" class="num">BP</th><th scope="col" class="num">PPB</th>' : ''}` +
+    `${presentation.applicability.bouncebacks ? '<th scope="col" class="num">BB pts</th><th scope="col" class="num">BB heard</th><th scope="col" class="num">BB %</th><th scope="col" class="num">Total bonus</th>' : ''}` +
+    `${presentation.applicability.lightning ? '<th scope="col" class="num">Lightning</th>' : ''}` +
     `${showClassifications ? '<th scope="col">Group</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>`;
   return renderReportPage(snapshot, 'Standings', `${reportScopeNote(snapshot)}${table}`);
 }

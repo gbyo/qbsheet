@@ -110,9 +110,11 @@ export function describeReportInput(
       ),
       packetRecorded: snapshot.games.some((game) => Boolean(game.packetName)),
       stageRecorded: phaseIds.size > 1,
-      // Director's canonical report DTO does not yet retain lightning statistics. A configured
-      // lightning round is therefore not enough to print a permanent zero column.
-      lightningRecorded: false,
+      // Same recorded-data rule as bouncebacks: a canonical number (even zero)
+      // proves the breakdown survived; unknown/null does not.
+      lightningRecorded: snapshot.games.some((game) =>
+        (game.teamStats ?? []).some((row) => typeof row.lightningPoints === 'number'),
+      ),
     },
   };
 }
