@@ -5,11 +5,7 @@ import {
   reportPointsMetricValue,
   reportTeamAnchor,
 } from './reportHtml.js';
-import {
-  reportNumber,
-  reportPercent,
-  type ReportPresentation,
-} from './reportPresentation.js';
+import { reportNumber, reportPercent, type ReportPresentation } from './reportPresentation.js';
 import type { GameStatsRow, StatsSnapshot, TeamStatsRow } from './stats.js';
 
 export type StandingsReportSectionKind = 'final' | 'phase' | 'pool' | 'cumulative';

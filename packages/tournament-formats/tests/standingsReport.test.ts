@@ -179,9 +179,7 @@ describe('stage-aware standings report HTML', () => {
   test('answer tiers come from the definitions, with point values in the headers', () => {
     const html = renderStageAwareStandingsReport(
       presentedReport(
-        presentationFor([
-          { ...standardDefinition, superpowerValue: 20, tossupValue: 10, powerValue: 15 },
-        ]),
+        presentationFor([{ ...standardDefinition, superpowerValue: 20, tossupValue: 10, powerValue: 15 }]),
       ),
     );
 
@@ -206,10 +204,7 @@ describe('stage-aware standings report HTML', () => {
   test('mixed definitions print one tier column plus the shared mixed-definition note', () => {
     const html = renderStageAwareStandingsReport(
       presentedReport(
-        presentationFor([
-          standardDefinition,
-          { ...standardDefinition, powerValue: 20, tossupCount: 24 },
-        ]),
+        presentationFor([standardDefinition, { ...standardDefinition, powerValue: 20, tossupCount: 24 }]),
       ),
     );
 

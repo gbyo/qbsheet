@@ -485,10 +485,7 @@ function builtSections(
  * the stage-aware Standings table renders semantic answer tiers and the selected points metric
  * instead of a second fixed vocabulary (#751).
  */
-function presentTeamRow(
-  row: TeamStatsRow,
-  x: number | null,
-): TeamStatsRow {
+function presentTeamRow(row: TeamStatsRow, x: number | null): TeamStatsRow {
   return {
     ...row,
     answerCounts: semanticAnswerCounts(row),
@@ -568,9 +565,7 @@ export function buildCanonicalStandingsReport(
   // The overall snapshot covers every accepted game, so its definitions and capabilities
   // describe the whole report — the same contract the other pages consume (#751).
   const input = describeReportInput(stats, overall, rawOptions);
-  const presentation: ReportPresentation | undefined = input
-    ? buildReportPresentation(input)
-    : undefined;
+  const presentation: ReportPresentation | undefined = input ? buildReportPresentation(input) : undefined;
   const x = presentation?.pointsNormalization?.tossups ?? null;
   return {
     tournament: overall.tournament,

@@ -1,8 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import {
-  defaultReportOptions,
-  renderStageAwareStandingsReport,
-} from '@qbsheet/tournament-formats';
+import { defaultReportOptions, renderStageAwareStandingsReport } from '@qbsheet/tournament-formats';
 import type { DirectorState, Phase } from '../domain';
 import { acceptedGame, playedTournament, scheduledGame, score, team } from '../../../tests/directorFixtures';
 import { buildCanonicalStandingsReport } from './standingsReport';
@@ -414,11 +411,7 @@ describe('standings presentation contract (#751)', () => {
     const report = buildCanonicalStandingsReport(playedTournament(), generatedAt);
 
     expect(report.presentation).toBeDefined();
-    expect(report.presentation?.answerColumns.map((column) => column.key)).toEqual([
-      'power',
-      'get',
-      'neg',
-    ]);
+    expect(report.presentation?.answerColumns.map((column) => column.key)).toEqual(['power', 'get', 'neg']);
     expect(report.presentation?.pointsNormalization).toEqual({ tossups: 20, label: 'Pts/20' });
     const row = report.sections[0]!.teams[0]!;
     expect(row.answerCounts).toEqual({ superpower: 0, power: 4, get: 8, neg: 1 });
