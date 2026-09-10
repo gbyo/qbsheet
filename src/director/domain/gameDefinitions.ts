@@ -616,6 +616,26 @@ export function reissueGameDefinition(
 }
 
 /**
+ * Whether the game's issued definition still matches current tournament defaults (#672).
+ *
+ * Derives the candidate the game would be issued under today and compares digests
+ * without persisting anything. True means a reissue would be a no-op; false means the
+ * game keeps older rules as a normal historical fact; null means the game was never
+ * issued (or cannot be derived), so there is nothing to compare.
+ */
+export function definitionMatchesDefaults(state: DirectorState, scheduledGameId: DirectorId): boolean | null {
+  const scheduled = state.scheduledGames.find((game) => game.id === scheduledGameId);
+  if (!scheduled || (scheduled.definitionRevision === undefined && !scheduled.definitionSnapshotId)) {
+    return null;
+  }
+  const active = activeDefinitionSnapshot(state, scheduledGameId);
+  if (!active) return null;
+  const candidate = deriveDefinitionSnapshot(state, scheduledGameId);
+  if (!candidate.ok) return null;
+  return candidate.snapshot.digest === active.digest;
+}
+
+/**
  * Lifecycle buckets for a tournament-defaults save (#672).
  *
  * Saving scoring defaults is prospective: only `unissued` games adopt the new defaults

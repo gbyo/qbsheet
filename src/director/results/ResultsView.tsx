@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
+  definitionMatchesDefaults,
   resultDecisionIssue,
   type DirectorState,
   type ProtestScoreAdjustment,
@@ -866,6 +867,13 @@ function ScheduledGameItem({
   const room = game.roomId ? state.rooms.find((entry) => entry.id === game.roomId) : undefined;
   const canCancel = !['accepted', 'cancelled'].includes(game.status) && !game.bracketKey;
   const canForfeit = !['accepted', 'cancelled'].includes(game.status) && Boolean(game.rightTeamId);
+  // An explicit reissue is only offered for issued but unstarted games (#672). Live,
+  // submitted, and accepted games keep their definitions; the controller re-verifies
+  // progress guards at commit, so a race with an arriving result still refuses safely.
+  const canReissue =
+    (game.definitionRevision !== undefined || game.definitionSnapshotId) &&
+    (game.status === 'scheduled' || game.status === 'released');
+  const defaultsMatch = definitionMatchesDefaults(state, game.id);
   return (
     <SummaryItem
       className={highlighted ? 'is-navigation-target' : ''}
@@ -877,7 +885,7 @@ function ScheduledGameItem({
       status={<StateLabel state={game.status} label={gameStatusLabel(game.status)} />}
       summary={`${round?.name ?? 'Unknown round'} · ${room?.name ?? 'Room unassigned'}`}
       actions={
-        canCancel || canForfeit ? (
+        canCancel || canForfeit || canReissue ? (
           <ActionMenu
             label={`${matchupLabel(state, game)} actions`}
             triggerLabel="Game actions"
@@ -885,6 +893,36 @@ function ScheduledGameItem({
           >
             {(close) => (
               <>
+                {canReissue && (
+                  <MenuItem
+                    icon="refresh"
+                    onSelect={() => {
+                      close();
+                      void (async () => {
+                        const approved = await confirmAction({
+                          title: `Reissue ${matchupLabel(state, game)} with current defaults?`,
+                          consequence:
+                            'The game keeps no progress check behind: the reissue is re-verified at commit and refuses if scorer progress or a result arrived first. ' +
+                            'On success the definition revision increments, old prepared files read as stale, and the room needs re-delivery.',
+                          confirmLabel: 'Reissue game',
+                        });
+                        if (!approved) return;
+                        const outcome = await Promise.resolve(controller.reissueGameDefinition(game.id));
+                        if (!outcome.ok) {
+                          onAnnounce(errorNotice(`The game was not reissued: ${outcome.reason}`));
+                          return;
+                        }
+                        onAnnounce(
+                          outcome.created
+                            ? `Reissued ${matchupLabel(state, game)} with current defaults. Re-deliver its assignment.`
+                            : `${matchupLabel(state, game)} already matches current defaults; no new revision.`,
+                        );
+                      })();
+                    }}
+                  >
+                    Reissue with current defaults…
+                  </MenuItem>
+                )}
                 {canForfeit && (
                   <MenuItem
                     icon="flag"
@@ -938,7 +976,22 @@ function ScheduledGameItem({
       <Diagnostics
         label="Game details"
         standalone={false}
-        items={[{ term: 'Game ID', value: game.id, mono: true }]}
+        items={[
+          { term: 'Game ID', value: game.id, mono: true },
+          ...(game.definitionRevision !== undefined || game.definitionSnapshotId
+            ? [
+                {
+                  term: 'Scoring rules',
+                  value:
+                    defaultsMatch === null
+                      ? `Revision ${game.definitionRevision ?? '—'}`
+                      : defaultsMatch
+                        ? `Revision ${game.definitionRevision ?? '—'} · matches current defaults`
+                        : `Revision ${game.definitionRevision ?? '—'} · differs from current defaults (historical, not an error)`,
+                },
+              ]
+            : []),
+        ]}
       />
       {forfeitOpen && (
         <ForfeitDialog
