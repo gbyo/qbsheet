@@ -46,6 +46,7 @@ export const teamStandingsCsvHeaders = [
   'bonuses_heard',
   'bonus_points',
   'ppb',
+  'bounceback_points',
 ] as const;
 
 export const playerStatsCsvHeaders = [
@@ -98,6 +99,9 @@ export function teamStandingsCsv(state: DirectorState): string {
       standing.bonuses,
       standing.bonusPoints,
       ratio(standing.bonusPoints, standing.bonuses),
+      // Unknown bounceback breakdowns stay blank: a spreadsheet zero would sort an
+      // unscored-on-bouncebacks team in with the teams that verifiably earned none (#748).
+      standing.bouncebacksKnown ? standing.bouncebackPoints : '',
     ]),
   );
 }

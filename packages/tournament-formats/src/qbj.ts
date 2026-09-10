@@ -1404,7 +1404,9 @@ function matchTeamObject(
     ...(teamId ? { team: { $ref: teamId } } : {}),
     ...(teamResult?.forfeitLoss !== undefined ? { forfeit_loss: teamResult.forfeitLoss } : {}),
     ...(teamResult?.points !== undefined ? { points: teamResult.points } : {}),
-    ...(teamResult?.bonusBouncebackPoints !== undefined
+    // An unknown bounceback breakdown round-trips as an absent QBJ field, never an
+    // explicit null or a fabricated zero (#748).
+    ...(teamResult?.bonusBouncebackPoints != null
       ? { bonus_bounceback_points: teamResult.bonusBouncebackPoints }
       : {}),
     ...(teamResult?.lightningPoints !== undefined ? { lightning_points: teamResult.lightningPoints } : {}),

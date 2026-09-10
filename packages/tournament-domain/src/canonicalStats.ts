@@ -7,7 +7,6 @@ export const teamGameScoreCountFields = [
   'negs',
   'bonuses',
   'bonusPoints',
-  'bouncebacks',
 ] as const satisfies readonly (keyof TeamGameScore)[];
 
 export const playerGameStatCountFields = [
@@ -39,6 +38,32 @@ export function invalidTeamGameScoreOvertimePoints(score: TeamGameScore): 'overt
   return value === undefined || value === null || (typeof value === 'number' && Number.isFinite(value))
     ? null
     : 'overtimePoints';
+}
+
+/**
+ * Bounceback points are optional (unknown when the source supplied no breakdown), but when
+ * supplied they must be a canonical count (#748).
+ */
+export function invalidTeamGameScoreBouncebacks(score: TeamGameScore): 'bouncebacks' | null {
+  const value = score.bouncebacks;
+  return value === undefined || value === null || isCanonicalCount(value) ? null : 'bouncebacks';
+}
+
+/**
+ * Bounceback points earned by one team line. An omitted field (programmatic construction)
+ * is a zero; `null` is an explicit unknown from a manual/legacy source that supplied no
+ * bounceback breakdown (#748).
+ */
+export function bouncebacksOf(score: TeamGameScore): number {
+  return score.bouncebacks ?? 0;
+}
+
+/**
+ * False only when the source explicitly left bouncebacks unknown (`null`), e.g. a manual
+ * or legacy result without a bounceback breakdown — never a verified zero.
+ */
+export function bouncebacksKnownOf(score: TeamGameScore): boolean {
+  return score.bouncebacks !== null;
 }
 
 export function invalidPlayerGameStatCountField(

@@ -308,7 +308,8 @@ function resultScores(game: InterchangeGameRecord): TeamGameScore[] {
     negs: number(team.negs) ?? 0,
     bonuses: number(team.bonusesHeard) ?? 0,
     bonusPoints: number(team.bonusPoints) ?? 0,
-    bouncebacks: number(team.bonusBouncebackPoints) ?? 0,
+    // An imported result without a bounceback breakdown is unknown, not a verified zero (#748).
+    bouncebacks: number(team.bonusBouncebackPoints) ?? null,
     // YellowFruit parity (#747): unknown lightning stays unknown through interchange.
     ...(typeof team.lightningPoints === 'number' ? { lightningPoints: team.lightningPoints } : {}),
   }));

@@ -570,7 +570,15 @@ export interface TeamGameScore {
   negs: number;
   bonuses: number;
   bonusPoints: number;
-  bouncebacks: number;
+  /**
+   * Bounceback points earned, YellowFruit parity field (#748).
+   *
+   * Null/undefined means the source result supplied no bounceback breakdown: a manual or
+   * legacy result without that detail is unknown, not a verified zero. Only an explicit zero
+   * (which the scorer always writes) is a known zero. Bounceback conversion denominators are
+   * derived from opponent bonus detail, never inferred from point deltas.
+   */
+  bouncebacks?: number | null;
   /**
    * Tossup points converted in overtime, YellowFruit parity field (#746 follow-up).
    *

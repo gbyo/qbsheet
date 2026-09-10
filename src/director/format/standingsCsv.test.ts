@@ -79,6 +79,25 @@ describe('the team standings CSV', () => {
 
     expect(parsed.rows[0][2]).toBe('Ninety Six, "A"');
   });
+
+  /*
+   * Bounceback points are unknown — not zero — when the result supplied no bounceback
+   * breakdown. The spreadsheet cell stays blank so an unscored team never sorts in with
+   * the teams that verifiably earned none (#748).
+   */
+  test('explicit bounceback points render; an unknown breakdown stays blank', () => {
+    const state = playedTournament();
+    state.games[0].scores[0].bouncebacks = 30;
+
+    const value = (parsed: ReturnType<typeof table>, name: string) => {
+      const row = parsed.rows.find((cells) => cells[2] === name);
+      return row?.[parsed.headers.indexOf('bounceback_points')];
+    };
+    expect(value(table(teamStandingsCsv(state)), 'Ninety Six')).toBe('30');
+
+    state.games[0].scores[0].bouncebacks = null;
+    expect(value(table(teamStandingsCsv(state)), 'Ninety Six')).toBe('');
+  });
 });
 
 describe('the player statistics CSV', () => {

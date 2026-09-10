@@ -165,6 +165,13 @@ function teamStatisticsColumns(rules: Parameters<typeof answerTierColumns>[0]): 
       alignment: 'trailing',
       description: 'Points per bonus',
     },
+    {
+      id: 'bb',
+      label: 'BB',
+      kind: 'integer',
+      alignment: 'trailing',
+      description: 'Bounceback points',
+    },
     { id: 'ppg', label: 'PPG', kind: 'decimal', precision: 1, alignment: 'trailing' },
   ];
 }
@@ -274,6 +281,8 @@ export function buildTeamStatisticsTable(
       standing.bonuses > 0
         ? decimal(standing.bonusPoints / standing.bonuses, 2)
         : { value: null, display: '—' },
+      // Unknown bounceback breakdowns render "—", never a fabricated zero (#748).
+      standing.bouncebacksKnown ? integer(standing.bouncebackPoints) : { value: null, display: '—' },
       decimal(standing.gamesPlayed > 0 ? standing.pointsFor / standing.gamesPlayed : 0, 1),
     ],
   }));
