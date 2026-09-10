@@ -4019,6 +4019,11 @@ export function useDirectorController(repository = createDirectorRepository()): 
           entityId: target.id,
           details: {
             sourcePhaseId: source.id,
+            // The persisted basis (#673): committed advancement verifies against this
+            // token afterwards, so any later change to the qualifying games, teams,
+            // pools, rule, or tiebreakers reads as stale instead of silently current.
+            basisToken: preview.basisToken,
+            qualifierTeamIds: preview.qualifiers.map((team) => team.id),
             assignments: input.assignments,
             overridden,
             ...(reason === '' ? {} : { reason }),
