@@ -84,12 +84,24 @@ export function assignmentChangeBlocker(
     if (occupant) return `${destination.name} already hosts another game in this round.`;
   }
 
+  const roundDuty = (staffId: DirectorId): 'HQ' | 'runner' | null => {
+    const duty = state.operationalAssignments.find(
+      (entry) =>
+        entry.roundId === game.roundId &&
+        (entry.kind === 'hq' || entry.kind === 'runner') &&
+        entry.staffIds.includes(staffId),
+    );
+    if (!duty) return null;
+    return duty.kind === 'hq' ? 'HQ' : 'runner';
+  };
   const roleBlocker = (staffId: DirectorId | null | undefined, role: 'moderator' | 'scorekeeper') => {
     if (!staffId) return null;
     const member = state.staff.find((entry) => entry.id === staffId);
     if (!member) return 'Choose a staff member who is in the tournament workspace.';
     if (!member.available) return `${member.name} is marked unavailable.`;
     if (!member.roles.includes(role)) return `${member.name} is not marked as a ${role}.`;
+    const duty = roundDuty(staffId);
+    if (duty) return `${member.name} is already on ${duty} duty in this round.`;
     const clash = state.scheduledGames.find((entry) => {
       if (entry.id === game.id || entry.roundId !== game.roundId || entry.bye) return false;
       if (entry.status === 'cancelled') return false;
@@ -103,8 +115,16 @@ export function assignmentChangeBlocker(
   if (changes.moderatorId !== undefined && moderatorBlocker) return moderatorBlocker;
   const scorekeeperBlocker = roleBlocker(changes.scorekeeperId, 'scorekeeper');
   if (changes.scorekeeperId !== undefined && scorekeeperBlocker) return scorekeeperBlocker;
-  if (changes.moderatorId && changes.scorekeeperId && changes.moderatorId === changes.scorekeeperId) {
-    return 'One person cannot moderate and score the same game.';
+  // Validate the resulting effective assignment, not just the changed fields: a
+  // one-field staff edit must not leave one person in both room roles (#708).
+  if (changes.moderatorId !== undefined || changes.scorekeeperId !== undefined) {
+    const current = effectiveAssignmentForGame(state, game);
+    const nextModerator = changes.moderatorId !== undefined ? changes.moderatorId : current.moderatorId;
+    const nextScorekeeper =
+      changes.scorekeeperId !== undefined ? changes.scorekeeperId : current.scorekeeperId;
+    if (nextModerator && nextModerator === nextScorekeeper) {
+      return 'One person cannot moderate and score the same game.';
+    }
   }
 
   if (changes.equipmentIds) {
