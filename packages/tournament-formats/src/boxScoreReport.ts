@@ -94,7 +94,8 @@ function teamBox(game: GameStatsRow, team: GameTeamStatsRow, presentation: Repor
 
 function gameMeta(game: GameStatsRow, presentation: ReportPresentation): string {
   const items: string[] = [];
-  if (presentation.applicability.stage && game.phaseId) items.push(`Stage: ${reportEscape(game.phaseId)}`);
+  if (presentation.applicability.stage && (game.phaseName ?? game.phaseId))
+    items.push(`Stage: ${reportEscape(game.phaseName ?? game.phaseId ?? '')}`);
   if (presentation.applicability.packet && game.packetName)
     items.push(`Packet: ${reportEscape(game.packetName)}`);
   items.push(`Tossups read: ${typeof game.tossupsRead === 'number' ? game.tossupsRead : '—'}`);
