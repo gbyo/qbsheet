@@ -19,6 +19,10 @@ use rand::RngCore;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use thiserror::Error;
+
+use crate::sleep::{
+    PlatformSleepLauncher, QbtcpSleepGuard, SleepLauncher, SleepPreventionStatus, SLEEP_WARNING,
+};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use tokio::net::TcpListener;
 
@@ -217,6 +221,8 @@ pub struct ServerStatus {
     pub pairing_code: Option<String>,
     pub pairing_url: Option<String>,
     pub message: Option<String>,
+    /// Host sleep-prevention state while QBTCP is serving (#745).
+    pub sleep_prevention: SleepPreventionStatus,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -314,6 +320,7 @@ struct ServerRuntimeState {
 pub struct ServerRuntime {
     inner: Mutex<ServerRuntimeState>,
     key_store: Arc<dyn QbtcpKeyStore>,
+    sleep_launcher: Arc<dyn SleepLauncher>,
 }
 
 impl Default for ServerRuntime {
@@ -321,6 +328,7 @@ impl Default for ServerRuntime {
         Self {
             inner: Mutex::new(ServerRuntimeState::default()),
             key_store: Arc::new(KeychainQbtcpKeyStore),
+            sleep_launcher: Arc::new(PlatformSleepLauncher),
         }
     }
 }
@@ -337,6 +345,16 @@ impl ServerRuntime {
         Self {
             inner: Mutex::new(ServerRuntimeState::default()),
             key_store: Arc::new(FixedKeyStore(key)),
+            sleep_launcher: Arc::new(PlatformSleepLauncher),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_sleep_launcher(launcher: Arc<dyn SleepLauncher>) -> Self {
+        Self {
+            inner: Mutex::new(ServerRuntimeState::default()),
+            key_store: Arc::new(KeychainQbtcpKeyStore),
+            sleep_launcher: launcher,
         }
     }
 
@@ -349,7 +367,7 @@ impl ServerRuntime {
         if let Some(server) = server {
             server.refresh();
         }
-        let Ok(inner) = self.inner.lock() else {
+        let Ok(mut inner) = self.inner.lock() else {
             return ServerStatus {
                 message: Some("QBTCP server status is unavailable.".to_owned()),
                 ..ServerStatus::default()
@@ -358,6 +376,27 @@ impl ServerRuntime {
         let mut status = inner.status.clone();
         if let Some(running) = inner.running.as_ref() {
             status.running = running.load(Ordering::Acquire);
+        }
+        // An aborted or panicked serve task never runs its own shutdown
+        // epilogue, so the running flag can stay set after the listener is
+        // gone. A finished task means the server is not serving (#745).
+        if status.running
+            && inner
+                .task
+                .as_ref()
+                .is_some_and(|task| task.inner().is_finished())
+        {
+            if let Some(running) = inner.running.as_ref() {
+                running.store(false, Ordering::Release);
+            }
+            status.running = false;
+        }
+        // The serve task owns the sleep guard, so an unexpected task exit
+        // releases the OS assertion when the guard drops. Reconcile the
+        // stored flag here so a dead server never reports protection (#745).
+        if !status.running && status.sleep_prevention.active {
+            status.sleep_prevention.active = false;
+            inner.status.sleep_prevention.active = false;
         }
         if let Some(state) = inner.state.as_ref() {
             status.paired_rooms = state.paired_room_count();
@@ -479,7 +518,29 @@ impl ServerRuntime {
         let running = Arc::new(AtomicBool::new(true));
         let task_running = Arc::clone(&running);
         let task_server = Arc::clone(&server);
+        // The serve task owns the sleep guard: normal stop, task abort, and
+        // unexpected task exit all release the OS assertion when the guard
+        // drops. Acquisition failure never blocks tournament service; it is
+        // reported as an actionable warning in status instead (#745).
+        let (sleep_guard, sleep_prevention) = match QbtcpSleepGuard::acquire(&*self.sleep_launcher)
+        {
+            Ok(guard) => (
+                Some(guard),
+                SleepPreventionStatus {
+                    active: true,
+                    warning: None,
+                },
+            ),
+            Err(error) => (
+                None,
+                SleepPreventionStatus {
+                    active: false,
+                    warning: Some(format!("{SLEEP_WARNING} ({error})")),
+                },
+            ),
+        };
         let task = tauri::async_runtime::spawn(async move {
+            let _sleep_guard = sleep_guard;
             let _ = task_server.serve(listener).await;
             task_running.store(false, Ordering::Release);
         });
@@ -509,6 +570,7 @@ impl ServerRuntime {
             pairing_code,
             pairing_url,
             message: Some(start_message(address_selection_required, address.is_some())),
+            sleep_prevention,
         };
         inner.task = Some(task);
         inner.server = Some(server);
@@ -3280,6 +3342,168 @@ mod tests {
         let stopped = runtime.stop();
         assert!(!stopped.running);
         assert_eq!(stopped.message.as_deref(), Some("QBTCP server stopped."));
+    }
+
+    /// #745 lifecycle: startup acquires sleep protection exactly once, a
+    /// duplicate start acquires nothing more, and stop releases it so a
+    /// restart can acquire a fresh guard.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sleep_protection_follows_the_server_lifetime() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+        let document = || {
+            Some(json!({
+                "tournament": {"id": "t-1", "name": "Sleep test"},
+                "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+            }))
+        };
+
+        let status = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("server starts");
+        assert!(status.running);
+        assert!(status.sleep_prevention.active);
+        assert_eq!(status.sleep_prevention.warning, None);
+        assert_eq!(launcher.acquired(), 1);
+
+        let duplicate = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("duplicate start is tolerated");
+        assert!(duplicate.running);
+        assert_eq!(launcher.acquired(), 1);
+        assert!(runtime.status().sleep_prevention.active);
+
+        let stopped = runtime.stop();
+        assert!(!stopped.running);
+        assert!(!stopped.sleep_prevention.active);
+        assert_eq!(launcher.acquired(), 1);
+
+        let restarted = runtime
+            .start_on_port(document(), 0)
+            .await
+            .expect("restart starts");
+        assert!(restarted.sleep_prevention.active);
+        assert_eq!(launcher.acquired(), 2);
+        runtime.stop();
+        assert!(!runtime.status().sleep_prevention.active);
+    }
+
+    /// #745 failure handling: when keep-awake acquisition fails, QBTCP stays
+    /// usable and status carries the manual-workaround warning instead of
+    /// claiming protection.
+    #[tokio::test(flavor = "current_thread")]
+    async fn sleep_acquisition_failure_warns_without_blocking_service() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::failing(usize::MAX));
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+
+        let status = runtime
+            .start_on_port(
+                Some(json!({
+                    "tournament": {"id": "t-1", "name": "Sleep warning test"},
+                    "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+                })),
+                0,
+            )
+            .await
+            .expect("server starts without sleep protection");
+        assert!(status.running);
+        assert!(!status.sleep_prevention.active);
+        assert!(status
+            .sleep_prevention
+            .warning
+            .as_deref()
+            .is_some_and(|warning| warning.contains("Disable automatic sleep")));
+
+        let stopped = runtime.stop();
+        assert!(!stopped.running);
+        assert_eq!(stopped.sleep_prevention.warning, None);
+    }
+
+    /// #745 failure handling: a start that fails before the guard exists
+    /// (occupied port) must not acquire anything or report protection.
+    #[tokio::test(flavor = "current_thread")]
+    async fn failed_start_acquires_no_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        // Hold the wildcard address: the server binds 0.0.0.0, and BSD
+        // stacks allow a wildcard bind alongside a loopback-only hold.
+        let held = std::net::TcpListener::bind("0.0.0.0:0").expect("occupy a port");
+        let port = held.local_addr().expect("port").port();
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+
+        assert!(runtime.start_on_port(None, port).await.is_err());
+        assert_eq!(launcher.acquired(), 0);
+        let status = runtime.status();
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+    }
+
+    /// #745 task exit: killing the serve task without stop() must not leave
+    /// protection reported once status is observed again.
+    #[tokio::test(flavor = "current_thread")]
+    async fn unexpected_task_exit_clears_reported_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime =
+            ServerRuntime::with_sleep_launcher(Arc::clone(&launcher) as Arc<dyn SleepLauncher>);
+        let status = runtime
+            .start_on_port(
+                Some(json!({
+                    "tournament": {"id": "t-1", "name": "Task exit test"},
+                    "rooms": [{"id": "room-101", "name": "Room 101", "available": true}]
+                })),
+                0,
+            )
+            .await
+            .expect("server starts");
+        assert!(status.sleep_prevention.active);
+
+        // Abort through the stored handle without stop(): the task dies
+        // without running any shutdown epilogue, like a real crash.
+        runtime
+            .inner
+            .lock()
+            .expect("runtime lock")
+            .task
+            .as_ref()
+            .expect("serve task")
+            .abort();
+        let mut status = runtime.status();
+        for _ in 0..100 {
+            if !status.running {
+                break;
+            }
+            tokio::task::yield_now().await;
+            status = runtime.status();
+        }
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+        runtime.stop();
+    }
+
+    /// #745 scope: a Director runtime that never started QBTCP holds no
+    /// sleep assertion and reports none.
+    #[test]
+    fn idle_runtime_reports_no_sleep_protection() {
+        use crate::sleep::test_support::FakeSleepLauncher;
+
+        let launcher = Arc::new(FakeSleepLauncher::succeeding());
+        let runtime = ServerRuntime::with_sleep_launcher(launcher);
+        let status = runtime.status();
+        assert!(!status.running);
+        assert!(!status.sleep_prevention.active);
+        assert_eq!(status.sleep_prevention.warning, None);
     }
 
     #[tokio::test(flavor = "current_thread")]

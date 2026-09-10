@@ -4,6 +4,7 @@ mod commands;
 mod live;
 mod live_server;
 mod server;
+mod sleep;
 mod store;
 mod transfers;
 

@@ -273,6 +273,53 @@ describe('room operations visibility', () => {
   });
 });
 
+describe('host sleep protection (#745)', () => {
+  function serverWithStatus(status: NativeServerState['status']): NativeServerState {
+    return {
+      status,
+      loading: false,
+      refresh: vi.fn(),
+      toggle: vi.fn(),
+      addInvitation: vi.fn(),
+      setAdvertisedAddress: vi.fn(),
+      apply: vi.fn(),
+    } as unknown as NativeServerState;
+  }
+
+  function renderWithServer(status: NativeServerState['status']) {
+    render(
+      <ConfirmProvider>
+        <RoomsView
+          state={tournamentState()}
+          controller={controllerWith()}
+          onAnnounce={vi.fn()}
+          server={serverWithStatus(status)}
+        />
+      </ConfirmProvider>,
+    );
+  }
+
+  test('a failed keep-awake acquisition surfaces the manual workaround', () => {
+    renderWithServer({
+      running: true,
+      sleepPrevention: {
+        active: false,
+        warning:
+          'Director could not prevent this computer from sleeping. Disable automatic sleep while QBTCP is running.',
+      },
+    });
+    expect(screen.getByText('Host sleep protection unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/Disable automatic sleep while QBTCP is running/)).toBeInTheDocument();
+  });
+
+  test('active protection is reported in diagnostics', () => {
+    renderWithServer({ running: true, sleepPrevention: { active: true } });
+    fireEvent.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(screen.getByText('Prevention active')).toBeInTheDocument();
+    expect(screen.queryByText('Host sleep protection unavailable')).toBeNull();
+  });
+});
+
 describe('QBTCP credential control', () => {
   test('requires explicit confirmation before resetting every pairing', async () => {
     const invoke = vi.fn(async (command: string) => {
