@@ -91,11 +91,22 @@ export function MultiSelect<T extends string = string>({
       close();
       triggerRef.current?.focus({ preventScroll: true });
     };
+    // Leaving with the keyboard dismisses like pointing outside does: an open
+    // popover must never linger while focus works unrelated controls (#724).
+    // Focus stays where the operator sent it; only Escape returns to the trigger.
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget as Node | null;
+      if (next && wrapRef.current?.contains(next)) return;
+      close();
+    };
+    const wrap = wrapRef.current;
     document.addEventListener('pointerdown', onPointerDown);
     document.addEventListener('keydown', onKeyDown, true);
+    wrap?.addEventListener('focusout', onFocusOut);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown, true);
+      wrap?.removeEventListener('focusout', onFocusOut);
     };
   }, [open, close]);
 
