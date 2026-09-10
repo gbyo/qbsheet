@@ -3,10 +3,12 @@ import {
   currentPhase,
   formatGenerationAvailability,
   previewAdvancement,
+  scoringDefaultsImpact,
   scoringRulePresets,
   type AdvancementRule,
   type DirectorState,
   type PhaseKind,
+  type ScoringDefaultsImpact,
 } from '../domain';
 import type { DirectorController } from '../state/useDirectorController';
 import {
@@ -82,7 +84,6 @@ export function FormatView({
   }
 
   const confirmedTeams = state.teams.filter((team) => team.status === 'confirmed').length;
-  const acceptedResultCount = state.games.filter((game) => game.status === 'accepted').length;
   const generation = formatGenerationAvailability(state);
   return (
     <Page>
@@ -121,12 +122,7 @@ export function FormatView({
           </Button>
         }
       >
-        {acceptedResultCount > 0 && (
-          <Callout tone="info" title="Core scoring values are locked">
-            {acceptedResultCount} accepted result{acceptedResultCount === 1 ? '' : 's'} already use these
-            values. Overtime, timers, lightning, bouncebacks, and tiebreakers remain editable.
-          </Callout>
-        )}
+        <ScoringScopeNote state={state} />
       </Panel>
 
       {format.kind === 'pools' || format.kind === 'playoff-pools'
@@ -193,7 +189,7 @@ export function FormatView({
         <ScoringRulesDialog
           rules={state.tournament.rules}
           controller={controller}
-          acceptedResultCount={acceptedResultCount}
+          impact={scoringDefaultsImpact(state)}
           onAnnounce={onAnnounce}
           onClose={() => setScoringOpen(false)}
         />
@@ -375,20 +371,40 @@ function FormatBasics({
   );
 }
 
+/**
+ * What a scoring save will and will not touch (#672).
+ *
+ * Settings are defaults for future unissued games. Once any game has an issued
+ * definition, the operator sees exactly how many games adopt the new defaults and how
+ * many keep their existing rules — never a lockout, never a silent rewrite.
+ */
+function ScoringScopeNote({ state, override }: { state?: DirectorState; override?: ScoringDefaultsImpact }) {
+  const impact = override ?? (state ? scoringDefaultsImpact(state) : null);
+  if (!impact) return null;
+  const issued = impact.issuedPinned.length + impact.live.length + impact.completed.length;
+  if (issued === 0) return null;
+  return (
+    <Callout tone="info" title="Scoring defaults apply to future games">
+      {impact.unissued.length} upcoming game{impact.unissued.length === 1 ? '' : 's'} will use these defaults.{' '}
+      {issued} issued game{issued === 1 ? '' : 's'} keep{issued === 1 ? 's' : ''} existing rules; changing an
+      issued game needs its own reissue, not this screen.
+    </Callout>
+  );
+}
+
 function ScoringRulesDialog({
   rules,
   controller,
-  acceptedResultCount,
+  impact,
   onAnnounce,
   onClose,
 }: {
   rules: NonNullable<DirectorState['tournament']>['rules'];
   controller: DirectorController;
-  acceptedResultCount: number;
+  impact: ScoringDefaultsImpact;
   onAnnounce: (announcement: AnnounceInput) => void;
   onClose: () => void;
 }) {
-  const locked = acceptedResultCount > 0;
   const [values, setValues] = useState(() => scoringRuleDraftsFor(rules));
   const [booleans, setBooleans] = useState(() => ({
     useBonuses: rules.useBonuses,
@@ -470,6 +486,10 @@ function ScoringRulesDialog({
       return;
     }
     setFieldErrors({});
+    // Every field always saves: the controller stores these as future defaults, and
+    // issued games keep their pinned definitions regardless of what changes here.
+    // The nullable value fields merge via assign (as before): a blank nullable means
+    // "no tier", which the rules type carries as undefined rather than null.
     const changes: Partial<typeof rules> = {
       overtimeTossupCount: parsed.overtimeTossupCount as number,
       lightningCountPerTeam: parsed.lightningCountPerTeam as number,
@@ -479,29 +499,33 @@ function ScoringRulesDialog({
       overtimeBonuses: booleans.overtimeBonuses,
       timed: booleans.timed,
       lightning: booleans.lightning,
+      useBonuses: booleans.useBonuses,
     };
-    if (!locked) {
-      Object.assign(changes, {
-        tossupValue: parsed.tossupValue,
-        superpowerValue: parsed.superpowerValue,
-        powerValue: parsed.powerValue,
-        negValue: parsed.negValue,
-        bonusValue: parsed.bonusValue,
-        tossupCount: parsed.tossupCount,
-        maximumTossupCount: parsed.maximumTossupCount,
-        bonusParts: parsed.bonusParts,
-        minimumBonusParts: parsed.minimumBonusParts,
-        maximumBonusScore: parsed.maximumBonusScore,
-        bonusDivisor: parsed.bonusDivisor,
-        maximumActivePlayers: parsed.maximumActivePlayers,
-        useBonuses: booleans.useBonuses,
-      });
-    }
+    Object.assign(changes, {
+      tossupValue: parsed.tossupValue,
+      superpowerValue: parsed.superpowerValue,
+      powerValue: parsed.powerValue,
+      negValue: parsed.negValue,
+      bonusValue: parsed.bonusValue,
+      tossupCount: parsed.tossupCount,
+      maximumTossupCount: parsed.maximumTossupCount,
+      bonusParts: parsed.bonusParts,
+      minimumBonusParts: parsed.minimumBonusParts,
+      maximumBonusScore: parsed.maximumBonusScore,
+      bonusDivisor: parsed.bonusDivisor,
+      maximumActivePlayers: parsed.maximumActivePlayers,
+    });
     if (!controller.updateRules(changes)) {
       onAnnounce(errorNotice('Scoring rules were not saved; review the Director error.'));
       return;
     }
-    onAnnounce('Scoring rules saved.');
+    const issued = impact.issuedPinned.length + impact.live.length + impact.completed.length;
+    onAnnounce(
+      issued === 0
+        ? 'Scoring defaults saved for future games.'
+        : `Scoring defaults saved for ${impact.unissued.length} future game${impact.unissued.length === 1 ? '' : 's'}; ` +
+            `${issued} issued game${issued === 1 ? '' : 's'} keep${issued === 1 ? 's' : ''} existing rules.`,
+    );
     onClose();
   };
 
@@ -520,26 +544,23 @@ function ScoringRulesDialog({
 
   return (
     <Dialog
-      title="Scoring rules"
-      description="Choose a preset or edit the values. Nothing changes until Save."
+      title="Scoring defaults"
+      description="Choose a preset or edit the values. Saving sets the defaults for future games; issued games keep their existing rules."
       size="xl"
       onClose={onClose}
       onSubmit={save}
-      submitLabel="Save scoring rules"
+      submitLabel="Save scoring defaults"
     >
-      {locked && (
-        <Callout tone="info" title="Core values are locked">
-          Accepted results already use the tournament&apos;s tossup, bonus, and roster-size values.
-          Operational options remain editable.
-        </Callout>
-      )}
-      <DialogSection title="Preset">
+      <ScoringScopeNote override={impact} />
+      <DialogSection
+        title="Preset"
+        description="A preset sets the future defaults above; issued games keep their rules unless explicitly reissued."
+      >
         <div className="director-actions">
           {scoringRulePresets.map((preset) => (
             <Button
               key={preset.id}
               variant="secondary"
-              disabled={locked}
               onClick={() => applyPreset(preset)}
               title={preset.description}
             >
@@ -553,7 +574,6 @@ function ScoringRulesDialog({
           <NumberRule
             label="Tossup value"
             value={values.tossupValue}
-            disabled={locked}
             error={fieldErrors.tossupValue}
             onChange={(value) => setValue('tossupValue', value)}
           />
@@ -561,7 +581,6 @@ function ScoringRulesDialog({
             label="Power value"
             hint="Blank means no power mark."
             value={values.powerValue}
-            disabled={locked}
             error={fieldErrors.powerValue}
             onChange={(value) => setValue('powerValue', value)}
           />
@@ -569,42 +588,36 @@ function ScoringRulesDialog({
             label="Neg value"
             hint="Blank means no interrupt penalty."
             value={values.negValue}
-            disabled={locked}
             error={fieldErrors.negValue}
             onChange={(value) => setValue('negValue', value)}
           />
           <NumberRule
             label="Bonus value"
             value={values.bonusValue}
-            disabled={locked}
             error={fieldErrors.bonusValue}
             onChange={(value) => setValue('bonusValue', value)}
           />
           <NumberRule
             label="Tossups"
             value={values.tossupCount}
-            disabled={locked}
             error={fieldErrors.tossupCount}
             onChange={(value) => setValue('tossupCount', value)}
           />
           <NumberRule
             label="Bonus parts"
             value={values.bonusParts}
-            disabled={locked}
             error={fieldErrors.bonusParts}
             onChange={(value) => setValue('bonusParts', value)}
           />
           <NumberRule
             label="Maximum active players"
             value={values.maximumActivePlayers}
-            disabled={locked}
             error={fieldErrors.maximumActivePlayers}
             onChange={(value) => setValue('maximumActivePlayers', value)}
           />
         </FieldGrid>
         <Checkbox
           checked={booleans.useBonuses}
-          disabled={locked}
           label="Use bonuses"
           onChange={(useBonuses) => setBooleans((current) => ({ ...current, useBonuses }))}
         />
@@ -668,7 +681,6 @@ function ScoringRulesDialog({
               label="Superpower value"
               hint="Blank means no second tier."
               value={values.superpowerValue}
-              disabled={locked}
               error={fieldErrors.superpowerValue}
               onChange={(value) => setValue('superpowerValue', value)}
             />
@@ -676,28 +688,24 @@ function ScoringRulesDialog({
               label="Maximum tossups"
               hint="Blank means regulation ends at Tossups."
               value={values.maximumTossupCount}
-              disabled={locked}
               error={fieldErrors.maximumTossupCount}
               onChange={(value) => setValue('maximumTossupCount', value)}
             />
             <NumberRule
               label="Minimum bonus parts"
               value={values.minimumBonusParts}
-              disabled={locked}
               error={fieldErrors.minimumBonusParts}
               onChange={(value) => setValue('minimumBonusParts', value)}
             />
             <NumberRule
               label="Maximum bonus score"
               value={values.maximumBonusScore}
-              disabled={locked}
               error={fieldErrors.maximumBonusScore}
               onChange={(value) => setValue('maximumBonusScore', value)}
             />
             <NumberRule
               label="Bonus divisor"
               value={values.bonusDivisor}
-              disabled={locked}
               error={fieldErrors.bonusDivisor}
               onChange={(value) => setValue('bonusDivisor', value)}
             />
@@ -1096,7 +1104,7 @@ function TiebreakerConfiguration({
     if (!current || !target) return;
     next[index] = target;
     next[targetIndex] = current;
-    if (controller.updateRules({ tiebreakers: next })) {
+    if (controller.updateTiebreakers(next)) {
       onAnnounce(
         `${tiebreakerLabel(current)} moved ${delta < 0 ? 'earlier' : 'later'} in the standings order.`,
       );
@@ -1105,7 +1113,7 @@ function TiebreakerConfiguration({
   return (
     <Panel
       title="Tiebreaker order"
-      description="The first criterion that separates tied teams wins."
+      description="The first criterion that separates tied teams wins. Standings only — reordering never changes an issued scorer definition."
       actions={
         <ReorderToggle
           active={reorder.active}
@@ -1431,7 +1439,6 @@ function PoolConfiguration({
             <Field label="Add another pool">
               <TextInput
                 value={newPoolName}
-                disabled={locked}
                 onChange={(event) => setNewPoolName(event.target.value)}
                 placeholder={poolName(pools.length)}
               />

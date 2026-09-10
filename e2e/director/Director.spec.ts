@@ -294,7 +294,9 @@ test('Director edits scoring rules without persisting an incomplete numeric fiel
   // rather than a wall of numeric inputs on the destination itself.
   await page.getByRole('button', { name: 'Edit scoring rules' }).click();
   const dialog = page.getByRole('dialog');
-  const save = dialog.locator('.director-dialog-footer').getByRole('button', { name: 'Save scoring rules' });
+  const save = dialog
+    .locator('.director-dialog-footer')
+    .getByRole('button', { name: 'Save scoring defaults' });
 
   const bonusValue = page.getByLabel('Bonus value');
   await expect(bonusValue).toHaveValue('10');

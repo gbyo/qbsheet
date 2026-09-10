@@ -100,3 +100,46 @@ describe('FormatView progressive disclosure', () => {
     expect(screen.getByRole('button', { name: 'Add stage' })).toBeTruthy();
   });
 });
+
+describe('FormatView prospective scoring scope (#672)', () => {
+  function game(id: string, overrides: Partial<DirectorState['scheduledGames'][number]> = {}) {
+    return {
+      id,
+      roundId: 'round-1',
+      poolId: null,
+      roomId: null,
+      packetId: null,
+      leftTeamId: 'team-a',
+      rightTeamId: 'team-b',
+      bye: false,
+      status: 'scheduled' as const,
+      assignmentRevision: 1,
+      ...overrides,
+    };
+  }
+
+  test('no scope note before any game is issued', () => {
+    const state = formatState([phase('phase-1', 'Tournament', 1)]);
+    state.scheduledGames.push(game('scheduled-1'), game('scheduled-2'));
+    renderFormat(state);
+
+    expect(screen.queryByText(/Scoring defaults apply to future games/)).toBeNull();
+  });
+
+  test('issued games keep existing rules while upcoming games adopt defaults', () => {
+    const state = formatState([phase('phase-1', 'Tournament', 1)]);
+    state.scheduledGames.push(
+      game('scheduled-issued-1', { status: 'released', definitionRevision: 1 }),
+      game('scheduled-issued-2', { status: 'accepted' }),
+      game('scheduled-future-1'),
+      game('scheduled-future-2'),
+      game('scheduled-future-3'),
+    );
+    renderFormat(state);
+
+    expect(screen.getByText(/Scoring defaults apply to future games/)).toBeVisible();
+    expect(
+      screen.getByText(/3 upcoming games will use these defaults\. 2 issued games keep existing rules/),
+    ).toBeVisible();
+  });
+});
