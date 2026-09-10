@@ -83,14 +83,15 @@ fn build_preflight_url(base_url: &str, tournament_id: &str) -> Result<Url, Relay
             "The relay address must not contain credentials.",
         ));
     }
-    if (url.path() != "/" && !url.path().is_empty()) || url.query().is_some() || url.fragment().is_some() {
+    if (url.path() != "/" && !url.path().is_empty())
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
         return Err(RelayProbeError::invalid(
             "The relay address must be a bare origin with no path, query, or fragment.",
         ));
     }
-    url.set_path(&format!(
-        "/qbtcp/v1/tournaments/{tournament_id}/sessions"
-    ));
+    url.set_path(&format!("/qbtcp/v1/tournaments/{tournament_id}/sessions"));
     Ok(url)
 }
 
@@ -161,7 +162,10 @@ mod tests {
             "https://example.workers.dev?query=1",
             "https://example.workers.dev/#fragment",
         ] {
-            assert!(build_preflight_url(invalid, TOURNAMENT_ID).is_err(), "{invalid}");
+            assert!(
+                build_preflight_url(invalid, TOURNAMENT_ID).is_err(),
+                "{invalid}"
+            );
         }
         assert!(build_preflight_url("https://example.workers.dev", "bad").is_err());
     }
@@ -208,7 +212,10 @@ mod tests {
         server.join().expect("server");
         assert_eq!(result.status, 204);
         assert_eq!(result.allow_origin.as_deref(), Some(SCORER_ORIGIN));
-        assert!(result.allow_methods.as_deref().is_some_and(|value| value.contains("POST")));
+        assert!(result
+            .allow_methods
+            .as_deref()
+            .is_some_and(|value| value.contains("POST")));
         assert!(result
             .allow_headers
             .as_deref()

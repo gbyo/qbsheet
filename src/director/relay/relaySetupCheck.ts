@@ -23,12 +23,7 @@ import { scoresheetOrigin } from './relayConfig';
 import { probeNativeRelayScorerOrigin } from './relayNativeProbe';
 
 export type RelaySetupStepKey =
-  | 'reachable'
-  | 'discovery'
-  | 'management'
-  | 'origin'
-  | 'publication'
-  | 'stream';
+  'reachable' | 'discovery' | 'management' | 'origin' | 'publication' | 'stream';
 
 export interface RelaySetupStep {
   key: RelaySetupStepKey;
@@ -237,7 +232,8 @@ export async function probeRelayScorerOrigin(
     return {
       key,
       ok: false,
-      message: 'Open the Director desktop app to verify the scorer browser origin before using Internet QBTCP.',
+      message:
+        'Open the Director desktop app to verify the scorer browser origin before using Internet QBTCP.',
     };
   }
   if (response.status !== 204) {
@@ -406,11 +402,7 @@ export async function runRelaySetupValidation(input: RelaySetupValidationInput):
   steps.push(management);
   if (!management.ok) return { ready: false, steps };
 
-  const origin = await probeRelayScorerOrigin(
-    input.baseUrl,
-    input.tournamentId,
-    input.fetchImpl,
-  );
+  const origin = await probeRelayScorerOrigin(input.baseUrl, input.tournamentId, input.fetchImpl);
   steps.push(origin);
   if (!origin.ok) return { ready: false, steps };
 

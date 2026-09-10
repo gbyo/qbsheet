@@ -238,23 +238,14 @@ describe('scorer-origin probe', () => {
   it('fails closed when the relay refuses the scorer browser origin', async () => {
     const report = await runRelaySetupValidation(input(originRefusingFetch()));
     expect(report.ready).toBe(false);
-    expect(report.steps.map((step) => step.key)).toEqual([
-      'reachable',
-      'discovery',
-      'management',
-      'origin',
-    ]);
+    expect(report.steps.map((step) => step.key)).toEqual(['reachable', 'discovery', 'management', 'origin']);
     expect(report.steps.at(-1)).toMatchObject({ key: 'origin', ok: false });
     expect(report.steps.at(-1)?.message).toMatch(/RELAY_ALLOWED_ORIGINS/);
   });
 
   it('passes when the origin falls through to the expected credential refusal', async () => {
     const fetchImpl = vi.fn(async (_url: string) => jsonResponse(401, { error: 'invalid_credential' }));
-    const step = await probeRelayScorerOrigin(
-      baseUrl,
-      tournamentId,
-      fetchImpl as unknown as typeof fetch,
-    );
+    const step = await probeRelayScorerOrigin(baseUrl, tournamentId, fetchImpl as unknown as typeof fetch);
     expect(step).toMatchObject({ key: 'origin', ok: true });
   });
 });
