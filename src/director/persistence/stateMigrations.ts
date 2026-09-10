@@ -186,16 +186,17 @@ function migrateV7ToV8(value: Record<string, unknown>): Record<string, unknown> 
 function migrateV8ToV9(value: Record<string, unknown>): Record<string, unknown> {
   const next = structuredClone(value);
   const rooms = arrayOfRecords(next.rooms, 'rooms');
-  next.rooms = rooms.map((room) => {
+  const normalizedRooms: Array<Record<string, unknown>> = rooms.map((room) => {
     const existing = Array.isArray(room.defaultEquipmentIds)
       ? room.defaultEquipmentIds.filter((id): id is string => typeof id === 'string')
       : null;
     const legacy = typeof room.equipmentId === 'string' && room.equipmentId ? [room.equipmentId] : [];
     return { ...room, defaultEquipmentIds: existing && existing.length > 0 ? existing : legacy };
   });
+  next.rooms = normalizedRooms;
 
   const roomsById = new Map(
-    rooms.flatMap((room) => (typeof room.id === 'string' ? [[room.id, room] as const] : [])),
+    normalizedRooms.flatMap((room) => (typeof room.id === 'string' ? [[room.id, room] as const] : [])),
   );
   const closedRoundIds = new Set(
     arrayOfRecords(next.rounds, 'rounds')
@@ -221,7 +222,16 @@ function migrateV8ToV9(value: Record<string, unknown>): Record<string, unknown> 
     if (game.bye === true || game.status === 'cancelled') continue;
     if (closedRoundIds.has(roundId) || covered.has(gameId)) continue;
     const room = roomsById.get(roomId);
-    const equipmentId = room && typeof room.equipmentId === 'string' ? room.equipmentId : null;
+    const defaultEquipmentIds =
+      room && Array.isArray(room.defaultEquipmentIds)
+        ? room.defaultEquipmentIds.filter((id): id is string => typeof id === 'string')
+        : [];
+    const equipmentIds =
+      defaultEquipmentIds.length > 0
+        ? defaultEquipmentIds
+        : room && typeof room.equipmentId === 'string' && room.equipmentId
+          ? [room.equipmentId]
+          : [];
     materialized.push({
       id: `assignment-migrated-${gameId}`,
       roundId,
@@ -230,7 +240,7 @@ function migrateV8ToV9(value: Record<string, unknown>): Record<string, unknown> 
       roomId,
       moderatorId: room && typeof room.moderatorId === 'string' ? room.moderatorId : null,
       scorekeeperId: room && typeof room.scorekeeperId === 'string' ? room.scorekeeperId : null,
-      equipmentIds: equipmentId ? [equipmentId] : [],
+      equipmentIds,
       pinned: { room: true },
     });
   }

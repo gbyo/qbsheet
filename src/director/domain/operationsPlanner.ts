@@ -496,7 +496,7 @@ export function planRoundOperations(
       roomId !== current.roomId ||
       moderatorId !== current.moderatorId ||
       scorekeeperId !== current.scorekeeperId ||
-      equipmentIds.join('') !== [...current.equipmentIds].sort().join('');
+      equipmentIds.join('\u001f') !== [...current.equipmentIds].sort().join('\u001f');
 
     results.push({
       scheduledGameId: game.id,
@@ -617,11 +617,15 @@ export function resourceUnavailabilityImpact(
       }
       if (kind === 'equipment' && assignment.equipmentIds.includes(resourceId)) record('equipment');
     }
-    if (kind === 'staff') {
+    if (kind === 'staff' || kind === 'equipment') {
       for (const duty of state.operationalAssignments) {
         if (duty.roundId !== round.id || duty.kind === 'room') continue;
-        if (!(duty.staffIds ?? []).includes(resourceId)) continue;
-        if (stillHolds(duty.kind === 'hq' ? 'hq' : 'runner')) continue;
+        if (kind === 'staff') {
+          if (!(duty.staffIds ?? []).includes(resourceId)) continue;
+          if (stillHolds(duty.kind === 'hq' ? 'hq' : 'runner')) continue;
+        } else if (!duty.equipmentIds.includes(resourceId)) {
+          continue;
+        }
         affected.push({
           roundId: round.id,
           roundName: round.name,

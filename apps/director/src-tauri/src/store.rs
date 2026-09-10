@@ -903,7 +903,11 @@ fn sync_normalized_state(
             params![
                 id,
                 round_id,
-                text(assignment, "kind").unwrap_or_else(|| "room".to_owned()),
+                match text(assignment, "kind").as_deref() {
+                    Some("hq") => "hq".to_owned(),
+                    Some("runner") => "runner".to_owned(),
+                    _ => "room".to_owned(),
+                },
                 text(assignment, "scheduledGameId"),
                 text(assignment, "roomId"),
                 text(assignment, "moderatorId"),
