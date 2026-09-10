@@ -12,11 +12,17 @@
 # # What is measured
 #
 # The uncompressed size of the App Clip bundle after app thinning, which is what Apple's rule is
-# stated against. A simulator build is a close approximation and is what CI can produce without
-# signing; an `xcarchive`'s thinned variant is the exact number and is what a release should use.
+# stated against. An unsigned `generic/platform=iOS` build is a close approximation and is what CI
+# can produce without credentials; an `xcarchive`'s thinned variant is the exact number and is what
+# a release should use.
+#
+# A *simulator* build is deliberately not what this measures. Its binaries are fat x86_64 + arm64,
+# so a Clip whose code is a third of its bundle reads roughly 4 MB heavy against a limit stated for
+# a single-architecture install — the kind of error that either fails a release build for no reason
+# or, worse, is corrected for by eye and then trusted.
 #
 # Usage:
-#   ./ios/scripts/measure-app-clip.sh                       # build for the simulator and measure
+#   ./ios/scripts/measure-app-clip.sh                       # build for iOS device arch and measure
 #   ./ios/scripts/measure-app-clip.sh path/to/Clip.app      # measure an existing bundle
 #
 # Exits non-zero above the budget.
@@ -33,16 +39,17 @@ bundle="${1:-}"
 
 if [ -z "$bundle" ]; then
   derived="${QBSHEET_DERIVED_DATA:-$(mktemp -d)/dd}"
-  echo "Building QBSheetLiveClip for the simulator…"
+  echo "Building QBSheetLiveClip for the iOS device architecture…"
   xcodebuild \
     -project "$repo_root/ios/QBSheetLive.xcodeproj" \
     -scheme QBSheetLiveClip \
     -configuration Release \
-    -destination 'generic/platform=iOS Simulator' \
+    -destination 'generic/platform=iOS' \
     -derivedDataPath "$derived" \
     CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
     build >/dev/null
-  bundle="$derived/Build/Products/Release-iphonesimulator/QBSheetLiveClip.app"
+  bundle="$derived/Build/Products/Release-iphoneos/QBSheetLiveClip.app"
 fi
 
 if [ ! -d "$bundle" ]; then

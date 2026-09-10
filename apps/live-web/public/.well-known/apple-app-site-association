@@ -2,7 +2,7 @@
   "applinks": {
     "details": [
       {
-        "appIDs": ["TEAMID.com.qbsheet.live"],
+        "appIDs": ["57CW34C9J4.com.qbsheet.live"],
         "components": [
           {
             "/": "/t/*",
@@ -13,7 +13,7 @@
     ]
   },
   "appclips": {
-    "apps": ["TEAMID.com.qbsheet.live.Clip"]
+    "apps": ["57CW34C9J4.com.qbsheet.live.Clip"]
   },
   "webcredentials": {
     "apps": []

@@ -12,9 +12,12 @@
 		25BFCF7EAA9802114F10EA1B /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 788A6AA3AA3B9B16AAD2F9A7 /* QBSheetLiveKit */; };
 		44ECD5F83AAB4C0D7B3FB23E /* QBSheetLiveClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2D6B8A0EB6CD35B5D76050B /* QBSheetLiveClipApp.swift */; };
 		58A6BFD0BDA0E1E155CCC10A /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 04DB2AD7D394B0997EDACB3D /* QBSheetLiveKit */; };
+		65144001C879F97B47598176 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 3139B24BEF2B7B5A1A63A25E /* AppIcon.icon */; };
 		7AC26A4C646A2175481BFB79 /* QBSheetLiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C966ACAB030C694C31D32219 /* QBSheetLiveActivity.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		8BE045753AC5B49E247E3ED5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E879839C1E73707E97D4B35 /* Assets.xcassets */; };
 		98E29F210AB7660A49F3AA1E /* QBSheetLiveActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 534BB41DBB445CB81E48F059 /* QBSheetLiveActivityView.swift */; };
+		9A045B9C129FDC3EEB5A579A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5E879839C1E73707E97D4B35 /* Assets.xcassets */; };
+		C2EE36A46623FE1FF5F5C5BA /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 3139B24BEF2B7B5A1A63A25E /* AppIcon.icon */; };
 		C77ED66044D9900501B7BA71 /* QBSheetLiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 82C95B2EC17DC5A8D4C234A6 /* QBSheetLiveKit */; };
 		C949124C57ACC0AF0252EA88 /* QBSheetLiveClip.app in Embed App Clips */ = {isa = PBXBuildFile; fileRef = B7AEEF05B5F8897A91C31143 /* QBSheetLiveClip.app */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		CEB9C27158E1A19D99A44F19 /* QBSheetLiveActivityBundle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35812C838B9F0451E80B5697 /* QBSheetLiveActivityBundle.swift */; };
@@ -92,6 +95,7 @@
 		0CC64EBC8BFFC3D1BBA882BB /* QBSheetLiveClipActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveClipActivityBundle.swift; sourceTree = "<group>"; };
 		11A450A0EE5237DD04C878F9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		1FE96BE5B83F54057307CE7C /* QBSheetLiveActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLiveActivity.entitlements; sourceTree = "<group>"; };
+		3139B24BEF2B7B5A1A63A25E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		35812C838B9F0451E80B5697 /* QBSheetLiveActivityBundle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveActivityBundle.swift; sourceTree = "<group>"; };
 		36B55E8E5DD547A1968195A8 /* QBSheetLiveApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QBSheetLiveApp.swift; sourceTree = "<group>"; };
 		476C78C90140AC42D40194EA /* QBSheetLiveClipActivity.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = QBSheetLiveClipActivity.entitlements; sourceTree = "<group>"; };
@@ -201,6 +205,7 @@
 		ACA19495DC4FFEB7044478C9 /* QBSheetLive */ = {
 			isa = PBXGroup;
 			children = (
+				3139B24BEF2B7B5A1A63A25E /* AppIcon.icon */,
 				5E879839C1E73707E97D4B35 /* Assets.xcassets */,
 				00A1BBFF24C5D9A8321D026D /* Info.plist */,
 				75C5AFF918B536AB72AD1C6C /* QBSheetLive.entitlements */,
@@ -238,6 +243,7 @@
 			buildConfigurationList = 5594DC574455ECD42ACFB3A8 /* Build configuration list for PBXNativeTarget "QBSheetLiveClip" */;
 			buildPhases = (
 				E73DB52AF3FE8F9A5C10B23A /* Sources */,
+				EDE152C675F2F0B8A4F4CFD6 /* Resources */,
 				22B9E1074AB12145CFB787F6 /* Frameworks */,
 				0C4C8E769F1D80B9B891B0EC /* Embed Foundation Extensions */,
 			);
@@ -326,19 +332,19 @@
 				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					1385C6DAB3CCED8FB8F03ECF = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 57CW34C9J4;
 						ProvisioningStyle = Automatic;
 					};
 					1B0DC49096381806966DB79F = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 57CW34C9J4;
 						ProvisioningStyle = Automatic;
 					};
 					D5D01D0FDDBF81071EB7B3E3 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 57CW34C9J4;
 						ProvisioningStyle = Automatic;
 					};
 					F460577D39B07DC9970A91C4 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 57CW34C9J4;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -373,7 +379,17 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C2EE36A46623FE1FF5F5C5BA /* AppIcon.icon in Resources */,
 				8BE045753AC5B49E247E3ED5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EDE152C675F2F0B8A4F4CFD6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				65144001C879F97B47598176 /* AppIcon.icon in Resources */,
+				9A045B9C129FDC3EEB5A579A /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -476,7 +492,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 57CW34C9J4;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -518,8 +534,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClip/QBSheetLiveClip.entitlements;
 				INFOPLIST_FILE = QBSheetLiveClip/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -538,8 +552,6 @@
 				CODE_SIGN_ENTITLEMENTS = QBSheetLive/QBSheetLive.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = QBSheetLive/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -592,8 +604,6 @@
 				CODE_SIGN_ENTITLEMENTS = QBSheetLive/QBSheetLive.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				INFOPLIST_FILE = QBSheetLive/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -641,7 +651,7 @@
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 57CW34C9J4;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -710,8 +720,6 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = QBSheetLiveClip/QBSheetLiveClip.entitlements;
 				INFOPLIST_FILE = QBSheetLiveClip/Info.plist;
-				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
-				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",

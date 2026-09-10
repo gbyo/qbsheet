@@ -36,6 +36,28 @@
     <string>UIInterfaceOrientationLandscapeRight</string>
   </array>
   <!--
+    iPad is in TARGETED_DEVICE_FAMILY, and an iPad app that does not declare all four orientations
+    is treated as one that cannot multitask. Upside-down is deliberately absent on iPhone, where no
+    system app supports it, and present here, where the home indicator has no fixed edge.
+  -->
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+  <!--
+    An empty UILaunchScreen is what tells iOS the app is built for the full screen rather than
+    letterboxed at a legacy size. It has to be a literal key in this file: the
+    INFOPLIST_KEY_UILaunchScreen_Generation build setting only applies to an Info.plist that Xcode
+    generates, and these targets supply their own, so the setting was silently doing nothing.
+    The dictionary is empty on purpose — the launch state is a plain background, and every pixel of
+    the first frame is SwiftUI's.
+  -->
+  <key>UILaunchScreen</key>
+  <dict/>
+  <!--
     A Debug-only URL scheme. A universal link needs live.qbsheet.com to serve the AASA file and the
     app to be signed with the matching Team ID; neither holds in a simulator or on CI, and without
     this the app could not be exercised end to end before the domain exists. Stripped from Release

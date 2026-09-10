@@ -25,9 +25,10 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    # Placeholders. Replace with the real Team ID before an App Store build; the AASA file and the
-    # associated-domains entitlements have to agree with it. See docs/QBLIVE_IOS.md.
-    DEVELOPMENT_TEAM: ""
+    # The Apple Developer Team ID. The AASA file served from live.qbsheet.com has to name the same
+    # one in `appIDs` and `appclips.apps`, or universal links and App Clip invocation both fail
+    # silently. See docs/QBLIVE_IOS.md and apps/live-web/public/.well-known/.
+    DEVELOPMENT_TEAM: "57CW34C9J4"
     CODE_SIGN_STYLE: Automatic
     MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
@@ -46,7 +47,12 @@ targets:
     type: application
     platform: iOS
     sources:
+      # Icon Composer document. `type: file` keeps XcodeGen from descending into it as a group; the
+      # .icon is an opaque bundle that the asset compiler reads whole.
+      - path: QBSheetLive/AppIcon.icon
+        type: file
       - path: QBSheetLive
+        excludes: ["AppIcon.icon", "AppIcon.icon/**"]
       - path: Shared
     dependencies:
       - package: QBSheetLiveKit
@@ -59,12 +65,13 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.qbsheet.live
+        # Every target here supplies its own Info.plist, so the INFOPLIST_KEY_* settings do not
+        # apply — they only feed an Info.plist that Xcode generates. UILaunchScreen and the iPad
+        # orientations are literal keys in the file itself.
         INFOPLIST_FILE: QBSheetLive/Info.plist
         CODE_SIGN_ENTITLEMENTS: QBSheetLive/QBSheetLive.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
 
   # ---------------------------------------------------------------- App Clip
   QBSheetLiveClip:
@@ -73,9 +80,12 @@ targets:
     sources:
       - path: QBSheetLiveClip
       - path: Shared
-      # The App Clip must ship with the same icon as the full app. Keeping a single asset catalog
-      # prevents the two products from drifting and gives the Clip an AppIcon resource at archive time.
+      # The App Clip must ship with the same icon as the full app. Compiling the full app's asset
+      # catalog and Icon Composer document into the Clip as well is what keeps the two from drifting
+      # and gives the Clip an AppIcon resource at archive time.
       - path: QBSheetLive/Assets.xcassets
+      - path: QBSheetLive/AppIcon.icon
+        type: file
     dependencies:
       - package: QBSheetLiveKit
         product: QBSheetLiveKit
@@ -88,8 +98,6 @@ targets:
         CODE_SIGN_ENTITLEMENTS: QBSheetLiveClip/QBSheetLiveClip.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
-        INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
 
   # ------------------------------------------------- Live Activity extensions
   QBSheetLiveActivity:
