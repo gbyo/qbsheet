@@ -4,7 +4,7 @@ use crate::model::{
     OPERATOR_NAME_HEADER, QBTCP_PREFIX, ROOM_TOKEN_HEADER, SESSION_TOKEN_HEADER,
 };
 use axum::body::{Body, Bytes};
-use axum::extract::{DefaultBodyLimit, Path, State};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, Extension, Path, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, Request, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -13,6 +13,7 @@ use axum::Router;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::Value;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 /// Build the canonical QBTCP v1 router.
@@ -84,19 +85,47 @@ struct PairBody {
     room_id: Option<String>,
 }
 
+/// Rate-limit identity for one pairing request (#729).
+///
+/// The direct LAN listener keys on the socket peer IP so independent scoring
+/// devices never share a limiter bucket. `X-Forwarded-For` is only honored
+/// behind explicit trusted-proxy configuration: clients can forge it, so it
+/// must never be the primary identity on an open listener.
+fn pairing_source(
+    server: &QbtcpServer,
+    headers: &HeaderMap,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
+) -> String {
+    if server.config.trust_forwarded_for {
+        if let Some(header) = header_value(headers, "x-forwarded-for") {
+            if let Some(identity) = header
+                .split(',')
+                .next()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+            {
+                return identity.to_owned();
+            }
+        }
+    }
+    peer.map(|Extension(ConnectInfo(addr))| addr.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
 async fn post_pair(
     State(server): State<Arc<QbtcpServer>>,
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, QbtcpError> {
     // Pairing failures must not distinguish malformed from unknown/mismatched codes. A malformed
     // JSON body still gets the same safe pairing refusal rather than an oracle-shaped parse error.
     let body = parse_object::<PairBody>(&body).map_err(|_| QbtcpError::PairingRefused)?;
-    let source = header_value(&headers, "x-forwarded-for").unwrap_or("unknown");
+    let source = pairing_source(&server, &headers, peer);
     let paired = server.pair(
         body.code.as_deref().unwrap_or_default(),
         body.room_id.as_deref(),
-        source,
+        &source,
     )?;
     Ok(json_response(StatusCode::OK, paired))
 }

@@ -53,6 +53,14 @@ pub struct QbtcpConfig {
     pub allowed_origins: Vec<String>,
     pub pairing_code_ttl: Duration,
     pub pairing_rate_limit: PairingRateLimit,
+    /// Trust `X-Forwarded-For` for pairing rate-limit identity (#729).
+    ///
+    /// Keep `false` for direct-LAN serving: browsers and other clients can forge
+    /// this header, so trusting it on an open listener lets anyone bypass the
+    /// limiter. Enable only behind a trusted reverse proxy that overwrites the
+    /// header from the real peer address; the transport then keys on the
+    /// client-most entry. The direct listener always keys on the socket peer IP.
+    pub trust_forwarded_for: bool,
     /// Inactivity timeout. Expiry abandons a session while preserving its recovery state and audit
     /// records; it never deletes a session or its submitted result.
     pub session_idle_timeout: Duration,
@@ -72,6 +80,7 @@ impl Default for QbtcpConfig {
             allowed_origins: Vec::new(),
             pairing_code_ttl: Duration::from_secs(15 * 60),
             pairing_rate_limit: PairingRateLimit::default(),
+            trust_forwarded_for: false,
             session_idle_timeout: Duration::from_secs(24 * 60 * 60),
         }
     }
@@ -155,7 +164,11 @@ pub struct PairingRateLimit {
 impl Default for PairingRateLimit {
     fn default() -> Self {
         Self {
-            max_attempts: 8,
+            // Headroom for a whole round pairing inside one window, including
+            // retries, while staying far below code-guessing throughput (#729).
+            // Deployments where many devices share one NAT-visible IP can raise
+            // this further; per-IP abuse protection still applies.
+            max_attempts: 32,
             window: Duration::from_secs(60),
         }
     }
