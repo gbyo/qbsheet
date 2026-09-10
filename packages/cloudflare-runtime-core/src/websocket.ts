@@ -22,7 +22,7 @@ export const SOCKET_ATTACHMENT_VERSION = 1;
  * so a future deployment never misreads an old attachment as a new shape.
  */
 export function encodeSocketAttachment(attachment: Record<string, unknown>): string {
-  return JSON.stringify({ v: SOCKET_ATTACHMENT_VERSION, ...attachment });
+  return JSON.stringify({ ...attachment, v: SOCKET_ATTACHMENT_VERSION });
 }
 
 /**
