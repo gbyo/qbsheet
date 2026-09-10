@@ -7,10 +7,10 @@
  * exists on one surface but drifts (or fabricates) on another fails here.
  *
  * Scope is the main-model stat set: record, win %, GP, PPG, answer counts,
- * TUH, PPTUH, bonuses heard/points, and PPB. Foundation-gated statistics
- * (bounceback conversion, lightning, fractional GP, eligibility metadata)
- * extend this matrix when #746-#749 land, as do the QBLive TUH/games columns
- * from #753/PR8; unknowns already propagate as null/— on every surface below.
+ * TUH, PPTUH, bonuses heard/points, and PPB, plus the QBLive TUH/games columns
+ * from #753. Foundation-gated statistics (bounceback conversion, lightning,
+ * fractional GP, eligibility metadata) carry their own matrix under the #754
+ * gate; unknowns already propagate as null/— on every surface below.
  */
 
 import { describe, expect, test } from 'vitest';
@@ -112,9 +112,10 @@ describe('one tournament, every surface (#754)', () => {
     expect(csv['bonus_points']).toBe('130');
     expect(csv['ppb']).toBe('10.83');
 
-    // QBLive publishes the same values with stable column ids.
+    // QBLive publishes the same values with stable column ids; records use
+    // Director's en dashes, matching formatRecord above.
     const standings = buildStandingsTable(state, overall, naming);
-    expect(qbliveCell(standings, 'team-a', 'record')).toEqual({ value: '1-0', display: '1-0' });
+    expect(qbliveCell(standings, 'team-a', 'record')).toEqual({ value: '1–0', display: '1–0' });
     expect(qbliveCell(standings, 'team-a', 'ppg')).toEqual({ value: 300, display: '300.0' });
     const teamStats = buildTeamStatisticsTable(state, overall, naming);
     expect(qbliveCell(teamStats, 'team-a', 'games')).toEqual({ value: 1, display: '1' });
@@ -157,7 +158,10 @@ describe('one tournament, every surface (#754)', () => {
 
     const html = renderStageAwareStandingsReport(buildCanonicalStandingsReport(state, generatedAt));
     expect(html).not.toContain('<td class="num">20</td>');
-    // QBLive TUH/PPTUH columns arrive with #753/PR8; the null contract above is what they consume.
+
+    const standings = buildStandingsTable(state, overall, naming);
+    expect(qbliveCell(standings, 'team-a', 'tuh')).toEqual({ value: null, display: '—' });
+    expect(qbliveCell(standings, 'team-a', 'pptuh')).toEqual({ value: null, display: '—' });
   });
 
   test('a team that has not played is blank/unknown everywhere, never winless', () => {
@@ -170,7 +174,10 @@ describe('one tournament, every surface (#754)', () => {
 
     const csv = csvRow(teamStandingsCsv(state), 'Abbeville');
     expect(csv['win_percentage']).toBe('');
-    // QBLive win-rate unknown arrives with #753/PR8.
+
+    const standings = buildStandingsTable(state, overall, naming);
+    expect(qbliveCell(standings, 'team-c', 'pct')).toEqual({ value: null, display: '—' });
+    expect(qbliveCell(standings, 'team-c', 'games')).toEqual({ value: 0, display: '0' });
   });
 
   test('a known zero renders as zero on every surface', () => {
