@@ -10,76 +10,116 @@ the external parser whenever the compatibility renderer changes materially.
 | Item | State | Date |
 | ---- | ----- | ---- |
 | Structural preflight + fixtures + offline compatibility tests | Implemented (#764) | 2026-09-10 |
-| Single-phase live upload smoke test | **Not performed** — no operator account available | — |
-| Multi-phase phase+combined smoke test | **Not applicable yet** — no combined exporter exists | — |
+| Multi-phase phase + Combined exporter | Implemented (#763) | 2026-09-10 |
+| Prepare-for-HSQuizbowl operator workflow | Implemented (#766) | 2026-09-10 |
+| Single-phase live upload + replacement smoke test | **Not performed** — authorized operator action required | — |
+| Multi-phase phase + Combined live upload smoke test | **Not performed** — authorized operator action required | — |
 
-Until the single-phase smoke test below succeeds, Director must not label the
-export "Resource Center compatible/ready" (enforced by
-`PublishStatReport.test.tsx`; the UI says "preflighted … for manual upload").
-`resourceCenterCompatibility.liveUploadVerified` in
-`packages/tournament-formats/src/resourceCenterPreflight.ts` stays `false` until
-then, and the row below is updated with the verification date.
+The two live-upload rows above are release evidence, not code-generation tasks. They
+must remain visibly incomplete until an authorized operator actually submits QBSheet
+output to a Resource Center tournament entry they own and verifies the public result.
+Do not substitute a local browser render, fixture comparison, HTTP probe, or claim in
+a PR description for that evidence.
 
-## Rules (from #764)
+Until the live smoke test succeeds, Director must not label the export "Resource
+Center compatible/ready." `resourceCenterCompatibility.liveUploadVerified` in
+`packages/tournament-formats/src/resourceCenterPreflight.ts` remains `false`, and the
+UI uses save-scoped language such as **Ready to save** / **Saved — not yet published**.
 
-- Do **not** commit credentials, cookies, CSRF tokens, session IDs, or private
-  account data. Record only dates, report URLs, and pass/fail observations.
-- The smoke test is a manual, authorized operator step. Automating the
-  authenticated upload form is an explicit non-goal (#764, #767).
-- Only the owner of a database entry may post statistics for it. Use a test or
-  operator-owned tournament entry, never someone else's.
+## Rules
 
-## Protocol — single-phase
+- Do **not** commit credentials, cookies, CSRF tokens, session IDs, or private account
+  data. Record only dates, public report/tournament URLs, QBSheet commit, and
+  pass/fail observations.
+- The smoke test is a manual, authorized operator step. Automating the authenticated
+  upload form is an explicit non-goal (#764, #767).
+- Only use a Resource Center tournament entry the operator is authorized to manage.
+- Use the exact package produced by **Exports → Quizbowl Resource Center → Prepare
+  for HSQuizbowl**. Do not hand-edit HTML to make the test pass.
+- Save/download the ZIP, extract it, and select the individual HTML files in the
+  Resource Center form. Do not upload the ZIP itself.
 
-Prerequisites: a Director tournament with at least one accepted game whose
-Resource Center export downloads with zero preflight warnings (or with warnings
-you have explicitly accepted).
+## Protocol — single-stage
 
-1. In Director, open Exports → Resource Center report → Download ZIP.
-2. Confirm the download was not refused by preflight (a refusal means the set
-   is inconsistent — fix the tournament, do not work around the gate).
-3. Sign into the forum account that owns the test tournament entry.
-4. Select the tournament → `Edit tournament listing` → `Manage stat reports` →
-   `Add stat report` (per `docs/HSQUIZBOWL_DIRECT_UPLOAD.md`).
-5. Upload each prepared HTML file into its matching slot. The one verified
-   field mapping is Resource Center `Scoreboard` → the file ending in
-   `_games.html`; fill remaining slots by semantic report role, never by
-   filename-substring guessing.
-6. Submit and open the uploaded report from its public `/stats/<report>/…` URL.
-7. Verify, view by view:
-   - Standings, Individuals, Scoreboard, Team Detail, Player Detail, Round
-     Report all render and navigate to each other;
-   - standings records, individual totals, and game scores match Director;
-   - special characters (accents, `&`, quotes) render correctly;
-   - partial-detail games show the same limitation as Director;
-   - forfeit games (if any) are represented sensibly;
-   - Resource Center / third-party indexing shows the tables (spot-check one
-     search or index view if available).
-8. Verify replacing/updating the stat report follows the expected operator
-   behavior (upload a corrected set, confirm the public URL reflects it).
-9. Record below: date, tournament entry URL, report URL, QBSheet commit, and
-   any parser behavior worth pinning (rejections, renames, encoding notes).
+Prerequisite: a Director tournament with at least one accepted game whose Resource
+Center report passes preflight (warnings may be accepted intentionally; blockers may
+not be bypassed).
 
-## Protocol — multi-phase (once a combined exporter exists)
+1. In Director, open **Exports → Quizbowl Resource Center → Prepare for HSQuizbowl**.
+2. Confirm the **Overall** report set contains the expected accepted games and passes
+   preflight. Resolve every blocking diagnostic before continuing.
+3. Save/download the generated Resource Center ZIP and record its displayed revision.
+4. Extract the ZIP. Keep the generated files unchanged.
+5. Sign into the forum account that owns the test tournament entry.
+6. Select the tournament → `Edit tournament listing` → `Manage stat reports` →
+   `Add stat report`.
+7. Upload each of the six required HTML files into its matching semantic field:
+   - Standings → `*_standings.html`
+   - Individuals → `*_individuals.html`
+   - Scoreboard → `*_games.html`
+   - Team Detail → `*_teamdetail.html`
+   - Player Detail → `*_playerdetail.html`
+   - Round Report → `*_rounds.html`
 
-In the same tournament or a second test entry:
+   The generated `*_statkey.html` is an optional SQBS/interoperability companion and
+   is not part of the verified six-slot Resource Center upload workflow unless the
+   authenticated form itself demonstrates otherwise.
+8. Submit the report and open its public `/stats/<report>/...` page.
+9. Verify all six public views render, navigate among one another, and agree with
+   Director for records, scores, player totals, and known/unknown detail. Also check
+   non-ASCII names/special characters and any represented forfeits or partial detail.
+10. Make a small legitimate result correction in Director, regenerate the package,
+    and use the Resource Center's normal edit/replace flow to update the same report.
+11. Confirm the public report reflects the corrected result and no stale page remains.
+12. Record the evidence in the results log below: date, public tournament/report URL,
+    tested QBSheet commit, generated revision(s), and observed parser behavior.
 
-1. Publish each phase report separately plus the combined report.
-2. Confirm phase and combined reports coexist with sensible names/slugs.
-3. Confirm each canonical accepted game appears exactly once in the combined
-   report and phase populations match their scopes.
+## Protocol — multi-phase
+
+Use a tournament with at least two phases containing accepted games. The normal
+Resource Center convention is separate phase reports plus a Combined report.
+
+1. Open **Prepare for HSQuizbowl** and use the recommended report-set selection.
+   Configured future phases with no accepted games should not be required for the
+   current package; explicitly selected empty scopes remain a preflight error.
+2. Confirm each played phase is present and **Combined** contains every canonical
+   accepted game exactly once.
+3. Save/download and extract the package.
+4. Add one Resource Center stat report for each phase plus one named **Combined**,
+   selecting each set's six matching HTML files.
+5. Confirm the reports coexist under sensible names and each public report opens.
+6. Verify each phase contains only its intended stage results and Combined contains
+   all accepted games exactly once. Verify carryover/tiebreaker notes against the
+   Director configuration if those features are present.
+7. Correct one result, regenerate the affected report package, replace/update the
+   corresponding public report, and verify the correction appears publicly.
+8. Record the evidence below.
 
 ## Results log
 
-| Date | Scope | Tournament entry | Public report URL | QBSheet commit | Result / notes |
-| ---- | ----- | ---------------- | ----------------- | -------------- | -------------- |
-| — | single-phase | — | — | — | Not performed |
-| — | multi-phase | — | — | — | Exporter does not exist yet |
+Do not mark a row Pass without a public Resource Center report that was actually
+accepted by the authenticated uploader.
+
+| Date | Scope | Tournament entry | Public report URL | QBSheet commit | Revision(s) | Result / notes |
+| ---- | ----- | ---------------- | ----------------- | -------------- | ----------- | -------------- |
+| — | single-stage + replacement | — | — | — | — | Not performed |
+| — | multi-phase + Combined | — | — | — | — | Not performed |
+
+## SQBS fixture evidence still required
+
+The repository currently contains a genuine YellowFruit 4.0.18 fixture and an
+honestly labeled hand-authored SQBS structural reference. The latter is **not** a
+substitute for #764's requested genuine SQBS-generated fixture. SQBS's official site
+currently identifies Version 4.0 as its latest Windows release and hosts an official
+"Example Web Report Generated by the Program," which is useful external evidence for
+the traditional seven-page report shape. Before #764 is considered fully complete,
+bring a genuine SQBS-generated report set into the sanitized fixture corpus with its
+version/provenance recorded; do not relabel the existing structural reference.
 
 ## Manual release checklist
 
-Re-run the single-phase protocol (steps 1–9) before any release whose diff
-touches the compatibility renderer or its inputs:
+Re-run the appropriate protocol above before a release whose diff materially changes
+the compatibility renderer, canonical report inputs, or phase-scoping semantics:
 
 - `packages/tournament-formats/src/resourceCenterReport.ts`
 - `packages/tournament-formats/src/resourceCenterPreflight.ts`
@@ -89,10 +129,9 @@ touches the compatibility renderer or its inputs:
 - `packages/tournament-formats/src/teamDetailReport.ts`
 - `packages/tournament-formats/src/playerDetailReport.ts`
 - `src/director/reports/resourceCenterExport.ts`
-- the canonical snapshot builders feeding the above
+- `src/director/reports/resourceCenterScopes.ts`
+- canonical snapshot builders feeding the above
 
-After a successful re-verification, update the verification date in
-`resourceCenterCompatibility.structuralPreflightDate`, the fixture provenance
-(`packages/tournament-formats/tests/fixtures/resource-center/README.md`), and
-the results log above. Delete nothing: behavior of this undocumented external
-parser can change, and the log is how we notice.
+After successful re-verification, update the results log and the verification date in
+`resourceCenterCompatibility`. Keep prior results in the log so changes in the
+undocumented external parser can be noticed rather than overwritten.
