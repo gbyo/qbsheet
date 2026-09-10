@@ -70,6 +70,7 @@ struct QBSheetLiveApp: App {
                 }
             }
             .environment(activities)
+            .environment(\.liveActivityController, activities)
         }
     }
 
