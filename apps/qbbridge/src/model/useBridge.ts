@@ -1754,13 +1754,19 @@ export function useBridge(): BridgeApi {
   /**
    * When the last poll tick ran, wall-clock. A gap far beyond the interval means the event
    * loop was suspended — laptop lid, tablet lock, backgrounded tab — and the next tick
-   * reconciles instead of assuming the world stood still.
+   * reconciles instead of assuming the world stood still. Null until the first tick
+   * baselines it inside an event handler, never during render.
    */
-  const lastPollMsRef = useRef(Date.now());
+  const lastPollMsRef = useRef<number | null>(null);
   const pollTick = useCallback((): void => {
     const now = Date.now();
-    const gap = now - lastPollMsRef.current;
+    const previous = lastPollMsRef.current;
     lastPollMsRef.current = now;
+    if (previous === null) {
+      void pollResults();
+      return;
+    }
+    const gap = now - previous;
     // A backward jump (clock correction) just re-baselines: only a long forward silence is sleep.
     if (gap >= 0 && gap > resumeGapMs) void reconcileAfterResume();
     else void pollResults();
