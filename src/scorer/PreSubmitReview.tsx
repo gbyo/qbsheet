@@ -180,12 +180,12 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
     blockers.length > 0 || warnings.length > 0 || openProtests.length > 0 || unsyncedRosterAdditions.length > 0;
   const reversibleFinish =
     game.phase.kind === 'complete' && (game.phase.reason === 'forfeit' || game.phase.reason === 'short');
-  const completionQualifier =
+  const finalScoreLabel =
     game.phase.kind === 'complete' && game.phase.reason === 'forfeit'
-      ? 'Forfeit recorded'
+      ? 'Final score — forfeit'
       : game.phase.kind === 'complete' && game.phase.reason === 'short'
-        ? 'Game ended early'
-        : 'Game complete';
+        ? 'Final score — game ended early'
+        : 'Final score';
 
   return (
     <div className="scorer-presubmit scorer-review-submit">
@@ -198,7 +198,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
             control.
           </p>
         </div>
-        <span className="scorer-review-submit-phase">{completionQualifier}</span>
+        <p className="scorer-complete-title scorer-review-submit-phase">{finalScoreLabel}</p>
       </header>
 
       <section className="scorer-review-score" aria-label="Final score">
@@ -350,7 +350,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
             checked={confirmed}
             onChange={(e) => setConfirmedGame(e.target.checked ? game : null)}
           />
-          I confirmed this final score with both teams
+          Final score confirmed with both teams
         </label>
         <div className="scorer-review-submit-buttons">
           <button type="button" className="scorer-action" onClick={onReview} disabled={submitting}>
