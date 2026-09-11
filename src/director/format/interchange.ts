@@ -29,6 +29,7 @@ import {
   newDirectorId,
   normalizeTimeZone,
   roomDefaultEquipmentIds,
+  rulesForGame,
   scoringValuesForGameRecord,
   timelineEventTypes,
   type DirectorState,
@@ -1424,6 +1425,116 @@ export interface SqbsTournamentExport {
 }
 
 /**
+ * The QBJ Match retained on an accepted game, whatever document shape carried it.
+ *
+ * Accepted records keep the whole result document (`{ objects: [...] }` from files,
+ * a bare Match from QBTCP/MODAQ-style payloads, occasionally nested under `qbj`),
+ * so the lookup tolerates each shape instead of assuming one producer.
+ */
+function retainedQbjMatch(rawQbj: unknown): Record<string, unknown> | undefined {
+  if (!rawQbj || typeof rawQbj !== 'object' || Array.isArray(rawQbj)) return undefined;
+  const record = rawQbj as Record<string, unknown>;
+  if (Array.isArray(record.objects)) {
+    const found = (record.objects as unknown[]).find(
+      (entry): entry is Record<string, unknown> =>
+        !!entry &&
+        typeof entry === 'object' &&
+        !Array.isArray(entry) &&
+        ((entry as Record<string, unknown>).type === 'Match' ||
+          Array.isArray((entry as Record<string, unknown>).match_teams)),
+    );
+    if (found) return found;
+  }
+  if (record.type === 'Match' || Array.isArray(record.match_teams)) return record;
+  return retainedQbjMatch(record.qbj);
+}
+
+function retainedTeamIdentity(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.$ref === 'string') return record.$ref;
+  if (typeof record.id === 'string') return record.id;
+  if (typeof record.name === 'string') return record.name;
+  return undefined;
+}
+
+/**
+ * Retained match_teams entries for the game's two sides, matched by team identity.
+ *
+ * Positional matching would silently swap sides when a document orders teams
+ * differently than the accepted scores, so identity is required: Director ids
+ * first, then display names. Anything ambiguous resolves to unknown, never a guess.
+ */
+function retainedMatchTeamsForGame(
+  state: DirectorState,
+  game: GameRecord,
+  leftTeamId: string,
+  rightTeamId: string,
+): [Record<string, unknown>, Record<string, unknown>] | undefined {
+  const match = retainedQbjMatch(game.rawQbj);
+  if (!match || !Array.isArray(match.match_teams)) return undefined;
+  const entries = match.match_teams as unknown[];
+  const teamsById = new Map(state.teams.map((team) => [team.id, team]));
+  const entryFor = (teamId: string): Record<string, unknown> | undefined => {
+    const team = teamsById.get(teamId);
+    const names = new Set(
+      [teamId, team?.displayName]
+        .filter((entry): entry is string => Boolean(entry))
+        .map((entry) => entry.toLocaleLowerCase()),
+    );
+    const found = entries.filter((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+      const identity = retainedTeamIdentity((entry as Record<string, unknown>).team)?.toLocaleLowerCase();
+      return identity !== undefined && names.has(identity);
+    });
+    return found.length === 1 ? (found[0] as Record<string, unknown>) : undefined;
+  };
+  const left = entryFor(leftTeamId);
+  const right = entryFor(rightTeamId);
+  if (!left || !right || left === right) return undefined;
+  return [left, right];
+}
+
+/**
+ * Correct no-bonus conversions for one retained match_team entry (#890).
+ *
+ * The standard `correct_tossups_without_bonuses` aggregate is an exact source fact
+ * whatever the format, so it wins when present and well-formed. Otherwise the
+ * YellowFruit overtime-buzz breakdown is usable only when the game's own historical
+ * rules play no bonuses in overtime: with overtime bonuses enabled those buzzes
+ * earned bonuses and must not be classified as no-bonus. A neg is never a correct
+ * conversion. Anything unreadable is unknown, never zero.
+ */
+function retainedNoBonusConversions(
+  entry: Record<string, unknown>,
+  useOvertimeDetail: boolean,
+): number | undefined {
+  const direct = entry.correct_tossups_without_bonuses;
+  if (typeof direct === 'number' && Number.isInteger(direct) && direct >= 0) return direct;
+  if (!useOvertimeDetail) return undefined;
+  const data = entry.YfData;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+  const buzzes = (data as Record<string, unknown>).overTimeBuzzes;
+  if (!Array.isArray(buzzes)) return undefined;
+  let total = 0;
+  for (const buzz of buzzes) {
+    if (!buzz || typeof buzz !== 'object' || Array.isArray(buzz)) return undefined;
+    const record = buzz as Record<string, unknown>;
+    const count = record.number;
+    const answerType = record.answer_type;
+    const value =
+      answerType && typeof answerType === 'object' && !Array.isArray(answerType)
+        ? (answerType as Record<string, unknown>).value
+        : undefined;
+    if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) return undefined;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    if (value > 0) total += count;
+  }
+  return total;
+}
+
+/**
  * Full SQBS tournament export for one scope (a stage, a pool, or the entire
  * tournament). Team order follows the canonical standings so Director, Live,
  * CSV, HTML, and SQBS never disagree about who is first; per-game detail
@@ -1604,10 +1715,56 @@ export function exportSqbsTournament(
         return;
       }
     }
-    const tossupsHeard =
-      game.playerStats.length > 0 && game.playerStats.every((stat) => stat.tossupsHeard !== null)
-        ? Math.max(...game.playerStats.map((stat) => stat.tossupsHeard as number))
-        : null;
+    // Exact match TUH from the accepted record (#746): several players hear the
+    // same tossup and substitutions change summed exposure, so player lines can
+    // never stand in for the match count. Unknown stays unknown (null) even when
+    // player detail is partial or missing.
+    const tossupsHeard = game.tossupsRead ?? null;
+    // Overtime and per-team no-bonus conversions from the game's own facts (#890),
+    // classified under its own historical rules (#671). Unknown detail warns
+    // instead of becoming a verified zero.
+    const gameRules = rulesForGame(state, game) ?? rules;
+    const overtimeTuh = forfeit ? 0 : (game.overtimeTossupsRead ?? null);
+    let overtime: boolean | undefined;
+    let leftWithoutBonus: number | undefined;
+    let rightWithoutBonus: number | undefined;
+    if (!forfeit && gameRules?.useBonuses === false) {
+      // Bonus-less formats have no bonus opportunities to classify.
+      overtime = (overtimeTuh ?? 0) > 0;
+      leftWithoutBonus = 0;
+      rightWithoutBonus = 0;
+    } else if (!forfeit && (overtimeTuh === 0 || gameRules?.overtime === false)) {
+      // Proven no overtime: an explicit zero, or rules with no overtime period.
+      overtime = false;
+      leftWithoutBonus = 0;
+      rightWithoutBonus = 0;
+    } else if (!forfeit) {
+      const hasOvertime = (overtimeTuh ?? 0) > 0;
+      // Overtime-buzz detail is no-bonus evidence only when the game's own rules
+      // play no bonuses in overtime.
+      const sides = retainedMatchTeamsForGame(state, game, leftScore.teamId, rightScore.teamId);
+      const leftNoBonus = sides
+        ? retainedNoBonusConversions(sides[0], gameRules?.overtimeBonuses === false)
+        : undefined;
+      const rightNoBonus = sides
+        ? retainedNoBonusConversions(sides[1], gameRules?.overtimeBonuses === false)
+        : undefined;
+      if (leftNoBonus !== undefined && rightNoBonus !== undefined) {
+        // Conversions prove overtime even when exact overtime TUH is missing.
+        overtime = hasOvertime || leftNoBonus + rightNoBonus > 0;
+        leftWithoutBonus = leftNoBonus;
+        rightWithoutBonus = rightNoBonus;
+      } else if (sides !== undefined || hasOvertime) {
+        // Proven overtime without a per-team split, or a retained breakdown that
+        // cannot be read: SQBS will read 0, so say so explicitly.
+        overtime = hasOvertime;
+        warnings.push(
+          hasOvertime
+            ? `Game ${game.id} went to overtime but per-team no-bonus conversions are unknown; SQBS will read 0.`
+            : `Game ${game.id} has overtime detail the export cannot attribute per team; SQBS will read 0 no-bonus conversions and no overtime.`,
+        );
+      }
+    }
     const buildSide = (score: TeamGameScore, label: 'left' | 'right'): SqbsSideGame | undefined => {
       const indexes = playerIndexByTeam.get(score.teamId) ?? new Map();
       const players = [];
@@ -1651,6 +1808,7 @@ export function exportSqbsTournament(
         bonusPoints: bonusesKnown ? score.bonusPoints : null,
         bouncebacksHeard: rules.bouncebacks ? null : undefined,
         bouncebackPoints: rules.bouncebacks ? score.bouncebacks : undefined,
+        tossupsWithoutBonus: label === 'left' ? leftWithoutBonus : rightWithoutBonus,
         players,
       };
     };
@@ -1663,6 +1821,7 @@ export function exportSqbsTournament(
       left,
       right,
       tossupsHeard,
+      overtime,
       forfeitWinner,
     });
   });

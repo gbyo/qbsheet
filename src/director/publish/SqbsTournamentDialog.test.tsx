@@ -214,11 +214,14 @@ test('warnings stay visible through the save', async () => {
   const onAnnounce = vi.fn();
   openTournamentDialog(twoStageTournament(), onAnnounce);
 
-  // The whole-tournament scope warns twice: flattened stage semantics and
-  // the playoff game's unknown bonus detail. Both stay visible before the save…
-  expect(screen.getAllByText('Export warning')).toHaveLength(2);
+  // The whole-tournament scope warns three times: flattened stage semantics,
+  // the playoff game's unknown bonus detail, and its unknown match TUH (player
+  // lines cannot establish the match count, so a game without exact tossups-read
+  // exports honest zeroes with a warning, #746). All stay visible before the save…
+  expect(screen.getAllByText('Export warning')).toHaveLength(3);
   expect(screen.getByText(/multiple stages/)).toBeTruthy();
   expect(screen.getByText(/unknown bonus/)).toBeTruthy();
+  expect(screen.getByText(/unknown tossups-heard/)).toBeTruthy();
 
   fireEvent.click(screen.getByRole('button', { name: /Download Ninety-Six-Invitational-tournament\.sqbs/ }));
   await Promise.resolve();
