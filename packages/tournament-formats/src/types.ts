@@ -153,6 +153,56 @@ export interface PhaseRecord extends ExtensibleRecord {
   carryovers?: JsonObject;
 }
 
+/** A phase-level YellowFruit wildcard destination, preserved without ranking any teams. */
+export interface YellowFruitWildcardAdvancementRule {
+  readonly tier: number;
+  readonly numberOfTeams: number;
+}
+
+/** A pool-level YellowFruit advancement destination, preserved without applying it. */
+export interface YellowFruitAutoAdvanceRule {
+  readonly tier: number;
+  readonly ranksThatAdvance: readonly number[];
+  readonly rankingRule?: string;
+}
+
+/** The schedule-template metadata YellowFruit stores for one pool. */
+export interface YellowFruitPoolSchedule {
+  readonly id: string;
+  readonly name: string;
+  /** YellowFruit's pool position, which is a tier and need not be unique in a phase. */
+  readonly tier?: number;
+  readonly expectedSize?: number;
+  /** The stable team ids referenced by this pool in the source file. */
+  readonly teamIds: readonly string[];
+  /** Numbered schedule slots, not current standings. */
+  readonly seeds?: readonly number[];
+  readonly roundRobins?: number;
+  readonly hasCarryover?: boolean;
+  readonly autoAdvanceRules: readonly YellowFruitAutoAdvanceRule[];
+}
+
+/** The schedule-template metadata YellowFruit stores for one phase. */
+export interface YellowFruitPhaseSchedule {
+  readonly id: string;
+  readonly name: string;
+  /** The source `YfData.phaseType`, such as `Prelim` or `Playoff`. */
+  readonly type?: string;
+  readonly code?: string;
+  readonly firstRound?: number;
+  readonly lastRound?: number;
+  readonly forceNumericRounds?: boolean;
+  readonly wildcardAdvancementRules: readonly YellowFruitWildcardAdvancementRule[];
+  readonly wildcardRankingMethod?: string;
+  readonly topWildcardSeed?: number;
+  readonly pools: readonly YellowFruitPoolSchedule[];
+}
+
+/** A pure, read-only snapshot of the useful schedule structure in a YellowFruit file. */
+export interface YellowFruitScheduleDescription {
+  readonly phases: readonly YellowFruitPhaseSchedule[];
+}
+
 export interface PoolRecord extends ExtensibleRecord {
   id: string;
   name: string;

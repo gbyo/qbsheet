@@ -14,6 +14,10 @@ function fixture(): string {
   return readFileSync(new URL('./fixtures/yft-sample.yft.json', import.meta.url), 'utf8');
 }
 
+function scheduleFixture(): string {
+  return readFileSync(new URL('./fixtures/yft-schedule-metadata.yft.json', import.meta.url), 'utf8');
+}
+
 describe('yellowfruit migration import', () => {
   test('real 12-team two-stage file imports with full detail', () => {
     const report = readYellowFruitTournament(fixture());
@@ -58,6 +62,141 @@ describe('yellowfruit migration import', () => {
     const codes = report.warnings.map((entry) => entry.code);
     expect(codes).toContain('yft-import-summary');
     expect(codes).toContain('yft-not-carried-over');
+  });
+
+  test('exposes parallel pools, tier advancement, and playoff carryover as read-only metadata', () => {
+    const report = readYellowFruitTournament(fixture());
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+
+    const [prelims, playoffs] = report.value.schedule.phases;
+    expect(prelims).toMatchObject({
+      id: 'Phase_Prelims',
+      name: 'Prelims',
+      type: 'Prelim',
+      code: '1',
+      firstRound: 1,
+      lastRound: 5,
+      wildcardAdvancementRules: [],
+      wildcardRankingMethod: 'RankThenPPB',
+    });
+    expect(prelims.pools.map((pool) => pool.tier)).toEqual([1, 1]);
+    expect(prelims.pools.map((pool) => pool.name)).toEqual(['Prelim A', 'Prelim B']);
+    expect(prelims.pools[0]).toMatchObject({
+      expectedSize: 6,
+      teamIds: [
+        'Team_Hebron Academy',
+        'Team_Windham A',
+        'Team_Cony',
+        'Team_Wells',
+        'Team_Gould Academy B',
+        'Team_Plymouth B',
+      ],
+      seeds: [1, 4, 5, 8, 9, 12],
+      roundRobins: 1,
+      hasCarryover: false,
+      autoAdvanceRules: [
+        {
+          tier: 1,
+          ranksThatAdvance: [1, 2, 3],
+          rankingRule: 'RecordthenPPGThenOther',
+        },
+        {
+          tier: 2,
+          ranksThatAdvance: [4, 5, 6],
+          rankingRule: 'RecordthenPPGThenOther',
+        },
+      ],
+    });
+    expect(playoffs).toMatchObject({ id: 'Phase_Playoffs', firstRound: 6, lastRound: 8 });
+    expect(playoffs.pools.map((pool) => [pool.name, pool.tier, pool.hasCarryover])).toEqual([
+      ['Championship', 1, true],
+      ['7th Place', 2, true],
+    ]);
+    expect(
+      report.warnings.some((entry) => entry.message.includes('schedule template is not carried over')),
+    ).toBe(false);
+  });
+
+  test('preserves wildcard metadata and an explicit zero-round-robin pool', () => {
+    const report = readYellowFruitTournament(scheduleFixture());
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+
+    const [phase] = report.value.schedule.phases;
+    expect(phase).toMatchObject({
+      type: 'Prelim',
+      code: 'custom',
+      firstRound: 1,
+      lastRound: 2,
+      forceNumericRounds: true,
+      wildcardAdvancementRules: [
+        { tier: 1, numberOfTeams: 2 },
+        { tier: 2, numberOfTeams: 1 },
+      ],
+      wildcardRankingMethod: 'RecordThanPPB',
+      topWildcardSeed: 9,
+    });
+    expect(phase.pools[0]).toMatchObject({
+      id: 'Pool_Custom',
+      name: 'Card System',
+      tier: 1,
+      expectedSize: 4,
+      teamIds: ['Team_Alpha', 'Team_Bravo', 'Team_Charlie', 'Team_Delta'],
+      seeds: [1, 4, 5, 8],
+      roundRobins: 0,
+      hasCarryover: false,
+      autoAdvanceRules: [{ tier: 1, ranksThatAdvance: [1, 2], rankingRule: 'RecordThenPPGThenOther' }],
+    });
+  });
+
+  test('ignores malformed optional schedule metadata without rejecting the tournament', () => {
+    const parsed = JSON.parse(scheduleFixture()) as {
+      objects: Record<string, unknown>[];
+    };
+    const tournament = parsed.objects[0];
+    const phase = (tournament.phases as Record<string, unknown>[])[0];
+    const phaseData = phase.YfData as Record<string, unknown>;
+    phaseData.wildCardAdvancementRules = [
+      { tier: 'one', numberOfTeams: 2 },
+      { tier: 1, numberOfTeams: 1 },
+    ];
+    phaseData.wildCardRankingMethod = 42;
+    phaseData.forceNumericRounds = 'yes';
+    const rounds = phase.rounds as Record<string, unknown>[];
+    (rounds[0].YfData as Record<string, unknown>).number = 'first';
+    const pool = (phase.pools as Record<string, unknown>[])[0];
+    const poolData = pool.YfData as Record<string, unknown>;
+    poolData.size = 'four';
+    poolData.seeds = [1, 'bad', 5];
+    poolData.roundRobins = 'none';
+    poolData.hasCarryover = 'yes';
+    poolData.autoAdvanceRules = [
+      { tier: 'one', ranksThatAdvance: [1] },
+      { tier: 2, ranksThatAdvance: [2], rankingRule: 17 },
+    ];
+
+    const report = readYellowFruitTournament(JSON.stringify(parsed));
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+
+    const [safePhase] = report.value.schedule.phases;
+    expect(safePhase).toMatchObject({
+      firstRound: 1,
+      lastRound: 2,
+      wildcardAdvancementRules: [{ tier: 1, numberOfTeams: 1 }],
+    });
+    expect(safePhase.forceNumericRounds).toBeUndefined();
+    expect(safePhase.wildcardRankingMethod).toBeUndefined();
+    expect(safePhase.pools[0]).toMatchObject({
+      teamIds: ['Team_Alpha', 'Team_Bravo', 'Team_Charlie', 'Team_Delta'],
+      autoAdvanceRules: [{ tier: 2, ranksThatAdvance: [2] }],
+    });
+    expect(safePhase.pools[0].expectedSize).toBeUndefined();
+    expect(safePhase.pools[0].seeds).toBeUndefined();
+    expect(safePhase.pools[0].roundRobins).toBeUndefined();
+    expect(safePhase.pools[0].hasCarryover).toBeUndefined();
+    expect(report.warnings.some((entry) => entry.code === 'yft-schedule-metadata')).toBe(true);
   });
 
   test('canonical QBJ is not detected as YellowFruit', () => {

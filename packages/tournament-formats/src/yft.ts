@@ -19,8 +19,18 @@
  */
 
 import { importQbj, qbjSerializationVersion, type QbjImportValue } from './qbj';
-import type { FormatReport, JsonObject, JsonValue } from './types';
-import { asJsonObject, asString, cloneJson, error, fail, ok, slugId, warning } from './util';
+import type {
+  FormatReport,
+  FormatWarning,
+  JsonObject,
+  JsonValue,
+  YellowFruitAutoAdvanceRule,
+  YellowFruitPhaseSchedule,
+  YellowFruitPoolSchedule,
+  YellowFruitScheduleDescription,
+  YellowFruitWildcardAdvancementRule,
+} from './types';
+import { asInteger, asJsonObject, asString, cloneJson, error, fail, ok, slugId, warning } from './util';
 
 export interface YellowFruitImportSummary {
   teams: number;
@@ -30,6 +40,11 @@ export interface YellowFruitImportSummary {
   stages: number;
   /** Human-readable list of things present in the file that QBSheet did not carry over. */
   notCarriedOver: string[];
+}
+
+export interface YellowFruitImportValue extends QbjImportValue {
+  /** The source schedule template, as read-only metadata rather than an executable schedule. */
+  schedule: YellowFruitScheduleDescription;
 }
 
 export type YellowFruitInput = string | Uint8Array | JsonObject;
@@ -98,11 +113,201 @@ function roundNumberFromName(name: string | undefined): number | undefined {
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
+function scheduleWarning(warnings: FormatWarning[], path: string, message: string): void {
+  warnings.push(warning('yft-schedule-metadata', path, message));
+}
+
+function scheduleDataFor(entry: JsonObject, path: string, warnings: FormatWarning[]): JsonObject {
+  if (entry.YfData === undefined) return {};
+  const data = asJsonObject(entry.YfData);
+  if (data) return data;
+  scheduleWarning(
+    warnings,
+    `${path}.YfData`,
+    'YellowFruit schedule metadata must be a JSON object; it was ignored.',
+  );
+  return {};
+}
+
+function scheduleInteger(value: unknown, minimum: number): number | undefined {
+  const number = asInteger(value);
+  return number !== undefined && Number.isSafeInteger(number) && number >= minimum ? number : undefined;
+}
+
+function optionalScheduleString(
+  data: JsonObject,
+  key: string,
+  path: string,
+  warnings: FormatWarning[],
+): string | undefined {
+  if (data[key] === undefined) return undefined;
+  const value = asString(data[key]);
+  if (value !== undefined) return value;
+  scheduleWarning(warnings, `${path}.${key}`, `The optional YellowFruit ${key} metadata was ignored.`);
+  return undefined;
+}
+
+function optionalScheduleBoolean(
+  data: JsonObject,
+  key: string,
+  path: string,
+  warnings: FormatWarning[],
+): boolean | undefined {
+  if (data[key] === undefined) return undefined;
+  if (typeof data[key] === 'boolean') return data[key];
+  scheduleWarning(warnings, `${path}.${key}`, `The optional YellowFruit ${key} metadata was ignored.`);
+  return undefined;
+}
+
+function optionalScheduleInteger(
+  data: JsonObject,
+  key: string,
+  path: string,
+  warnings: FormatWarning[],
+  minimum: number,
+): number | undefined {
+  if (data[key] === undefined) return undefined;
+  const value = scheduleInteger(data[key], minimum);
+  if (value !== undefined) return value;
+  scheduleWarning(warnings, `${path}.${key}`, `The optional YellowFruit ${key} metadata was ignored.`);
+  return undefined;
+}
+
+function optionalScheduleIntegerList(
+  value: unknown,
+  path: string,
+  warnings: FormatWarning[],
+  minimum: number,
+): number[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) {
+    scheduleWarning(
+      warnings,
+      path,
+      'The optional YellowFruit integer list was ignored because it was malformed.',
+    );
+    return undefined;
+  }
+  const values = value.map((entry) => scheduleInteger(entry, minimum));
+  if (values.some((entry) => entry === undefined)) {
+    scheduleWarning(
+      warnings,
+      path,
+      'The optional YellowFruit integer list was ignored because it was malformed.',
+    );
+    return undefined;
+  }
+  return values as number[];
+}
+
+function wildcardRulesFrom(
+  value: unknown,
+  path: string,
+  warnings: FormatWarning[],
+): YellowFruitWildcardAdvancementRule[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    scheduleWarning(warnings, path, 'Wildcard advancement metadata was ignored because it was malformed.');
+    return [];
+  }
+  const rules: YellowFruitWildcardAdvancementRule[] = [];
+  value.forEach((entry, index) => {
+    if (!isObject(entry)) {
+      scheduleWarning(warnings, `${path}[${index}]`, 'This wildcard advancement rule was ignored.');
+      return;
+    }
+    const tier = scheduleInteger(entry.tier, 1);
+    const numberOfTeams = scheduleInteger(entry.numberOfTeams, 0);
+    if (tier === undefined || numberOfTeams === undefined) {
+      scheduleWarning(warnings, `${path}[${index}]`, 'This wildcard advancement rule was ignored.');
+      return;
+    }
+    rules.push({ tier, numberOfTeams });
+  });
+  return rules;
+}
+
+function autoAdvanceRulesFrom(
+  data: JsonObject,
+  path: string,
+  warnings: FormatWarning[],
+): YellowFruitAutoAdvanceRule[] {
+  const value = data.autoAdvanceRules;
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    scheduleWarning(warnings, path, 'Automatic advancement metadata was ignored because it was malformed.');
+    return [];
+  }
+  const rules: YellowFruitAutoAdvanceRule[] = [];
+  value.forEach((entry, index) => {
+    const rulePath = `${path}[${index}]`;
+    if (!isObject(entry)) {
+      scheduleWarning(warnings, rulePath, 'This automatic advancement rule was ignored.');
+      return;
+    }
+    const tier = scheduleInteger(entry.tier, 1);
+    if (tier === undefined)
+      scheduleWarning(warnings, `${rulePath}.tier`, 'This automatic advancement rule was ignored.');
+    const ranksThatAdvance = optionalScheduleIntegerList(
+      entry.ranksThatAdvance,
+      `${rulePath}.ranksThatAdvance`,
+      warnings,
+      1,
+    );
+    if (ranksThatAdvance === undefined)
+      scheduleWarning(
+        warnings,
+        `${rulePath}.ranksThatAdvance`,
+        'This automatic advancement rule was ignored.',
+      );
+    if (tier === undefined || ranksThatAdvance === undefined) return;
+    const rankingRule = optionalScheduleString(entry, 'rankingRule', rulePath, warnings);
+    rules.push({ tier, ranksThatAdvance, ...(rankingRule === undefined ? {} : { rankingRule }) });
+  });
+  return rules;
+}
+
+function scheduleRoundNumber(round: JsonObject, path: string, warnings: FormatWarning[]): number | undefined {
+  const data = scheduleDataFor(round, path, warnings);
+  if (data.number !== undefined) {
+    const number = scheduleInteger(data.number, 1);
+    if (number !== undefined) return number;
+    scheduleWarning(
+      warnings,
+      `${path}.YfData.number`,
+      'This round number was ignored because it was malformed.',
+    );
+  }
+  const normalizedNumber = scheduleInteger(round.number, 1);
+  return normalizedNumber ?? roundNumberFromName(asString(round.name));
+}
+
+function phaseRoundRange(
+  rounds: JsonObject[],
+  path: string,
+  warnings: FormatWarning[],
+): {
+  firstRound?: number;
+  lastRound?: number;
+} {
+  const numbers = rounds
+    .map((round, index) => scheduleRoundNumber(round, `${path}.rounds[${index}]`, warnings))
+    .filter((number): number is number => number !== undefined);
+  if (numbers.length === 0) return {};
+  return {
+    firstRound: numbers.reduce((lowest, number) => Math.min(lowest, number), numbers[0]),
+    lastRound: numbers.reduce((highest, number) => Math.max(highest, number), numbers[0]),
+  };
+}
+
 function normalizeYellowFruit(root: JsonObject): {
   document: { version: string; objects: JsonObject[] };
   summary: YellowFruitImportSummary;
+  schedule: YellowFruitScheduleDescription;
+  scheduleWarnings: FormatWarning[];
 } {
   const notCarriedOver: string[] = [];
+  const scheduleWarnings: FormatWarning[] = [];
   const objects = asObjectArray(root.objects);
   const tournament = objects.find((entry) => entry.type === 'Tournament') ?? objects[0];
   const doc: JsonObject[] = [];
@@ -225,20 +430,49 @@ function normalizeYellowFruit(root: JsonObject): {
   // pool membership and round context survive the import.
   let gameCount = 0;
   let scoredCount = 0;
+  const schedulePhases: YellowFruitPhaseSchedule[] = [];
   const phases = asObjectArray(tournamentClone.phases);
   phases.forEach((phase, phaseIndex) => {
     phase.type = 'Phase';
-    const phaseData = asJsonObject(phase.YfData) ?? {};
+    const phasePath = `phases[${phaseIndex}]`;
+    const phaseData = scheduleDataFor(phase, phasePath, scheduleWarnings);
     const phaseId =
       asString(phase.id) ??
       slugId('Phase', asString(phaseData.code) ?? asString(phase.name) ?? `stage-${phaseIndex + 1}`);
     phase.id = phaseId;
     phase.kind = phaseKindFromYellowFruit(phaseData.phaseType);
     if (typeof phase.order !== 'number') phase.order = phaseIndex + 1;
-    if (Array.isArray(phaseData.wildCardAdvancementRules) && phaseData.wildCardAdvancementRules.length > 0)
-      notCarriedOver.push(
-        `Wildcard advancement on ${JSON.stringify(phase.name ?? phaseId)} is preserved in extensions but must be re-entered as a Director advancement rule.`,
-      );
+    const wildcardRulesKey =
+      phaseData.wildCardAdvancementRules !== undefined
+        ? 'wildCardAdvancementRules'
+        : 'wildcardAdvancementRules';
+    const wildcardAdvancementRules = wildcardRulesFrom(
+      phaseData[wildcardRulesKey],
+      `${phasePath}.YfData.${wildcardRulesKey}`,
+      scheduleWarnings,
+    );
+    const phaseType = optionalScheduleString(phaseData, 'phaseType', `${phasePath}.YfData`, scheduleWarnings);
+    const phaseCode = optionalScheduleString(phaseData, 'code', `${phasePath}.YfData`, scheduleWarnings);
+    const forceNumericRounds = optionalScheduleBoolean(
+      phaseData,
+      'forceNumericRounds',
+      `${phasePath}.YfData`,
+      scheduleWarnings,
+    );
+    const wildcardRankingMethod = optionalScheduleString(
+      phaseData,
+      phaseData.wildCardRankingMethod !== undefined ? 'wildCardRankingMethod' : 'wildcardRankingMethod',
+      `${phasePath}.YfData`,
+      scheduleWarnings,
+    );
+    const topWildcardSeed = optionalScheduleInteger(
+      phaseData,
+      phaseData.topWildCardSeed !== undefined ? 'topWildCardSeed' : 'topWildcardSeed',
+      `${phasePath}.YfData`,
+      scheduleWarnings,
+      1,
+    );
+    const schedulePools: YellowFruitPoolSchedule[] = [];
     for (const [poolIndex, pool] of asObjectArray(phase.pools).entries()) {
       pool.type = 'Pool';
       const position = typeof pool.position === 'number' ? pool.position : poolIndex;
@@ -247,16 +481,62 @@ function normalizeYellowFruit(root: JsonObject): {
       // uses the pool's index while `order` keeps the file's position.
       if (asString(pool.id) === undefined) pool.id = `${phaseId}__pool_${poolIndex + 1}`;
       if (typeof pool.order !== 'number') pool.order = position + 1;
-      pool.teams = asObjectArray(pool.pool_teams)
+      const teamIds = asObjectArray(pool.pool_teams)
         .map((entry) => refOf(entry.team))
-        .filter((id): id is string => typeof id === 'string')
-        .map((id) => ({ $ref: id }) as JsonObject);
+        .filter((id): id is string => typeof id === 'string');
+      pool.teams = teamIds.map((id) => ({ $ref: id }) as JsonObject);
       delete pool.pool_teams;
-      const poolData = asJsonObject(pool.YfData) ?? {};
-      if (Array.isArray(poolData.autoAdvanceRules) && poolData.autoAdvanceRules.length > 0)
-        notCarriedOver.push(
-          `Automatic advancement out of ${JSON.stringify(pool.name ?? pool.id)} is preserved in extensions but must be re-entered as a Director advancement rule.`,
+      const poolPath = `${phasePath}.pools[${poolIndex}]`;
+      const poolData = scheduleDataFor(pool, poolPath, scheduleWarnings);
+      const tier = pool.position === undefined ? undefined : scheduleInteger(pool.position, 1);
+      if (pool.position !== undefined && tier === undefined)
+        scheduleWarning(
+          scheduleWarnings,
+          `${poolPath}.position`,
+          'The pool tier was ignored because it was malformed.',
         );
+      const expectedSize = optionalScheduleInteger(
+        poolData,
+        'size',
+        `${poolPath}.YfData`,
+        scheduleWarnings,
+        0,
+      );
+      const seeds = optionalScheduleIntegerList(
+        poolData.seeds,
+        `${poolPath}.YfData.seeds`,
+        scheduleWarnings,
+        1,
+      );
+      const roundRobins = optionalScheduleInteger(
+        poolData,
+        'roundRobins',
+        `${poolPath}.YfData`,
+        scheduleWarnings,
+        0,
+      );
+      const hasCarryover = optionalScheduleBoolean(
+        poolData,
+        'hasCarryover',
+        `${poolPath}.YfData`,
+        scheduleWarnings,
+      );
+      const poolName = asString(pool.name) ?? `Pool ${poolIndex + 1}`;
+      schedulePools.push({
+        id: asString(pool.id) ?? `${phaseId}__pool_${poolIndex + 1}`,
+        name: poolName,
+        ...(tier === undefined ? {} : { tier }),
+        ...(expectedSize === undefined ? {} : { expectedSize }),
+        teamIds,
+        ...(seeds === undefined ? {} : { seeds }),
+        ...(roundRobins === undefined ? {} : { roundRobins }),
+        ...(hasCarryover === undefined ? {} : { hasCarryover }),
+        autoAdvanceRules: autoAdvanceRulesFrom(
+          poolData,
+          `${poolPath}.YfData.autoAdvanceRules`,
+          scheduleWarnings,
+        ),
+      });
       hoist(pool);
     }
     for (const [roundIndex, round] of asObjectArray(phase.rounds).entries()) {
@@ -281,6 +561,19 @@ function normalizeYellowFruit(root: JsonObject): {
         hoist(match);
       }
     }
+    const roundRange = phaseRoundRange(asObjectArray(phase.rounds), phasePath, scheduleWarnings);
+    schedulePhases.push({
+      id: phaseId,
+      name: asString(phase.name) ?? `Phase ${phaseIndex + 1}`,
+      ...(phaseType === undefined ? {} : { type: phaseType }),
+      ...(phaseCode === undefined ? {} : { code: phaseCode }),
+      ...roundRange,
+      ...(forceNumericRounds === undefined ? {} : { forceNumericRounds }),
+      wildcardAdvancementRules,
+      ...(wildcardRankingMethod === undefined ? {} : { wildcardRankingMethod }),
+      ...(topWildcardSeed === undefined ? {} : { topWildcardSeed }),
+      pools: schedulePools,
+    });
   });
 
   // Final ranks: YellowFruit stores placements on the teams themselves
@@ -294,10 +587,6 @@ function normalizeYellowFruit(root: JsonObject): {
   if (tournamentClone.yftFinalRanks === undefined)
     notCarriedOver.push('Final rankings are not stored in this file; Director uses calculated standings.');
 
-  if (tournamentData.usingScheduleTemplate === true)
-    notCarriedOver.push(
-      'The YellowFruit schedule template is not carried over; pairings come from the imported games.',
-    );
   const hasOvertimeDetail = (side: JsonObject): boolean =>
     (asJsonObject(side.YfData)?.overTimeBuzzes ?? undefined) !== undefined;
   const overtimeBuzzes =
@@ -324,13 +613,15 @@ function normalizeYellowFruit(root: JsonObject): {
       stages: phases.length,
       notCarriedOver: [...new Set(notCarriedOver)],
     },
+    schedule: { phases: schedulePhases },
+    scheduleWarnings,
   };
 }
 
 const MAX_YFT_BYTES = 8 * 1024 * 1024;
 
 /** Read-only import of a YellowFruit `.yft` file into canonical QBJ records. */
-export function readYellowFruitTournament(input: YellowFruitInput): FormatReport<QbjImportValue> {
+export function readYellowFruitTournament(input: YellowFruitInput): FormatReport<YellowFruitImportValue> {
   let parsed: unknown = input;
   if (input instanceof Uint8Array) {
     if (input.byteLength > MAX_YFT_BYTES)
@@ -362,9 +653,10 @@ export function readYellowFruitTournament(input: YellowFruitInput): FormatReport
       ],
       [],
     );
-  const { document, summary } = normalizeYellowFruit(parsed);
+  const { document, schedule, scheduleWarnings, summary } = normalizeYellowFruit(parsed);
   const report = importQbj({ version: document.version, objects: document.objects });
   const warnings = [
+    ...scheduleWarnings,
     warning(
       'yft-import-summary',
       '',
@@ -374,5 +666,5 @@ export function readYellowFruitTournament(input: YellowFruitInput): FormatReport
     ...report.warnings,
   ];
   if (!report.ok) return fail(report.errors, warnings);
-  return ok(report.value, warnings);
+  return ok({ ...report.value, schedule }, warnings);
 }
