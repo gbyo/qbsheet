@@ -98,9 +98,12 @@ describe('QBSheet Bridge dual-scope Windows installer', () => {
     expect(text).toContain('InstallerVersion="500"');
     expect(text).toContain('InstallScope="perMachine"');
     expect(text).not.toContain('InstallScope="perUser"');
-    expect(text).toContain('<Property Id="ALLUSERS" Value="2" />');
-    expect(text).toContain('<Property Id="MSIINSTALLPERUSER" Value="" />');
-    expect(text).toContain('<Property Id="QBB_INSTALLSCOPE" Value="perMachine" />');
+    expect(text).toContain('<Property Id="ALLUSERS" Value="2" Secure="yes" />');
+    // MSIINSTALLPERUSER must be declared with NO Value attribute: candle rejects
+    // Value="" with CNDL0006, while an unset property still means per-machine.
+    expect(text).toContain('<Property Id="MSIINSTALLPERUSER" Secure="yes" />');
+    expect(text).not.toContain('MSIINSTALLPERUSER" Value=""');
+    expect(text).toContain('<Property Id="QBB_INSTALLSCOPE" Value="perMachine" Secure="yes" />');
     expect(text).toContain('QBB_INSTALLSCOPE = "perUser"');
   });
 

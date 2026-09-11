@@ -79,11 +79,14 @@
         <!--
           Dual-scope defaults: Standard (all users) unless the scope dialog selects Current
           user, which flips MSIINSTALLPERUSER to 1 before CostInitialize in both sequences.
-          ALLUSERS=2 lets the property decide; an empty MSIINSTALLPERUSER means per-machine.
+          ALLUSERS=2 lets the property decide; an unset MSIINSTALLPERUSER means
+          per-machine. NOTE: MSIINSTALLPERUSER must be declared with NO Value attribute:
+          candle rejects Value="" with CNDL0006 (empty attribute value). Secure carries
+          the scope choice across the UAC boundary on per-machine installs.
         -->
-        <Property Id="ALLUSERS" Value="2" />
-        <Property Id="MSIINSTALLPERUSER" Value="" />
-        <Property Id="QBB_INSTALLSCOPE" Value="perMachine" />
+        <Property Id="ALLUSERS" Value="2" Secure="yes" />
+        <Property Id="MSIINSTALLPERUSER" Secure="yes" />
+        <Property Id="QBB_INSTALLSCOPE" Value="perMachine" Secure="yes" />
         <SetProperty Id="MSIINSTALLPERUSER" Value="1" Before="CostInitialize" Sequence="both">QBB_INSTALLSCOPE = "perUser"</SetProperty>
 
         <!--
