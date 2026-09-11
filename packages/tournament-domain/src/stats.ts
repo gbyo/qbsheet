@@ -333,6 +333,7 @@ export function deriveTeamStandings(
     if (!leftStanding || !rightStanding) continue;
     const gameRules = rulesForGame(state, game) ?? defaultRules;
     const detailKnown = gameDetailedCountsKnown(game);
+    const definitionProven = historicalDefinitionResolved(state, game);
     leftStanding.gamesPlayed += 1;
     rightStanding.gamesPlayed += 1;
     leftStanding.pointsFor += left.score;
@@ -358,14 +359,30 @@ export function deriveTeamStandings(
     leftStanding.negs += left.negs;
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
-    accumulateBouncebackSide(bouncebackTotalsFor(left.teamId), left, right, game, gameRules, detailKnown);
-    accumulateTeamLightning(leftStanding, left.lightningPoints, game, gameRules);
+    accumulateBouncebackSide(
+      bouncebackTotalsFor(left.teamId),
+      left,
+      right,
+      game,
+      gameRules,
+      detailKnown,
+      definitionProven,
+    );
+    accumulateTeamLightning(leftStanding, left.lightningPoints, game, gameRules, definitionProven);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
     rightStanding.bonuses += right.bonuses;
     rightStanding.bonusPoints += right.bonusPoints;
-    accumulateBouncebackSide(bouncebackTotalsFor(right.teamId), right, left, game, gameRules, detailKnown);
+    accumulateBouncebackSide(
+      bouncebackTotalsFor(right.teamId),
+      right,
+      left,
+      game,
+      gameRules,
+      detailKnown,
+      definitionProven,
+    );
     const leftOutcome = gameOutcomeForTeam(game, left.teamId);
     const rightOutcome = gameOutcomeForTeam(game, right.teamId);
     if (leftOutcome === 'win') leftStanding.wins += 1;
@@ -374,7 +391,7 @@ export function deriveTeamStandings(
     if (rightOutcome === 'win') rightStanding.wins += 1;
     else if (rightOutcome === 'loss') rightStanding.losses += 1;
     else if (rightOutcome === 'tie') rightStanding.ties += 1;
-    accumulateTeamLightning(rightStanding, right.lightningPoints, game, gameRules);
+    accumulateTeamLightning(rightStanding, right.lightningPoints, game, gameRules, definitionProven);
   }
 
   for (const standing of byTeam.values()) {
@@ -572,30 +589,29 @@ function accumulateBouncebackSide(
   game: GameRecord,
   rules: TournamentRules | null | undefined,
   detailKnown: boolean,
+  definitionProven: boolean,
 ): void {
-  if (rules && !rules.bouncebacks && game.definitionDigest) {
-    // The pinned historical definition defines no bouncebacks: this game is N/A
-    // for every bounceback fact, whether the stored breakdown is an omitted null
-    // or a scorer-exported numeric zero (#755). Entered detail under an
-    // applicable definition always aggregates as-entered below.
-    return;
-  }
+  // A proven historical definition without bouncebacks proves no opportunity —
+  // but only when the stored breakdown agrees (absent or zero). Entered nonzero
+  // detail is contradictory, never N/A: it aggregates as-entered for points
+  // while declining the parts denominator the definition cannot supply (#755).
+  const provenOff = !!rules && !rules.bouncebacks && definitionProven;
   if (own.bouncebacks === null) {
-    // An absent breakdown is N/A — not unknown — where the stored historical
-    // definition defines no bouncebacks, or the game is a pure-forfeit placeholder.
-    // Entered detail always aggregates as-entered; any other missing breakdown
-    // unknowns the scope (#755, #844).
-    const noOpportunity: boolean =
-      !!(rules && !rules.bouncebacks && game.definitionDigest) ||
-      (game.status === 'forfeit' && isPureForfeitPlaceholder(game));
+    // An absent breakdown is N/A — not unknown — where the proven historical
+    // definition defines no bouncebacks, or the game is a pure-forfeit
+    // placeholder. Any other missing breakdown unknowns the scope (#755, #844).
+    const noOpportunity: boolean = provenOff || (game.status === 'forfeit' && isPureForfeitPlaceholder(game));
     if (!noOpportunity) {
       totals.pointsKnown = false;
       totals.partsKnown = false;
     }
     return;
   }
+  // A stored zero under a proven-off definition is N/A: it contributes nothing
+  // at all, while any other zero aggregates as-entered below.
+  if (own.bouncebacks === 0 && provenOff) return;
   totals.points += own.bouncebacks ?? 0;
-  if (!rules || !detailKnown) {
+  if (provenOff || !rules || !detailKnown) {
     totals.partsKnown = false;
     return;
   }
@@ -688,8 +704,18 @@ export function bouncebackDerivationForTeam(
     contributingGames += 1;
     // Exact game rules are required for parts denominators; without state the live
     // defaults apply, but a state that names no rules leaves parts unavailable.
+    // Provenance likewise needs state: without it nothing is proven N/A.
     const rules = state ? rulesForGame(state, game) : defaultRules;
-    accumulateBouncebackSide(totals, own, opponent, game, rules, gameDetailedCountsKnown(game));
+    const definitionProven = state ? historicalDefinitionResolved(state, game) : false;
+    accumulateBouncebackSide(
+      totals,
+      own,
+      opponent,
+      game,
+      rules,
+      gameDetailedCountsKnown(game),
+      definitionProven,
+    );
     bonuses += own.bonuses;
     bonusPoints += own.bonusPoints;
   }
@@ -950,25 +976,34 @@ export function bonusPointsPerBonus(bonusPoints: number, bonuses: number): numbe
  * Lightning points are known only when the result supplies the breakdown.
  * A missing value marks the aggregate unknown rather than contributing zero.
  *
- * Games whose historical definition disables lightning are N/A: they contribute
- * neither points, knownness, nor denominator (#755). Pure-forfeit placeholders
- * likewise contribute nothing, while a forfeit that kept entered lightning
- * detail aggregates as-entered without supplying a per-game denominator.
+ * Games whose proven historical definition disables lightning are N/A — but only
+ * when the stored breakdown agrees (absent or zero). Entered nonzero detail is
+ * contradictory, never N/A, and aggregates as-entered with its denominator.
+ * Provenance means a resolved snapshot, never a bare echoed digest (#755).
+ * Pure-forfeit placeholders likewise contribute nothing, while a forfeit that
+ * kept entered lightning detail aggregates as-entered without supplying a
+ * per-game denominator.
  */
 function accumulateTeamLightning(
   standing: TeamStanding,
   lightningPoints: number | null | undefined,
   game: GameRecord,
   gameRules: TournamentRules,
+  definitionProven: boolean,
 ): void {
-  if (!gameRules.lightning) return;
+  const entered =
+    typeof lightningPoints === 'number' && Number.isFinite(lightningPoints) && lightningPoints !== 0;
+  if (!gameRules.lightning && definitionProven && !entered) return;
   if (game.status === 'forfeit') {
     if (typeof lightningPoints === 'number' && Number.isFinite(lightningPoints)) {
       standing.lightningPoints += lightningPoints;
     }
     return;
   }
-  standing.lightningGames += 1;
+  // The denominator covers every game aggregated above: applicable games, plus
+  // contradictory entered detail aggregated as-entered. An unproven off-format
+  // game still fails closed on a missing breakdown rather than proving N/A.
+  if (gameRules.lightning || entered) standing.lightningGames += 1;
   addTeamLightning(standing, lightningPoints);
 }
 
@@ -996,6 +1031,24 @@ export function rulesForGame(state: DirectorState, game: GameRecord): Tournament
     if (snapshot) return snapshot.rules;
   }
   return state.tournament?.rules;
+}
+
+/**
+ * Whether a game names a stored historical definition snapshot (#671, #755).
+ *
+ * A bare digest string proves nothing by itself — an imported or legacy result
+ * can echo a digest with no matching snapshot in the store. Only a resolved
+ * snapshot proves the historical rules, so only resolution excuses N/A games
+ * from aggregates; anything else fails closed on missing breakdowns.
+ */
+export function historicalDefinitionResolved(state: DirectorState, game: GameRecord): boolean {
+  return (
+    typeof game.definitionDigest === 'string' &&
+    game.definitionDigest.length > 0 &&
+    state.gameDefinitions.some(
+      (entry) => entry.scheduledGameId === game.scheduledGameId && entry.digest === game.definitionDigest,
+    )
+  );
 }
 
 function validTuh(value: unknown): value is number {

@@ -18,6 +18,7 @@ import {
   derivePlayerStandings,
   deriveTeamStandings,
   gameDetailedCountsKnown,
+  historicalDefinitionResolved,
   orderDayItems,
   playerHasAppearance,
   playerPoints,
@@ -200,8 +201,10 @@ function teamGameParts(
     bonusPartsConverted: own.bonusPoints / rules.bonusValue,
     bonusPartsHeard: own.bonuses * rules.bonusParts,
   };
-  if (rules && !rules.bouncebacks && game.definitionDigest) {
-    // The pinned historical definition defines no bouncebacks: bounceback parts
+  // Provenance means resolution: a bare echoed digest with no stored snapshot
+  // cannot prove N/A, so such games fail closed on missing breakdowns (#755).
+  if (rules && !rules.bouncebacks && historicalDefinitionResolved(state, game)) {
+    // The proven historical definition defines no bouncebacks: bounceback parts
     // are N/A (null), while the team's own bonus parts remain known facts (#755).
     return { ...declined, ...ownParts };
   }
@@ -225,7 +228,13 @@ function teamGameParts(
 function roundStatDefinitionOf(
   historical: HistoricalGameDefinition,
   rules: TournamentRules | null,
+  proven: boolean,
 ): RoundStatDefinition {
+  // A `false` flag is proven not-applicable and excuses the game from round sums
+  // and denominators; anything less than a resolved historical definition leaves
+  // the flag null so unknown applicability fails closed in the sum (#755). This
+  // mirrors the canonical aggregation, which only excuses proven games.
+  const flag = (value: boolean): boolean | null => (proven ? value : value ? true : null);
   return {
     regulationTossups: historical.regulationTossupCount,
     regulationLengthFixed: null,
@@ -236,8 +245,8 @@ function roundStatDefinitionOf(
     // Applicability for N/A-scoping comes from the resolved historical rules —
     // the same source the canonical aggregation uses — never a numeric probe of
     // the stored breakdowns (#755).
-    bouncebacks: rules ? rules.bouncebacks : null,
-    lightning: rules ? rules.lightning : null,
+    bouncebacks: rules ? flag(rules.bouncebacks) : null,
+    lightning: rules ? flag(rules.lightning) : null,
     maximumBonusScore: historical.maximumBonusScore,
     source: 'unknown',
   };
@@ -425,7 +434,13 @@ export function buildCanonicalSnapshot(
     const phaseNameText = phaseId ? phaseName.get(phaseId) : undefined;
     return {
       gameId: game.id,
-      roundStatDefinition: roundStatDefinitionOf(historical, rulesForGame(state, game) ?? null),
+      roundStatDefinition: roundStatDefinitionOf(
+        historical,
+        rulesForGame(state, game) ?? null,
+        // Resolution is the same proven-history proxy the canonical
+        // aggregation uses to excuse N/A games (#755).
+        historicalDefinitionResolved(state, game),
+      ),
       ...(phaseId ? { phaseId } : {}),
       ...(phaseNameText ? { phaseName: phaseNameText } : {}),
       roundId: game.roundId,
