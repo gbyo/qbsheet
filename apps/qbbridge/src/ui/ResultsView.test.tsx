@@ -1,7 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
-import type { BridgeState } from '../model/persistence';
+import type { BridgeState, StoredResult } from '../model/persistence';
 import type { BridgeApi } from '../model/useBridge';
 import { scoredResultDocument } from '../tests/scoredResult';
 import ResultsView from './ResultsView';
@@ -78,12 +78,104 @@ function bridgeWhileBatchSaving(): BridgeApi {
   };
 }
 
+function resultQbj(location: string, leftName: string, rightName: string): object {
+  return {
+    objects: [
+      { type: 'Tournament', id: 'tournament', phases: [{ $ref: 'phase' }] },
+      { type: 'Phase', id: 'phase', rounds: [{ $ref: 'round' }] },
+      { type: 'Round', id: 'round', name: '4', matches: [{ $ref: 'match' }] },
+      { type: 'Team', id: 'left', name: leftName },
+      { type: 'Team', id: 'right', name: rightName },
+      {
+        type: 'Match',
+        id: 'match',
+        location,
+        match_teams: [
+          { team: { $ref: 'left' }, points: 300 },
+          { team: { $ref: 'right' }, points: 200 },
+        ],
+      },
+    ],
+  };
+}
+
+function bridgeWithResults(results: StoredResult[], resultFolder: string | null = '/tournaments/results'): BridgeApi {
+  const bridge = bridgeWhileBatchSaving();
+  return {
+    ...bridge,
+    state: { ...bridge.state, resultFolder, results },
+    savingResults: false,
+    resultBusy: vi.fn(() => false),
+    saveResult: vi.fn(async () => undefined),
+  };
+}
+
 describe('ResultsView save controls', () => {
   test('disables the batch and row saves while a batch is active', () => {
     render(<ResultsView bridge={bridgeWhileBatchSaving()} />);
 
     expect(screen.getByRole('button', { name: /Save New Results/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Save result/ })).toBeDisabled();
+  });
+
+  test('gives each row save a contextual, unique accessible name without changing visible copy', () => {
+    const bridge = bridgeWithResults([
+      {
+        resultId: 'result-a',
+        qbj: resultQbj('Room 101', 'Aiken', 'Dorman'),
+        receivedAt: '2026-09-11T15:00:00Z',
+      },
+      {
+        resultId: 'result-b',
+        qbj: resultQbj('Room 102', 'Southside', 'Wren A'),
+        receivedAt: '2026-09-11T15:01:00Z',
+      },
+    ]);
+
+    render(<ResultsView bridge={bridge} />);
+
+    const aiken = screen.getByRole('button', {
+      name: /Save result — Round 4, Room 101, Aiken vs Dorman, result [0-9a-f]{12}/,
+    });
+    const southside = screen.getByRole('button', {
+      name: /Save result — Round 4, Room 102, Southside vs Wren A, result [0-9a-f]{12}/,
+    });
+    expect(aiken).toHaveTextContent('Save');
+    expect(southside).toHaveTextContent('Save');
+
+    fireEvent.click(aiken);
+    expect(bridge.saveResult).toHaveBeenCalledWith('result-a');
+  });
+
+  test('saved and sparse rows remain uniquely named and preserve disabled state without a folder', () => {
+    const bridge = bridgeWithResults(
+      [
+        {
+          resultId: 'saved-a',
+          qbj: resultQbj('Room 101', 'Aiken', 'Dorman'),
+          receivedAt: '2026-09-11T15:00:00Z',
+          savedPath: '/old/result-a.qbj',
+        },
+        {
+          resultId: 'saved-b',
+          qbj: {},
+          receivedAt: '2026-09-11T15:01:00Z',
+          savedPath: '/old/result-b.qbj',
+        },
+      ],
+      null,
+    );
+
+    render(<ResultsView bridge={bridge} />);
+
+    const contextual = screen.getByRole('button', {
+      name: /Save result again — Round 4, Room 101, Aiken vs Dorman, result [0-9a-f]{12}/,
+    });
+    const sparse = screen.getByRole('button', { name: /Save result again — result [0-9a-f]{12}/ });
+    expect(contextual).toHaveTextContent('Save again');
+    expect(sparse).toHaveTextContent('Save again');
+    expect(contextual).toBeDisabled();
+    expect(sparse).toBeDisabled();
   });
 
   test('shows the local import marker and lets the operator filter it', async () => {
