@@ -133,6 +133,13 @@ describe('QBSheet Bridge dual-scope Windows installer', () => {
     expect(text).toContain('<Condition>NOT MSIINSTALLPERUSER</Condition>');
     expect(text).toContain('Name="InstalledAllUsers"');
     expect(text).toContain('<ComponentRef Id="CMP_PerMachineMarker"/>');
+    // The per-user marker is the mirror image: written only by Current-user installs,
+    // so the per-user search is a precise per-user-copy signal rather than InstallDir,
+    // which every install writes.
+    expect(text).toContain('Id="CMP_PerUserMarker"');
+    expect(text).toContain('<Condition>MSIINSTALLPERUSER</Condition>');
+    expect(text).toContain('Name="InstalledPerUser"');
+    expect(text).toContain('<ComponentRef Id="CMP_PerUserMarker"/>');
     for (const marker of [
       'QBB_MACHINE_INSTALL',
       'QBB_USER_INSTALL',

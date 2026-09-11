@@ -28,14 +28,15 @@
      per-machine context needs it.
   2. A QbbInstallScopeDlg dialog (wired into the no-license WixUI_InstallDir chain; QBBridge
      ships no license file, and a repo test guards that assumption) offering the two scopes
-     with Standard preselected. The name avoids the stock QbbInstallScopeDlg dialog the
+     with Standard preselected. The name avoids the stock InstallScopeDlg dialog the
      WixUIExtension ships, which would collide at link time (LGHT0091). Silent installs
      take the Standard default.
-  3. A per-machine HKLM marker component plus AppSearch searches and launch conditions that
-     refuse a fresh install when a conflicting copy exists in another context or an NSIS copy
-     is registered, with carve-outs for same-context upgrades (UPGRADINGPRODUCTCODE) and
-     maintenance (Installed). Cross-context upgrades are never automatic; each message says
-     what to remove.
+  3. Per-scope marker components (HKLM InstalledAllUsers written only by per-machine
+     installs, HKCU InstalledPerUser written only by Current-user installs) plus AppSearch
+     searches and launch conditions that refuse a fresh install when a conflicting copy
+     exists in another context or an NSIS copy is registered, with carve-outs for
+     same-context upgrades (UPGRADINGPRODUCTCODE) and maintenance (Installed).
+     Cross-context upgrades are never automatic; each message says what to remove.
   4. Nothing else: file payload, shortcuts, HKCU registry, ARP flags, WebView2 bootstrapper
      blocks, and MajorUpgrade handling are stock. Per-user safety holds because every location
      and registry write the stock template uses is context-relative (the program-files,
@@ -99,9 +100,11 @@
           Conflicting-copy detection. AppSearch populates these before LaunchConditions runs:
           - QBB_MACHINE_INSTALL: a per-machine MSI copy's HKLM marker (readable from any
             context; written only by per-machine installs, see CMP_PerMachineMarker).
-          - QBB_USER_INSTALL: an MSI copy's HKCU marker. Only enforced on per-machine
-            installs: per-user sessions let MSI handle their own context, and a stale marker
-            without a product must not strand a per-user install.
+          - QBB_USER_INSTALL: a Current-user MSI copy's HKCU marker (written only by
+            per-user installs, see CMP_PerUserMarker, so a per-machine install never
+            sets it). Only enforced on per-machine installs: per-user sessions let MSI
+            handle their own context, and a stale marker without a product must not
+            strand a per-user install.
           - QBB_NSIS_USER_UNINSTALL / QBB_NSIS_MACHINE_UNINSTALL: an NSIS copy's Add/Remove
             registration in the user or machine hive (NSIS registers under PRODUCTNAME).
           Same-context upgrades (UPGRADINGPRODUCTCODE) and maintenance (Installed) are carved
@@ -111,7 +114,7 @@
           <RegistrySearch Id="QBB_SearchMachineInstall" Root="HKLM" Key="SOFTWARE\\{{manufacturer}}\\{{product_name}}" Name="InstalledAllUsers" Type="raw" />
         </Property>
         <Property Id="QBB_USER_INSTALL">
-          <RegistrySearch Id="QBB_SearchUserInstall" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstallDir" Type="raw" />
+          <RegistrySearch Id="QBB_SearchUserInstall" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstalledPerUser" Type="raw" />
         </Property>
         <Property Id="QBB_NSIS_USER_UNINSTALL">
           <RegistrySearch Id="QBB_SearchNsisUser" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}" Name="UninstallString" Type="raw" />
@@ -327,6 +330,16 @@
                 <Condition>NOT MSIINSTALLPERUSER</Condition>
                 <RegistryValue Root="HKLM" Key="SOFTWARE\\{{manufacturer}}\\{{product_name}}" Name="InstalledAllUsers" Type="integer" Value="1" KeyPath="yes" />
             </Component>
+            <!--
+              Per-user marker: the mirror image, written only by Current-user installs so
+              a later Standard install can detect the conflicting copy. Per-machine
+              installs never write it, so the QBB_USER_INSTALL search is a precise
+              per-user-copy signal (unlike InstallDir, which every install writes).
+            -->
+            <Component Id="CMP_PerUserMarker" Guid="*">
+                <Condition>MSIINSTALLPERUSER</Condition>
+                <RegistryValue Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstalledPerUser" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
         </DirectoryRef>
 
         <DirectoryRef Id="ApplicationProgramsFolder">
@@ -366,6 +379,7 @@
 
             <ComponentRef Id="RegistryEntries"/>
             <ComponentRef Id="CMP_PerMachineMarker"/>
+            <ComponentRef Id="CMP_PerUserMarker"/>
 
             {{#each resource_file_ids as |resource_file_id| ~}}
                 <ComponentRef Id="{{ resource_file_id }}"/>

@@ -297,7 +297,7 @@ jobs:
         if: matrix.name == 'Windows'
         shell: pwsh
         run: |
-          $msi = Get-ChildItem 'apps/qbbridge/src-tauri/target/release/bundle/msi/*.msi' | Select-Object -First 1
+          $msi = Get-ChildItem 'apps/qbbridge/src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi' | Select-Object -First 1
           if (-not $msi) { throw 'No MSI was built.' }
           $installer = New-Object -ComObject WindowsInstaller.Installer
           $db = $installer.OpenDatabase($msi.FullName, 0)
@@ -317,7 +317,7 @@ jobs:
           Assert-Equal (Get-SingleValue 'SELECT `Value` FROM `Property` WHERE `Property` = ''ALLUSERS''') '2' 'ALLUSERS default'
           $msiPerUser = Get-SingleValue 'SELECT `Value` FROM `Property` WHERE `Property` = ''MSIINSTALLPERUSER'''
           if ($null -ne $msiPerUser -and $msiPerUser -ne '') { throw "MSIINSTALLPERUSER default must be empty (per-machine), got [$msiPerUser]." }
-          Assert-Equal (Get-SingleValue 'SELECT `Dialog` FROM `Dialog` WHERE `Dialog` = ''InstallScopeDlg''') 'InstallScopeDlg' 'InstallScopeDlg dialog'
+          Assert-Equal (Get-SingleValue 'SELECT `Dialog` FROM `Dialog` WHERE `Dialog` = ''QbbInstallScopeDlg''') 'QbbInstallScopeDlg' 'QbbInstallScopeDlg dialog'
           # Conflicting-copy launch conditions, each with upgrade and maintenance carve-outs.
           $conditions = @()
           $view = $db.OpenView('SELECT `Condition` FROM `LaunchCondition`')
