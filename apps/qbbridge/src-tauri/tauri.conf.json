@@ -40,11 +40,6 @@
       "icons/icon.ico"
     ],
     "targets": "all",
-    "createUpdaterArtifacts": false,
-    "windows": {
-      "wix": {
-        "template": "wix/main.wxs"
-      }
-    }
+    "createUpdaterArtifacts": false
   }
 }
