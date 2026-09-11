@@ -212,6 +212,73 @@ label {
   font-size: var(--qbs-text-meta);
 }
 
+/* --------------------------------------------------------------------------- Rooms context */
+
+.rooms-schedule-context,
+.rooms-suggestions {
+  margin: 0 0 var(--qbs-space-4);
+  padding: var(--qbs-space-3);
+  border: 1px solid var(--qbs-border-subtle);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface-sunken);
+}
+
+.rooms-schedule-context__heading,
+.rooms-suggestions__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--qbs-space-3);
+}
+
+.rooms-schedule-context h3,
+.rooms-suggestions h3 {
+  margin: 0;
+  font-size: var(--qbs-text-section);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-strong);
+}
+
+.pool-context,
+.suggestion-list {
+  margin: var(--qbs-space-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pool-context > li {
+  padding: var(--qbs-space-2) 0;
+  border-top: 1px solid var(--qbs-border-subtle);
+}
+
+.pool-context__summary {
+  color: var(--qbs-text);
+}
+
+.pool-context__rules {
+  margin: var(--qbs-space-1) 0 0;
+  padding-left: var(--qbs-space-4);
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-meta);
+}
+
+.rooms-schedule-context > p:last-child {
+  margin: var(--qbs-space-3) 0 0;
+}
+
+.rooms-suggestions__heading {
+  align-items: center;
+}
+
+.rooms-suggestions__heading p {
+  margin: var(--qbs-space-1) 0 0;
+}
+
+.suggestion-list li {
+  padding: var(--qbs-space-2) 0;
+  border-top: 1px solid var(--qbs-border-subtle);
+}
+
 ul.plain {
   margin: var(--qbs-space-2) 0;
   padding-left: var(--qbs-space-5);

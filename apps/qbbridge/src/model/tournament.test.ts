@@ -7,8 +7,8 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import { loadedFixture, timedFixtureText, yftFixtureText } from '../tests/fixture';
-import { formatSummary, loadYellowFruitTournament } from './tournament';
+import { loadedFixture, timedFixtureText, unplayedGamesFixtureText, yftFixtureText } from '../tests/fixture';
+import { bridgeRelevantWarnings, formatSummary, loadYellowFruitTournament } from './tournament';
 
 describe('loading a YellowFruit file', () => {
   test('reads the tournament, its teams, its rosters and its rounds', () => {
@@ -86,6 +86,73 @@ describe('loading a YellowFruit file', () => {
     expect(report.tournament.timed).toBe(true);
     expect(report.tournament.rules.maximum_regulation_tossup_count).toBe(24);
     expect(formatSummary(report.tournament)).toContain('Timed');
+  });
+
+  test('offers only concrete unplayed two-team Matches as suggestions', () => {
+    const report = loadYellowFruitTournament(unplayedGamesFixtureText());
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+
+    expect(report.tournament.suggestedGames).toHaveLength(2);
+    expect(report.tournament.suggestedGames[0]).toMatchObject({
+      roundId: report.tournament.rounds[0]?.id,
+      phaseId: 'Phase_Prelims',
+      location: 'Room 1',
+    });
+    expect(report.tournament.suggestedGames.every((game) => game.teamIds.every(Boolean))).toBe(true);
+    expect(report.tournament.suggestedGames.some((game) => game.location === undefined)).toBe(true);
+  });
+
+  test('surfaces Bridge-relevant identity/scoring warnings, not Director migration noise', () => {
+    const report = loadYellowFruitTournament(yftFixtureText());
+    expect(report.ok).toBe(true);
+    if (!report.ok) return;
+
+    const warnings = report.warnings.join(' ');
+    expect(warnings).not.toMatch(/Director|standings|advancement|schedule template|not interpreted/i);
+
+    const retained = bridgeRelevantWarnings([
+      {
+        code: 'unsupported-field-preserved',
+        path: 'objects[0].phases[0].YfData',
+        message: 'The YfData field is not interpreted by this adapter; it was preserved in extensions.',
+      },
+      {
+        code: 'unsupported-field-preserved',
+        path: 'objects[0].scoring_rules.customAnswerValue',
+        message: 'The custom scoring field was preserved for review.',
+      },
+      {
+        code: 'ambiguous-team-name',
+        path: 'games[0].match_teams[1].team',
+        message: 'The team identity could not be resolved safely.',
+      },
+      {
+        code: 'missing-tossups-heard',
+        path: 'games[0].match_teams[0]',
+        message: 'Tossups heard was not available for every player; the team total remains unknown.',
+      },
+      {
+        code: 'yft-schedule-metadata',
+        path: 'phases[0].YfData',
+        message: 'The YellowFruit schedule template was not carried over.',
+      },
+      {
+        code: 'yft-not-carried-over',
+        path: '',
+        message: 'Final rankings are not stored; Director uses calculated standings.',
+      },
+      {
+        code: 'unsupported-field-preserved',
+        path: 'objects[0].rankings[0].position',
+        message: 'The position field is not interpreted by this adapter; it was preserved.',
+      },
+    ]);
+    expect(retained).toEqual([
+      'The custom scoring field was preserved for review.',
+      'The team identity could not be resolved safely.',
+      'Tossups heard was not available for every player; the team total remains unknown.',
+    ]);
   });
 
   test('something that is not a YellowFruit file is refused with a reason', () => {

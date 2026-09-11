@@ -11,8 +11,10 @@ import userEvent from '@testing-library/user-event';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { resetNativeHost } from '../model/native';
-import { yftFixtureText } from '../tests/fixture';
+import { unplayedGamesFixtureText, yftFixtureText } from '../tests/fixture';
 import BridgeApp from './BridgeApp';
+
+let openedFixture = yftFixtureText();
 
 function installFakeTauri(): void {
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
@@ -20,7 +22,7 @@ function installFakeTauri(): void {
     value: {
       invoke: async (command: string) => {
         if (command === 'open_yellowfruit_file') {
-          return { path: '/tournaments/spring.yft', contents: yftFixtureText() };
+          return { path: '/tournaments/spring.yft', contents: openedFixture };
         }
         if (command === 'relay_request') return { status: 503, body: '{}' };
         throw new Error(command);
@@ -36,11 +38,13 @@ async function pickTeam(user: UserEvent, label: string, name: string): Promise<v
   await user.clear(input);
   await user.type(input, name);
   const listbox = await screen.findByRole('listbox');
-  await user.click(within(listbox).getByRole('option', { name }));
+  // Pool context is rendered beside the team name, so the option's accessible name includes it.
+  await user.click(within(listbox).getByRole('option', { name: new RegExp(`^${name}(?: |$)`) }));
 }
 
 beforeEach(installFakeTauri);
 afterEach(() => {
+  openedFixture = yftFixtureText();
   Reflect.deleteProperty(globalThis as Record<string, unknown>, '__TAURI_INTERNALS__');
   resetNativeHost();
 });
@@ -110,6 +114,83 @@ describe('the shell', () => {
     expect(within(row).getAllByText(/^[0-9]{8}$/)).toHaveLength(2);
     // Publishing needs a relay; without one the button does not pretend otherwise.
     expect(screen.getByRole('button', { name: /Publish Round 1/ })).toBeDisabled();
+  });
+
+  test('groups rounds and exposes the selected phase pools as read-only context', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+
+    const roundSelect = screen.getByLabelText('Round');
+    expect(roundSelect.querySelector('optgroup[label="Prelims"]')?.querySelectorAll('option')).toHaveLength(
+      5,
+    );
+    expect(roundSelect.querySelector('optgroup[label="Playoffs"]')?.querySelectorAll('option')).toHaveLength(
+      3,
+    );
+    expect(screen.getByLabelText('Team pool')).toHaveValue('');
+    expect(screen.getByText(/Teams in this file:.*Cony/)).toBeInTheDocument();
+    await user.selectOptions(roundSelect, 'Phase_Playoffs__round_7');
+    expect(screen.getAllByText(/carryover/)).toHaveLength(2);
+    expect(screen.getByText(/does not calculate standings or advancement/)).toBeInTheDocument();
+  });
+
+  test('warns about a cross-pool override without disabling manual pairing', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+    await pickTeam(user, 'Right team in Room 1', 'Deering');
+
+    expect(screen.getByText(/crosses pools/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Publish Round 1/ })).toBeDisabled();
+  });
+
+  test('offers concrete unplayed games and fills exact or available rooms', async () => {
+    openedFixture = unplayedGamesFixtureText();
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+
+    const suggestions = screen.getByRole('list', { name: 'Concrete unplayed YellowFruit games' });
+    expect(within(suggestions).getAllByRole('listitem')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: 'Fill pairings from file' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Fill pairings from file' }));
+    expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Hebron Academy');
+    expect(screen.getByRole('combobox', { name: 'Right team in Room 1' })).toHaveValue('Plymouth B');
+    expect(screen.getByRole('combobox', { name: 'Left team in Room 2' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Right team in Room 2' })).toHaveValue('');
+    expect(screen.getByText(/Already in Room 1/)).toBeInTheDocument();
+    expect(screen.getByText(/Choose a room manually.*No room location in file/)).toBeInTheDocument();
+  });
+
+  test('requires confirmation before a file suggestion replaces an edited pairing', async () => {
+    openedFixture = unplayedGamesFixtureText();
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+
+    await user.click(screen.getByRole('button', { name: 'Fill pairings from file' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Replace entered pairings from file?' });
+    expect(within(dialog).getByText(/replace team selections you already entered/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Fill from file' }));
+    expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Hebron Academy');
   });
 
   test('warns about the things a person mistypes', async () => {
