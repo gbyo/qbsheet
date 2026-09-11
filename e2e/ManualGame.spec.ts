@@ -158,7 +158,11 @@ test('reviewing an already submitted result does not claim it is unsent', async 
   await page.getByRole('button', { name: 'Start game' }).click();
   await chooseStarters(page);
 
-  for (let tossup = 1; tossup <= 4; tossup += 1) {
+  // Score first: four scoreless tossups would end regulation tied and offer overtime
+  // instead of the review screen this test is about.
+  await scorePlayer(page, 'Sarah', 'Power');
+  await page.getByLabel('Bonus').getByRole('button', { name: '30', exact: true }).click();
+  for (let tossup = 2; tossup <= 4; tossup += 1) {
     await page.getByRole('button', { name: 'No buzz' }).click();
   }
   await page.getByLabel('Final score confirmed with both teams').check();

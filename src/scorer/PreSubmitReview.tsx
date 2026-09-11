@@ -196,8 +196,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           <p className="scorer-review-submit-eyebrow">Review &amp; submit</p>
           <h2 className="scorer-review-submit-title">Confirm the result</h2>
           <p className="scorer-review-submit-state">
-            You can still edit this game here. Submit sends the score shown below; if you opened a result
-            that was already sent, submit again only after making a correction.
+            You can still edit this game here. Submit sends the score shown below; if you opened a result that
+            was already sent, submit again only after making a correction.
           </p>
         </div>
         <p className="scorer-complete-title scorer-review-submit-phase">{finalScoreLabel}</p>
