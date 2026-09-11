@@ -1,6 +1,6 @@
 {
   "name": "@qbsheet/qbbridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "QBSheet Bridge: a small tournament utility that carries stock YellowFruit rounds to QBSheet Scorer over Internet QBTCP and brings the result QBJ back",
   "type": "module",
