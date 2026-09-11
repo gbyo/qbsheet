@@ -26,7 +26,13 @@
 
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
-import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
+import {
+  RelayError,
+  relayHealth,
+  relayPublishMirror,
+  type MirrorRoomInput,
+  type RelayConnection,
+} from './relay';
 import type { Room, RoomTombstone } from './rooms';
 import { isCompletePairing, pairingsByRoom, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
@@ -229,6 +235,35 @@ export interface PublishOutcome {
   assignments: PreparedAssignment[];
   /** The rooms whose assignment the relay just cleared. */
   clearedRoomIds: string[];
+  /** The key this attempt sent. A retry of the same revision and content reuses it. */
+  idempotencyKey: string;
+  /**
+   * True when the relay already held exactly this publication — a retry whose first receipt was
+   * lost, or a conflict reconciled against the relay's own position. The rooms hold the
+   * publication either way; nothing was sent twice.
+   */
+  duplicate: boolean;
+}
+
+/**
+ * Name one logical publication.
+ *
+ * The SHA-256 binds the epoch, the revision and the exact room payloads, so a retry of the same
+ * revision reuses the key only when it would send the same bytes: edited content after a failed
+ * attempt mints a fresh key and is judged as a new publication, never mistaken for the old one.
+ * Random-per-attempt keys would do the opposite — each retry looking like a new publication —
+ * which is the double-apply this exists to prevent.
+ */
+export async function publishIdempotencyKey(input: {
+  epoch: number;
+  revision: number;
+  rooms: readonly MirrorRoomInput[];
+}): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify([input.epoch, input.revision, input.rooms])),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -273,15 +308,47 @@ export async function publishRound(
     });
   }
   const revision = input.lastRevision + 1;
-  await relayPublishMirror(connection, {
+  const idempotencyKey = await publishIdempotencyKey({
+    epoch: input.epoch,
+    revision,
+    rooms: mirrorRooms,
+  });
+  const mirrorInput = {
     directorEpoch: input.epoch,
     revision,
     tournamentName: input.tournamentName,
     rooms: mirrorRooms,
-  });
-  return {
+  };
+  const applied = {
     revision,
     assignments: input.plan.assignments,
     clearedRoomIds: input.plan.cleared.map((entry) => entry.roomId),
+    idempotencyKey,
   };
+  try {
+    const publication = await relayPublishMirror(connection, mirrorInput, { idempotencyKey });
+    return { ...applied, duplicate: publication.duplicate };
+  } catch (error) {
+    // The PUT may have landed while its receipt was lost, in which case the relay holds this
+    // revision and refuses the retry as a conflict. The relay's own position settles it: the
+    // same epoch, revision and key means the rooms hold exactly this publication, and the
+    // retry succeeds without sending anything twice. Anything else — another key at this
+    // position, a newer revision, an unreachable health check — keeps the original conflict,
+    // because guessing here would silently adopt someone else's publication as ours.
+    if (!(error instanceof RelayError) || error.status !== 409 || error.code !== 'conflict') {
+      throw error;
+    }
+    let confirmed = false;
+    try {
+      const health = await relayHealth(connection);
+      confirmed =
+        health.directorEpoch === input.epoch &&
+        health.revision === revision &&
+        health.lastMirrorKey === idempotencyKey;
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) throw error;
+    return { ...applied, duplicate: true };
+  }
 }

@@ -148,6 +148,12 @@ export interface RelayHealth {
   backupProvisioned: boolean;
   backupControllerId: string | null;
   backupControllerLabel: string | null;
+  /**
+   * The idempotency key of the last applied publication, or null when the relay predates
+   * keys or the last publication carried none. Lets an unconfirmed receipt distinguish "the
+   * relay holds exactly my publication" from "someone else moved the relay".
+   */
+  lastMirrorKey: string | null;
 }
 
 export interface ScorerReadinessResult {
@@ -324,6 +330,7 @@ export async function relayHealth(connection: RelayConnection): Promise<RelayHea
       typeof controller.backup_controller_id === 'string' ? controller.backup_controller_id : null,
     backupControllerLabel:
       typeof controller.backup_controller_label === 'string' ? controller.backup_controller_label : null,
+    lastMirrorKey: typeof mirror.last_mirror_key === 'string' ? mirror.last_mirror_key : null,
   };
 }
 
@@ -408,10 +415,20 @@ export interface MirrorRoomInput {
  *    tokens live in their own table and a mirror does not revoke them, so a device's room token
  *    from round 1 remains valid in round 8.
  */
+/** What the relay answered to one mirror publication. */
+export interface MirrorPublication {
+  /**
+   * True when the relay recognized the idempotency key and replayed the stored position without
+   * touching rooms: the publication already landed and this send was its lost receipt's retry.
+   */
+  duplicate: boolean;
+}
+
 export async function relayPublishMirror(
   connection: RelayConnection,
   input: { directorEpoch: number; revision: number; tournamentName: string; rooms: MirrorRoomInput[] },
-): Promise<void> {
+  options?: { idempotencyKey?: string },
+): Promise<MirrorPublication> {
   const built = buildRelayMirrorDocument({
     directorEpoch: input.directorEpoch,
     revision: input.revision,
@@ -431,11 +448,16 @@ export async function relayPublishMirror(
   });
   if (!built.ok) throw new RelayError(built.error);
 
+  // Omitted when the caller has no key, so an older caller sends a byte-identical body to
+  // before and an older relay sees a body with no field it does not already ignore.
   const response = await relayRequest({
     method: 'PUT',
     url: `${manageBase(connection.baseUrl, connection.tournamentId)}/mirror`,
     bearer: connection.managementToken,
-    body: built.document,
+    body:
+      options?.idempotencyKey === undefined
+        ? built.document
+        : { ...built.document, idempotency_key: options.idempotencyKey },
   });
   if (response.status === 409) {
     const body = parseBody(response);
@@ -449,6 +471,7 @@ export async function relayPublishMirror(
     );
   }
   if (response.status !== 200) throw fail(response, 'The relay refused that publication.');
+  return { duplicate: parseBody(response).duplicate === true };
 }
 
 /** One completed game the relay is holding. `qbj` is the scorer's document, untouched. */

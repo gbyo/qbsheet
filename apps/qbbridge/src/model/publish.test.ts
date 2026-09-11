@@ -551,3 +551,132 @@ describe('a room that is unused this round', () => {
     expect((calls[1].body as { sessions: unknown[] }).sessions).toEqual([]);
   });
 });
+
+describe('idempotent publication', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  function standardArgs(lastRevision = 6) {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    return {
+      tournament,
+      args: {
+        epoch: 1,
+        lastRevision,
+        tournamentName: tournament.name,
+        plan: planRound(tournament, tournament.rounds[3], rooms, pairingsFor()),
+        rooms,
+      },
+    };
+  }
+
+  function healthBody(lastMirrorKey: unknown) {
+    return JSON.stringify({
+      tournamentId: connection.tournamentId,
+      mirror: {
+        director_epoch: 1,
+        revision: 7,
+        updated_at: '2026-01-01T00:00:00.000Z',
+        last_mirror_key: lastMirrorKey,
+      },
+      controller: {
+        authenticated_as: 'primary',
+        active: true,
+        active_controller: 'primary',
+        backup_provisioned: false,
+      },
+    });
+  }
+
+  test('the mirror carries a content-bound key and the outcome reports it', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const { args } = standardArgs();
+
+    const outcome = await publishRound(connection, args);
+
+    const body = calls[0].body as { idempotency_key: unknown };
+    expect(body.idempotency_key).toMatch(/^[0-9a-f]{64}$/);
+    expect(outcome.idempotencyKey).toBe(body.idempotency_key);
+    expect(outcome.duplicate).toBe(false);
+  });
+
+  test('a retry of the same revision and content reuses the key', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+
+    await publishRound(connection, standardArgs().args);
+    await publishRound(connection, standardArgs().args);
+
+    const first = (calls[0].body as { idempotency_key: unknown }).idempotency_key;
+    const second = (calls[1].body as { idempotency_key: unknown }).idempotency_key;
+    // Same revision, same bytes: the relay reads the retry as the same request, not a conflict.
+    expect(second).toBe(first);
+  });
+
+  test('edited content after a failure mints a fresh key', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const first = standardArgs();
+    const second = standardArgs();
+    second.args.rooms[0] = { ...second.args.rooms[0], pendingPairingCode: '00000000' };
+
+    await publishRound(connection, first.args);
+    await publishRound(connection, second.args);
+
+    // The pairing hash changed, so the key changed with it: the relay judges the edited retry
+    // as a new publication rather than mistaking it for the failed one.
+    expect((calls[1].body as { idempotency_key: unknown }).idempotency_key).not.toBe(
+      (calls[0].body as { idempotency_key: unknown }).idempotency_key,
+    );
+  });
+
+  test('a duplicate receipt succeeds without publishing twice', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: JSON.stringify({ duplicate: true }) }));
+    const { args } = standardArgs();
+
+    const outcome = await publishRound(connection, args);
+
+    expect(calls).toHaveLength(1);
+    expect(outcome).toMatchObject({ revision: 7, duplicate: true });
+  });
+
+  test('a conflict the relay confirms as ours succeeds from the stored position', async () => {
+    let sentKey: unknown;
+    const calls = stubRelay((call) => {
+      if (call.method === 'PUT') {
+        sentKey = (call.body as { idempotency_key: unknown }).idempotency_key;
+        return { status: 409, body: JSON.stringify({ code: 'conflict', currentRevision: 7 }) };
+      }
+      return { status: 200, body: healthBody(sentKey) };
+    });
+    const { args } = standardArgs();
+
+    // The first attempt landed while its receipt was lost; the retry conflicts, then the
+    // relay's own position — same epoch, revision and key — proves the rooms hold it.
+    const outcome = await publishRound(connection, args);
+
+    expect(outcome).toMatchObject({ revision: 7, duplicate: true, idempotencyKey: sentKey });
+    expect(calls.filter((call) => call.method === 'PUT')).toHaveLength(1);
+  });
+
+  test('a conflict holding someone else’s key stays a conflict', async () => {
+    stubRelay((call) => {
+      if (call.method === 'PUT') {
+        return { status: 409, body: JSON.stringify({ code: 'conflict', currentRevision: 7 }) };
+      }
+      return { status: 200, body: healthBody('another-directors-key') };
+    });
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+
+    // The relay moved under a different publication. Adopting it as ours would silently bless
+    // rooms holding games this plan never sent, so the conflict stands.
+    await expect(
+      publishRound(connection, {
+        epoch: 1,
+        lastRevision: 6,
+        tournamentName: tournament.name,
+        plan: planRound(tournament, tournament.rounds[3], rooms, pairingsFor()),
+        rooms,
+      }),
+    ).rejects.toThrow(/revision 7.*Nothing was sent to the rooms/);
+  });
+});
