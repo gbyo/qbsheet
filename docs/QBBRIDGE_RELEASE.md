@@ -87,11 +87,11 @@ artifact, so a dispatch run that silently uploads nothing reads as red, not gree
 The macOS bundle is `universal-apple-darwin`: one download for both Apple silicon and Intel, so an
 operator does not have to know which processor their Mac has.
 
-| Platform | Files                                                   |
-| -------- | ------------------------------------------------------- |
-| Windows  | `-setup.exe` (NSIS), `.msi` (dual-scope WiX, see below) |
-| macOS    | `.dmg`                                                  |
-| Linux    | `.AppImage`, `.deb`, `.rpm`                             |
+| Platform | Files                                                           |
+| -------- | --------------------------------------------------------------- |
+| Windows  | `-setup.exe` (NSIS), `.msi` (WiX, for administrator deployment) |
+| macOS    | `.dmg`                                                          |
+| Linux    | `.AppImage`, `.deb`, `.rpm`                                     |
 
 The Linux bundles link against the glibc of the runner they were built on, so the runner image in
 the workflow matrix decides the oldest distribution QBBridge supports. It is pinned to
@@ -104,77 +104,6 @@ milliseconds on every CI run. It exists because Director's abandoned 0.1.0 macOS
 Xcode's `actool` — one opaque line, after a full compile — over `icons/icon.icon`, which is an
 Xcode Icon Composer _source directory_, not an image. Keep Icon Composer sources in the tree as
 design inputs, but never in a `bundle.icon` list.
-
-## The Windows MSI installs for everyone or for one user
-
-The `.msi` is built from the owned WiX template in `apps/qbbridge/src-tauri/wix/main.wxs`
-(wired in via `bundle.windows.wix.template`), not from the Tauri stock template. It is one
-dual-scope package, not two installers: the second wizard page offers **Standard install for
-everyone on this PC (recommended)** and **Current user only, no administrator approval
-needed**, with Standard preselected. A silent install (`msiexec /qn`) takes the Standard
-default. Elevation is prompted only when the per-machine context actually needs it; the
-Current-user path never elevates.
-
-Install locations follow the context. Standard installs under Program Files with Start Menu
-and desktop shortcuts for all users; Current-user installs under the account's application
-folder with that account's shortcuts. Either way the app's own state (rooms, round plans,
-publication facts, results) lives in the same per-user WebView profile directory the NSIS and
-other builds use, so switching installer kinds does not strand an operator's setup — but the
-two scopes are separate Windows products, and the installer refuses to create a side-by-side
-pair (see below).
-
-### Upgrades, conflicts, and the copies the installer refuses
-
-Same-context upgrades are ordinary major upgrades: installing a newer MSI over the same scope
-replaces it, and the installed Programs entry stays single. Nothing ever migrates across
-contexts automatically. A fresh install that would create a second copy is refused with a
-message naming what to remove first:
-
-| Existing copy          | New install               | Result                                                    |
-| ---------------------- | ------------------------- | --------------------------------------------------------- |
-| MSI, all users         | MSI, current user         | Refused: uninstall the all-users copy from Settings, Apps |
-| MSI, current user      | MSI, all users            | Refused: uninstall the per-user copy from Settings, Apps  |
-| NSIS, current user     | MSI, either scope         | Refused: uninstall the classic copy from Settings, Apps   |
-| NSIS, all users        | MSI, either scope         | Refused: uninstall the classic copy from Settings, Apps   |
-| MSI or NSIS, any scope | Same scope, newer version | Upgrades in place                                         |
-| MSI, either scope      | Older version over newer  | Refused by the stock downgrade guard                      |
-
-Repair, uninstall, and same-context upgrades never trip on their own product: every launch
-condition carries carve-outs for upgrades in progress and installed maintenance. Two
-limitations are known and accepted. A per-machine install cannot see other Windows accounts'
-per-user copies, so the check covers the installing operator's account. And a per-user
-session does not second-guess its own context's registry marker, so a stale marker left by a
-manually deleted (never uninstalled) copy can prefill the directory page — the operator can
-still pick a folder, and a proper uninstall never leaves one.
-
-### WebView2 in the Current-user install
-
-The stock WebView2 bootstrapper blocks are unchanged: when no runtime is present, the MSI
-downloads the Evergreen bootstrapper and runs it as the installing user, without elevation.
-On a Current-user install that means a per-user WebView2 runtime and no administrator prompt
-at any point. On a Standard install the bootstrapper elevates itself only if a machine-wide
-runtime is what is missing. If the machine is offline the download fails and the install
-fails with the bootstrapper's error rather than a half-installed app.
-
-### Repair, uninstall, and template maintenance
-
-Repair and uninstall behave per context: each installed copy repairs and removes only itself,
-and uninstalling one scope leaves the other (and the operator's WebView-profile state)
-untouched. The Start Menu uninstall shortcut runs `msiexec /x` for its own product code.
-
-The template header records the exact stock Tauri template it was derived from and the four
-numbered divergences. When the Tauri CLI minor version moves, re-diff against the new stock
-template, carry the divergences forward, and update the base tag. Three guardrails enforce
-this: `bundleConfig.test.ts` fails if the base tag's minor version drifts from the pinned
-CLI, if the scope dialog or the conflict conditions regress, or if a per-machine write
-appears outside the marker; the release workflow reads the built MSI back and fails unless
-the dual-scope markers are present; and the config must stay license-free, because adding a
-license file would silently orphan the scope dialog from the installer chain.
-
-Before trusting a new template revision, walk the manual checklist on a real Windows machine:
-Standard install as admin, Current-user install as a restricted account with no admin
-available, each conflict row above, upgrade in each scope, and uninstall of each scope with
-the other present.
 
 ## Where this differs from Director
 
