@@ -9,7 +9,14 @@
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { pairingCodeHash } from './pairing';
-import { planRoomSetup, planRound, publicationReviewItems, publishRound } from './publish';
+import {
+  lateJoinedRoomIds,
+  planRoomSetup,
+  planRound,
+  publicationPlansEqual,
+  publicationReviewItems,
+  publishRound,
+} from './publish';
 import {
   relayClaim,
   relayCheckScorerReadiness,
@@ -138,6 +145,37 @@ describe('planning a round', () => {
       ]),
     );
     expect(items.filter((item) => /same team/i.test(item.message))).toHaveLength(1);
+  });
+
+  test('never-published rooms are late joiners; published and unknown rooms are not', () => {
+    const rooms = [...roomsFor(), { ...roomsFor()[0]!, id: 'room-published', assignmentRevision: 3 }];
+    // room-1..3 come from newRoom at revision 0; only receivers at revision 0 are late.
+    // (Cleared rooms never reach this helper: the caller passes only rooms receiving content.)
+    expect(lateJoinedRoomIds(['room-1', 'room-published', 'room-gone'], rooms)).toEqual(['room-1']);
+    expect(lateJoinedRoomIds(['room-1', 'room-1', 'room-2'], rooms)).toEqual(['room-1', 'room-2']);
+  });
+
+  test('plan equality is order-insensitive but content-exact', () => {
+    const tournament = loadedFixture();
+    const round = tournament.rounds[3]!;
+    const plan = planRound(tournament, round, roomsFor(), pairingsFor());
+    const reordered = {
+      ...plan,
+      publications: [...plan.publications].reverse(),
+      cleared: [...plan.cleared],
+    };
+    expect(publicationPlansEqual(plan, reordered)).toBe(true);
+    const editedPairings = pairingsFor();
+    editedPairings[0] = { ...editedPairings[0]!, rightTeamId: teamId('Wells') };
+    const edited = planRound(tournament, round, roomsFor(), editedPairings);
+    expect(publicationPlansEqual(plan, edited)).toBe(false);
+    const renamed = planRound(
+      tournament,
+      round,
+      roomsFor().map((room) => (room.id === 'room-1' ? { ...room, name: 'Room 101b' } : room)),
+      pairingsFor(),
+    );
+    expect(publicationPlansEqual(plan, renamed)).toBe(false);
   });
 
   test('a duplicated room row publishes the entry the UI shows', () => {

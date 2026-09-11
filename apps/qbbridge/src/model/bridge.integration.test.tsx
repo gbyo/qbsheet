@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
+import type { TournamentReconciliation } from './reconcile';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
@@ -57,6 +58,10 @@ let secureCredentials = new Map<string, string>();
 let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
+/** Rows served by GET manage/sessions: room presence and activity for reconciliation. */
+let relaySessions: unknown[] = [];
+/** Set to make the sessions feed fail, so aliveness degrades to unknown. */
+let sessionsFail = false;
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
@@ -226,6 +231,13 @@ function installFakeTauri(): void {
             }),
           };
         }
+        if (url.endsWith('/sessions')) {
+          if (sessionsFail) return { status: 503, body: JSON.stringify({ message: 'sessions down' }) };
+          return {
+            status: 200,
+            body: JSON.stringify({ tournamentId: relayTournament, sessions: relaySessions }),
+          };
+        }
         if (url.endsWith('/acks')) {
           if (ackFailuresRemaining > 0) {
             ackFailuresRemaining -= 1;
@@ -263,6 +275,8 @@ function installFakeTauri(): void {
 
 beforeEach(() => {
   relayResults = [];
+  relaySessions = [];
+  sessionsFail = false;
   recoveryPackage = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
@@ -1459,8 +1473,13 @@ describe('critical relay persistence', () => {
     const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
     let writes = 0;
     const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
-      writes += 1;
-      if (writes === 2) throw new Error('storage became unavailable after the claim');
+      // Only the BridgeState save can fail the claim into its pending path. Diagnostic keys
+      // (audit, lifecycle) share the store and must pass through, or any future diagnostic
+      // write silently shifts this fault to the wrong save.
+      if (key === storageKey) {
+        writes += 1;
+        if (writes === 2) throw new Error('storage became unavailable after the claim');
+      }
       originalSetItem(key, value);
     });
     const rendered = renderHook(() => useBridge());
@@ -2353,5 +2372,690 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+/**
+ * Tournament-live guards (#1016). Phase and audit history persist in localStorage, so this
+ * suite owns its keys and always leaves them clean for the suites around it.
+ */
+describe('tournament lifecycle guards', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('setup actions run at once with no override', async () => {
+    const rendered = await setUpTournament();
+    const [first] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.removeRoom(first.id);
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(1);
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    expect(rendered.result.current.auditLog.some((entry) => entry.action === 'room-removed')).toBe(true);
+    rendered.unmount();
+  });
+
+  test('a live room removal waits for an explicit audited override', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    expect(rendered.result.current.phase).toBe('live');
+    const [first] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.removeRoom(first.id);
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(2);
+    const pending = rendered.result.current.pendingLiveOverride;
+    expect(pending?.action.id).toBe('remove-room');
+    expect(pending?.action.label).toMatch(/Room 101/);
+    expect(pending?.action.consequences).toMatch(/tombstone/);
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(1);
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    const actions = rendered.result.current.auditLog.map((entry) => entry.action);
+    expect(actions).toContain('live-override');
+    expect(actions).toContain('room-removed');
+    rendered.unmount();
+  });
+
+  test('a live relay change is held for override while setup change is instant', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    expect(rendered.result.current.state.relay).not.toBeNull();
+    expect(rendered.result.current.changingRelay).toBe(false);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('change-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    expect(rendered.result.current.changingRelay).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a clean end of day finishes with a safe-to-close proof', async () => {
+    const rendered = await setUpConnectedRooms();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation?.safeToClose).toBe(true);
+    expect(rendered.result.current.notice?.message).toMatch(/Safe to close/);
+    expect(
+      rendered.result.current.auditLog.some(
+        (entry) => entry.action === 'lifecycle' && entry.fields.phase === 'finished',
+      ),
+    ).toBe(true);
+    rendered.unmount();
+  });
+
+  test('an unresolved end of day finishes only through an explicit override', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    // Entered pairings leave rooms active, so the close is dirty and waits.
+    expect(rendered.result.current.phase).toBe('live');
+    expect(rendered.result.current.reconciliation?.safeToClose).toBe(false);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('finish-dirty');
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    rendered.unmount();
+  });
+});
+
+describe('live late-join publication guards', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  function mirrorCount(): number {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+  }
+
+  test('a room added while live waits for an explicit override before its first publish', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    act(() => {
+      rendered.result.current.goLive();
+      rendered.result.current.addRoom();
+    });
+    const late = rendered.result.current.state.rooms.at(-1)!;
+    act(() => {
+      rendered.result.current.setRoomTeams(late.id, 'left', 'Team_Hebron Academy');
+      rendered.result.current.setRoomTeams(late.id, 'right', 'Team_Deering');
+    });
+    const mirrorsBefore = mirrorCount();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    // Blocked before anything reaches the relay, and the override names the late room.
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    const pending = rendered.result.current.pendingLiveOverride;
+    expect(pending?.action.id).toBe('publish-late-rooms');
+    expect(pending?.action.label).toMatch(new RegExp(late.name));
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    // The override opens the review, where the late room stays visible.
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: late.id, message: expect.stringMatching(/never been published/) }),
+      ]),
+    );
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(mirrorCount()).toBeGreaterThan(mirrorsBefore);
+    expect(rendered.result.current.state.rooms.find((room) => room.id === late.id)?.relayPublished).toBe(
+      true,
+    );
+    rendered.unmount();
+  });
+
+  test('room setup for a late room takes the same override', async () => {
+    const rendered = await setUpConnectedRooms();
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCount()).toBe(1);
+    act(() => {
+      rendered.result.current.goLive();
+      rendered.result.current.addRoom();
+    });
+    const late = rendered.result.current.state.rooms.at(-1)!;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    // Pairing codes for a never-published room are content too: held for override.
+    expect(mirrorCount()).toBe(1);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('publish-late-rooms');
+    expect(rendered.result.current.pendingLiveOverride?.action.label).toMatch(new RegExp(late.name));
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    await waitFor(() => expect(mirrorCount()).toBe(2));
+    rendered.unmount();
+  });
+
+  test('confirming a review after the pairings changed refuses and keeps the relay untouched', async () => {
+    const rendered = await setUpTournament();
+    const [first, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    const mirrorsBefore = mirrorCount();
+    // The plan under review changes while the review is open.
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Windham C');
+    });
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/changed after this plan was reviewed/);
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    // Reviewing again publishes the new plan, not the stale one.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(mirrorCount()).toBeGreaterThan(mirrorsBefore);
+    expect(rendered.result.current.state.rooms[0].relayPublished).toBe(true);
+    rendered.unmount();
+  });
+
+  test('confirming a review after the relay moved refuses', async () => {
+    const rendered = await setUpTournament();
+    const [, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    const mirrorsBefore = mirrorCount();
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev/',
+        tournamentId: relayTournament,
+        setupToken: 'fresh',
+      });
+    });
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/relay changed after this plan was reviewed/);
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    rendered.unmount();
+  });
+});
+
+describe('publication critical section', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  function mirrorCalls(): InvokeCall[] {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+  }
+
+  /**
+   * Start a publish with the mirror held open, going through the review when the pairings
+   * warrant one. Resolves once the mirror request is actually in flight.
+   */
+  async function startHeldPublish(
+    rendered: Awaited<ReturnType<typeof setUpTournament>>,
+  ): Promise<{ publishing: Promise<void> }> {
+    let publishing: Promise<void>;
+    act(() => {
+      publishing = rendered.result.current.publish();
+    });
+    await waitFor(() => {
+      if (!deferredMirrorStarted && rendered.result.current.pendingPublicationReview === null)
+        throw new Error('publish has neither opened its review nor reached the relay yet');
+    });
+    if (rendered.result.current.pendingPublicationReview !== null) {
+      act(() => {
+        publishing = rendered.result.current.confirmPublicationReview();
+      });
+      await waitFor(() => expect(deferredMirrorStarted).toBe(true));
+    }
+    // Wrapped: returning the bare promise through an async boundary would adopt it, and
+    // awaiting the helper would park at the held mirror instead of returning it.
+    return { publishing: publishing! };
+  }
+
+  test('a result polled while a publish is in flight lands alongside the publication', async () => {
+    const { result: document } = scoredResultDocument();
+    const rendered = await setUpTournament();
+    const roomId = rendered.result.current.state.rooms[0].id;
+    let releaseMirror: (() => void) | null = null;
+    deferMirror = new Promise<void>((resolve) => {
+      releaseMirror = resolve;
+    });
+    const { publishing } = await startHeldPublish(rendered);
+    relayResults = [
+      { result_id: 'res-1', room_id: roomId, received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+    releaseMirror!();
+    await act(async () => {
+      await publishing;
+    });
+    deferMirror = null;
+    // Both landed: the publication was adopted and the polled result survived it.
+    expect(rendered.result.current.state.rooms[0].relayPublished).toBe(true);
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+    expect(rendered.result.current.notice?.message).toMatch(/Published round/);
+    rendered.unmount();
+  });
+
+  test('replacing the relay while a publish is in flight refuses without adopting anything', async () => {
+    const rendered = await setUpTournament();
+    let releaseMirror: (() => void) | null = null;
+    deferMirror = new Promise<void>((resolve) => {
+      releaseMirror = resolve;
+    });
+    const { publishing } = await startHeldPublish(rendered);
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev/',
+        tournamentId: relayTournament,
+        setupToken: 'fresh',
+      });
+    });
+    releaseMirror!();
+    await act(async () => {
+      await publishing;
+    });
+    deferMirror = null;
+    expect(rendered.result.current.notice?.message).toMatch(/relay changed while this round was publishing/);
+    expect(rendered.result.current.auditLog.some((entry) => entry.action === 'publication-confirmed')).toBe(
+      false,
+    );
+    // The only mirror went to the replaced relay; nothing was adopted from it. Origin
+    // comparison, not a substring prefix: a prefix would also match a lookalike host.
+    expect(mirrorCalls()).toHaveLength(1);
+    expect(new URL(String(mirrorCalls()[0]?.args.url)).origin).toBe(relayBase);
+    rendered.unmount();
+  });
+});
+
+describe('reconciliation aliveness', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('active rooms are tiered by live heartbeat', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    const [first, second] = rendered.result.current.state.rooms;
+    const now = new Date().toISOString();
+    relaySessions = [
+      {
+        session_id: 'session-1',
+        room_id: first.id,
+        updated_at: now,
+        presence: [{ updated_at: now }],
+      },
+    ];
+    let report: TournamentReconciliation | null | undefined;
+    await act(async () => {
+      report = await rendered.result.current.refreshReconciliation();
+    });
+    expect(report).not.toBeNull();
+    expect(report?.safeToClose).toBe(false);
+    const blocker = report?.blockers.find((entry) => entry.includes('assignment out'));
+    expect(blocker).toMatch(/do not close mid-game/);
+    expect(blocker).toMatch(new RegExp(first.name));
+    // The room with no session anywhere is quiet, not live.
+    expect(blocker).toMatch(new RegExp(`${second.name} \\(no live heartbeat\\)`));
+    rendered.unmount();
+  });
+
+  test('an unreadable sessions feed degrades to unknown instead of failing', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    sessionsFail = true;
+    let report: TournamentReconciliation | null | undefined;
+    await act(async () => {
+      report = await rendered.result.current.refreshReconciliation();
+    });
+    expect(report).not.toBeNull();
+    expect(report?.safeToClose).toBe(false);
+    const blocker = report?.blockers.find((entry) => entry.includes('assignment out'));
+    expect(blocker).toBeDefined();
+    expect(blocker).not.toMatch(/heartbeat|mid-game|moments ago/);
+    rendered.unmount();
+  });
+
+  test('a persistence failure during the fetch still blocks the close', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    deferResultRequests = true;
+    let reconciling: Promise<TournamentReconciliation | null> | undefined;
+    act(() => {
+      reconciling = rendered.result.current.refreshReconciliation();
+    });
+    await waitFor(() => expect(pendingResultRequests.length).toBe(1));
+    // A state save fails while the relay request is still in flight.
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    let stateWrites = 0;
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(((
+      key: string,
+      value: string,
+    ) => {
+      if (key === storageKey) {
+        stateWrites += 1;
+        throw new Error('storage unavailable mid-fetch');
+      }
+      originalSetItem(key, value);
+    }) as typeof globalThis.localStorage.setItem);
+    act(() => {
+      rendered.result.current.addRoom();
+    });
+    expect(stateWrites).toBeGreaterThan(0);
+    expect(rendered.result.current.persistenceSavePending).toBe(true);
+    // Keep failing state saves until the report is built: background polls commit too, and
+    // a successful one would legitimately clear the flag by persisting everything.
+    act(() => {
+      for (const pending of pendingResultRequests.splice(0)) {
+        pending.resolve({ status: 200, body: JSON.stringify({ results: [] }) });
+      }
+    });
+    const report = await act(async () => await reconciling!);
+    setItem.mockRestore();
+    expect(report?.pendingRecovery).toBe(1);
+    expect(report?.safeToClose).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a clean close with aged-out finals names the retention gap', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      {
+        result_id: 'res-old',
+        room_id: 'room-gone',
+        received_at: '2026-08-20T15:00:00Z',
+        qbj: document,
+      },
+    ];
+    const rendered = await setUpConnectedRooms();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    act(() => {
+      rendered.result.current.markResultImported('res-old');
+    });
+    // The relay no longer serves the old final: it aged out of retention.
+    relayResults = [];
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation?.agedOut).toEqual(['res-old']);
+    // The counts are reported separately, never equated, with the gap explained.
+    expect(rendered.result.current.notice?.message).toMatch(/Safe to close/);
+    expect(rendered.result.current.notice?.message).toMatch(/aged out/);
+    expect(rendered.result.current.notice?.message).not.toMatch(/=/);
+    rendered.unmount();
+  });
+});
+
+describe('guarded recovery operations', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('revoking backup access while live waits for an override, then reports its result', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    let revoked: Promise<boolean>;
+    act(() => {
+      revoked = rendered.result.current.revokeBackup();
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('revoke-backup');
+    expect(
+      calls.some(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/backup/revoke'),
+      ),
+    ).toBe(false);
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    await act(async () => {
+      await expect(revoked!).resolves.toBe(true);
+    });
+    expect(
+      rendered.result.current.auditLog.some(
+        (entry) => entry.action === 'live-override' && entry.fields.action === 'revoke-backup',
+      ),
+    ).toBe(true);
+    rendered.unmount();
+  });
+
+  test('cancelling a held operation resolves with its failure value', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    let revoked: Promise<boolean>;
+    act(() => {
+      revoked = rendered.result.current.revokeBackup();
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('revoke-backup');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    await act(async () => {
+      await expect(revoked!).resolves.toBe(false);
+    });
+    expect(
+      calls.some(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/backup/revoke'),
+      ),
+    ).toBe(false);
+    rendered.unmount();
+  });
+
+  test('takeover, transfer, rotate, and import all wait for an override while live', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    const pending: Promise<unknown>[] = [];
+    act(() => {
+      pending.push(rendered.result.current.takeOverRelay());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('take-over-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.transferRelayToPrimary());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('transfer-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.rotateBackup());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('rotate-backup');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.importRecoveryPackage('passphrase'));
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('import-recovery');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    await act(async () => {
+      await expect(Promise.all(pending)).resolves.toEqual([false, false, null, false]);
+    });
+    // Nothing reached the relay: every held operation resolved its failure value instead.
+    expect(
+      calls.some(
+        (call) =>
+          call.command === 'relay_request' &&
+          /takeover|transfer|backup|provision/.test(String(call.args.url)),
+      ),
+    ).toBe(false);
+    rendered.unmount();
+  });
+});
+
+describe('lifecycle durability and reset', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('a missed lifecycle or audit write joins the durability flag instead of vanishing', async () => {
+    const rendered = await setUpTournament();
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(((
+      key: string,
+      value: string,
+    ) => {
+      if (key === 'qbbridge.lifecycle.v1' || key === 'qbbridge.audit.v1')
+        throw new Error('diagnostic storage unavailable');
+      originalSetItem(key, value);
+    }) as typeof globalThis.localStorage.setItem);
+    try {
+      act(() => {
+        rendered.result.current.goLive();
+      });
+      // The transition stays in memory — the tournament has to run — but it is flagged.
+      expect(rendered.result.current.phase).toBe('live');
+      expect(rendered.result.current.persistenceSavePending).toBe(true);
+      // So is a missed audit write from an ordinary action.
+      act(() => {
+        rendered.result.current.addRoom();
+      });
+      expect(rendered.result.current.persistenceSavePending).toBe(true);
+    } finally {
+      setItem.mockRestore();
+    }
+    rendered.unmount();
+  });
+
+  test('switching tournaments resets the phase and clears the old reconciliation', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    // Entered pairings leave the close dirty, so finish through the override.
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation).not.toBeNull();
+    act(() => {
+      rendered.result.current.loadFileContents('/other-tournament.yft', yftFixtureText());
+    });
+    expect(rendered.result.current.pendingFileSwitch).not.toBeNull();
+    act(() => {
+      rendered.result.current.confirmFileSwitch();
+    });
+    // The switch itself is guarded while finished.
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('switch-tournament');
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    // The new tournament starts clean: setup phase, no stale reconciliation.
+    expect(rendered.result.current.phase).toBe('setup');
+    expect(rendered.result.current.reconciliation).toBeNull();
+    rendered.unmount();
   });
 });

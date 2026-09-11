@@ -27,6 +27,7 @@ import {
   schedulePairingWarnings,
 } from '../model/schedule';
 import type { BridgeApi } from '../model/useBridge';
+import { LiveOverrideDialog } from './LiveOverrideDialog';
 import Qr from './Qr';
 
 const status: Record<RoomStatus, { label: string; tone: Tone }> = {
@@ -636,6 +637,11 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           ))}
         </ul>
       </ConfirmDialog>
+      <LiveOverrideDialog
+        pending={bridge.pendingLiveOverride}
+        onConfirm={bridge.confirmLiveOverride}
+        onCancel={bridge.cancelLiveOverride}
+      />
       {printTarget !== null && typeof document !== 'undefined'
         ? createPortal(
             <div className="room-print-sheets" data-print-target={printTarget}>

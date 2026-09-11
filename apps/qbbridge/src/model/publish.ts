@@ -56,6 +56,46 @@ export interface PublicationReviewItem {
 }
 
 /**
+ * Rooms about to receive content that were never published to: they joined after go-live
+ * (their local assignment revision is still zero), so nothing they hold was ever reviewed.
+ *
+ * `receivingRoomIds` is the caller saying what "receive" means for its plan: the rooms
+ * getting an assignment for a round publish, every publication for a room-setup publish
+ * (codes go out even though the assignment stays null). Tombstones are never in `rooms`,
+ * so clearing a removed room needs no gate. Pure, so the live-publish gate and its tests
+ * share it.
+ */
+export function lateJoinedRoomIds(
+  receivingRoomIds: readonly string[],
+  rooms: readonly Pick<Room, 'id' | 'assignmentRevision'>[],
+): string[] {
+  const revisions = new Map(rooms.map((room) => [room.id, room.assignmentRevision]));
+  return [...new Set(receivingRoomIds)].filter((roomId) => revisions.get(roomId) === 0);
+}
+
+/**
+ * Whether two plans would put the same content in the same rooms.
+ *
+ * The confirm step re-derives the plan from current state and refuses on any drift, so the
+ * comparison is order-insensitive but content-exact: a renamed room or a re-seeded code hash
+ * is a real change the operator must review again, not noise to normalize away.
+ */
+export function publicationPlansEqual(a: PublishPlan, b: PublishPlan): boolean {
+  const canonical = (plan: PublishPlan): string => {
+    const byRoomId = (x: { roomId: string }, y: { roomId: string }): number =>
+      x.roomId < y.roomId ? -1 : x.roomId > y.roomId ? 1 : 0;
+    const publications = [...plan.publications]
+      .sort(byRoomId)
+      .map((entry) => [entry.roomId, entry.roomName, entry.assignment, entry.clearedReason]);
+    const cleared = [...plan.cleared]
+      .sort(byRoomId)
+      .map((entry) => [entry.roomId, entry.roomName, entry.reason]);
+    return JSON.stringify({ publications, cleared });
+  };
+  return canonical(a) === canonical(b);
+}
+
+/**
  * Turn the exact plan and its read-only pairing warnings into the review shown before publishing.
  *
  * The plan's cleared entries matter as much as advisory warnings: a room omitted from a pairing

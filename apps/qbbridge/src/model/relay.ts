@@ -505,6 +505,103 @@ export async function relayFetchResults(connection: RelayConnection): Promise<Re
  */
 export const relayUnackedWindow = 128;
 
+export interface RelayRetainedFinal extends RelayResult {
+  /** True once the relay recorded an acknowledgment; retained for the seven-day window. */
+  acked: boolean;
+}
+
+/**
+ * Every final the relay retains, acknowledged or not, oldest first.
+ *
+ * Same page bound as the unacked poll and likewise no cursor, so a full page means the
+ * caller must treat the counts as lower bounds. Used only by end-of-day reconciliation:
+ * ordinary polling stays on the unacked window so a result beyond it keeps its
+ * never-acknowledged-before-save guarantee.
+ */
+export async function relayFetchRetainedFinals(
+  connection: RelayConnection,
+): Promise<{ finals: RelayRetainedFinal[]; truncated: boolean }> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/results?state=all&limit=${relayUnackedWindow}`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with results.');
+  const body = parseBody(response);
+  const rows = Array.isArray(body.results) ? body.results : [];
+  const finals: RelayRetainedFinal[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (typeof entry.result_id !== 'string' || entry.qbj === undefined || entry.qbj === null) continue;
+    finals.push({
+      resultId: entry.result_id,
+      roomId: typeof entry.room_id === 'string' ? entry.room_id : '',
+      matchId: typeof entry.match_id === 'string' ? entry.match_id : null,
+      fingerprint: typeof entry.fingerprint === 'string' ? entry.fingerprint : '',
+      receivedAt: typeof entry.received_at === 'string' ? entry.received_at : '',
+      qbj: entry.qbj,
+      acked: typeof entry.director_ack_at === 'string',
+    });
+  }
+  // Truncation is measured on the relay's row count, not the parsed finals: a malformed
+  // row is dropped above, and a full page with a dropped row is still a full page whose
+  // counts are lower bounds.
+  return { finals, truncated: rows.length >= relayUnackedWindow };
+}
+
+export interface RelayRoomActivity {
+  /** Newest unexpired presence heartbeat the relay holds for the room, if any. */
+  lastHeartbeatAt: string | null;
+  /** Newest session mutation the relay holds for the room, of any kind. */
+  lastActivityAt: string | null;
+}
+
+/**
+ * The freshest aliveness signal per room, for end-of-day reconciliation.
+ *
+ * Presence rows expire after sixty seconds, so an unexpired heartbeat means a scorer is
+ * attached right now; the session row survives longer and says when the room was last
+ * active in any way. Timestamp-only on purpose: device identities stay on the relay
+ * (see the scorer-build presence redaction), reconciliation only needs to know whether
+ * an assignment still out is live, recently active, or long quiet.
+ */
+export async function relayFetchRoomActivity(
+  connection: RelayConnection,
+): Promise<Map<string, RelayRoomActivity>> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/sessions`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with sessions.');
+  const body = parseBody(response);
+  const rows = Array.isArray(body.sessions) ? body.sessions : [];
+  const activity = new Map<string, RelayRoomActivity>();
+  const freshest = (current: string | null, candidate: unknown): string | null => {
+    if (typeof candidate !== 'string' || Number.isNaN(Date.parse(candidate))) return current;
+    if (current === null || Date.parse(candidate) > Date.parse(current)) return candidate;
+    return current;
+  };
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (typeof entry.room_id !== 'string') continue;
+    const known = activity.get(entry.room_id) ?? { lastHeartbeatAt: null, lastActivityAt: null };
+    known.lastActivityAt = freshest(known.lastActivityAt, entry.updated_at);
+    const presence = Array.isArray(entry.presence) ? entry.presence : [];
+    for (const heartbeat of presence) {
+      if (!heartbeat || typeof heartbeat !== 'object' || Array.isArray(heartbeat)) continue;
+      known.lastHeartbeatAt = freshest(
+        known.lastHeartbeatAt,
+        (heartbeat as Record<string, unknown>).updated_at,
+      );
+    }
+    activity.set(entry.room_id, known);
+  }
+  return activity;
+}
+
 /**
  * Acknowledge results whose bytes are on disk.
  *

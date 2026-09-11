@@ -29,19 +29,37 @@ import {
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
+  lateJoinedRoomIds,
   planRoomSetup,
   planRound,
+  publicationPlansEqual,
   publicationReviewItems,
   publishRound,
   type PublicationReviewItem,
   type PublishOutcome,
   type PublishPlan,
 } from './publish';
+import { appendAuditEntry, loadAuditLog, type AuditAction, type AuditEntry } from './audit';
+import {
+  canFinish,
+  canGoLive,
+  canReopen,
+  describeGuard,
+  loadTournamentPhase,
+  requiresOverride,
+  saveTournamentPhase,
+  type GuardedAction,
+  type GuardedActionId,
+  type TournamentPhase,
+} from './lifecycle';
+import { buildTournamentReconciliation, type TournamentReconciliation } from './reconcile';
 import {
   relayAcknowledgeResults,
   relayClaim,
   relayCheckScorerReadiness,
+  relayFetchRetainedFinals,
   relayFetchResults,
+  relayFetchRoomActivity,
   relayHealth,
   relayProvisionBackup,
   relayRevokeBackup,
@@ -50,6 +68,7 @@ import {
   relayTransfer,
   relayUnackedWindow,
   RelayError,
+  type RelayRoomActivity,
   type BackupProvisionResult,
   type RelayConnection,
   type ScorerReadinessResult,
@@ -96,6 +115,7 @@ import {
   type StoredResult,
 } from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
+import packageJson from '../../package.json';
 import {
   decryptRecoveryPackage,
   encryptRecoveryPackage,
@@ -204,6 +224,25 @@ export interface BridgeApi {
   /** Delete the stored management credential. Deliberate, confirmed, and not undoable. */
   forgetRelayCredential(): void;
 
+  /**
+   * Tournament lifecycle and final reconciliation (#1016). Setup plans freely; live guards
+   * high-impact actions behind explicit audited overrides; finished is terminal until reopened.
+   */
+  phase: TournamentPhase;
+  auditLog: AuditEntry[];
+  /** A guarded action waiting for its explicit override confirmation, if any. */
+  pendingLiveOverride: { action: GuardedAction; proceed: () => void } | null;
+  confirmLiveOverride(): void;
+  cancelLiveOverride(): void;
+  goLive(): void;
+  reopenTournament(): void;
+  /** Latest end-of-day reconciliation, or null before the first run. */
+  reconciliation: TournamentReconciliation | null;
+  reconciliationRunning: boolean;
+  refreshReconciliation(): Promise<TournamentReconciliation | null>;
+  /** Finish live play: clean reconciliations close directly, dirty ones need an override. */
+  finishTournament(): Promise<void>;
+
   addRoom(): void;
   renameRoom(roomId: string, name: string): void;
   removeRoom(roomId: string): void;
@@ -225,14 +264,14 @@ export interface BridgeApi {
   regeneratePairingCode(roomId: string): void;
   /** Change which round the table is editing. Changes nothing else, and discards nothing. */
   selectRound(roundId: string): void;
-  publish(): Promise<void>;
+  publish(options?: { lateRoomsOverride?: boolean }): Promise<void>;
   pendingPublicationReview: PendingPublicationReview | null;
   confirmPublicationReview(): Promise<void>;
   cancelPublicationReview(): void;
   assignmentFallback: AssignmentFallback | null;
   exportAssignmentFallback(): Promise<boolean>;
   /** Publish room identities and pairing hashes without sending any match assignments. */
-  publishRoomSetup(): Promise<void>;
+  publishRoomSetup(options?: { lateRoomsOverride?: boolean }): Promise<void>;
   roomStatus(room: Room): RoomStatus;
   warnings: ReturnType<typeof pairingWarnings>;
 
@@ -386,9 +425,62 @@ function stateWithRelay(current: BridgeState, connection: RelayConnection): Brid
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
+  const tournamentRef = useRef<BridgeTournament | null>(null);
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
+
+  const [relayCredentialSavePending, setRelayCredentialSavePendingState] = useState(false);
+  const [persistenceSavePending, setPersistenceSavePendingState] = useState(false);
+  const relayCredentialSavePendingRef = useRef(false);
+  const persistenceSavePendingRef = useRef(false);
+  // Ref-mirrored setters: the values are also read after relay awaits (reconciliation),
+  // where the render closure would still hold the pre-request snapshot. Memoized so
+  // consumers like setPhaseState stay stable.
+  const setRelayCredentialSavePending = useCallback((next: boolean): void => {
+    relayCredentialSavePendingRef.current = next;
+    setRelayCredentialSavePendingState(next);
+  }, []);
+  const setPersistenceSavePending = useCallback((next: boolean): void => {
+    persistenceSavePendingRef.current = next;
+    setPersistenceSavePendingState(next);
+  }, []);
+
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>(loadAuditLog);
+  const auditLogRef = useRef<AuditEntry[]>(auditLog);
+
+  const recordAudit = useCallback(
+    (action: AuditAction, fields: Record<string, string | number | boolean | null>): void => {
+      // Sole writer of the audit log: read-modify-write through the ref so the append and
+      // the durability check observe the same log. A state updater could not report whether
+      // its own save landed, and a missed audit write must surface instead of vanishing.
+      const appended = appendAuditEntry(auditLogRef.current, action, fields);
+      auditLogRef.current = appended.log;
+      setAuditLog(appended.log);
+      if (!appended.persisted) setPersistenceSavePending(true);
+    },
+    [setPersistenceSavePending],
+  );
+
+  const relayReachableRef = useRef<boolean | null>(null);
+  /**
+   * Set reachability and audit transitions both ways. Same-value sets neither re-render
+   * nor audit, so hot paths like the results poll stay quiet while degradation and
+   * recovery are both recorded.
+   */
+  const reportReachability = useCallback(
+    (next: boolean | null): void => {
+      setRelayReachable(next);
+      if (next === null) {
+        relayReachableRef.current = null;
+        return;
+      }
+      if (relayReachableRef.current === next) return;
+      relayReachableRef.current = next;
+      recordAudit('relay-reachability', { reachable: next });
+    },
+    [recordAudit],
+  );
   const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
     state.relay
       ? {
@@ -418,8 +510,6 @@ export function useBridge(): BridgeApi {
     warnings: string[];
   } | null>(null);
   const pendingRelayClaimRef = useRef<RelayConnection | null>(null);
-  const [relayCredentialSavePending, setRelayCredentialSavePending] = useState(false);
-  const [persistenceSavePending, setPersistenceSavePending] = useState(false);
   const savingResultIdsRef = useRef(new Set<string>());
   const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
   const savingBatchRef = useRef(false);
@@ -491,7 +581,7 @@ export function useBridge(): BridgeApi {
       .then((token) => {
         const current = stateRef.current;
         if (!token || !sameRelay(current) || !current.relay) {
-          setRelayReachable(false);
+          reportReachability(false);
           setNotice({
             kind: 'bad',
             message:
@@ -502,13 +592,13 @@ export function useBridge(): BridgeApi {
         activateState({ ...current, relay: { ...current.relay, managementToken: token } });
       })
       .catch((error) => {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `QBBridge could not read the relay credential from secure storage. ${(error as Error).message}`,
         });
       });
-  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId]);
+  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId, reportReachability]);
 
   const commit = useCallback(
     (
@@ -525,12 +615,229 @@ export function useBridge(): BridgeApi {
       activateState(resolved);
       return { state: resolved, persisted };
     },
-    [activateState],
+    [activateState, setPersistenceSavePending],
   );
 
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  useEffect(() => {
+    tournamentRef.current = tournament;
+  }, [tournament]);
+
+  const [phase, setPhase] = useState<TournamentPhase>(loadTournamentPhase);
+  const phaseRef = useRef<TournamentPhase>(phase);
+  const [pendingLiveOverride, setPendingLiveOverride] = useState<{
+    action: GuardedAction;
+    proceed: () => void;
+  } | null>(null);
+  const pendingLiveOverrideCancelRef = useRef<(() => void) | null>(null);
+  const [reconciliation, setReconciliation] = useState<TournamentReconciliation | null>(null);
+  const [reconciliationRunning, setReconciliationRunning] = useState(false);
+  const reconciliationRunningRef = useRef(false);
+
+  const setPhaseState = useCallback(
+    (next: TournamentPhase): void => {
+      phaseRef.current = next;
+      // A missed phase write keeps the in-memory transition — the tournament has to run —
+      // but joins the durability flag so a restart cannot silently restore the old phase.
+      if (!saveTournamentPhase(next)) setPersistenceSavePending(true);
+      setPhase(next);
+    },
+    [setPersistenceSavePending],
+  );
+
+  const appStartAuditedRef = useRef(false);
+  useEffect(() => {
+    if (appStartAuditedRef.current) return;
+    appStartAuditedRef.current = true;
+    recordAudit('app-start', {
+      version: typeof packageJson.version === 'string' ? packageJson.version : 'unknown',
+    });
+  }, [recordAudit]);
+
+  /**
+   * Route a high-impact action through the lifecycle. In setup it runs at once; once live
+   * (or finished) it waits for an explicit override that names its consequences, and the
+   * override itself is audited on confirm.
+   */
+  const requestGuarded = useCallback(
+    (id: GuardedActionId, subject: string | null, proceed: () => void): void => {
+      if (!requiresOverride(phaseRef.current, id)) {
+        proceed();
+        return;
+      }
+      setPendingLiveOverride({ action: describeGuard(id, subject), proceed });
+    },
+    [],
+  );
+
+  const confirmLiveOverride = useCallback((): void => {
+    if (!pendingLiveOverride) return;
+    const { action, proceed } = pendingLiveOverride;
+    setPendingLiveOverride(null);
+    recordAudit('live-override', { action: action.id });
+    proceed();
+  }, [pendingLiveOverride, recordAudit]);
+
+  const cancelLiveOverride = useCallback((): void => {
+    setPendingLiveOverride(null);
+    pendingLiveOverrideCancelRef.current?.();
+    pendingLiveOverrideCancelRef.current = null;
+  }, []);
+
+  /**
+   * Promise-aware guarded execution for operations that report a result. In setup the
+   * work runs at once; once live or finished it waits for the override dialog, resolving
+   * with the work's result on confirm and with `fallback` on cancel. Recovery and
+   * relay-control operations keep their fire-and-forget button handlers while still
+   * reporting their outcome to awaiters.
+   */
+  const requestGuardedAsync = useCallback(
+    <T>(id: GuardedActionId, subject: string | null, work: () => Promise<T>, fallback: T): Promise<T> => {
+      if (!requiresOverride(phaseRef.current, id)) return work();
+      return new Promise<T>((resolve) => {
+        pendingLiveOverrideCancelRef.current = () => resolve(fallback);
+        setPendingLiveOverride({
+          action: describeGuard(id, subject),
+          proceed: () => {
+            pendingLiveOverrideCancelRef.current = null;
+            void work().then(resolve);
+          },
+        });
+      });
+    },
+    [],
+  );
+
+  const goLive = useCallback((): void => {
+    if (!canGoLive(phaseRef.current)) return;
+    setPhaseState('live');
+    recordAudit('lifecycle', { phase: 'live' });
+    setNotice({
+      kind: 'good',
+      message: 'Tournament is live. High-impact setup actions now need an explicit override.',
+    });
+  }, [recordAudit, setPhaseState]);
+
+  const reopenTournament = useCallback((): void => {
+    if (!canReopen(phaseRef.current)) return;
+    requestGuarded('reopen-tournament', null, () => {
+      setPhaseState('setup');
+      recordAudit('lifecycle', { phase: 'setup', reopened: true });
+      setNotice({ kind: 'warn', message: 'Tournament reopened to setup. Live guards are off.' });
+    });
+  }, [requestGuarded, recordAudit, setPhaseState]);
+
+  const refreshReconciliation = useCallback(async (): Promise<TournamentReconciliation | null> => {
+    if (reconciliationRunningRef.current) return null;
+    const connection = connectionOf(stateRef.current);
+    if (!connection) {
+      setNotice({ kind: 'bad', message: 'Connect a relay before reconciling the tournament.' });
+      return null;
+    }
+    reconciliationRunningRef.current = true;
+    setReconciliationRunning(true);
+    try {
+      const { finals, truncated } = await relayFetchRetainedFinals(connection);
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return null;
+      // Aliveness is advisory: a sessions failure degrades the room tiers to unknown
+      // rather than failing the whole reconciliation.
+      let activity = new Map<string, RelayRoomActivity>();
+      let heartbeatUnknown = false;
+      try {
+        activity = await relayFetchRoomActivity(connection);
+      } catch {
+        heartbeatUnknown = true;
+      }
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return null;
+      const live = stateRef.current;
+      const report = buildTournamentReconciliation({
+        relayFinals: finals.map((entry) => ({
+          resultId: entry.resultId,
+          roomId: entry.roomId,
+          matchId: entry.matchId,
+          receivedAt: entry.receivedAt,
+          acked: entry.acked,
+        })),
+        relayTruncated: truncated,
+        local: live.results.map((entry) => ({
+          resultId: entry.resultId,
+          matchId: resultMatchId(entry.qbj),
+          receivedAt: entry.receivedAt,
+          saved: entry.savedPath !== undefined,
+          ackPending: entry.ackPending === true,
+          importStatus: entry.importStatus ?? 'new',
+        })),
+        rooms: live.rooms.map((room) => ({
+          roomId: room.id,
+          name: room.name,
+          active:
+            room.relayPublished ||
+            room.pendingPairingCode !== null ||
+            live.roundPlans.some((plan) => plan.pairings.some((pairing) => pairing.roomId === room.id)),
+          lastHeartbeatAt: activity.get(room.id)?.lastHeartbeatAt ?? null,
+          lastActivityAt: activity.get(room.id)?.lastActivityAt ?? null,
+        })),
+        pendingPublication: (pendingPublicationReviewRef.current ? 1 : 0) + live.pendingRoomRemovals.length,
+        // Read from the ref-mirrored setters, not the render closure: a retry or a failed
+        // save can flip either flag while the relay requests above are still in flight, and
+        // a stale false here would let the tournament close with recovery still pending.
+        pendingRecovery: relayCredentialSavePendingRef.current || persistenceSavePendingRef.current ? 1 : 0,
+        heartbeatUnknown,
+      });
+      setReconciliation(report);
+      return report;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `Tournament reconciliation failed: ${(error as Error).message}`,
+      });
+      return null;
+    } finally {
+      reconciliationRunningRef.current = false;
+      setReconciliationRunning(false);
+    }
+  }, []);
+
+  const finishTournament = useCallback(async (): Promise<void> => {
+    if (!canFinish(phaseRef.current)) return;
+    const report = await refreshReconciliation();
+    if (!report) return;
+    if (report.safeToClose) {
+      setPhaseState('finished');
+      recordAudit('lifecycle', { phase: 'finished', safeToClose: true });
+      // The three counts are reported separately, never equated: aged-out relay finals make
+      // a lower relay count legitimate, and printing them as equal would state a falsehood.
+      const agedNote =
+        report.agedOut.length > 0
+          ? ` ${report.agedOut.length} old final(s) aged out of relay retention and are durable locally only.`
+          : '';
+      setNotice({
+        kind: 'good',
+        message:
+          `Safe to close the tournament relay: ${report.relayCount} relay finals, ` +
+          `${report.localSavedCount} durable local QBJs, ${report.importedCount} verified YellowFruit games.${agedNote}`,
+      });
+      return;
+    }
+    const action = describeGuard('finish-dirty');
+    setPendingLiveOverride({
+      action: {
+        ...action,
+        consequences: `${report.blockers.join(' ')} ${action.consequences}`,
+      },
+      proceed: () => {
+        setPhaseState('finished');
+        recordAudit('lifecycle', {
+          phase: 'finished',
+          safeToClose: false,
+          blockers: report.blockers.length,
+        });
+      },
+    });
+  }, [refreshReconciliation, recordAudit, setPhaseState]);
 
   const setResultSaving = useCallback((resultId: string, saving: boolean) => {
     const next = new Set(savingResultIdsRef.current);
@@ -559,7 +866,7 @@ export function useBridge(): BridgeApi {
         const next = readinessState(result);
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(true);
+          reportReachability(true);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -576,7 +883,7 @@ export function useBridge(): BridgeApi {
         };
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(false);
+          reportReachability(false);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -587,7 +894,7 @@ export function useBridge(): BridgeApi {
         return next;
       }
     },
-    [commit],
+    [commit, reportReachability],
   );
 
   const applyLoadedFile = useCallback(
@@ -621,8 +928,12 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = null;
         setRelayCredentialSavePending(false);
         setPersistenceSavePending(false);
+        // A new tournament is a new lifecycle: the previous tournament's live/finished phase
+        // and reconciliation report must not survive the switch.
+        setPhaseState('setup');
+        setReconciliation(null);
         setScorerReadiness(null);
-        setRelayReachable(null);
+        reportReachability(null);
         setChangingRelay(false);
         invalidateRoundArtifacts();
         activateState(next);
@@ -653,6 +964,14 @@ export function useBridge(): BridgeApi {
       }
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
+      recordAudit('yft-loaded', {
+        file: path === null ? '(pasted contents)' : (path.split('/').pop() ?? path),
+        tournamentId: report.tournament.id,
+        teams: report.tournament.teams.length,
+        rounds: report.tournament.rounds.length,
+        warnings: report.warnings.length,
+        startNew,
+      });
       invalidateRoundArtifacts();
       const reconciliationNote =
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
@@ -664,7 +983,16 @@ export function useBridge(): BridgeApi {
       });
       return true;
     },
-    [activateState, commit, invalidateRoundArtifacts],
+    [
+      activateState,
+      commit,
+      invalidateRoundArtifacts,
+      recordAudit,
+      reportReachability,
+      setPhaseState,
+      setPersistenceSavePending,
+      setRelayCredentialSavePending,
+    ],
   );
 
   const loadFileContents = useCallback(
@@ -699,7 +1027,7 @@ export function useBridge(): BridgeApi {
     [applyLoadedFile],
   );
 
-  const confirmFileSwitch = useCallback(() => {
+  const confirmFileSwitchNow = useCallback(() => {
     const pending = pendingFileRef.current;
     if (!pending) return;
     if (
@@ -713,6 +1041,11 @@ export function useBridge(): BridgeApi {
     pendingFileRef.current = null;
     setPendingFileSwitch(null);
   }, [applyLoadedFile]);
+
+  const confirmFileSwitch = useCallback(() => {
+    const pending = pendingFileRef.current;
+    requestGuarded('switch-tournament', pending?.tournament.name ?? null, () => confirmFileSwitchNow());
+  }, [requestGuarded, confirmFileSwitchNow]);
 
   const cancelFileSwitch = useCallback(() => {
     pendingFileRef.current = null;
@@ -749,7 +1082,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        reportReachability(null);
         setNotice({
           kind: 'bad',
           message: `The relay claim succeeded, but QBBridge could not save the returned management credential in secure storage. Repair secure storage and retry. ${(error as Error).message}`,
@@ -764,7 +1097,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        reportReachability(null);
         setNotice({
           kind: 'bad',
           message:
@@ -780,7 +1113,7 @@ export function useBridge(): BridgeApi {
       readinessKeyRef.current = null;
       activateState(next);
       setChangingRelay(false);
-      setRelayReachable(true);
+      reportReachability(true);
       const readiness = await refreshScorerReadiness(connection);
       if (readinessKeyRef.current === connectionKey(connection)) {
         const nextNotice = readinessNotice(readiness);
@@ -795,7 +1128,13 @@ export function useBridge(): BridgeApi {
       }
       return true;
     },
-    [activateState, refreshScorerReadiness],
+    [
+      reportReachability,
+      activateState,
+      refreshScorerReadiness,
+      setPersistenceSavePending,
+      setRelayCredentialSavePending,
+    ],
   );
 
   /**
@@ -832,7 +1171,7 @@ export function useBridge(): BridgeApi {
         };
         return await activateClaimedRelay(connection);
       } catch (error) {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `${(error as Error).message} The relay already set up here is unchanged.`,
@@ -842,7 +1181,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateClaimedRelay],
+    [reportReachability, activateClaimedRelay],
   );
 
   const retryRelayCredentialSave = useCallback(async (): Promise<boolean> => {
@@ -885,7 +1224,7 @@ export function useBridge(): BridgeApi {
     }
   }, []);
 
-  const rotateBackup = useCallback(async (label?: string): Promise<BackupProvisionResult | null> => {
+  const rotateBackupNow = useCallback(async (label?: string): Promise<BackupProvisionResult | null> => {
     const connection = connectionOf(stateRef.current);
     if (!connection) return null;
     try {
@@ -905,7 +1244,17 @@ export function useBridge(): BridgeApi {
     }
   }, []);
 
-  const revokeBackup = useCallback(async (): Promise<boolean> => {
+  /**
+   * Rotating backup access mid-tournament strands the backup laptop until a new package
+   * is built, so once live this waits for an explicit override. In setup it runs at once.
+   */
+  const rotateBackup = useCallback(
+    (label?: string): Promise<BackupProvisionResult | null> =>
+      requestGuardedAsync('rotate-backup', null, () => rotateBackupNow(label), null),
+    [requestGuardedAsync, rotateBackupNow],
+  );
+
+  const revokeBackupNow = useCallback(async (): Promise<boolean> => {
     const connection = connectionOf(stateRef.current);
     if (!connection) return false;
     try {
@@ -924,6 +1273,15 @@ export function useBridge(): BridgeApi {
     }
   }, []);
 
+  /**
+   * Revoking backup access mid-tournament removes the safety net, so once live this waits
+   * for an explicit override. In setup it runs at once.
+   */
+  const revokeBackup = useCallback(
+    (): Promise<boolean> => requestGuardedAsync('revoke-backup', null, () => revokeBackupNow(), false),
+    [requestGuardedAsync, revokeBackupNow],
+  );
+
   const createRecoveryPackage = useCallback(
     async (passphrase: string, label = 'Tournament backup controller'): Promise<boolean> => {
       const current = stateRef.current;
@@ -939,6 +1297,7 @@ export function useBridge(): BridgeApi {
         const payload = recoveryPackageState(current, provisioned);
         const contents = await encryptRecoveryPackage(payload, passphrase);
         const path = await writeRecoveryPackage('', recoveryPackageFileName, contents);
+        recordAudit('recovery-package-created', {});
         setNotice({
           kind: 'good',
           message: `Encrypted backup control package saved to ${path}. Keep the file and passphrase separate; the package contains no primary credential.`,
@@ -966,10 +1325,10 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [],
+    [recordAudit],
   );
 
-  const importRecoveryPackage = useCallback(
+  const importRecoveryPackageNow = useCallback(
     async (passphrase: string): Promise<boolean> => {
       setBusy(true);
       try {
@@ -1012,16 +1371,17 @@ export function useBridge(): BridgeApi {
         setTournament(null);
         setLoadWarnings([]);
         setChangingRelay(false);
-        setRelayReachable(true);
+        reportReachability(true);
         activateState(next);
         const readiness = await refreshScorerReadiness(connection);
+        recordAudit('recovery-package-imported', { tournamentId: connection.tournamentId });
         setNotice({
           kind: 'good',
           message: `Encrypted recovery package imported for ${connection.tournamentId}. Reload the authoritative .yft, then take over explicitly before publishing. ${readiness.message}`,
         });
         return true;
       } catch (error) {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `The recovery package was not imported. ${(error as Error).message}`,
@@ -1031,10 +1391,27 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateState, refreshScorerReadiness],
+    [
+      reportReachability,
+      activateState,
+      refreshScorerReadiness,
+      recordAudit,
+      setPersistenceSavePending,
+      setRelayCredentialSavePending,
+    ],
   );
 
-  const takeOverRelay = useCallback(async (): Promise<boolean> => {
+  /**
+   * An imported package replaces this machine's whole tournament state, so once live this
+   * waits for an explicit override. In setup it runs at once.
+   */
+  const importRecoveryPackage = useCallback(
+    (passphrase: string): Promise<boolean> =>
+      requestGuardedAsync('import-recovery', null, () => importRecoveryPackageNow(passphrase), false),
+    [requestGuardedAsync, importRecoveryPackageNow],
+  );
+
+  const takeOverRelayNow = useCallback(async (): Promise<boolean> => {
     const current = stateRef.current;
     const connection = connectionOf(current);
     if (!connection || connection.controllerRole !== 'backup') {
@@ -1064,7 +1441,8 @@ export function useBridge(): BridgeApi {
         });
         return false;
       }
-      setRelayReachable(true);
+      reportReachability(true);
+      recordAudit('relay-takeover', { epoch: outcome.directorEpoch });
       setNotice({
         kind: 'warn',
         message:
@@ -1072,15 +1450,24 @@ export function useBridge(): BridgeApi {
       });
       return true;
     } catch (error) {
-      setRelayReachable(false);
+      reportReachability(false);
       setNotice({ kind: 'bad', message: `Relay takeover was not completed. ${(error as Error).message}` });
       return false;
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
-  const transferRelayToPrimary = useCallback(async (): Promise<boolean> => {
+  /**
+   * Taking over fences the old primary from publishing, so once live this waits for an
+   * explicit override. A backup laptop in setup runs it at once.
+   */
+  const takeOverRelay = useCallback(
+    (): Promise<boolean> => requestGuardedAsync('take-over-relay', null, () => takeOverRelayNow(), false),
+    [requestGuardedAsync, takeOverRelayNow],
+  );
+
+  const transferRelayToPrimaryNow = useCallback(async (): Promise<boolean> => {
     const connection = connectionOf(stateRef.current);
     if (!connection) return false;
     setBusy(true);
@@ -1094,7 +1481,8 @@ export function useBridge(): BridgeApi {
             }
           : current,
       );
-      setRelayReachable(false);
+      reportReachability(false);
+      recordAudit('relay-transfer', { epoch: outcome.directorEpoch });
       setNotice({
         kind: 'warn',
         message:
@@ -1107,9 +1495,22 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
-  const beginRelayChange = useCallback(() => setChangingRelay(true), []);
+  /**
+   * Transferring control makes this machine read-only, so once live this waits for an
+   * explicit override. In setup it runs at once.
+   */
+  const transferRelayToPrimary = useCallback(
+    (): Promise<boolean> =>
+      requestGuardedAsync('transfer-relay', null, () => transferRelayToPrimaryNow(), false),
+    [requestGuardedAsync, transferRelayToPrimaryNow],
+  );
+
+  const beginRelayChange = useCallback(
+    () => requestGuarded('change-relay', null, () => setChangingRelay(true)),
+    [requestGuarded],
+  );
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
 
   const checkScorerReadiness = useCallback(async () => {
@@ -1137,7 +1538,7 @@ export function useBridge(): BridgeApi {
    * no way back: the relay's setup token was consumed by the claim that produced this
    * credential, so the same relay cannot be claimed again.
    */
-  const forgetRelayCredential = useCallback(async () => {
+  const forgetRelayCredentialNow = useCallback(async () => {
     const existing = stateRef.current.relay;
     if (existing) {
       try {
@@ -1160,14 +1561,19 @@ export function useBridge(): BridgeApi {
     pollGenerationRef.current += 1;
     const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
-    setRelayReachable(null);
+    reportReachability(null);
     setNotice({
       kind: persisted.ok ? 'warn' : 'bad',
       message: persisted.ok
         ? 'The relay credential was deleted from this machine. Set up a relay to publish again.'
         : 'The relay credential was removed from the active session but could not be saved locally. Retry saving local state before restarting.',
     });
-  }, [commit]);
+  }, [reportReachability, commit]);
+
+  const forgetRelayCredential = useCallback(
+    () => requestGuarded('forget-credential', null, () => void forgetRelayCredentialNow()),
+    [requestGuarded, forgetRelayCredentialNow],
+  );
 
   const retryStatePersistence = useCallback((): boolean => {
     const persisted = saveState(stateRef.current, { secureCredential: true });
@@ -1182,10 +1588,10 @@ export function useBridge(): BridgeApi {
       message: 'QBBridge still cannot save the current relay state. Restore local storage access and retry.',
     });
     return false;
-  }, []);
+  }, [setPersistenceSavePending]);
 
   const addRoom = useCallback(() => {
-    commit((current) => {
+    const created = commit((current) => {
       const id = nextRoomId([
         ...current.rooms,
         ...current.pendingRoomRemovals,
@@ -1194,7 +1600,9 @@ export function useBridge(): BridgeApi {
       const name = `Room ${current.rooms.length + 1}`;
       return { ...current, rooms: [...current.rooms, newRoom(id, name, generatePairingCode())] };
     });
-  }, [commit]);
+    const room = created.state.rooms.at(-1);
+    if (room) recordAudit('room-created', { roomId: room.id });
+  }, [commit, recordAudit]);
 
   const updateRoom = useCallback(
     (roomId: string, change: (room: Room) => Room) => {
@@ -1207,14 +1615,21 @@ export function useBridge(): BridgeApi {
   );
 
   const renameRoom = useCallback(
-    (roomId: string, name: string) => updateRoom(roomId, (room) => ({ ...room, name })),
-    [updateRoom],
+    (roomId: string, name: string) => {
+      recordAudit('room-renamed', { roomId });
+      updateRoom(roomId, (room) => ({ ...room, name }));
+    },
+    [updateRoom, recordAudit],
   );
 
-  const removeRoom = useCallback(
+  const removeRoomNow = useCallback(
     (roomId: string) => {
       const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
       if (!room) return;
+      recordAudit('room-removed', {
+        roomId,
+        tombstone: room.relayPublished,
+      });
       const tombstone = room.relayPublished ? roomTombstone(room) : null;
       commit((current) => ({
         ...current,
@@ -1240,7 +1655,15 @@ export function useBridge(): BridgeApi {
           : { kind: 'good', message: `${room.name} was removed.` },
       );
     },
-    [commit],
+    [commit, recordAudit],
+  );
+
+  const removeRoom = useCallback(
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      requestGuarded('remove-room', room?.name ?? roomId, () => removeRoomNow(roomId));
+    },
+    [requestGuarded, removeRoomNow],
   );
 
   /**
@@ -1262,10 +1685,20 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  const regeneratePairingCodeNow = useCallback(
+    (roomId: string) => {
+      recordAudit('pairing-code-regenerated', { roomId });
+      updateRoom(roomId, (target) => ({ ...target, pendingPairingCode: generatePairingCode() }));
+    },
+    [updateRoom, recordAudit],
+  );
+
   const regeneratePairingCode = useCallback(
-    (roomId: string) =>
-      updateRoom(roomId, (room) => ({ ...room, pendingPairingCode: generatePairingCode() })),
-    [updateRoom],
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      requestGuarded('regenerate-code', room?.name ?? roomId, () => regeneratePairingCodeNow(roomId));
+    },
+    [requestGuarded, regeneratePairingCodeNow],
   );
 
   /**
@@ -1349,6 +1782,19 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  /**
+   * Send one plan through the relay's compare-and-swap. The critical section is exactly
+   * the mirror PUT between the two relay-identity checks, and the checks sort every
+   * out-of-band operation into two kinds:
+   *
+   * - Relay replacement (or any revision move) inside the section refuses: the checks
+   *   compare the connection and revision before and after, and a mismatch drops the
+   *   local adoption without touching rooms.
+   * - Result polls, recovery saves, and room edits merge safely by construction: polls
+   *   and recovery only ever add results, and publication adoption is a functional merge
+   *   over exactly the rooms in the plan, so a poll landing mid-publish loses nothing
+   *   either way.
+   */
   const publishPlan = useCallback(
     async (input: {
       plan: PublishPlan;
@@ -1406,7 +1852,12 @@ export function useBridge(): BridgeApi {
         }
         const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
         if (input.assignmentFallback) rememberAssignmentFallback(null);
-        setRelayReachable(true);
+        recordAudit('publication-confirmed', {
+          revision: outcome.revision,
+          rooms: outcome.assignments.length,
+          cleared: outcome.clearedRoomIds.length,
+        });
+        reportReachability(true);
         setNotice(
           persisted.ok
             ? { kind: input.successKind, message: input.successMessage(outcome) }
@@ -1417,7 +1868,7 @@ export function useBridge(): BridgeApi {
         );
         return outcome;
       } catch (error) {
-        if (error instanceof RelayError) setRelayReachable(false);
+        if (error instanceof RelayError) reportReachability(false);
         const fallbackAvailable = input.assignmentFallback && relayUnavailable(error);
         if (fallbackAvailable) rememberAssignmentFallback(input.assignmentFallback!);
         setNotice({
@@ -1433,13 +1884,55 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, rememberAssignmentFallback],
+    [reportReachability, applyPublication, rememberAssignmentFallback, recordAudit],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
     const review = pendingPublicationReviewRef.current;
     if (!review) return;
     rememberPublicationReview(null);
+    // The review is a snapshot, not a lock: the relay may have moved, or the operator may
+    // have edited pairings, rooms, or the tournament file while it was open. Re-derive the
+    // plan from current state and refuse on any drift, so confirm can only send exactly what
+    // was reviewed. (The relay-moved half is re-checked inside publishPlan against the review
+    // snapshot; this re-check names the cause before anything is sent.)
+    // Occupancy verification plugs in here once that feed exists (#1021): at this point the
+    // plan is known-fresh, so per-room holder checks would evaluate the exact room set about
+    // to be written. Until then revision continuity is the only controller-identity signal.
+    const current = stateRef.current;
+    if (
+      !sameRelayConnection(review.snapshot.connection, connectionOf(current)) ||
+      review.snapshot.revision !== current.relay?.revision
+    ) {
+      setNotice({
+        kind: 'bad',
+        message: 'The relay changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
+    const tournamentNow = tournamentRef.current;
+    const roundNow = tournamentNow?.rounds.find((entry) => entry.id === review.roundId);
+    if (!tournamentNow || !roundNow) {
+      setNotice({
+        kind: 'bad',
+        message: 'The tournament file changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
+    const freshPlan = planRound(
+      tournamentNow,
+      roundNow,
+      current.rooms,
+      pairingsForRound(current.roundPlans, review.roundId),
+      current.pendingRoomRemovals,
+    );
+    if (!publicationPlansEqual(review.plan, freshPlan)) {
+      setNotice({
+        kind: 'bad',
+        message: 'The pairings or room setup changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
     await publishPlan({
       plan: review.plan,
       tournamentName: review.tournamentName,
@@ -1471,114 +1964,253 @@ export function useBridge(): BridgeApi {
     setNotice({ kind: 'warn', message: 'Round publication canceled. The room selections are unchanged.' });
   }, [rememberPublicationReview]);
 
-  const publish = useCallback(async () => {
-    const current = stateRef.current;
-    const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
-    if (!tournament || !round) {
-      setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
-      return;
-    }
-    const pairings = pairingsForRound(current.roundPlans, round.id);
-    const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
-    const snapshot = publicationSnapshot(current);
-    const teamNameForReview = (id: string): string =>
-      tournament.teams.find((team) => team.id === id)?.name ?? id;
-    const reviewItems = publicationReviewItems(
-      plan,
-      [
-        ...pairingWarnings(current.rooms, pairings, teamNameForReview),
-        ...schedulePairingWarnings(tournament, round, current.rooms, pairings),
-      ],
-      current.rooms,
-      pairings,
-      teamNameForReview,
-    );
-    // A round with no playable matchup is not a round publication. Keep the explicit room-setup
-    // action as the only way to send a clear-only mirror; otherwise a mistaken empty round could
-    // silently revoke every room's active assignment.
-    if (plan.assignments.length === 0) {
-      setNotice({
-        kind: 'bad',
-        message:
-          'No room in this round has two teams chosen. Use “Publish Room Setup” to publish room codes or clear assignments.',
+  /**
+   * Carry an already-built round publication through the review-or-send tail. Split out of
+   * `publish` so the live late-join guard can route through the override dialog and resume
+   * here: the guard names a separate worker rather than calling the guarded callback back,
+   * which keeps the override continuation a plain reference the hooks lint can follow.
+   */
+  const executeRoundPublish = useCallback(
+    async (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): Promise<void> => {
+      const { tournamentName, roundId, roundName, plan, snapshot } = built;
+      await publishPlan({
+        plan,
+        tournamentName,
+        successKind: plan.cleared.length > 0 ? 'warn' : 'good',
+        successMessage: (outcome) => {
+          const clearedNote =
+            plan.cleared.length > 0
+              ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
+              : '';
+          return `Published round ${roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+        },
+        failureMessage: 'Round not published — the rooms still have whatever they had before.',
+        missingRelayMessage: 'Connect the relay before publishing a round.',
+        assignmentFallback: {
+          tournamentName,
+          roundId,
+          roundName,
+          plan,
+          exportedRoomIds: [],
+          exportDirectory: null,
+        },
+        snapshot,
       });
-      return;
-    }
-    const previousFallback = assignmentFallbackRef.current;
-    if (
-      previousFallback?.roundId === round.id &&
-      previousFallback.exportedRoomIds.length > 0 &&
-      plan.assignments.length > 0
-    ) {
-      reviewItems.unshift({
-        roomId: plan.assignments[0]?.roomId ?? round.id,
-        roomName: plan.assignments[0]?.roomName ?? `Round ${round.displayName}`,
-        message:
-          'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
-      });
-    }
-    const assignmentFallback: AssignmentFallback = {
-      tournamentName: tournament.name,
-      roundId: round.id,
-      roundName: round.displayName,
-      plan,
-      exportedRoomIds: [],
-      exportDirectory: null,
-    };
-    if (reviewItems.length > 0) {
+    },
+    [publishPlan],
+  );
+
+  const openRoundReview = useCallback(
+    (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): void => {
       rememberPublicationReview({
+        tournamentName: built.tournamentName,
+        roundId: built.roundId,
+        roundName: built.roundName,
+        plan: built.plan,
+        items: built.reviewItems,
+        snapshot: built.snapshot,
+      });
+      setNotice({
+        kind: 'warn',
+        message: `Round ${built.roundName} has ${built.reviewItems.length} issue(s) to review before publishing.`,
+      });
+    },
+    [rememberPublicationReview],
+  );
+
+  /**
+   * The fallback warning plus the review-or-send tail of a round publish, shared by the
+   * direct path and the late-join override continuation.
+   */
+  const publishTail = useCallback(
+    async (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): Promise<void> => {
+      const { roundId, roundName, plan, reviewItems } = built;
+      const previousFallback = assignmentFallbackRef.current;
+      if (
+        previousFallback?.roundId === roundId &&
+        previousFallback.exportedRoomIds.length > 0 &&
+        plan.assignments.length > 0
+      ) {
+        reviewItems.unshift({
+          roomId: plan.assignments[0]?.roomId ?? roundId,
+          roomName: plan.assignments[0]?.roomName ?? `Round ${roundName}`,
+          message:
+            'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
+        });
+      }
+      if (reviewItems.length > 0) {
+        openRoundReview(built);
+        return;
+      }
+      rememberPublicationReview(null);
+      await executeRoundPublish(built);
+    },
+    [executeRoundPublish, openRoundReview, rememberPublicationReview],
+  );
+
+  const publish = useCallback(
+    async (options?: { lateRoomsOverride?: boolean }) => {
+      const current = stateRef.current;
+      const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
+      if (!tournament || !round) {
+        setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
+        return;
+      }
+      const pairings = pairingsForRound(current.roundPlans, round.id);
+      const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
+      const snapshot = publicationSnapshot(current);
+      const teamNameForReview = (id: string): string =>
+        tournament.teams.find((team) => team.id === id)?.name ?? id;
+      const reviewItems = publicationReviewItems(
+        plan,
+        [
+          ...pairingWarnings(current.rooms, pairings, teamNameForReview),
+          ...schedulePairingWarnings(tournament, round, current.rooms, pairings),
+        ],
+        current.rooms,
+        pairings,
+        teamNameForReview,
+      );
+      // A round with no playable matchup is not a round publication. Keep the explicit room-setup
+      // action as the only way to send a clear-only mirror; otherwise a mistaken empty round could
+      // silently revoke every room's active assignment.
+      if (plan.assignments.length === 0) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'No room in this round has two teams chosen. Use “Publish Room Setup” to publish room codes or clear assignments.',
+        });
+        return;
+      }
+      // A room added while live was never vetted: publishing hands its Scorer the official
+      // record of play mid-tournament. Once live this needs an explicit override naming the
+      // rooms, and the late rooms stay visible as review items after the override.
+      const lateRoomIds =
+        phaseRef.current === 'live'
+          ? lateJoinedRoomIds(
+              plan.assignments.map((assignment) => assignment.roomId),
+              current.rooms,
+            )
+          : [];
+      if (lateRoomIds.length > 0) {
+        const lateNames = lateRoomIds.map(
+          (roomId) => current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+        );
+        for (const roomId of lateRoomIds) {
+          reviewItems.push({
+            roomId,
+            roomName: current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+            message:
+              'This room joined after go-live and has never been published. Its assignment is leaving review for the first time mid-tournament.',
+          });
+        }
+        if (!options?.lateRoomsOverride) {
+          const built = {
+            tournamentName: tournament.name,
+            roundId: round.id,
+            roundName: round.displayName,
+            plan,
+            reviewItems,
+            snapshot,
+          };
+          requestGuarded('publish-late-rooms', lateNames.join(', '), () => void publishTail(built));
+          return;
+        }
+      }
+      await publishTail({
         tournamentName: tournament.name,
         roundId: round.id,
         roundName: round.displayName,
         plan,
-        items: reviewItems,
+        reviewItems,
         snapshot,
       });
-      setNotice({
-        kind: 'warn',
-        message: `Round ${round.displayName} has ${reviewItems.length} issue(s) to review before publishing.`,
-      });
-      return;
-    }
-    rememberPublicationReview(null);
-    await publishPlan({
-      plan,
-      tournamentName: tournament.name,
-      successKind: plan.cleared.length > 0 ? 'warn' : 'good',
-      successMessage: (outcome) => {
-        const clearedNote =
-          plan.cleared.length > 0
-            ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
-            : '';
-        return `Published round ${round.displayName} to ${outcome.assignments.length} room(s).${clearedNote}`;
-      },
-      failureMessage: 'Round not published — the rooms still have whatever they had before.',
-      missingRelayMessage: 'Connect the relay before publishing a round.',
-      assignmentFallback,
-      snapshot,
-    });
-  }, [publishPlan, rememberPublicationReview, tournament]);
+    },
+    [publishTail, requestGuarded, tournament],
+  );
 
-  const publishRoomSetup = useCallback(async () => {
-    const current = stateRef.current;
-    if (!current.tournamentName) {
-      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before publishing room setup.' });
-      return;
-    }
-    const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
-    await publishPlan({
-      plan,
-      tournamentName: current.tournamentName,
-      successKind: 'good',
-      successMessage: () => {
-        const removed = plan.publications.length - current.rooms.length;
-        const removedNote = removed > 0 ? ` Cleared ${removed} removed room(s) from the relay.` : '';
-        return `Published room setup for ${current.rooms.length} room(s). Pairing codes are now active and room tokens remain valid.${removedNote}`;
-      },
-      failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
-      missingRelayMessage: 'Connect the relay before publishing room setup.',
-    });
-  }, [publishPlan]);
+  /**
+   * Send an already-built room-setup plan. Split out of `publishRoomSetup` for the same
+   * reason as the round worker: the late-join override continuation names this instead of
+   * calling the guarded callback back.
+   */
+  const executeRoomSetupPublish = useCallback(
+    async (input: { plan: PublishPlan; tournamentName: string; roomCount: number }): Promise<void> => {
+      const { plan, tournamentName, roomCount } = input;
+      await publishPlan({
+        plan,
+        tournamentName,
+        successKind: 'good',
+        successMessage: () => {
+          const removed = plan.publications.length - roomCount;
+          const removedNote = removed > 0 ? ` Cleared ${removed} removed room(s) from the relay.` : '';
+          return `Published room setup for ${roomCount} room(s). Pairing codes are now active and room tokens remain valid.${removedNote}`;
+        },
+        failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
+        missingRelayMessage: 'Connect the relay before publishing room setup.',
+      });
+    },
+    [publishPlan],
+  );
+
+  const publishRoomSetup = useCallback(
+    async (options?: { lateRoomsOverride?: boolean }) => {
+      const current = stateRef.current;
+      if (!current.tournamentName) {
+        setNotice({ kind: 'bad', message: 'Load a YellowFruit file before publishing room setup.' });
+        return;
+      }
+      const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
+      // Room setup publishes pairing codes, so a never-published room joining mid-tournament
+      // takes the same override as a round publish. Tombstones clear removed rooms and need none.
+      const lateRoomIds =
+        phaseRef.current === 'live'
+          ? lateJoinedRoomIds(
+              plan.publications.map((publication) => publication.roomId),
+              current.rooms,
+            )
+          : [];
+      if (lateRoomIds.length > 0 && !options?.lateRoomsOverride) {
+        const lateNames = lateRoomIds.map(
+          (roomId) => current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+        );
+        const built = {
+          plan,
+          tournamentName: current.tournamentName,
+          roomCount: current.rooms.length,
+        };
+        requestGuarded('publish-late-rooms', lateNames.join(', '), () => void executeRoomSetupPublish(built));
+        return;
+      }
+      await executeRoomSetupPublish({
+        plan,
+        tournamentName: current.tournamentName,
+        roomCount: current.rooms.length,
+      });
+    },
+    [executeRoomSetupPublish, requestGuarded],
+  );
 
   const pollResults = useCallback(async () => {
     const current = stateRef.current;
@@ -1609,7 +2241,7 @@ export function useBridge(): BridgeApi {
             .map((entry) => entry.resultId),
         ),
       ];
-      setRelayReachable(true);
+      reportReachability(true);
       commit((current) => {
         if (!sameRelayConnection(connection, connectionOf(current))) return current;
         const fresh: StoredResult[] = fetched
@@ -1631,6 +2263,7 @@ export function useBridge(): BridgeApi {
       }
       if (!isCurrentPoll()) return;
       const acknowledged = new Set(pendingAckIds);
+      recordAudit('result-acknowledged', { results: pendingAckIds.length });
       commit((current) => {
         if (!sameRelayConnection(connection, connectionOf(current))) return current;
         return {
@@ -1641,9 +2274,9 @@ export function useBridge(): BridgeApi {
         };
       });
     } catch {
-      if (isCurrentPoll()) setRelayReachable(false);
+      if (isCurrentPoll()) reportReachability(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
   useEffect(() => {
     // Changing the active relay invalidates every in-flight request, even if a replacement happens
@@ -1727,6 +2360,7 @@ export function useBridge(): BridgeApi {
         kind: 'good',
         message: `Exported ${fallback.plan.assignments.length} assignment file(s) to ${folder}. Open each QBJ in its room's QBSheet Scorer by local handoff or USB. Do not also publish this round to the relay after a scorer opens a fallback file.`,
       });
+      recordAudit('fallback-exported', { rooms: fallback.plan.assignments.length });
       return true;
     } catch (error) {
       setNotice({
@@ -1737,7 +2371,7 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [recordAudit]);
 
   /**
    * Write one result and record where it went.
@@ -1827,6 +2461,7 @@ export function useBridge(): BridgeApi {
       try {
         await writeOne(entry, folder);
         await acknowledgeSaved(connection, [entry.resultId]);
+        recordAudit('result-saved', { resultId });
         setNotice({ kind: 'good', message: 'Result saved.' });
       } catch (error) {
         setNotice({ kind: 'bad', message: `That result was not saved. ${(error as Error).message}` });
@@ -1834,7 +2469,7 @@ export function useBridge(): BridgeApi {
         setResultSaving(resultId, false);
       }
     },
-    [acknowledgeSaved, setResultSaving, writeOne],
+    [acknowledgeSaved, setResultSaving, writeOne, recordAudit],
   );
 
   const saveNewResults = useCallback(async () => {
@@ -1868,6 +2503,8 @@ export function useBridge(): BridgeApi {
         }
       }
       await acknowledgeSaved(connection, written);
+      if (written.length > 0)
+        recordAudit('result-saved', { results: written.length, failed: failures.length });
       setNotice(
         failures.length === 0
           ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
@@ -1881,7 +2518,7 @@ export function useBridge(): BridgeApi {
       setSavingBatch(false);
       setBusy(false);
     }
-  }, [acknowledgeSaved, writeOne]);
+  }, [acknowledgeSaved, writeOne, recordAudit]);
 
   const markResultImported = useCallback(
     (resultId: string): void => {
@@ -1896,6 +2533,7 @@ export function useBridge(): BridgeApi {
           row.resultId === resultId ? { ...row, importStatus: 'imported' as const } : row,
         ),
       })).persisted;
+      recordAudit('result-import-marked', { resultId, imported: true });
       setNotice({
         kind: persisted.ok ? 'good' : 'bad',
         message: persisted.ok
@@ -1903,7 +2541,7 @@ export function useBridge(): BridgeApi {
           : 'Marked imported for this session, but QBBridge could not save that marker locally. Retry local persistence before restarting.',
       });
     },
-    [commit],
+    [commit, recordAudit],
   );
 
   const unmarkResultImported = useCallback(
@@ -1916,6 +2554,7 @@ export function useBridge(): BridgeApi {
           row.resultId === resultId ? { ...row, importStatus: 'needs-import' as const } : row,
         ),
       })).persisted;
+      recordAudit('result-import-marked', { resultId, imported: false });
       setNotice({
         kind: persisted.ok ? 'good' : 'bad',
         message: persisted.ok
@@ -1923,7 +2562,7 @@ export function useBridge(): BridgeApi {
           : 'Import marker removed for this session, but QBBridge could not save that change locally. Retry local persistence before restarting.',
       });
     },
-    [commit],
+    [commit, recordAudit],
   );
 
   const resultMatchIds = useMemo(
@@ -2087,6 +2726,17 @@ export function useBridge(): BridgeApi {
     cancelRelayChange,
     changingRelay,
     forgetRelayCredential,
+    phase,
+    auditLog,
+    pendingLiveOverride,
+    confirmLiveOverride,
+    cancelLiveOverride,
+    goLive,
+    reopenTournament,
+    reconciliation,
+    reconciliationRunning,
+    refreshReconciliation,
+    finishTournament,
     addRoom,
     renameRoom,
     removeRoom,
