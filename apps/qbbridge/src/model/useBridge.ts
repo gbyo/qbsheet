@@ -1298,9 +1298,7 @@ export function useBridge(): BridgeApi {
       }
       return {
         kind: 'bad',
-        message:
-          `${room.name} has a scorer connected right now on a game QBBridge did not publish. ` +
-          `Check the room before ${action}.`,
+        message: `${room.name} has a scorer connected right now. Check the room before ${action}.`,
       };
     },
     [currentResultMatchIds, describeLiveGame],
@@ -1634,18 +1632,29 @@ export function useBridge(): BridgeApi {
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
     const review = pendingPublicationReviewRef.current;
     if (!review) return;
-    if (review.blockers.length > 0) {
+    // Blockers are re-derived, never trusted from review time: a poll can attach a scorer
+    // to a room (or deliver its missing result) while the review sits open, and confirming
+    // a stale all-clear would replace a room that is occupied right now.
+    const blockers = occupancyBlockers(
+      review.plan,
+      stateRef.current.rooms,
+      currentResultMatchIds(),
+      roomSessionsRef.current,
+      describeLiveGame,
+    );
+    if (blockers.length > 0) {
+      rememberPublicationReview({ ...review, blockers });
       setNotice({
         kind: 'bad',
         message:
-          `${review.roundName} still has ${review.blockers.length} occupied room(s): ` +
-          `${review.blockers.map((blocker) => blocker.roomName).join(', ')}. Receive their ` +
+          `${review.roundName} still has ${blockers.length} occupied room(s): ` +
+          `${blockers.map((blocker) => blocker.roomName).join(', ')}. Receive their ` +
           `results first; replacing them takes the explicit exceptional override.`,
       });
       return;
     }
     await publishReviewedPlan(review);
-  }, [publishReviewedPlan]);
+  }, [publishReviewedPlan, currentResultMatchIds, describeLiveGame, rememberPublicationReview]);
 
   const confirmPublicationOverride = useCallback(async (): Promise<void> => {
     const review = pendingPublicationReviewRef.current;

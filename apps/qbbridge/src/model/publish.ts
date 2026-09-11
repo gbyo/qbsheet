@@ -159,10 +159,15 @@ export function roomOccupancy(
   for (const session of sessions) {
     if (session.roomId !== room.id) continue;
     if (session.status !== 'open' || !session.hasPresence) continue;
-    // A live session on the room's own game is the waiting case above, and a session on an
-    // already-resolved game trusts the durable final over lingering presence.
-    if (session.matchId === null || session.matchId === live) continue;
-    if (resultMatchIds.has(session.matchId)) continue;
+    if (session.matchId === null) continue;
+    // The room's own game, resolved or not: someone is still attached to it, so room
+    // actions and non-identical publication wait. (When the result is missing, the
+    // durable rule above already fired; this covers the attached-after-result case.)
+    // A session on any other already-resolved game trusts the durable final over
+    // lingering presence instead. Same-game republication stays possible through the
+    // occupancyBlockers exemption, which is about the plan's content, not about
+    // whether the room is free.
+    if (session.matchId !== live && resultMatchIds.has(session.matchId)) continue;
     return { occupied: true, reason: 'active-session', liveMatchId: live };
   }
   return { occupied: false };
@@ -218,7 +223,7 @@ export function occupancyBlockers(
         roomId: room.id,
         roomName: room.name,
         message:
-          `${room.name} has a scorer connected right now on a game QBBridge did not publish. ` +
+          `${room.name} has a scorer connected right now. ` +
           `Check the room before ${action} what it is serving.`,
       });
     }

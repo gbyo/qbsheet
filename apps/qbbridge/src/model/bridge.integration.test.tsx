@@ -406,13 +406,14 @@ async function publishReviewed(rendered: Awaited<ReturnType<typeof setUpTourname
  */
 async function receiveRoundResults(
   rendered: Awaited<ReturnType<typeof setUpTournament>>,
-  specs: { roomId: string; left: string; right: string; roundIndex: number }[],
+  specs: { roomId: string; roomName?: string; left: string; right: string; roundIndex: number }[],
 ): Promise<void> {
   relayResults = specs.map((spec, index) => {
     const { result } = scoredResultDocument({
       left: spec.left,
       right: spec.right,
       roomId: spec.roomId,
+      roomName: spec.roomName,
       roundIndex: spec.roundIndex,
     });
     return {
@@ -465,7 +466,7 @@ describe('a round, published and returned', () => {
     // Round 3 is over: both finals arrive before round 4 may replace them.
     await receiveRoundResults(rendered, [
       { roomId: 'room-1', left: 'Cony', right: 'Deering', roundIndex: 3 },
-      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+      { roomId: 'room-2', roomName: 'Room 102', left: 'Wells', right: 'Windham A', roundIndex: 3 },
     ]);
     expect(rendered.result.current.state.rooms.map((room) => bridgeStatus(rendered, room.id))).toEqual([
       'result-received',
@@ -768,7 +769,7 @@ describe('room setup and removal', () => {
     );
     // The remaining room's game is over, so room setup may clear the tombstone.
     await receiveRoundResults(restarted, [
-      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+      { roomId: 'room-2', roomName: 'Room 102', left: 'Wells', right: 'Windham A', roundIndex: 3 },
     ]);
     await act(async () => {
       restarted.result.current.loadFileContents(null, yftFixtureText());
@@ -856,7 +857,7 @@ describe('occupied room fencing', () => {
     // Once the games are over, room setup publishes directly with no review.
     await receiveRoundResults(rendered, [
       { roomId: 'room-1', left: 'Cony', right: 'Deering', roundIndex: 3 },
-      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+      { roomId: 'room-2', roomName: 'Room 102', left: 'Wells', right: 'Windham A', roundIndex: 3 },
     ]);
     await act(async () => {
       await rendered.result.current.publishRoomSetup();
@@ -887,7 +888,7 @@ describe('occupied room fencing', () => {
     const review = rendered.result.current.pendingPublicationReview;
     expect(review).not.toBeNull();
     expect(review!.blockers.map((blocker) => blocker.roomId)).toEqual(['room-1']);
-    expect(review!.blockers[0].message).toMatch(/did not publish/);
+    expect(review!.blockers[0].message).toMatch(/scorer connected right now/);
 
     // Presence gone: the room is free again with nothing persisted about the scare.
     relaySessions = [];
@@ -900,6 +901,59 @@ describe('occupied room fencing', () => {
     });
     await publishReviewed(rendered);
     expect(rendered.result.current.state.relay?.revision).toBe(1);
+  });
+
+  test('a scorer who connects while the review sits open blocks the confirm', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    expect(rendered.result.current.pendingPublicationReview!.blockers).toEqual([]);
+    // A scorer opens a foreign game in room-1 after the review was built with a clean fence.
+    relaySessions = [
+      {
+        room_id: 'room-1',
+        match_id: 'foreign-match',
+        status: 'open',
+        presence: [{ device_id: 'scorer-tablet' }],
+        updated_at: '2026-09-10T15:00:00Z',
+      },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    const mirrorsBefore = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    // The confirm re-derives the fence instead of trusting the review snapshot: no mirror,
+    // the review stays open carrying the new blocker.
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(mirrorsBefore);
+    expect(rendered.result.current.notice?.message).toMatch(/still has 1 occupied room/);
+    expect(
+      rendered.result.current.pendingPublicationReview!.blockers.map((blocker) => blocker.roomId),
+    ).toEqual(['room-1']);
+    // Presence gone: the same confirm goes through without rebuilding the review.
+    relaySessions = [];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'))
+        .length,
+    ).toBeGreaterThan(mirrorsBefore);
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    rendered.unmount();
   });
 
   test('the fence survives a restart: an unresolved room is still unresolved', async () => {

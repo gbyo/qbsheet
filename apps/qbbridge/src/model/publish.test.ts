@@ -658,7 +658,29 @@ describe('occupied room fencing', () => {
     ];
     const blockers = occupancyBlockers(plan, rooms, new Set(), sessions, describeGame);
     expect(blockers.map((blocker) => blocker.roomId)).toEqual(['room-3']);
-    expect(blockers[0].message).toMatch(/did not publish/);
+    expect(blockers[0].message).toMatch(/scorer connected right now/);
+  });
+
+  test('an attached scorer on the resolved game still fences the room', () => {
+    const { tournament, rooms, matchByRoom } = liveRooms();
+    const live = matchByRoom.get('room-1')!;
+    const sessions = [session({ roomId: 'room-1', matchId: live, status: 'open', hasPresence: true })];
+    // The result is in hand, but the scorer never left: room actions must see occupancy.
+    const room = rooms.find((entry) => entry.id === 'room-1')!;
+    expect(roomOccupancy(room, new Set([live]), sessions)).toEqual({
+      occupied: true,
+      reason: 'active-session',
+      liveMatchId: live,
+    });
+    // Same-game republication stays exempt — the plan content is identical.
+    const samePlan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
+    expect(occupancyBlockers(samePlan, rooms, new Set([live]), sessions, describeGame)).toEqual([]);
+    // A different game for the room blocks while the scorer is attached.
+    const live2 = matchByRoom.get('room-2')!;
+    const nextPlan = planRound(tournament, tournament.rounds[4], rooms, pairingsFor());
+    const blockers = occupancyBlockers(nextPlan, rooms, new Set([live, live2]), sessions, describeGame);
+    expect(blockers.map((blocker) => blocker.roomId)).toEqual(['room-1']);
+    expect(blockers[0]!.message).toMatch(/scorer connected right now/);
   });
 
   test('sessions without presence, finished sessions, and resolved games do not fence', () => {
