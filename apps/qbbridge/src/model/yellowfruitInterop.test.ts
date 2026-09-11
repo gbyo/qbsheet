@@ -207,3 +207,96 @@ describe('a completed result, read the way stock YellowFruit reads one', () => {
     expect(sides.map((side) => side.points)).toEqual([30, 40]);
   });
 });
+
+/**
+ * Two teams from one school, all the way through.
+ *
+ * A school that entered an A and a B team is a single `Registration` in YellowFruit, and an
+ * A-vs-B game is the case where both sides of the match resolve to it. The result writer used to
+ * emit one `Registration` per side, producing two top-level objects with the same id — each
+ * naming a different team and a different name, so which one a reader indexed decided what
+ * `$ref: Registration_…` pointed at.
+ *
+ * This runs the real path rather than a hand-written document: QBBridge builds the assignment,
+ * QBSheet's parser reads it, a game is scored through the scoring engine, and QBSheet's own
+ * `buildResultDocument` writes the result.
+ */
+describe('a game between two teams of the same school', () => {
+  const { result, tournament } = scoredResultDocument({
+    left: 'Gould Academy A',
+    right: 'Gould Academy B',
+  });
+  const objects = result.objects;
+
+  test('every object in the result has a unique identity', () => {
+    const ids = objects.map((entry) => `${String(entry.type)}:${String(entry.id)}`);
+    expect(ids.filter((id, index) => ids.indexOf(id) !== index)).toEqual([]);
+  });
+
+  test('one Registration carries both teams, under the school’s own name and id', () => {
+    const registrations = objects.filter((entry) => entry.type === 'Registration');
+    expect(registrations).toHaveLength(1);
+
+    // The identifier is YellowFruit's, not one this application minted.
+    const school = tournament.teams.find((team) => team.name === 'Gould Academy A')!;
+    expect(registrations[0].id).toBe(school.registrationId);
+    expect(registrations[0].name).toBe('Gould Academy');
+    expect(registrations[0].teams).toEqual([
+      { $ref: 'Team_Gould Academy A' },
+      { $ref: 'Team_Gould Academy B' },
+    ]);
+  });
+
+  test('the school’s third team is not dragged in', () => {
+    // Gould Academy entered A, B and C. C is not playing, so C is not in the document.
+    expect(JSON.stringify(result)).not.toContain('Gould Academy C');
+  });
+
+  test('the tournament references that one registration once', () => {
+    const tournamentObject = objects.find((entry) => entry.type === 'Tournament')!;
+    const refs = tournamentObject.registrations as { $ref: string }[];
+    expect(refs).toHaveLength(1);
+    expect(new Set(refs.map((ref) => ref.$ref)).size).toBe(1);
+  });
+
+  test('every `$ref` in the result resolves to an object the result carries', () => {
+    const byId = new Map<string, QbjObject>();
+    const index = (entry: unknown): void => {
+      if (!isRecord(entry)) return;
+      if (typeof entry.id === 'string') byId.set(entry.id, entry);
+      for (const value of Object.values(entry)) {
+        if (Array.isArray(value)) value.forEach(index);
+        else if (isRecord(value)) index(value);
+      }
+    };
+    objects.forEach(index);
+
+    const dangling: string[] = [];
+    const check = (entry: unknown): void => {
+      if (Array.isArray(entry)) return entry.forEach(check);
+      if (!isRecord(entry)) return;
+      if (typeof entry.$ref === 'string' && !byId.has(entry.$ref)) dangling.push(entry.$ref);
+      for (const value of Object.values(entry)) check(value);
+    };
+    objects.forEach(check);
+    expect(dangling).toEqual([]);
+  });
+
+  test('stock YellowFruit still finds the match and both of its teams', () => {
+    const found = findMatches(objects);
+    expect(found).toHaveLength(1);
+    expect(Number.parseInt(String(found[0].roundName), 10)).toBe(4);
+
+    const refTargets = collectRefTargets(objects);
+    const knownTeamIds = new Set(tournament.teams.map((team) => team.id));
+    const sides = (Array.isArray(found[0].match.match_teams) ? found[0].match.match_teams : []).filter(
+      isRecord,
+    );
+    expect(sides).toHaveLength(2);
+    for (const side of sides) {
+      const ref = isRecord(side.team) ? String(side.team.$ref) : '';
+      expect(refTargets.has(ref)).toBe(true);
+      expect(knownTeamIds.has(ref)).toBe(true);
+    }
+  });
+});

@@ -67,6 +67,14 @@ export interface IQbjIdentity {
   playerIds?: Record<string, string>;
   /** Registrations, so an exported result can rebuild the objects the assignment came with. */
   registrationIds?: { left?: string; right?: string };
+  /**
+   * The name each `Registration` carried, which is not the team's name.
+   *
+   * A school that entered an A and a B team is one `Registration` called "Gould Academy" holding
+   * two teams. Rebuilding that object from the roster name would call it "Gould Academy A", and
+   * in an A-vs-B game there is no roster name that is right for it.
+   */
+  registrationNames?: { left?: string; right?: string };
 }
 
 /** Where a definition came from. For honest display and for logs; never a branch in scoring. */

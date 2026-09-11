@@ -25,6 +25,8 @@
  * control, a status colour, or a type size.
  */
 
+/* The shared QBSheet layer first: `styles/tokens.css` is now aliases onto it. */
+@import '@qbsheet/ui/tokens.css';
 @import './styles/tokens.css';
 @import './styles/base.css';
 @import './styles/controls.css';

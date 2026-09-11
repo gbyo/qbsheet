@@ -231,6 +231,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Director's tokens are aliases onto `@qbsheet/ui`, so the shared layer is part of its build.
+      - name: Test QBSheet UI primitives
+        run: npm run ui:test
+
       - name: Build Director frontend
         run: npm run director:build
 
@@ -288,6 +292,13 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      # The shared design system, which QBBridge is the first consumer of.
+      - name: Test QBSheet UI primitives
+        run: npm run ui:test
+
+      - name: Typecheck QBSheet UI
+        run: npm run ui:typecheck
 
       - name: Test QBSheet Bridge
         run: npm run qbbridge:test

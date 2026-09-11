@@ -4,6 +4,7 @@
  * The list shows a few fields read out of each document. What is written is the document.
  */
 
+import { Button, StatusBadge } from '@qbsheet/ui';
 import { resultFileName, resultSummary } from '../model/results';
 import type { BridgeApi } from '../model/useBridge';
 
@@ -17,20 +18,17 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   return (
     <section className="panel">
       <h2>Results</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <button type="button" onClick={() => void bridge.chooseFolder()}>
-          Choose Result Folder
-        </button>
+      <div className="row" style={{ marginBottom: 'var(--qbs-space-3)' }}>
+        <Button onPress={() => void bridge.chooseFolder()}>Choose Result Folder</Button>
         <span className="muted">{state.resultFolder ?? 'No folder chosen'}</span>
-        <button
-          className="primary"
-          type="button"
+        <Button
+          variant="primary"
           style={{ marginLeft: 'auto' }}
-          disabled={bridge.busy || unsaved.length === 0 || !state.resultFolder}
-          onClick={() => void bridge.saveNewResults()}
+          isDisabled={bridge.busy || unsaved.length === 0 || !state.resultFolder}
+          onPress={() => void bridge.saveNewResults()}
         >
           Save New Results{unsaved.length > 0 ? ` (${unsaved.length})` : ''}
-        </button>
+        </Button>
       </div>
 
       {ordered.length === 0 ? (
@@ -46,34 +44,34 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
               : `${summary.leftName ?? '?'} vs ${summary.rightName ?? '?'}`;
           return (
             <div className="result" key={entry.resultId}>
-              <span className={`dot${entry.savedPath ? ' saved' : ''}`}>{entry.savedPath ? '✓' : '●'}</span>
               <div style={{ flex: 1 }}>
                 <div>
                   {summary.roundName ? `R${summary.roundName} · ` : ''}
                   {summary.location ? `${summary.location} · ` : ''}
                   {score}
                 </div>
-                <div className="muted status">
-                  {entry.savedPath ? `Saved · ${entry.savedPath}` : 'New'} ·{' '}
-                  {resultFileName(summary, entry.resultId)}
-                </div>
+                <div className="faint">{entry.savedPath ?? resultFileName(summary, entry.resultId)}</div>
               </div>
-              <button
-                type="button"
-                disabled={!state.resultFolder}
-                onClick={() => void bridge.saveResult(entry.resultId)}
+              <StatusBadge tone={entry.savedPath ? 'success' : 'info'}>
+                {entry.savedPath ? 'Saved' : 'New'}
+              </StatusBadge>
+              <Button
+                size="sm"
+                isDisabled={!state.resultFolder}
+                onPress={() => void bridge.saveResult(entry.resultId)}
               >
                 {entry.savedPath ? 'Save again' : 'Save'}
-              </button>
+              </Button>
             </div>
           );
         })
       )}
 
-      <p className="muted" style={{ marginTop: 12 }}>
+      <p className="faint" style={{ marginTop: 'var(--qbs-space-4)' }}>
         Saved results are ready for YellowFruit &rarr; Import Games Only (Cmd/Ctrl+M). Each file is the
-        scorer&rsquo;s own QBJ, written out unchanged; QBBridge recalculates nothing and merges nothing. The
-        relay keeps its copy of every result as a second backup.
+        scorer&rsquo;s own QBJ, written out unchanged; QBBridge recalculates nothing and merges nothing. A
+        file already in the folder is never replaced by a different result — a corrected final arrives under
+        its own name.
       </p>
     </section>
   );

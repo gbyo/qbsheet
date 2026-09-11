@@ -50,6 +50,8 @@
     "director:tauri:dev": "npm run tauri:dev --workspace=@qbsheet/director",
     "director:tauri:build": "npm run tauri:build --workspace=@qbsheet/director",
     "director:core:test": "npm run test --workspace=@qbsheet/tournament-core",
+    "ui:test": "npm run test --workspace=@qbsheet/ui",
+    "ui:typecheck": "npm run typecheck --workspace=@qbsheet/ui",
     "director:formats:test": "npm run test --workspace=@qbsheet/tournament-formats",
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
     "qbbridge:dev": "npm run dev --workspace=@qbsheet/qbbridge",

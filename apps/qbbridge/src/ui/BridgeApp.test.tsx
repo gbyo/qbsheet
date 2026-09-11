@@ -6,8 +6,9 @@
  * claims a state QBBridge cannot know.
  */
 
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { resetNativeHost } from '../model/native';
 import { yftFixtureText } from '../tests/fixture';
@@ -29,6 +30,15 @@ function installFakeTauri(): void {
   resetNativeHost();
 }
 
+/** Choose a team through the combo box, the way an operator does. */
+async function pickTeam(user: UserEvent, label: string, name: string): Promise<void> {
+  const input = screen.getByRole('combobox', { name: label });
+  await user.clear(input);
+  await user.type(input, name);
+  const listbox = await screen.findByRole('listbox');
+  await user.click(within(listbox).getByRole('option', { name }));
+}
+
 beforeEach(installFakeTauri);
 afterEach(() => {
   Reflect.deleteProperty(globalThis as Record<string, unknown>, '__TAURI_INTERNALS__');
@@ -38,11 +48,11 @@ afterEach(() => {
 describe('the shell', () => {
   test('opens on the tournament panel and says what is missing', () => {
     render(<BridgeApp />);
-    // The wordmark is the mark and "Bridge" is text, so the heading still reads as one name
-    // rather than announcing the logo and the product separately.
+    // The wordmark reads "QBSheet Bridge" on its own, so nothing repeats it in text and the
+    // heading still has exactly one accessible name.
     const heading = screen.getByRole('heading', { name: 'QBSheet Bridge' });
-    expect(heading).toBeInTheDocument();
-    expect(within(heading).getByAltText('QBSheet')).toHaveClass('wordmark');
+    expect(within(heading).getByAltText('QBSheet Bridge')).toHaveClass('wordmark');
+    expect(heading.textContent).toBe('');
     expect(screen.getByText('No YellowFruit file loaded')).toBeInTheDocument();
     expect(screen.getByText('Relay not connected')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open YellowFruit File' })).toBeInTheDocument();
@@ -69,38 +79,66 @@ describe('the shell', () => {
     await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
     await screen.findByText('12 teams · 48 players');
 
-    await user.click(screen.getByRole('button', { name: 'Rooms' }));
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
     await user.click(screen.getByRole('button', { name: '+ Room' }));
 
-    const row = screen.getByRole('row', { name: /Room 1/ });
-    await user.selectOptions(within(row).getByLabelText('Left team in Room 1'), 'Team_Cony');
-    await user.selectOptions(within(row).getByLabelText('Right team in Room 1'), 'Team_Deering');
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+    await pickTeam(user, 'Right team in Room 1', 'Deering');
 
+    const row = screen.getByRole('row', { name: /Room 1/ });
     expect(within(row).getByText(/^[0-9]{8}$/)).toBeInTheDocument();
     expect(within(row).getByText('Ready')).toBeInTheDocument();
     // Publishing needs a relay; without one the button does not pretend otherwise.
     expect(screen.getByRole('button', { name: /Publish Round 1/ })).toBeDisabled();
   });
 
-  test('warns about the three things a person mistypes', async () => {
+  test('warns about the things a person mistypes', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
     await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
     await screen.findByText('12 teams · 48 players');
-    await user.click(screen.getByRole('button', { name: 'Rooms' }));
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
     await user.click(screen.getByRole('button', { name: '+ Room' }));
 
     expect(screen.getByText('This room has no matchup yet.')).toBeInTheDocument();
-    const row = screen.getByRole('row', { name: /Room 1/ });
-    await user.selectOptions(within(row).getByLabelText('Left team in Room 1'), 'Team_Cony');
-    await user.selectOptions(within(row).getByLabelText('Right team in Room 1'), 'Team_Cony');
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+    await pickTeam(user, 'Right team in Room 1', 'Cony');
     expect(screen.getByText('Both sides are the same team.')).toBeInTheDocument();
+  });
+
+  test('switching rounds asks before it clears the pairings', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+
+    const rounds = screen.getByLabelText('Round');
+    await user.selectOptions(rounds, 'Phase_Prelims__round_5');
+
+    // Nothing has changed yet: the dialog is the gate.
+    const dialog = await screen.findByRole('alertdialog', { name: 'Switch to Round 5?' });
+    expect(within(dialog).getByText(/selections in every room will be cleared/)).toBeInTheDocument();
+    // The page behind a modal is inert and hidden from assistive technology, so the only thing
+    // reachable is the question. That is the property `window.confirm` fakes and a hand-rolled
+    // overlay usually misses.
+    expect(screen.queryByRole('combobox', { name: 'Left team in Room 1' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Left team in Room 1', hidden: true })).toHaveValue('Cony');
+
+    await user.click(within(dialog).getByRole('button', { name: 'Switch Round' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue(''),
+    );
+    // The room and its pairing code survive the switch.
+    expect(screen.getByRole('row', { name: /Room 1/ })).toBeInTheDocument();
   });
 
   test('the results screen names the YellowFruit step and claims nothing about it', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
-    await user.click(screen.getByRole('button', { name: 'Results' }));
+    await user.click(screen.getByRole('tab', { name: 'Results' }));
 
     expect(screen.getByText(/Import Games Only/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Choose Result Folder' })).toBeInTheDocument();
@@ -113,7 +151,7 @@ describe('the shell', () => {
   test('the help screen is the tournament-day workflow', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
-    await user.click(screen.getByRole('button', { name: 'Help' }));
+    await user.click(screen.getByRole('tab', { name: 'Help' }));
     expect(screen.getByText(/Before the tournament/)).toBeInTheDocument();
     expect(screen.getByText(/Import Games Only/)).toBeInTheDocument();
   });

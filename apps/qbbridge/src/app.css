@@ -1,22 +1,18 @@
 /*
- * The platform's own UI face and a plain, dense layout.
+ * QBSheet Bridge: the layout this one utility needs, and nothing else.
  *
- * This is a utility that sits next to YellowFruit on a folding table. It has three areas, no
- * sidebar, no dashboard, no animation, and nothing that needs explaining before a round.
+ * Every value comes from `@qbsheet/ui` tokens. QBBridge used to declare a six-variable palette of
+ * its own (`--ink`, `--paper`, `--accent`, `--good`…), which meant QBSheet had two visual
+ * vocabularies and a second place to change a grey. Controls, notices, badges, tabs and dialogs
+ * are now the shared components; what is left here is page rhythm — the title bar, the panels,
+ * the room table, the result rows.
+ *
+ * This is a desktop operational utility. No sidebar, no dashboard cards, no gradients, no
+ * glass, no animated anything.
  */
 
-:root {
-  --ink: #17181b;
-  --ink-soft: #5c6069;
-  --line: #d6d8dd;
-  --paper: #ffffff;
-  --shell: #f4f5f7;
-  --accent: #1d4ed8;
-  --good: #15803d;
-  --warn: #a16207;
-  --bad: #b91c1c;
-  color-scheme: light;
-}
+@import '@qbsheet/ui/tokens.css';
+@import '@qbsheet/ui/components.css';
 
 * {
   box-sizing: border-box;
@@ -24,14 +20,11 @@
 
 body {
   margin: 0;
-  background: var(--shell);
-  color: var(--ink);
-  font:
-    13px/1.45 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    system-ui,
-    sans-serif;
+  background: var(--qbs-surface-page);
+  color: var(--qbs-text);
+  font-family: var(--qbs-font-sans);
+  font-size: var(--qbs-text-body);
+  line-height: var(--qbs-leading-normal);
 }
 
 .shell {
@@ -40,100 +33,91 @@ body {
   min-height: 100vh;
 }
 
+/* ------------------------------------------------------------------------------- Title bar */
+
 .titlebar {
   display: flex;
-  align-items: baseline;
-  gap: 16px;
-  padding: 10px 16px;
-  background: var(--paper);
-  border-bottom: 1px solid var(--line);
+  align-items: center;
+  gap: var(--qbs-space-4);
+  padding: var(--qbs-space-3) var(--qbs-space-4);
+  background: var(--qbs-surface);
+  border-bottom: 1px solid var(--qbs-border);
 }
 
 .titlebar h1 {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
 }
 
 /* 987 × 133 in the source, so the width follows from the height. */
 .titlebar .wordmark {
-  height: 15px;
+  display: block;
+  height: 22px;
   width: auto;
-  /* The mark sits on its baseline; the descender-free lockup needs a nudge to line up with text. */
-  position: relative;
-  top: 1px;
 }
 
 .titlebar .subtle {
-  color: var(--ink-soft);
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
 }
 
-.tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0 12px;
-  background: var(--paper);
-  border-bottom: 1px solid var(--line);
+.titlebar .relay-state {
+  margin-left: auto;
 }
 
-.tabs button {
-  appearance: none;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: none;
-  padding: 8px 12px;
-  font: inherit;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-
-.tabs button[aria-current='page'] {
-  color: var(--ink);
-  border-bottom-color: var(--accent);
-  font-weight: 600;
-}
+/* ------------------------------------------------------------------------------------ Page */
 
 main {
   flex: 1;
-  padding: 16px;
+  padding: var(--qbs-space-4);
+}
+
+.page-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-2);
+  max-width: 1100px;
+  margin-bottom: var(--qbs-space-4);
 }
 
 section.panel {
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 14px 16px;
-  margin-bottom: 14px;
+  background: var(--qbs-surface);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  padding: var(--qbs-space-4) var(--qbs-space-5);
+  margin-bottom: var(--qbs-space-4);
   max-width: 960px;
 }
 
+section.panel.wide {
+  max-width: 1100px;
+}
+
 section.panel h2 {
-  margin: 0 0 10px;
-  font-size: 12px;
-  font-weight: 600;
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-meta);
+  font-weight: var(--qbs-weight-semibold);
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--ink-soft);
+  color: var(--qbs-text-muted);
 }
 
 dl.facts {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 4px 16px;
+  gap: var(--qbs-space-1) var(--qbs-space-4);
   margin: 0;
 }
 
 dl.facts dt {
-  color: var(--ink-soft);
+  color: var(--qbs-text-muted);
 }
 
 dl.facts dd {
   margin: 0;
 }
+
+/* ----------------------------------------------------------------------------------- Table */
 
 table {
   width: 100%;
@@ -143,104 +127,88 @@ table {
 th,
 td {
   text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--line);
+  padding: var(--qbs-space-2);
+  border-bottom: 1px solid var(--qbs-border-subtle);
   vertical-align: middle;
 }
 
 th {
-  font-size: 11px;
+  font-size: var(--qbs-text-meta);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--ink-soft);
-  font-weight: 600;
+  color: var(--qbs-text-muted);
+  font-weight: var(--qbs-weight-semibold);
 }
 
-button,
+td.team-cell {
+  min-width: 190px;
+}
+
+/* -------------------------------------------------------------------------------- Controls
+   Only the inputs QBBridge still renders natively: a short round list and a room name. Both
+   are genuinely small and fixed, so a native control is the right control. */
+
 select,
-input[type='text'],
-input[type='password'] {
-  font: inherit;
-  color: inherit;
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  background: var(--paper);
-  padding: 4px 8px;
+input[type='text'] {
+  font-family: inherit;
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text);
+  height: var(--qbs-control-sm);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface);
+  padding: 0 var(--qbs-space-2);
 }
 
-button {
-  cursor: pointer;
+select:focus-visible,
+input[type='text']:focus-visible {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-color: var(--qbs-accent);
 }
 
-button:disabled {
-  color: var(--ink-soft);
-  cursor: not-allowed;
-}
-
-button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  padding: 6px 14px;
-}
-
-button.primary:disabled {
-  background: var(--line);
-  border-color: var(--line);
-  color: var(--ink-soft);
+label {
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text-muted);
 }
 
 .row {
   display: flex;
-  gap: 8px;
+  gap: var(--qbs-space-2);
   align-items: center;
   flex-wrap: wrap;
 }
 
 .code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 14px;
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-body);
   letter-spacing: 0.08em;
 }
 
-.status {
-  font-size: 12px;
+.muted {
+  color: var(--qbs-text-muted);
 }
 
-.status.good {
-  color: var(--good);
-}
-
-.status.warn {
-  color: var(--warn);
-}
-
-.status.bad {
-  color: var(--bad);
-}
-
-.notice {
-  border-left: 3px solid var(--warn);
-  padding: 6px 10px;
-  margin: 8px 0;
-  background: #fffbeb;
-}
-
-.notice.bad {
-  border-left-color: var(--bad);
-  background: #fef2f2;
-}
-
-.notice.good {
-  border-left-color: var(--good);
-  background: #f0fdf4;
+.faint {
+  color: var(--qbs-text-faint);
+  font-size: var(--qbs-text-meta);
 }
 
 ul.plain {
-  margin: 6px 0;
-  padding-left: 18px;
+  margin: var(--qbs-space-2) 0;
+  padding-left: var(--qbs-space-5);
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
 }
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-3);
+  max-width: 460px;
+}
+
+/* --------------------------------------------------------------------------------------- QR */
 
 .qr {
   width: 66px;
@@ -253,29 +221,21 @@ ul.plain {
   display: block;
 }
 
+/* ---------------------------------------------------------------------------------- Results */
+
 .result {
   display: flex;
-  gap: 10px;
+  gap: var(--qbs-space-3);
   align-items: baseline;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.result .dot {
-  width: 9px;
-  color: var(--accent);
-}
-
-.result .dot.saved {
-  color: var(--good);
-}
-
-.muted {
-  color: var(--ink-soft);
+  padding: var(--qbs-space-2) 0;
+  border-bottom: 1px solid var(--qbs-border-subtle);
 }
 
 pre.help {
   white-space: pre-wrap;
-  font: inherit;
+  font-family: inherit;
+  font-size: var(--qbs-text-body);
+  line-height: var(--qbs-leading-relaxed);
   margin: 0;
+  color: var(--qbs-text-muted);
 }

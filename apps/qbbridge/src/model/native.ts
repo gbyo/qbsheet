@@ -65,14 +65,22 @@ export async function chooseResultFolder(): Promise<string | null> {
   return invoke<string | null>('choose_result_folder');
 }
 
-/** Write one result file. Returns the full path written. */
+/**
+ * Write one result file. Returns the full path written.
+ *
+ * `overwrite` defaults to refusing an existing file. A result that is already on disk is a result
+ * somebody may not have imported yet, and two different retained relay results for one game
+ * produce names that differ only in their suffix — so the failure mode this guards against is a
+ * corrected final quietly replacing the original.
+ */
 export async function writeResultFile(
   directory: string,
   fileName: string,
   contents: string,
+  overwrite = false,
 ): Promise<string> {
   requireNative('Saving a result file');
-  return invoke<string>('write_result_file', { directory, fileName, contents });
+  return invoke<string>('write_result_file', { directory, fileName, contents, overwrite });
 }
 
 export interface RelayResponse {

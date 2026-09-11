@@ -89,6 +89,13 @@ There is no round-robin generation, no automatic pairing, no bracket, no advance
 schedule-legality engine. There are four cheap warnings — an empty room, a team against itself, a
 duplicate room name, a team in two rooms this round — and none of them blocks a publish.
 
+**Choosing a different round clears every room's team selection**, after a confirmation. Rooms,
+their names, their pairing codes and their publication history all survive; only the entry state
+goes. The alternative — last round's pairings still sitting in the pickers under a new round's
+heading — makes the most damaging mistake on the screen available in one click: publishing round
+4's matchups as real, correctly formatted round 5 assignments, which the rooms would score and
+YellowFruit would import without complaint.
+
 ## What reaches a room
 
 Each room gets a normal one-game QBJ serialization (version `2.1.1`) that follows
@@ -117,9 +124,25 @@ PUT  /qbtcp/v1/manage/tournaments/{id}/mirror
 GET  /qbtcp/v1/manage/tournaments/{id}/results?state=unacked
 ```
 
-There is deliberately no `POST manage/acks`. The relay keeps an unacknowledged final forever, so
-leaving the day's results unacknowledged gives the tournament a second durable copy of every game
-at no cost. Deduplication is local, by result id.
+```text
+POST /qbtcp/v1/manage/tournaments/{id}/acks
+```
+
+### Why results are acknowledged, and exactly when
+
+`GET results?state=unacked` answers with the oldest **128** unacknowledged results and carries no
+cursor or offset. A build that never acknowledged anything would, at result 129, hold a result it
+could never reach by polling — a silent ceiling, which is the worst kind.
+
+So a result is acknowledged **only after its bytes are on the operator's disk**, never because it
+arrived and never because it was displayed. `unacked` therefore means "not yet saved locally": a
+queue that drains, and that cannot fill up while results are being saved. If the acknowledgment
+call itself fails the save still stands; the result is simply offered again next poll and
+recognised as already saved.
+
+The relay keeps an acknowledged result for seven days and still serves it under `state=all`, so the
+second copy the tournament wanted is there for the weekend. As a backstop, QBBridge warns when 100
+results are unsaved, well before the window could matter. Deduplication is local, by result id.
 
 Pairing codes are eight digits, generated locally, shown in the application, and sent to the relay
 only as SHA-256 hex. The plaintext travels to a device in the URL _fragment_ of the ordinary
@@ -129,9 +152,21 @@ A room keeps its pairing across rounds. Publishing restates each room's pairing 
 replaces a listed room's columns wholesale) and sends an empty `sessions` list, which touches no
 scorer-created session. Room tokens live in their own table and a mirror does not revoke them.
 
+**Every configured room is in every publication**, including rooms with no game. The relay upserts
+and never deletes, so a room left out of the payload keeps serving whatever it was last given: a
+scorekeeper in an unused room could open last round's assignment, which is real and correctly
+formatted and belongs to a match nobody is playing. An unused room is therefore published with its
+assignment explicitly cleared, keeping its id, its name and its pairing hash.
+
 If a publish fails, QBBridge says the rooms were not updated and changes nothing locally. If the
 relay disappears, local state is kept and the next poll tries again. There is no offline queue, no
 background sync engine, and no reconciliation.
+
+**Change Relay never deletes anything.** It opens the setup form while the current relay keeps
+working, and the stored credential is replaced only after a new claim succeeds; Cancel returns to
+what was there. Deleting the credential is a separate action that says so and asks first, because
+a relay's setup token is consumed by the claim that produced the credential — a deleted one cannot
+be recreated and the relay it authorized cannot be claimed again.
 
 ## Results
 
@@ -141,6 +176,13 @@ into one file, or convert anything. The only thing it adds is a filename, and a 
 identity.
 
 One `.qbj` per game. YellowFruit's import dialog multi-selects.
+
+**A saved result is never silently replaced.** The relay can legitimately hold two finals for one
+game — a correction and the original — with the same match, the same room and the same two teams,
+and so the same descriptive filename. Each file therefore ends in six hex characters derived from
+the relay's own `result_id`, and the native writer opens exclusively: an existing file comes back
+as a readable error rather than being overwritten. Re-saving one specific result deliberately
+rewrites its own file.
 
 QBBridge reports only what it can see: a room is **Ready** until its assignment is published,
 **Waiting** until a result for that match arrives, then **Result received**; a result is **New**
@@ -168,6 +210,24 @@ selection, mirror revision, seen and saved results, results folder — is one `l
 For a single-operator utility that is less code and fewer failure modes than a database, and the
 credential authorizes one tournament on a relay the operator deployed themselves.
 
+## How it looks
+
+QBBridge renders from `@qbsheet/ui` — the shared QBSheet token layer and a small set of
+React Aria-backed primitives (`Button`, `Tabs`, `ConfirmDialog`, `TextField`, `TeamComboBox`,
+`Notice`, `StatusBadge`). It defines no colours, no type scale and no spacing of its own; what is
+left in `src/app.css` is page rhythm.
+
+React Aria supplies behaviour only — keyboard and pointer activation, focus management, dialog
+focus trapping and restoration, ARIA relationships, the `data-*` state hooks. Every pixel comes
+from QBSheet tokens; no third-party theme is imported and nothing here should look like somebody
+else's design system.
+
+Plain semantic HTML stays plain: the room list is a real `<table>`, the tournament summary is a
+`<dl>`, the round picker is a `<select>` over eight fixed entries. The team pickers are combo
+boxes because a sixty-team roster is faster to type than to scroll, and because two teams called
+"Providence A" and "Providence B" should not be thirty rows apart — the value is always the team's
+identifier, matching is a plain substring, and nothing fuzzy can change which team is selected.
+
 ## Developing
 
 ```bash
@@ -178,6 +238,10 @@ npm run qbbridge:tauri:dev    # the desktop application
 npm run qbbridge:tauri:build  # QBSheet Bridge.app and the platform equivalents
 ```
 
+```bash
+npm run ui:test               # the shared primitives
+```
+
 Tests cover the places where a mistake ruins a real match: loading a real stock `.yft`, the scoring
 rules a known configuration produces (and a deliberately non-default one, so nothing is hard-coded
 to NAQT), that QBSheet's own parser turns an assignment into a playable game with no questions
@@ -185,6 +249,13 @@ asked, match identity across republishes, that plaintext pairing codes stay loca
 hashes reach the mirror, result deduplication, byte-for-byte result preservation, restart recovery,
 and that a completed result satisfies the import assumptions of stock `ANadig/YellowFruit` — whose
 algorithm is transcribed with citations in `src/model/yellowfruitInterop.test.ts`.
+
+The tournament-day failure modes have their own regressions: a room used in round 4 and unused in
+round 5 has its assignment cleared while keeping its pairing; a round change clears selections and
+cannot publish the previous round's pairings; a failed relay claim leaves the working credential
+usable; two result ids for one game produce two files and the first is never overwritten; a result
+is acknowledged after it is written and not before; and an A-vs-B game between two teams of one
+school produces a result with unique object ids and one shared `Registration`.
 
 ## The supported boundary
 

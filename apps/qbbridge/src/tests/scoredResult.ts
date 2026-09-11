@@ -75,7 +75,7 @@ function playedEvents(format: IScorekeeperFormat, left: string[], right: string[
 }
 
 /** Assignment → scorer → completed result, the whole way a real game travels. */
-export function scoredResultDocument(): {
+export function scoredResultDocument(options: { left?: string; right?: string } = {}): {
   result: { version: string; objects: QbjObject[] };
   matchId: string;
   tournament: BridgeTournament;
@@ -86,8 +86,8 @@ export function scoredResultDocument(): {
     round: tournament.rounds[3],
     roomId: 'room-1',
     roomName: 'Room 101',
-    left: teamNamed(tournament, 'Cony'),
-    right: teamNamed(tournament, 'Deering'),
+    left: teamNamed(tournament, options.left ?? 'Cony'),
+    right: teamNamed(tournament, options.right ?? 'Deering'),
     assignmentRevision: 1,
   });
   if (!built.ok) throw new Error(built.error);

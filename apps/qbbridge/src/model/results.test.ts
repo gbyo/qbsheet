@@ -8,7 +8,13 @@
 
 import { describe, expect, test } from 'vitest';
 import { scoredResultDocument } from '../tests/scoredResult';
-import { resultFileContents, resultFileName, resultSummary, sameQbjDocument } from './results';
+import {
+  resultFileContents,
+  resultFileName,
+  resultFileSuffix,
+  resultSummary,
+  sameQbjDocument,
+} from './results';
 
 describe('reading a result for the list', () => {
   test('a real scored document reports its round, room, teams and score', () => {
@@ -32,9 +38,35 @@ describe('reading a result for the list', () => {
 });
 
 describe('file names', () => {
-  test('are descriptive and safe', () => {
+  test('are descriptive, and end in the identity of the result they hold', () => {
     const { result } = scoredResultDocument();
-    expect(resultFileName(resultSummary(result), 'res-1')).toBe('R04_Room-101_Cony_vs_Deering.result.qbj');
+    expect(resultFileName(resultSummary(result), 'res-1')).toBe(
+      `R04_Room-101_Cony_vs_Deering_${resultFileSuffix('res-1')}.result.qbj`,
+    );
+    expect(resultFileSuffix('res-1')).toMatch(/^[0-9a-f]{6}$/);
+  });
+
+  test('two results for the same game get different names', () => {
+    // The case this exists for: a room submitted a correction, so the relay holds two finals
+    // with the same match, the same room and the same two teams.
+    const summary = resultSummary(scoredResultDocument().result);
+    const first = resultFileName(summary, 'result-aaa');
+    const second = resultFileName(summary, 'result-bbb');
+    expect(first).not.toBe(second);
+    // Both still say what they are; only the suffix differs.
+    expect(first.startsWith('R04_Room-101_Cony_vs_Deering_')).toBe(true);
+    expect(second.startsWith('R04_Room-101_Cony_vs_Deering_')).toBe(true);
+  });
+
+  test('the same result always gets the same name', () => {
+    const summary = resultSummary(scoredResultDocument().result);
+    expect(resultFileName(summary, 'result-aaa')).toBe(resultFileName(summary, 'result-aaa'));
+  });
+
+  test('ids differing only in case do not collide on a case-insensitive volume', () => {
+    // Relay result ids use a case-sensitive alphabet, so a filename slice of one would not be
+    // safe on macOS. The suffix is a hash for exactly that reason.
+    expect(resultFileSuffix('result-AbC')).not.toBe(resultFileSuffix('result-aBc'));
   });
 
   test('a name that would escape the folder is flattened', () => {
@@ -50,7 +82,7 @@ describe('file names', () => {
       },
       'res-1',
     );
-    expect(name).toBe('R04_..-..-etc_A-B_vs_C-D.result.qbj');
+    expect(name).toBe(`R04_..-..-etc_A-B_vs_C-D_${resultFileSuffix('res-1')}.result.qbj`);
     // No separator survives, so the name stays one path component. The native writer refuses
     // anything else outright; this is the first of the two checks, not the only one.
     expect(name).not.toContain('/');
@@ -60,7 +92,7 @@ describe('file names', () => {
 
   test('an unreadable result still gets a file name', () => {
     const blank = resultSummary(null);
-    expect(resultFileName(blank, 'res-77')).toBe('Game_res-77.result.qbj');
+    expect(resultFileName(blank, 'res-77')).toBe(`Game_${resultFileSuffix('res-77')}.result.qbj`);
   });
 });
 

@@ -1,28 +1,35 @@
 /**
- * The screen used between rounds: one row per room, two dropdowns, one button.
+ * The screen used between rounds: one row per room, two team pickers, one button.
  *
  * The pairing table is QBBridge's own, because stock YellowFruit's saved file does not carry an
  * authoritative list of future room-by-room pairings to publish. Nothing here generates a
  * schedule, advances a bracket, or refuses a matchup; it records the operator's choice.
+ *
+ * It is a real `<table>`. The content is tabular, a screen reader gets row and column context
+ * for free, and a grid of `<div>`s with ARIA bolted on would be a worse version of what the
+ * element already does.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import { Button, ConfirmDialog, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
 import { pairingLink } from '../model/pairing';
 import type { Room, RoomStatus } from '../model/rooms';
 import type { BridgeApi } from '../model/useBridge';
 import Qr from './Qr';
 
-const statusLabel: Record<RoomStatus, string> = {
-  ready: 'Ready',
-  waiting: 'Waiting',
-  paired: 'Paired',
-  scoring: 'Scoring',
-  'result-received': 'Result received',
+const status: Record<RoomStatus, { label: string; tone: Tone }> = {
+  ready: { label: 'Ready', tone: 'neutral' },
+  waiting: { label: 'Waiting', tone: 'info' },
+  paired: { label: 'Paired', tone: 'info' },
+  scoring: { label: 'Scoring', tone: 'info' },
+  'result-received': { label: 'Result received', tone: 'success' },
 };
 
 export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
+  const [pendingRound, setPendingRound] = useState<string | null>(null);
   const round = tournament?.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null;
+
   const warningsByRoom = useMemo(() => {
     const map = new Map<string, string[]>();
     for (const warning of bridge.warnings) {
@@ -30,6 +37,25 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     }
     return map;
   }, [bridge.warnings]);
+
+  const teamOptions = useMemo(() => {
+    if (!tournament) return [];
+    const byName = new Map<string, number>();
+    for (const team of tournament.teams) {
+      byName.set(team.name, (byName.get(team.name) ?? 0) + 1);
+    }
+    return [...tournament.teams]
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((team) => ({
+        id: team.id,
+        name: team.name,
+        // Only where it is needed: two teams that read alike must stay tellable apart, and
+        // every other row stays uncluttered.
+        ...((byName.get(team.name) ?? 0) > 1 && team.poolNames.length > 0
+          ? { detail: team.poolNames[0] }
+          : {}),
+      }));
+  }, [tournament]);
 
   if (!tournament) {
     return (
@@ -39,8 +65,6 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
       </section>
     );
   }
-
-  const teamOptions = [...tournament.teams].sort((left, right) => left.name.localeCompare(right.name));
 
   const linkFor = (room: Room): string | null => {
     if (!state.relay) return null;
@@ -56,15 +80,25 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     }
   };
 
+  const requestRound = (roundId: string): void => {
+    if (roundId === state.selectedRoundId) return;
+    // Changing rounds clears every selection, so ask first when there is something to lose.
+    if (bridge.roundChangeDiscardsSelections) setPendingRound(roundId);
+    else bridge.selectRound(roundId);
+  };
+
+  const pendingRoundName = tournament.rounds.find((entry) => entry.id === pendingRound)?.qbjName ?? '';
+
   return (
-    <section className="panel" style={{ maxWidth: 1100 }}>
+    <section className="panel wide">
       <h2>Rooms</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
+      <div className="row" style={{ marginBottom: 'var(--qbs-space-3)' }}>
         <label htmlFor="round">Round</label>
+        {/* Eight rounds in a fixed list: a native select is the right control and needs no help. */}
         <select
           id="round"
           value={state.selectedRoundId ?? ''}
-          onChange={(event) => bridge.selectRound(event.target.value)}
+          onChange={(event) => requestRound(event.target.value)}
         >
           {tournament.rounds.map((entry) => (
             <option key={entry.id} value={entry.id}>
@@ -72,18 +106,15 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
             </option>
           ))}
         </select>
-        <button type="button" onClick={bridge.addRoom}>
-          + Room
-        </button>
-        <button
-          className="primary"
-          type="button"
+        <Button onPress={bridge.addRoom}>+ Room</Button>
+        <Button
+          variant="primary"
           style={{ marginLeft: 'auto' }}
-          disabled={bridge.busy || !state.relay || !round}
-          onClick={() => void bridge.publish()}
+          isDisabled={bridge.busy || !state.relay || !round}
+          onPress={() => void bridge.publish()}
         >
           {round ? `Publish Round ${round.qbjName}` : 'Publish'}
-        </button>
+        </Button>
       </div>
 
       {state.rooms.length === 0 ? (
@@ -97,13 +128,16 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
               <th scope="col">Right</th>
               <th scope="col">Pairing</th>
               <th scope="col">Status</th>
-              <th scope="col" />
+              <th scope="col">
+                <span className="qbs-visually-hidden">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {state.rooms.map((room) => {
               const link = linkFor(room);
               const roomWarnings = warningsByRoom.get(room.id) ?? [];
+              const state_ = status[bridge.roomStatus(room)];
               return (
                 <tr key={room.id}>
                   <td>
@@ -114,56 +148,40 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                       value={room.name}
                       onChange={(event) => bridge.renameRoom(room.id, event.target.value)}
                     />
-                    {roomWarnings.length > 0 ? (
-                      <div className="status warn">{roomWarnings.join(' ')}</div>
-                    ) : null}
+                    {roomWarnings.length > 0 ? <div className="faint">{roomWarnings.join(' ')}</div> : null}
                   </td>
-                  <td>
-                    <select
-                      aria-label={`Left team in ${room.name}`}
-                      value={room.leftTeamId ?? ''}
-                      onChange={(event) => bridge.setRoomTeams(room.id, 'left', event.target.value || null)}
-                    >
-                      <option value="">—</option>
-                      {teamOptions.map((team) => (
-                        <option key={team.id} value={team.id}>
-                          {team.name}
-                        </option>
-                      ))}
-                    </select>
+                  <td className="team-cell">
+                    <TeamComboBox
+                      label={`Left team in ${room.name}`}
+                      options={teamOptions}
+                      selectedId={room.leftTeamId}
+                      onSelect={(id) => bridge.setRoomTeams(room.id, 'left', id)}
+                    />
                   </td>
-                  <td>
-                    <select
-                      aria-label={`Right team in ${room.name}`}
-                      value={room.rightTeamId ?? ''}
-                      onChange={(event) => bridge.setRoomTeams(room.id, 'right', event.target.value || null)}
-                    >
-                      <option value="">—</option>
-                      {teamOptions.map((team) => (
-                        <option key={team.id} value={team.id}>
-                          {team.name}
-                        </option>
-                      ))}
-                    </select>
+                  <td className="team-cell">
+                    <TeamComboBox
+                      label={`Right team in ${room.name}`}
+                      options={teamOptions}
+                      selectedId={room.rightTeamId}
+                      onSelect={(id) => bridge.setRoomTeams(room.id, 'right', id)}
+                    />
                   </td>
                   <td>
                     <div className="row">
                       <span className="code">{room.pairingCode}</span>
-                      {link ? <Qr url={link} label={`Pairing QR for ${room.name}`} /> : null}
-                      <button
-                        type="button"
-                        title="Issue a new code for this room. The old one stops working at the next publish."
-                        onClick={() => bridge.regeneratePairingCode(room.id)}
-                      >
+                      {link ? <Qr url={link} roomName={room.name} /> : null}
+                      <Button size="sm" variant="quiet" onPress={() => bridge.regeneratePairingCode(room.id)}>
                         New code
-                      </button>
+                      </Button>
                     </div>
                   </td>
-                  <td className="status">{statusLabel[bridge.roomStatus(room)]}</td>
                   <td>
-                    <button type="button" onClick={() => bridge.removeRoom(room.id)}>
+                    <StatusBadge tone={state_.tone}>{state_.label}</StatusBadge>
+                  </td>
+                  <td>
+                    <Button size="sm" variant="quiet" onPress={() => bridge.removeRoom(room.id)}>
                       Remove
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               );
@@ -171,10 +189,27 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           </tbody>
         </table>
       )}
-      <p className="muted" style={{ marginTop: 10 }}>
-        QBBridge reports only what it can see from the relay: a room is <em>Waiting</em> from the moment its
-        assignment is published until its result arrives.
+      <p className="faint" style={{ marginTop: 'var(--qbs-space-3)' }}>
+        QBBridge reports only what it can see from the relay: a room is Waiting from the moment its assignment
+        is published until its result arrives. Publishing a round also clears the assignment of every room
+        with no matchup, so an unused room cannot open last round&rsquo;s game.
       </p>
+
+      <ConfirmDialog
+        isOpen={pendingRound !== null}
+        title={`Switch to Round ${pendingRoundName}?`}
+        confirmLabel="Switch Round"
+        onCancel={() => setPendingRound(null)}
+        onConfirm={() => {
+          const roundId = pendingRound;
+          setPendingRound(null);
+          if (roundId) bridge.selectRound(roundId);
+        }}
+      >
+        The team selections in every room will be cleared, so this round&rsquo;s pairings have to be entered
+        fresh. Rooms, their names and their pairing codes are kept, and nothing is sent to the relay until you
+        publish.
+      </ConfirmDialog>
     </section>
   );
 }

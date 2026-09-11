@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import { Notice, StatusBadge, Tab, TabList, TabPanel, Tabs } from '@qbsheet/ui';
 import wordmark from '../assets/qbsheet-wordmark.svg';
 import { useBridge } from '../model/useBridge';
 import SetupView from './SetupView';
@@ -10,25 +11,24 @@ import RoomsView from './RoomsView';
 import ResultsView from './ResultsView';
 import HelpView from './HelpView';
 
-type Tab = 'setup' | 'rooms' | 'results' | 'help';
+const noticeTone = { good: 'success', warn: 'warning', bad: 'danger' } as const;
 
 export default function BridgeApp() {
   const bridge = useBridge();
-  const [tab, setTab] = useState<Tab>('setup');
+  const [tab, setTab] = useState('setup');
   const unsaved = bridge.state.results.filter((entry) => !entry.savedPath).length;
 
   return (
     <div className="shell">
       <header className="titlebar">
         {/*
-         * The designed two-colour wordmark, as an image rather than inline `currentColor` SVG:
-         * the green is the mark, not a theme value, and this window is light in both appearances.
-         * `alt` carries the word so the heading's accessible name is still "QBSheet Bridge" —
-         * a screen reader reads one name, not the mark and the name twice.
+         * The designed two-colour wordmark reads "QBSheet Bridge" on its own — seven black
+         * glyphs and six green ones — so there is no text beside it to repeat. It is an `<img>`
+         * rather than an inline `currentColor` SVG because the green is the mark rather than a
+         * theme value, and `alt` carries the whole name so the heading has one accessible name.
          */}
         <h1>
-          <img className="wordmark" src={wordmark} alt="QBSheet" />
-          <span>Bridge</span>
+          <img className="wordmark" src={wordmark} alt="QBSheet Bridge" />
         </h1>
         <span className="subtle">
           {bridge.tournament
@@ -37,51 +37,64 @@ export default function BridgeApp() {
               ? `${bridge.state.tournamentName} — reload the .yft to publish`
               : 'No YellowFruit file loaded'}
         </span>
-        <span style={{ marginLeft: 'auto' }} className="status">
+        {/*
+         * Relay reachability as a word plus a tone, never a coloured dot alone. It rerenders on
+         * every poll, so it is deliberately not a live region: a screen reader narrating "relay
+         * connected" every five seconds is worse than silence.
+         */}
+        <span className="relay-state">
           {bridge.state.relay === null ? (
-            <span className="muted">Relay not connected</span>
+            <StatusBadge tone="neutral">Relay not connected</StatusBadge>
           ) : bridge.relayReachable === false ? (
-            <span className="bad">Relay unavailable</span>
+            <StatusBadge tone="danger">Relay unavailable</StatusBadge>
           ) : (
-            <span className="good">Relay connected</span>
+            <StatusBadge tone="success">Relay connected</StatusBadge>
           )}
         </span>
       </header>
 
-      <nav className="tabs">
-        {(
-          [
-            ['setup', 'Tournament'],
-            ['rooms', 'Rooms'],
-            ['results', unsaved > 0 ? `Results (${unsaved} new)` : 'Results'],
-            ['help', 'Help'],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            aria-current={tab === key ? 'page' : undefined}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+      <Tabs aria-label="QBSheet Bridge sections" selectedKey={tab} onSelectionChange={setTab}>
+        <TabList aria-label="QBSheet Bridge sections">
+          <Tab id="setup">Tournament</Tab>
+          <Tab id="rooms">Rooms</Tab>
+          <Tab id="results">{unsaved > 0 ? `Results (${unsaved} new)` : 'Results'}</Tab>
+          <Tab id="help">Help</Tab>
+        </TabList>
 
-      <main>
-        {bridge.notice ? (
-          <div
-            className={`notice ${bridge.notice.kind === 'bad' ? 'bad' : bridge.notice.kind === 'good' ? 'good' : ''}`}
-            role="status"
-          >
-            {bridge.notice.message}
+        <main>
+          <div className="page-notices">
+            {/*
+             * One live region for the outcome of whatever the operator just did. A failure is
+             * `assertive` because it means the thing they asked for did not happen; anything
+             * else is `polite` and waits its turn.
+             */}
+            {bridge.notice ? (
+              <Notice
+                tone={noticeTone[bridge.notice.kind]}
+                live={bridge.notice.kind === 'bad' ? 'assertive' : 'polite'}
+              >
+                {bridge.notice.message}
+              </Notice>
+            ) : null}
+            {bridge.unsavedResultWarning ? (
+              <Notice tone="warning">{bridge.unsavedResultWarning}</Notice>
+            ) : null}
           </div>
-        ) : null}
-        {tab === 'setup' ? <SetupView bridge={bridge} /> : null}
-        {tab === 'rooms' ? <RoomsView bridge={bridge} /> : null}
-        {tab === 'results' ? <ResultsView bridge={bridge} /> : null}
-        {tab === 'help' ? <HelpView /> : null}
-      </main>
+
+          <TabPanel id="setup">
+            <SetupView bridge={bridge} />
+          </TabPanel>
+          <TabPanel id="rooms">
+            <RoomsView bridge={bridge} />
+          </TabPanel>
+          <TabPanel id="results">
+            <ResultsView bridge={bridge} />
+          </TabPanel>
+          <TabPanel id="help">
+            <HelpView />
+          </TabPanel>
+        </main>
+      </Tabs>
     </div>
   );
 }

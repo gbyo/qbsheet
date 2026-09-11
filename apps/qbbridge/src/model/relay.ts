@@ -1,5 +1,5 @@
 /**
- * The three relay calls QBBridge makes.
+ * The four relay calls QBBridge makes.
  *
  * `apps/qbtcp-relay-backend-cloudflare` is the relay. QBBridge deploys nothing, forks nothing, and
  * speaks the surface that is already there:
@@ -8,14 +8,27 @@
  * POST /qbtcp/v1/manage/claim
  * PUT  /qbtcp/v1/manage/tournaments/{id}/mirror
  * GET  /qbtcp/v1/manage/tournaments/{id}/results?state=unacked
+ * POST /qbtcp/v1/manage/tournaments/{id}/acks
  * ```
  *
- * There is no fourth call. In particular there is no `POST manage/acks`: leaving the day's finals
- * unacknowledged is deliberate, because the relay keeps an unacknowledged final forever and that
- * is a free second copy of every result. See `docs/QBTCP_INTERNET.md`.
+ * # Why acknowledgment is here, and what it is not
  *
- * This is not a synchronization engine. There is no event cursor, no replay, no reconciliation and
- * no retry coordinator: a call either worked or it is reported as having failed.
+ * `GET manage/results?state=unacked` answers with the oldest 128 unacknowledged results and
+ * carries no cursor or offset. A build that never acknowledged anything would, at result 129,
+ * have a result it could never reach by polling. That is a silent data-loss ceiling, and it is
+ * the reason this call exists.
+ *
+ * The rule is narrow: **a result is acknowledged only after its bytes are on the operator's
+ * disk**, never because it arrived and never because it was displayed. `unacked` therefore means
+ * "not yet saved locally", which is a queue that drains and cannot fill up under normal use.
+ *
+ * The relay keeps an acknowledged result for seven days (`ACK_RETENTION_MS`) and still serves it
+ * under `state=all`, so the second copy the tournament wanted is still there for the weekend; what
+ * changes is only that a saved result stops occupying the unacknowledged window.
+ *
+ * This is still not a synchronization engine. There is no event cursor, no replay, no
+ * reconciliation, no result review and no retry coordinator: a call either worked or it is
+ * reported as having failed.
  */
 
 import { buildRelayMirrorDocument } from '../../../../src/director/relay/relaySync';
@@ -94,21 +107,27 @@ export interface MirrorRoomInput {
   roomId: string;
   name: string;
   pairingCodeHash: string;
-  assignmentQbj: unknown;
-  matchId: string;
+  /** Null clears the room's assignment: the room stays, its game does not. */
+  assignmentQbj: unknown | null;
+  matchId: string | null;
   assignmentRevision: number;
 }
 
 /**
  * Publish the current rooms.
  *
- * Two things about `PUT manage/mirror` are worth stating because they decide what a publish is
- * allowed to leave out, and both were read out of the relay rather than assumed:
+ * Three things about `PUT manage/mirror` decide what a publish is allowed to leave out, and all
+ * three were read out of the relay rather than assumed:
  *
- * 1. Rooms are upserted and never deleted, but every listed room's columns are *replaced*. A room
- *    republished without its pairing hash would lose the hash and stop accepting the code on its
- *    QR. So every publish restates each room's hash.
- * 2. `sessions` is applied the same way — listed sessions are upserted, unlisted ones are left
+ * 1. A room that is **not in the payload is left exactly as it was**. The relay upserts; it never
+ *    deletes. A room left out because it is unused this round therefore keeps serving last
+ *    round's assignment, which is the worst kind of wrong: a scorekeeper opens a real, correctly
+ *    formatted game that nobody is playing. So every configured room appears in every publish.
+ * 2. Every listed room's columns are *replaced*, including with nulls. That is what makes (1)
+ *    fixable — a room sent without an assignment has its assignment cleared — and it is also why
+ *    every publish restates each room's pairing hash, since a room republished without one would
+ *    stop accepting the code printed on its QR.
+ * 3. `sessions` is applied the same way: listed sessions are upserted, unlisted ones are left
  *    alone. QBBridge models no sessions, so it sends an empty list, which touches none. Room
  *    tokens live in their own table and a mirror does not revoke them, so a device paired in
  *    round 1 is still paired in round 8.
@@ -124,7 +143,10 @@ export async function relayPublishMirror(
     rooms: input.rooms.map((room) => ({
       roomId: room.roomId,
       name: room.name,
+      // Always restated: the relay replaces this column, and a room without it stops pairing.
       pairingCodeHash: room.pairingCodeHash,
+      // Null for a room with no game this round. The builder omits the key, and the relay reads
+      // an omitted key as an explicit null, which is what clears the stale assignment.
       assignmentQbj: room.assignmentQbj,
       matchId: room.matchId,
       assignmentRevision: room.assignmentRevision,
@@ -164,16 +186,16 @@ export interface RelayResult {
 }
 
 /**
- * Every completed result the relay still holds unacknowledged.
+ * The relay's page of unacknowledged results: everything received and not yet saved locally.
  *
- * QBBridge never acknowledges, so this is the whole day's finals, every poll. Deduplication is
- * local and by `result_id`; the repeated rows are the point, not a problem — they are the relay's
- * standing backup copy.
+ * Bounded by the relay at `relayUnackedWindow`, with no cursor behind it, which is why a saved
+ * result is acknowledged and leaves this page. Deduplication is still local and by `result_id`,
+ * because a result stays here across every poll until its save succeeds.
  */
 export async function relayFetchResults(connection: RelayConnection): Promise<RelayResult[]> {
   const response = await relayRequest({
     method: 'GET',
-    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/results?state=unacked&limit=128`,
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/results?state=unacked&limit=${relayUnackedWindow}`,
     bearer: connection.managementToken,
   });
   if (response.status !== 200) throw fail(response, 'The relay did not answer with results.');
@@ -195,4 +217,38 @@ export async function relayFetchResults(connection: RelayConnection): Promise<Re
     });
   }
   return results;
+}
+
+/**
+ * The most unacknowledged results the relay will return in one page.
+ *
+ * `clampPage(limit, 1, 128)` in `getDirectorResults`, over
+ * `WHERE director_ack_at IS NULL ORDER BY received_at ASC LIMIT ?` with no offset. There is no
+ * page after this one, so a result beyond the window is unreachable until something ahead of it
+ * is acknowledged.
+ */
+export const relayUnackedWindow = 128;
+
+/**
+ * Acknowledge results whose bytes are on disk.
+ *
+ * Called after a successful local save and at no other time. Idempotent on the relay's side
+ * (`COALESCE(director_ack_at, ?)`), and unknown ids are ignored, so a retry is harmless.
+ *
+ * A failure here is deliberately not fatal to the save: the file is already written, and a result
+ * that stays unacknowledged is merely one that will be offered again on the next poll, where the
+ * local record recognises it and reports it as already saved.
+ */
+export async function relayAcknowledgeResults(
+  connection: RelayConnection,
+  resultIds: readonly string[],
+): Promise<void> {
+  if (resultIds.length === 0) return;
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/acks`,
+    bearer: connection.managementToken,
+    body: { results: [...resultIds] },
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not record that acknowledgment.');
 }

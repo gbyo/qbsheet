@@ -186,12 +186,27 @@ export function buildResultDocument(options: IQbjResultOptions): IQbjDocument {
   const match = buildResultMatch(options);
 
   const teamObjects: QbjObject[] = [];
-  const registrationObjects: QbjObject[] = [];
+  /*
+   * One `Registration` per registration, not one per side.
+   *
+   * A school that entered an A and a B team is a single `Registration` in the source document,
+   * and the two sides of an A-vs-B game resolve to the same one. Writing it once per side put two
+   * objects with one id in the result, each claiming a different name and listing one of the two
+   * teams — a document whose `$ref` targets depend on which duplicate a reader indexed last.
+   *
+   * So registrations are collected by id and their team lists are unioned. The teams listed are
+   * only the ones playing: a sibling team that is not in this game is not in this document.
+   */
+  const registrationsById = new Map<string, { name: string; teamIds: string[] }>();
+  const registrationOrder: string[] = [];
 
   for (const side of ['left', 'right'] as const) {
     const roster = definition[side];
     const teamId = identity?.teamIds?.[side] ?? fallbackId('Team', roster.name);
     const registrationId = identity?.registrationIds?.[side] ?? fallbackId('Registration', roster.name);
+    // The registration's own name where the source gave one; the roster name is the fallback, and
+    // it is the right fallback only when the registration was synthesized from that one team.
+    const registrationName = identity?.registrationNames?.[side] ?? roster.name;
 
     const players = roster.players.map((player) => ({
       type: 'Player',
@@ -202,13 +217,25 @@ export function buildResultDocument(options: IQbjResultOptions): IQbjDocument {
     }));
 
     teamObjects.push({ type: 'Team', id: teamId, name: roster.name, players });
-    registrationObjects.push({
-      type: 'Registration',
-      id: registrationId,
-      name: roster.name,
-      teams: [{ $ref: teamId }],
-    });
+
+    const existing = registrationsById.get(registrationId);
+    if (existing) {
+      if (!existing.teamIds.includes(teamId)) existing.teamIds.push(teamId);
+    } else {
+      registrationsById.set(registrationId, { name: registrationName, teamIds: [teamId] });
+      registrationOrder.push(registrationId);
+    }
   }
+
+  const registrationObjects: QbjObject[] = registrationOrder.map((id) => {
+    const entry = registrationsById.get(id)!;
+    return {
+      type: 'Registration',
+      id,
+      name: entry.name,
+      teams: entry.teamIds.map((teamId) => ({ $ref: teamId })),
+    };
+  });
 
   const scoringRulesId = identity?.scoringRulesId ?? 'ScoringRules';
   const scoringRules = writeQbjScoringRules(format, scoringRulesId);

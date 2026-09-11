@@ -121,11 +121,18 @@ fn safe_file_name(name: &str) -> CommandResult<PathBuf> {
 }
 
 /// Write one result file into the chosen folder, and report the full path.
+///
+/// Refuses an existing file unless `overwrite` says otherwise. A saved result is a completed game
+/// that may not have been imported yet, and the relay can legitimately hold two results for one
+/// match — a correction and the original. Replacing one with the other because their descriptive
+/// names matched would destroy a game with nothing on screen to say so, so the create is
+/// exclusive and a collision comes back as an error the operator can read.
 #[tauri::command]
 pub async fn write_result_file(
     directory: String,
     file_name: String,
     contents: String,
+    overwrite: bool,
 ) -> CommandResult<String> {
     if contents.len() > MAX_RESULT_BYTES {
         return Err(CommandError::new(
@@ -141,7 +148,30 @@ pub async fn write_result_file(
         ));
     }
     let path = directory.join(safe_file_name(&file_name)?);
-    std::fs::write(&path, contents)
+
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if overwrite {
+        options.create(true).truncate(true);
+    } else {
+        // `create_new` is the exclusive one: it fails rather than opening a file that is there.
+        options.create_new(true);
+    }
+    let mut file = options.open(&path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            CommandError::new(
+                "result_file_exists",
+                format!(
+                    "{} already exists in that folder and was not replaced. \
+                     Move or rename it, or save this result on its own to overwrite it.",
+                    path.file_name().unwrap_or_default().to_string_lossy()
+                ),
+            )
+        } else {
+            CommandError::new("write_failed", error.to_string())
+        }
+    })?;
+    std::io::Write::write_all(&mut file, contents.as_bytes())
         .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
     Ok(path.to_string_lossy().into_owned())
 }
@@ -225,7 +255,7 @@ pub async fn relay_request(
 
 #[cfg(test)]
 mod tests {
-    use super::safe_file_name;
+    use super::{safe_file_name, write_result_file};
 
     #[test]
     fn plain_names_are_accepted() {
@@ -249,5 +279,64 @@ mod tests {
         ] {
             assert!(safe_file_name(name).is_err(), "{name} should be refused");
         }
+    }
+
+    #[test]
+    fn an_existing_result_is_not_replaced_unless_asked() {
+        let directory = std::env::temp_dir().join(format!(
+            "qbbridge-write-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let folder = directory.to_string_lossy().into_owned();
+        let name = "R04_Room-101_A_vs_B_a81f3c.result.qbj".to_owned();
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let first = runtime
+            .block_on(write_result_file(
+                folder.clone(),
+                name.clone(),
+                "{\"first\":true}".to_owned(),
+                false,
+            ))
+            .expect("the first write should succeed");
+
+        // A second result whose descriptive name collided must not land on top of the first.
+        let refused = runtime
+            .block_on(write_result_file(
+                folder.clone(),
+                name.clone(),
+                "{\"second\":true}".to_owned(),
+                false,
+            ))
+            .expect_err("a colliding write should be refused");
+        assert_eq!(refused.code, "result_file_exists");
+        assert_eq!(
+            std::fs::read_to_string(&first).unwrap(),
+            "{\"first\":true}",
+            "the original result must be untouched"
+        );
+
+        // Re-saving one result deliberately does replace its own file.
+        runtime
+            .block_on(write_result_file(
+                folder,
+                name,
+                "{\"second\":true}".to_owned(),
+                true,
+            ))
+            .expect("an explicit overwrite should succeed");
+        assert_eq!(
+            std::fs::read_to_string(&first).unwrap(),
+            "{\"second\":true}"
+        );
+
+        std::fs::remove_dir_all(&directory).ok();
     }
 }

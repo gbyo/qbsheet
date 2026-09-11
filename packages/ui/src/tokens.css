@@ -1,0 +1,182 @@
+/*
+ * QBSheet design tokens — the shared source of truth for every QBSheet surface.
+ *
+ * # Where these values came from
+ *
+ * Director's `src/director/styles/tokens.css`, unchanged. That system was already the mature one:
+ * a six-level type scale, a 4px spacing rhythm, complete status triples, one focus ring. What it
+ * was missing was a home outside Director, so the next application — QBBridge — invented a
+ * six-variable palette of its own (`--ink`, `--paper`, `--accent`, `--good`…) and QBSheet
+ * immediately had two visual vocabularies.
+ *
+ * These are those values under a product-wide name. Director keeps its `--director-*` vocabulary
+ * as aliases onto this layer rather than being renamed wholesale, because hundreds of rules
+ * reference it and a rename would be an enormous diff that proves nothing.
+ *
+ * # What belongs here, and what does not
+ *
+ * Here: anything that answers "what does QBSheet look like" — type, colour, spacing, radii,
+ * control metrics, focus, elevation, motion, stacking.
+ *
+ * Not here: anything that answers "how is *this application* laid out". Director's sidebar width,
+ * rail width, top-bar height and page maximum are Director's, and they stay in Director.
+ */
+
+:root {
+  /* QBSheet's desktop surfaces are deliberately light and high-contrast. Declared rather than
+     inherited, so a native control the OS draws matches the application around it. */
+  color-scheme: light;
+
+  /* ---------------------------------------------------------------------- Typography
+     The platform UI face on every platform we ship. QBSheet desktop surfaces load no webfont. */
+  --qbs-font-sans:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
+  --qbs-font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+
+  /* One restrained scale, each level with a job, nothing operational below 13px. */
+  --qbs-text-display: 28px;
+  --qbs-text-title: 22px;
+  --qbs-text-section: 16px;
+  --qbs-text-subhead: 14px;
+  --qbs-text-body: 14px;
+  --qbs-text-secondary: 13px;
+  --qbs-text-meta: 12px;
+  --qbs-text-micro: 11px;
+
+  --qbs-leading-tight: 1.25;
+  --qbs-leading-snug: 1.4;
+  --qbs-leading-normal: 1.5;
+  --qbs-leading-relaxed: 1.6;
+
+  --qbs-weight-regular: 400;
+  --qbs-weight-medium: 500;
+  --qbs-weight-semibold: 600;
+  --qbs-weight-bold: 700;
+
+  /* -------------------------------------------------------------------------- Ink
+     A hierarchy rather than a palette: text carries the information, muted supports it, faint
+     timestamps it. Nothing the operator must act on is ever `faint`. */
+  --qbs-text: #16212c;
+  --qbs-text-strong: #0d1620;
+  --qbs-text-muted: #4f5d6a;
+  --qbs-text-faint: #667585;
+  --qbs-text-on-accent: #ffffff;
+
+  /* ---------------------------------------------------------------------- Surfaces */
+  --qbs-surface-page: #f4f6f8;
+  --qbs-surface: #ffffff;
+  --qbs-surface-soft: #f7f9fa;
+  --qbs-surface-sunken: #eef1f4;
+  --qbs-surface-raised: #ffffff;
+  --qbs-surface-selected: #e8f1f8;
+  --qbs-surface-hover: #f0f3f5;
+
+  --qbs-border-subtle: #e7eaee;
+  --qbs-border: #d6dce2;
+  --qbs-border-strong: #b9c2cb;
+
+  --qbs-accent: #125f95;
+  --qbs-accent-hover: #0e4d79;
+  --qbs-accent-active: #0a3d61;
+  --qbs-accent-soft: #e9f2f9;
+  --qbs-accent-border: #a8c9de;
+
+  /* -------------------------------------------------------------------- Status tones
+     Five tones, each a complete triple (text / tint / border) plus a solid fill for the rare
+     case that needs one. Every status surface draws from these and nothing else. */
+  --qbs-neutral-fg: #4f5d6a;
+  --qbs-neutral-bg: #eef1f4;
+  --qbs-neutral-border: #d6dce2;
+
+  --qbs-info-fg: #125f95;
+  --qbs-info-bg: #e9f2f9;
+  --qbs-info-border: #a8c9de;
+  --qbs-info-solid: #125f95;
+
+  --qbs-success-fg: #1f6144;
+  --qbs-success-bg: #e8f4ed;
+  --qbs-success-border: #a6ceb8;
+  --qbs-success-solid: #1f6144;
+
+  --qbs-warning-fg: #7d4f0c;
+  --qbs-warning-bg: #fdf3e2;
+  --qbs-warning-border: #e3c48c;
+  --qbs-warning-solid: #9a641b;
+
+  --qbs-danger-fg: #8f342a;
+  --qbs-danger-bg: #fceeec;
+  --qbs-danger-border: #e0b0aa;
+  --qbs-danger-solid: #a03a2e;
+  --qbs-danger-hover: #8a3025;
+
+  /* ------------------------------------------------------------------------ Spacing
+     A 4px rhythm, with no exceptions to it. */
+  --qbs-space-1: 4px;
+  --qbs-space-2: 8px;
+  --qbs-space-3: 12px;
+  --qbs-space-4: 16px;
+  --qbs-space-5: 20px;
+  --qbs-space-6: 24px;
+  --qbs-space-7: 32px;
+  --qbs-space-8: 40px;
+
+  /* -------------------------------------------------------------------------- Radii */
+  --qbs-radius-sm: 4px;
+  --qbs-radius: 6px;
+  --qbs-radius-lg: 10px;
+  --qbs-radius-pill: 999px;
+
+  /* ----------------------------------------------------------------- Control metrics
+     36px is the default for an application people drive all day; `sm` is for genuinely dense
+     table rows. An icon-only control is never smaller than the minimum target. */
+  --qbs-control-sm: 32px;
+  --qbs-control-md: 36px;
+  --qbs-control-lg: 42px;
+  --qbs-control-pad-sm: 0 10px;
+  --qbs-control-pad-md: 0 14px;
+  --qbs-control-pad-lg: 0 20px;
+  --qbs-target-min: 32px;
+
+  /* ---------------------------------------------------------------------- Elevation */
+  --qbs-shadow-sm: 0 1px 2px rgb(16 33 46 / 6%);
+  --qbs-shadow-menu: 0 6px 20px rgb(16 33 46 / 14%), 0 1px 3px rgb(16 33 46 / 10%);
+  --qbs-shadow-modal: 0 18px 48px rgb(16 33 46 / 22%);
+
+  /* -------------------------------------------------------------------------- Focus
+     One ring, everywhere, including inside controls that draw their own chrome. Nothing removes
+     an outline without setting this. */
+  --qbs-focus-ring: 0 0 0 2px var(--qbs-surface), 0 0 0 4px rgb(18 95 149 / 45%);
+  --qbs-focus-outline: 2px solid var(--qbs-accent);
+  --qbs-focus-offset: 2px;
+
+  /* ------------------------------------------------------------------------ Z-index
+     Named so overlays cannot fight: menus above sticky headers, modals above menus. */
+  --qbs-z-sticky: 20;
+  --qbs-z-dropdown: 60;
+  --qbs-z-overlay: 100;
+  --qbs-z-modal: 110;
+  --qbs-z-toast: 200;
+
+  /* ------------------------------------------------------------------------- Motion
+     Short, functional, and switched off wholesale under `prefers-reduced-motion`. */
+  --qbs-duration-fast: 90ms;
+  --qbs-duration: 140ms;
+  --qbs-ease: cubic-bezier(0.2, 0, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --qbs-duration-fast: 0ms;
+    --qbs-duration: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

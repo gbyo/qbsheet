@@ -52,30 +52,46 @@ function roomsFor(): Room[] {
 }
 
 describe('planning a round', () => {
-  test('builds one assignment per room with a matchup, and skips nothing silently', () => {
+  test('covers every configured room, not only the ones playing', () => {
     const tournament = loadedFixture();
     const plan = planRound(tournament, tournament.rounds[3], roomsFor());
+
+    // Room 103 has no matchup. It is still in the plan — as a room whose assignment is being
+    // cleared — because a room left out of a mirror keeps whatever the relay last gave it.
+    expect(plan.publications.map((entry) => entry.roomId)).toEqual(['room-1', 'room-2', 'room-3']);
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-1', 'room-2']);
-    expect(plan.skipped).toEqual([]);
+    expect(plan.cleared).toEqual([
+      { roomId: 'room-3', roomName: 'Room 103', reason: 'No matchup chosen for this round.' },
+    ]);
     // Each room's first publication is issue 1.
     expect(plan.assignments.map((entry) => entry.assignmentRevision)).toEqual([1, 1]);
     // Two rooms, two different games.
     expect(new Set(plan.assignments.map((entry) => entry.matchId)).size).toBe(2);
   });
 
-  test('a team that is no longer in the file is reported rather than dropped', () => {
+  test('a team that is no longer in the file clears that room rather than leaving it alone', () => {
     const tournament = loadedFixture();
     const rooms = roomsFor();
     rooms[0] = { ...rooms[0], rightTeamId: 'Team_Deleted' };
     const plan = planRound(tournament, tournament.rounds[0], rooms);
+
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
-    expect(plan.skipped).toEqual([
-      {
-        roomId: 'room-1',
-        roomName: 'Room 101',
-        reason: 'A team in this room is not in the loaded YellowFruit file. Reload the file.',
-      },
-    ]);
+    // Not "skipped": skipping is what would leave Room 101 serving its previous game.
+    expect(plan.cleared).toContainEqual({
+      roomId: 'room-1',
+      roomName: 'Room 101',
+      reason: 'A team in this room is not in the loaded YellowFruit file. Reload the file.',
+    });
+    expect(plan.publications.find((entry) => entry.roomId === 'room-1')?.assignment).toBeNull();
+  });
+
+  test('a room with the same team on both sides is cleared, not published', () => {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    rooms[0] = { ...rooms[0], rightTeamId: rooms[0].leftTeamId };
+    const plan = planRound(tournament, tournament.rounds[0], rooms);
+    expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
+    expect(plan.cleared.map((entry) => entry.reason)).toContain('Both sides of this room are the same team.');
   });
 });
 
@@ -111,7 +127,7 @@ describe('the mirror body', () => {
       sessions: unknown[];
     };
     expect(body).toMatchObject({ director_epoch: 1, revision: 7 });
-    expect(body.rooms.map((room) => room.room_id)).toEqual(['room-1', 'room-2']);
+    expect(body.rooms.map((room) => room.room_id)).toEqual(['room-1', 'room-2', 'room-3']);
 
     // The plaintext code is nowhere in the bytes; its hash is on its own room.
     const text = JSON.stringify(body);
@@ -119,13 +135,20 @@ describe('the mirror body', () => {
     expect(text).not.toContain('19435077');
     expect(body.rooms[0].pairing_code_hash).toBe(await pairingCodeHash('48213906'));
     expect(body.rooms[1].pairing_code_hash).toBe(await pairingCodeHash('19435077'));
+    expect(body.rooms[2].pairing_code_hash).toBe(await pairingCodeHash('75038112'));
     expect(String(body.rooms[0].pairing_code_hash)).toMatch(/^[0-9a-f]{64}$/);
 
-    // The assignment in each room is that room's own game.
-    for (const [index, room] of body.rooms.entries()) {
-      expect(room.match_id).toBe(plan.assignments[index].matchId);
+    // The unused room is present with no game: the relay reads an absent `assignment_qbj` as an
+    // explicit null and clears the column, which is what stops it serving a stale round.
+    expect(body.rooms[2].assignment_qbj).toBeUndefined();
+    expect(body.rooms[2].match_id).toBeUndefined();
+
+    // The assignment in each playing room is that room's own game.
+    for (const [index, assignment] of plan.assignments.entries()) {
+      const room = body.rooms[index];
+      expect(room.match_id).toBe(assignment.matchId);
       expect(room.assignment_revision).toBe(1);
-      expect(JSON.stringify(room.assignment_qbj)).toContain(String(plan.assignments[index].matchId));
+      expect(JSON.stringify(room.assignment_qbj)).toContain(String(assignment.matchId));
     }
     expect(JSON.stringify(body.rooms[0].assignment_qbj)).not.toContain('Wells');
 
@@ -164,7 +187,9 @@ describe('the mirror body', () => {
     expect(second.map((room) => room.pairing_code_hash)).toEqual(first.map((room) => room.pairing_code_hash));
     // A new round is a new game and a new issue.
     expect(second.map((room) => room.match_id)).not.toEqual(first.map((room) => room.match_id));
-    expect(second.map((room) => room.assignment_revision)).toEqual([2, 2]);
+    // Every room's issue advances, the cleared one included: a scorer still holding the old
+    // assignment can tell it was superseded rather than merely left alone.
+    expect(second.map((room) => room.assignment_revision)).toEqual([2, 2, 2]);
   });
 
   test('a stale publication is reported, not worked around', async () => {
@@ -188,15 +213,31 @@ describe('the mirror body', () => {
   test('a round with no matchups is refused before anything is sent', async () => {
     const calls = stubRelay(() => ({ status: 200, body: '{}' }));
     const tournament = loadedFixture();
+    const rooms = roomsFor().map((room) => ({ ...room, leftTeamId: null, rightTeamId: null }));
     await expect(
       publishRound(connection, {
         epoch: 1,
         lastRevision: 0,
         tournamentName: tournament.name,
-        plan: { assignments: [], skipped: [] },
+        plan: planRound(tournament, tournament.rounds[0], rooms),
+        rooms,
+      }),
+    ).rejects.toThrow(/no room in this round has two teams/i);
+    expect(calls).toEqual([]);
+  });
+
+  test('with no rooms at all there is nothing to publish', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const tournament = loadedFixture();
+    await expect(
+      publishRound(connection, {
+        epoch: 1,
+        lastRevision: 0,
+        tournamentName: tournament.name,
+        plan: planRound(tournament, tournament.rounds[0], []),
         rooms: [],
       }),
-    ).rejects.toThrow(/no room/i);
+    ).rejects.toThrow(/no rooms to publish/i);
     expect(calls).toEqual([]);
   });
 });
@@ -265,5 +306,82 @@ describe('the other two relay calls', () => {
   test('an unreachable relay surfaces as a relay error rather than a silent empty page', async () => {
     stubRelay(() => ({ status: 503, body: 'gateway' }));
     await expect(relayFetchResults(connection)).rejects.toBeInstanceOf(RelayError);
+  });
+});
+
+/**
+ * The sequence that motivated the whole room-clearing change.
+ *
+ * Round 4 fills three rooms; round 5 needs only two. A publish that mentioned only the two would
+ * leave Room 103 holding round 4's assignment, because the relay upserts and never deletes — and
+ * the room would look entirely normal to the scorekeeper who opened it.
+ */
+describe('a room that is unused this round', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  test('has its assignment cleared, keeps its pairing, and destroys no session state', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const tournament = loadedFixture();
+    const [cony, deering, wells, windham] = ['Cony', 'Deering', 'Wells', 'Windham A'].map(
+      (name) => tournament.teams.find((team) => team.name === name)!.id,
+    );
+
+    // Round 4: all three rooms playing.
+    const roundFourRooms: Room[] = [
+      { ...newRoom('room-1', 'Room 101', '48213906'), leftTeamId: cony, rightTeamId: deering },
+      { ...newRoom('room-2', 'Room 102', '19435077'), leftTeamId: wells, rightTeamId: windham },
+      {
+        ...newRoom('room-3', 'Room 103', '75038112'),
+        leftTeamId: tournament.teams.find((team) => team.name === 'Plymouth A')!.id,
+        rightTeamId: tournament.teams.find((team) => team.name === 'Plymouth B')!.id,
+      },
+    ];
+    await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 0,
+      tournamentName: tournament.name,
+      plan: planRound(tournament, tournament.rounds[3], roundFourRooms),
+      rooms: roundFourRooms,
+    });
+
+    const roundFour = (calls[0].body as { rooms: Record<string, unknown>[] }).rooms;
+    expect(roundFour).toHaveLength(3);
+    expect(roundFour[2].assignment_qbj).toBeTruthy();
+
+    // Round 5: the same rooms, but 103 sits out. Its team selections are gone, exactly as a
+    // round change leaves them.
+    const roundFiveRooms: Room[] = [
+      { ...roundFourRooms[0], leftTeamId: cony, rightTeamId: wells, assignmentRevision: 1 },
+      { ...roundFourRooms[1], leftTeamId: deering, rightTeamId: windham, assignmentRevision: 1 },
+      { ...roundFourRooms[2], leftTeamId: null, rightTeamId: null, assignmentRevision: 1 },
+    ];
+    const outcome = await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 1,
+      tournamentName: tournament.name,
+      plan: planRound(tournament, tournament.rounds[4], roundFiveRooms),
+      rooms: roundFiveRooms,
+    });
+
+    const roundFive = (calls[1].body as { rooms: Record<string, unknown>[]; sessions: unknown[] }).rooms;
+    const unused = roundFive.find((room) => room.room_id === 'room-3')!;
+
+    // Present, and explicitly holding no game.
+    expect(unused).toBeTruthy();
+    expect(unused.assignment_qbj).toBeUndefined();
+    expect(unused.match_id).toBeUndefined();
+    expect(outcome.clearedRoomIds).toEqual(['room-3']);
+
+    // Everything that keeps the room paired survives.
+    expect(unused.room_id).toBe('room-3');
+    expect(unused.name).toBe('Room 103');
+    expect(unused.pairing_code_hash).toBe(await pairingCodeHash('75038112'));
+
+    // Round 4's game is nowhere in the round 5 payload.
+    expect(JSON.stringify(roundFive)).not.toContain('Plymouth');
+
+    // No session is named, so the relay touches none of them. A mirrored session here is how a
+    // room change would abandon a game somebody is in the middle of scoring.
+    expect((calls[1].body as { sessions: unknown[] }).sessions).toEqual([]);
   });
 });

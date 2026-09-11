@@ -204,6 +204,15 @@ export const RULES = [
   // Tournament packages. Consumed by `src/director/` and `apps/director/`, and by nothing in the
   // scorer. `tournament-domain` is also a QBLive dependency, and qblive.yml lists it in its filter.
   // ---------------------------------------------------------------------------------------------
+  // --------------------------------------------------------------------------------------------
+  // The shared design system. Director and QBBridge both render from it, so a token or a
+  // primitive changing has to be checked by both.
+  // --------------------------------------------------------------------------------------------
+  {
+    glob: 'packages/ui/**',
+    domains: ['director-ui', 'qbbridge'],
+    why: 'QBSheet tokens and primitives; Director and QBBridge both build against them',
+  },
   {
     glob: 'packages/tournament-core/**',
     domains: ['tournament-js', 'director-ui'],
@@ -674,6 +683,7 @@ export const LOCKFILE_PROJECT_DOMAINS = {
   '': ALL_JS,
   'apps/director': ['director-ui'],
   'apps/qbbridge': ['qbbridge'],
+  'packages/ui': ['director-ui', 'qbbridge'],
   'apps/live-web': ['qblive-js'],
   'packages/tournament-core': ['tournament-js', 'director-ui'],
   'packages/tournament-domain': ['tournament-js', 'director-ui'],

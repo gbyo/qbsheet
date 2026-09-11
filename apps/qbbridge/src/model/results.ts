@@ -13,6 +13,8 @@
  * written out is the parsed object it arrived as.
  */
 
+import { fnv1a64 } from '../../../../src/director/transfers/canonical';
+
 export interface ResultSummary {
   roundName: string | null;
   roundNumber: number | null;
@@ -124,12 +126,25 @@ function safePart(value: string): string {
 }
 
 /**
- * A descriptive filename.
+ * A descriptive filename, with a suffix that makes it this result's and no other's.
  *
- * Guidance for a person choosing files in YellowFruit's import dialog, and nothing more. The QBJ
- * inside carries the identity; two operators may rename every one of these.
+ * # Why the suffix is not decoration
+ *
+ * The relay can hold more than one legitimate result for the same game: a room that submitted a
+ * correction has two retained finals with the same match, the same room and the same two teams.
+ * The descriptive part of the name is identical for both, and a second save over the first would
+ * destroy a result that nobody had looked at yet.
+ *
+ * So the name ends in six hex characters derived from the relay's own `result_id` — the thing
+ * that distinguishes the two. It is stable, so re-saving one result rewrites its own file rather
+ * than accumulating copies, and it is a hash rather than a slice of the id because the relay's
+ * ids are case-sensitive and two of them differing only in case would be one filename on a
+ * case-insensitive volume.
+ *
+ * The suffix is filename convenience and never identity. The QBJ inside carries that, and a room
+ * may rename any of these.
  */
-export function resultFileName(summary: ResultSummary, fallbackId: string): string {
+export function resultFileName(summary: ResultSummary, resultId: string): string {
   const round =
     summary.roundNumber !== null
       ? `R${String(summary.roundNumber).padStart(2, '0')}`
@@ -140,8 +155,13 @@ export function resultFileName(summary: ResultSummary, fallbackId: string): stri
   const matchup =
     summary.leftName && summary.rightName
       ? `_${safePart(summary.leftName)}_vs_${safePart(summary.rightName)}`
-      : `_${safePart(fallbackId)}`;
-  return `${round}${room}${matchup}.result.qbj`;
+      : '';
+  return `${round}${room}${matchup}_${resultFileSuffix(resultId)}.result.qbj`;
+}
+
+/** Six lowercase hex characters that identify one retained relay result. */
+export function resultFileSuffix(resultId: string): string {
+  return fnv1a64(resultId).slice(0, 6);
 }
 
 /**
