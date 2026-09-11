@@ -70,12 +70,16 @@ function RoomPrintSheet({ data }: { data: RoomPrintData }) {
             </li>
             <li>
               <strong>Connect to tournament control.</strong>
-              <span>In <em>Tournament control address</em>, enter:</span>
+              <span>
+                In <em>Tournament control address</em>, enter:
+              </span>
               <code className="room-print-sheet__address">{data.tournamentControlUrl}</code>
             </li>
             <li>
               <strong>Enter this access code.</strong>
-              <span>QBSheet labels this field <em>Pairing code</em>. Then choose <em>Pair this room</em>.</span>
+              <span>
+                QBSheet labels this field <em>Pairing code</em>. Then choose <em>Pair this room</em>.
+              </span>
               <code className="room-print-sheet__access-code">{data.pairingCode}</code>
             </li>
           </ol>
@@ -86,20 +90,20 @@ function RoomPrintSheet({ data }: { data: RoomPrintData }) {
         <h2 id={`trouble-${data.roomId}`}>Trouble connecting?</h2>
         <ul>
           <li>
-            <strong>QR won&rsquo;t scan?</strong> Use the four manual steps above. The printed address and code do
-            the same thing as the QR.
+            <strong>QR won&rsquo;t scan?</strong> Use the four manual steps above. The printed address and
+            code do the same thing as the QR.
           </li>
           <li>
-            <strong>Can&rsquo;t reach tournament control?</strong> Check that the device has an internet connection,
-            reload qbsheet.com, and try the address again.
+            <strong>Can&rsquo;t reach tournament control?</strong> Check that the device has an internet
+            connection, reload qbsheet.com, and try the address again.
           </li>
           <li>
-            <strong>Code rejected or wrong room?</strong> Stop and ask tournament staff for this room&rsquo;s current
-            code. Do not use another room&rsquo;s sheet.
+            <strong>Code rejected or wrong room?</strong> Stop and ask tournament staff for this room&rsquo;s
+            current code. Do not use another room&rsquo;s sheet.
           </li>
           <li>
-            <strong>Connection drops during a game?</strong> Keep scoring in the same QBSheet game. Do not start a
-            second scoresheet; tell tournament staff when the game is over.
+            <strong>Connection drops during a game?</strong> Keep scoring in the same QBSheet game. Do not
+            start a second scoresheet; tell tournament staff when the game is over.
           </li>
         </ul>
       </section>
