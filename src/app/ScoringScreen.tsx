@@ -56,7 +56,7 @@ import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import type { IRosterAddResult, IRosterAmendment } from '../integrations/fruity/FruityServerClient';
-import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
+import useConnectedRuntime, { ICredentialRepair, type RoomCredentialEndpoint } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
 import { describeTransport } from '../qbtcp/QbtcpPreferredTransport';
 import { useAppUpdate } from '../pwa/useAppUpdate';
@@ -160,7 +160,7 @@ export default function ScoringScreen(props: {
   // never a render-phase state update and no synchronizing effect. See that hook for the
   // degrade/recover contract.
   const [recordDurablyStored, setRecordDurablyStored] = useDurableRecordFlag(durable, storageDegraded);
-  const [repairing, setRepairing] = useState(false);
+  const [repairing, setRepairing] = useState<RoomCredentialEndpoint | null>(null);
   const update = useAppUpdate();
   const rosterPackageRef = useRef(record.package);
   const rosterIdentityWrite = useRef(Promise.resolve());
@@ -272,7 +272,7 @@ export default function ScoringScreen(props: {
     scheduledMatchId: record.package.scheduledMatchId,
     tournamentKey: live?.tournamentKey,
     enabled: live !== null,
-    onRepairConnection: live ? () => setRepairing(true) : undefined,
+    onRepairConnection: live ? (endpoint) => setRepairing(endpoint) : undefined,
     onCredentialsRepaired,
     progressSequence: connection?.progressSequence,
     onProgressSequence,
@@ -281,6 +281,8 @@ export default function ScoringScreen(props: {
     lanCredentials,
     initialLan: Boolean(live && !live.credentials.sessionId && lanCredentials),
   });
+
+  const repairClient = repairing === 'lan' ? lanClient : live?.client;
 
   /**
    * The second copy.
@@ -705,21 +707,21 @@ export default function ScoringScreen(props: {
           delivery: downloadedAt ? 'hand-over' : undefined,
         }}
       />
-      {repairing && live && (
+      {repairing !== null && live && repairClient && (
         <RepairConnectionDialog
-          client={live.client}
+          client={repairClient}
           roomId={live.identity.roomId}
           roomName={connection?.roomName ?? live.identity.roomId}
           onRepaired={(roomToken) => {
-            onConnectionRepaired({ roomToken });
+            onConnectionRepaired(repairing === 'lan' ? { lanRoomToken: roomToken } : { roomToken });
             connectionTimeline.record('room-repaired');
-            setRepairing(false);
+            setRepairing(null);
           }}
           onDisconnect={() => {
             onConnectionLost();
-            setRepairing(false);
+            setRepairing(null);
           }}
-          onClose={() => setRepairing(false)}
+          onClose={() => setRepairing(null)}
         />
       )}
     </>

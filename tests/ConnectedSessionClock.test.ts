@@ -67,8 +67,11 @@ describe('connected session clock handling', () => {
     );
 
     expect(readConnection(new Date(), storage)).toMatchObject({
+      baseUrl: 'https://relay.example/tournament',
       roomToken: 'relay-room-token',
+      sessionId: 'relay-session',
       sessionToken: 'relay-session-token',
+      lanBaseUrl: 'http://192.168.1.20:8787',
       lanRoomToken: 'lan-room-token',
       lanSessionId: 'lan-session',
       lanSessionToken: 'lan-session-token',

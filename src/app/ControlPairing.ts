@@ -111,7 +111,11 @@ export async function openControl(address: string): Promise<ControlOpenResult> {
   };
 }
 
-export type PairingExchangeResult = { ok: true; value: IPairedRoom } | { ok: false; error: string };
+export type LanPairingOutcome =
+  'not-configured' | 'paired' | 'transient-failure' | 'rejected' | 'room-mismatch';
+
+export type PairingExchangeResult =
+  { ok: true; value: IPairedRoom; lanOutcome: LanPairingOutcome } | { ok: false; error: string };
 
 /**
  * Spend the short code and keep what it bought.
@@ -132,6 +136,10 @@ export async function exchangePairingCode(
    * Validated, never trusted blind: a value that is not a well-formed secondary endpoint —
    * or that equals the primary — is dropped rather than stored, so a bad hint leaves a
    * primary-only pairing instead of a broken fallback.
+   *
+   * Plain HTTP remains intentional for controlled venue networks. It is not equivalent to HTTPS;
+   * the accepted threat model and protected-tunnel requirement for untrusted networks are documented
+   * in `docs/QBTCP-LAN-THREAT-MODEL.md`.
    */
   lanServer?: string,
   lanClientFactory: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
@@ -144,17 +152,32 @@ export async function exchangePairingCode(
 
   const lanBaseUrl = readSecondaryEndpoint(lanServer, client.baseUrl);
   let lanRoomToken: string | undefined;
+  let lanOutcome: LanPairingOutcome = lanBaseUrl ? 'rejected' : 'not-configured';
   if (lanBaseUrl) {
     const lanJoined = await lanClientFactory(lanBaseUrl).join(
       trimmed,
       roomId === undefined || roomId === '' ? undefined : roomId,
     );
-    if (lanJoined.ok && lanJoined.value.roomId === joined.value.roomId) {
-      lanRoomToken = lanJoined.value.accessToken;
+    if (lanJoined.ok) {
+      if (lanJoined.value.roomId === joined.value.roomId) {
+        lanRoomToken = lanJoined.value.accessToken;
+        lanOutcome = 'paired';
+      } else {
+        lanOutcome = 'room-mismatch';
+      }
+    } else {
+      const transient =
+        !lanJoined.unsupported &&
+        (lanJoined.status === undefined ||
+          lanJoined.status === 408 ||
+          lanJoined.status === 429 ||
+          (lanJoined.status !== undefined && lanJoined.status >= 500));
+      lanOutcome = transient ? 'transient-failure' : 'rejected';
     }
   }
   return {
     ok: true,
+    lanOutcome,
     value: {
       baseUrl: client.baseUrl,
       roomId: joined.value.roomId,

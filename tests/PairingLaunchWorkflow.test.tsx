@@ -87,7 +87,7 @@ function startControl(options: { acceptCode?: string } = {}) {
       return answer(200, { rooms: [{ id: 'room-204', name: 'Room 204' }] });
     }
     if (path === '/qbtcp/v1/pair' && method === 'POST') {
-      const sent = body as { code?: string; roomId?: string } | undefined;
+      const sent = body as { code?: string; room_id?: string } | undefined;
       if (sent?.code !== accepted) {
         // "Return an identical failure" — the protocol's uniform pairing refusal.
         return answer(401, { error: 'That pairing code was not accepted.' });
@@ -195,7 +195,7 @@ describe('a pairing link opened on an idle device', () => {
     await waitFor(() => expect(readConnection()).not.toBeNull());
 
     const pair = server.requests.find((entry) => entry.path === '/qbtcp/v1/pair');
-    expect(pair?.body).toEqual({ code: pairingCode, roomId: 'room-204' });
+    expect(pair?.body).toEqual({ code: pairingCode, room_id: 'room-204' });
   });
 
   test('a link without a room leaves the room to the protocol, as a typed code does', async () => {
