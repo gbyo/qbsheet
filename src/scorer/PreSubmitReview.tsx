@@ -4,8 +4,8 @@
  * # Review is deliberately not a terminal state
  *
  * A paper scoresheet ends with the teams and moderator agreeing on the score, but that agreement is
- * also the last good moment to catch a mistake. The screen therefore says what is true: the game is
- * complete, but the result has not been submitted yet and the scorekeeper may still correct it.
+ * also the last good moment to catch a mistake. The screen therefore stays editable whether this is
+ * the room's first send or a later correction of a result that was already handed off.
  *
  * The score is the visual center. Editing stays beside it. Detailed player lines, exports and other
  * forensic information remain available without competing with the one decision the room is making:
@@ -196,8 +196,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           <p className="scorer-review-submit-eyebrow">Review &amp; submit</p>
           <h2 className="scorer-review-submit-title">Confirm the result</h2>
           <p className="scorer-review-submit-state">
-            <strong>Not submitted yet.</strong> You can still edit the game before sending it to tournament
-            control.
+            You can still edit this game here. Submit sends the score shown below; if you opened a result
+            that was already sent, submit again only after making a correction.
           </p>
         </div>
         <p className="scorer-complete-title scorer-review-submit-phase">{finalScoreLabel}</p>
