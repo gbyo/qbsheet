@@ -47,6 +47,40 @@ describe('describeResult', () => {
     expect(description.detail).toMatch(/one team name missing/);
   });
 
+  test('a right-known partial keeps the score pair positional, never attributing left points', () => {
+    const description = describeResult(
+      documentWith({
+        type: 'Match',
+        id: 'Match_3',
+        match_teams: [{ points: 100 }, { team: { id: 'Team_Greenwood', name: 'Greenwood' }, points: 200 }],
+      }),
+    );
+    expect(description.kind).toBe('partial');
+    expect(description.leftName).toBeNull();
+    expect(description.rightName).toBe('Greenwood');
+    expect(description.leftPoints).toBe(100);
+    expect(description.rightPoints).toBe(200);
+    expect(description.headline).toBe('(left side opponent not identified) 100–200 Greenwood');
+    expect(description.headline).not.toBe('Greenwood 100–200 (left side opponent not identified)');
+  });
+
+  test('a malformed first match_teams slot leaves a left hole instead of shifting the right side over', () => {
+    const description = describeResult(
+      documentWith({
+        type: 'Match',
+        id: 'Match_4',
+        match_teams: ['not-a-side', { team: { id: 'Team_Deering', name: 'Deering' }, points: 180 }],
+      }),
+    );
+    expect(description.kind).toBe('partial');
+    expect(description.leftName).toBeNull();
+    expect(description.leftPoints).toBeNull();
+    expect(description.rightName).toBe('Deering');
+    expect(description.rightPoints).toBe(180);
+    expect(description.headline).toBe('Deering vs opponent not identified');
+    expect(description.detail).toMatch(/left side opponent not identified/);
+  });
+
   test('a nameless match is unidentified, never a mystery matchup', () => {
     const description = describeResult(documentWith({ type: 'Match', id: 'Match_9' }));
     expect(description.kind).toBe('unidentified');

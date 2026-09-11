@@ -113,7 +113,12 @@ export function describeResult(qbj: unknown): ResultDescription {
     }
   }
 
-  const sides = (Array.isArray(match.match_teams) ? match.match_teams : []).filter(isRecord);
+  // Positional slots: match_teams[0] is the left side and [1] is the right side. A malformed
+  // entry must leave a hole in its own slot, never shift the surviving side into the other
+  // position (which would attribute the wrong score and name to the wrong team).
+  const rawSides = Array.isArray(match.match_teams) ? match.match_teams : [];
+  const leftSide = isRecord(rawSides[0]) ? rawSides[0] : undefined;
+  const rightSide = isRecord(rawSides[1]) ? rawSides[1] : undefined;
   const nameOf = (side: QbjRecord | undefined): string | null => {
     if (!side) return null;
     const team = resolve(side.team, byId);
@@ -123,10 +128,10 @@ export function describeResult(qbj: unknown): ResultDescription {
   const pointsOf = (side: QbjRecord | undefined): number | null =>
     side && typeof side.points === 'number' && Number.isFinite(side.points) ? side.points : null;
 
-  const leftName = nameOf(sides[0]);
-  const rightName = nameOf(sides[1]);
-  const leftPoints = pointsOf(sides[0]);
-  const rightPoints = pointsOf(sides[1]);
+  const leftName = nameOf(leftSide);
+  const rightName = nameOf(rightSide);
+  const leftPoints = pointsOf(leftSide);
+  const rightPoints = pointsOf(rightSide);
   const parsedNumber = roundName !== null ? Number.parseInt(roundName, 10) : Number.NaN;
   const base = {
     matchId,
@@ -153,10 +158,18 @@ export function describeResult(qbj: unknown): ResultDescription {
   const known = leftName ?? rightName;
   if (known) {
     const gap = leftName ? `right side ${missingSide}` : `left side ${missingSide}`;
+    // Side-aware headline: the score pair always stays in left–right positional order and the
+    // known name stays on its own side, so a right-known team is never paired with the left
+    // score (e.g. unknown-left 100 / Greenwood-right 200 must not read `Greenwood 100–200`).
+    const scoredHeadline = scored
+      ? leftName
+        ? `${leftName} ${leftPoints}–${rightPoints} (${gap})`
+        : `(${gap}) ${leftPoints}–${rightPoints} ${rightName}`
+      : `${known} vs ${missingSide}`;
     return {
       ...base,
       kind: 'partial',
-      headline: scored ? `${known} ${leftPoints}–${rightPoints} (${gap})` : `${known} vs ${missingSide}`,
+      headline: scoredHeadline,
       detail: `one team name missing (${gap})`,
     };
   }
