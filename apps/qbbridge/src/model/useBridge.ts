@@ -29,10 +29,12 @@ import {
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
+  occupancyBlockers,
   planRoomSetup,
   planRound,
   publicationReviewItems,
   publishRound,
+  roomOccupancy,
   type PublicationReviewItem,
   type PublishOutcome,
   type PublishPlan,
@@ -42,6 +44,7 @@ import {
   relayClaim,
   relayCheckScorerReadiness,
   relayFetchResults,
+  relayFetchSessions,
   relayHealth,
   relayProvisionBackup,
   relayRevokeBackup,
@@ -52,6 +55,7 @@ import {
   RelayError,
   type BackupProvisionResult,
   type RelayConnection,
+  type RelayRoomSession,
   type ScorerReadinessResult,
 } from './relay';
 import {
@@ -111,6 +115,9 @@ export const resultPollIntervalMs = 5000;
 /** Routine confirmations are useful briefly, while problems need to remain available. */
 export const noticeAutoDismissMs = 4000;
 
+/** Synthetic review id for room-setup publications, which belong to no YellowFruit round. */
+const roomSetupReviewId = 'room-setup';
+
 /**
  * How many unsaved results may pile up before the operator is told.
  *
@@ -150,6 +157,14 @@ export interface PendingPublicationReview {
   roundName: string;
   plan: PublishPlan;
   items: PublicationReviewItem[];
+  /**
+   * Rooms whose live game this plan would replace or clear while occupied.
+   *
+   * When non-empty the review is a fence, not advice: the ordinary confirm refuses, and only
+   * the explicit exceptional override publishes. Whole-round on purpose — the relay mirror is
+   * always the full room set, so there is no safe partial publish to fall back to.
+   */
+  blockers: PublicationReviewItem[];
   snapshot: PublicationSnapshot;
 }
 
@@ -206,7 +221,24 @@ export interface BridgeApi {
 
   addRoom(): void;
   renameRoom(roomId: string, name: string): void;
+  /**
+   * Remove a room, unless it is still scoring.
+   *
+   * Refuses with a notice when the room holds an unresolved game or a live scorer session;
+   * use `forceRemoveRoom` behind an explicit confirmation for the exceptional case. A
+   * removed room's relay clearing rides on the next publish, which fences the tombstone the
+   * same way when the room is still occupied.
+   */
   removeRoom(roomId: string): void;
+  /** Explicit exceptional removal of a room that is still scoring. Confirm first. */
+  forceRemoveRoom(roomId: string): void;
+  /**
+   * Why a room-level action would refuse right now, or null when the room is free.
+   *
+   * Lets the UI offer the exceptional force path behind a confirmation instead of firing a
+   * guarded action blindly. The wording matches the refusal the guarded action would post.
+   */
+  occupiedRoomMessage(roomId: string, action: string): string | null;
   /** Choose one side of one room's matchup in the selected round. Never touches another round. */
   setRoomTeams(roomId: string, side: 'left' | 'right', teamId: string | null): void;
   /** The selected round's planned matchup for this room. Both null when nothing is entered. */
@@ -222,12 +254,33 @@ export interface BridgeApi {
   roundProgress: { roundId: string | null; assigned: number };
   /** Assignment counts for every round in the selected round's phase, for the pre-tournament view. */
   phaseRoundProgress: { roundId: string; displayName: string; assigned: number }[];
+  /**
+   * Stage a replacement pairing code, unless the room is still scoring.
+   *
+   * Refuses with a notice while the room holds an unresolved game or a live scorer session;
+   * use `forceRegeneratePairingCode` behind an explicit confirmation for the exceptional case.
+   */
   regeneratePairingCode(roomId: string): void;
+  /** Explicit exceptional code replacement for a room that is still scoring. Confirm first. */
+  forceRegeneratePairingCode(roomId: string): void;
   /** Change which round the table is editing. Changes nothing else, and discards nothing. */
   selectRound(roundId: string): void;
   publish(): Promise<void>;
   pendingPublicationReview: PendingPublicationReview | null;
+  /**
+   * Publish the reviewed plan — unless the review carries occupancy blockers.
+   *
+   * A blocked review refuses with a notice naming the occupied rooms; extraordinary
+   * replacement goes through `confirmPublicationOverride`, never through here.
+   */
   confirmPublicationReview(): Promise<void>;
+  /**
+   * Exceptional publish of a blocked review, replacing or clearing occupied rooms.
+   *
+   * Lives apart from the ordinary confirm on purpose: it may strand an active scoresheet,
+   * so the caller must have confirmed that consequence explicitly.
+   */
+  confirmPublicationOverride(): Promise<void>;
   cancelPublicationReview(): void;
   assignmentFallback: AssignmentFallback | null;
   exportAssignmentFallback(): Promise<boolean>;
@@ -410,6 +463,12 @@ export function useBridge(): BridgeApi {
   const pendingPublicationReviewRef = useRef<PendingPublicationReview | null>(null);
   const [assignmentFallback, setAssignmentFallback] = useState<AssignmentFallback | null>(null);
   const assignmentFallbackRef = useRef<AssignmentFallback | null>(null);
+  /**
+   * Last-known relay sessions for occupancy fencing. Transient and best-effort: presence
+   * expires, so this is never persisted and never the sole fence — a room whose published
+   * game has no local result is unresolved with or without a visible session.
+   */
+  const roomSessionsRef = useRef<RelayRoomSession[]>([]);
   const stateRef = useRef(state);
   const pollGenerationRef = useRef(0);
   const pendingFileRef = useRef<{
@@ -1184,6 +1243,78 @@ export function useBridge(): BridgeApi {
     return false;
   }, []);
 
+  /**
+   * Human context for a room's live game, for fencing messages.
+   *
+   * Resolved from the persisted round plans — the round that published the game still has its
+   * pairing recorded — so "Room 103 is still scoring Round 4 (Aiken vs Dorman)" names the
+   * actual game rather than a match id. Falls back to the round alone, then to a generic
+   * phrase, as context runs out. Never guesses from display names.
+   */
+  const describeLiveGame = useCallback(
+    (room: Room): string => {
+      const liveRound =
+        room.publishedRoundId === null
+          ? null
+          : (tournament?.rounds.find((entry) => entry.id === room.publishedRoundId) ?? null);
+      const roundLabel = liveRound ? `Round ${liveRound.displayName}` : 'its published game';
+      if (!liveRound || !tournament) return roundLabel;
+      const pairing = pairingFor(stateRef.current.roundPlans, liveRound.id, room.id);
+      if (!pairing?.leftTeamId || !pairing.rightTeamId) return roundLabel;
+      const left = tournament.teams.find((team) => team.id === pairing.leftTeamId)?.name;
+      const right = tournament.teams.find((team) => team.id === pairing.rightTeamId)?.name;
+      return left && right ? `${roundLabel} (${left} vs ${right})` : roundLabel;
+    },
+    [tournament],
+  );
+
+  /** Match ids with a locally received result, read from current state for fencing decisions. */
+  const currentResultMatchIds = useCallback((): Set<string> => {
+    const ids = new Set<string>();
+    for (const entry of stateRef.current.results) {
+      const matchId = resultMatchId(entry.qbj);
+      if (matchId) ids.add(matchId);
+    }
+    return ids;
+  }, []);
+
+  /**
+   * Refusal notice for a room-level action while the room is occupied, or null when free.
+   *
+   * Shares the same occupancy rule as publication fencing so removing a room, replacing its
+   * code, and publishing into it cannot disagree about whether the room is busy.
+   */
+  const occupiedRoomNotice = useCallback(
+    (room: Room, action: string): BridgeNotice | null => {
+      const occupancy = roomOccupancy(room, currentResultMatchIds(), roomSessionsRef.current);
+      if (!occupancy.occupied) return null;
+      if (occupancy.reason === 'unresolved') {
+        return {
+          kind: 'bad',
+          message:
+            `${room.name} is still scoring ${describeLiveGame(room)}. Receive the result or ` +
+            `resolve that game before ${action}.`,
+        };
+      }
+      return {
+        kind: 'bad',
+        message:
+          `${room.name} has a scorer connected right now on a game QBBridge did not publish. ` +
+          `Check the room before ${action}.`,
+      };
+    },
+    [currentResultMatchIds, describeLiveGame],
+  );
+
+  const occupiedRoomMessage = useCallback(
+    (roomId: string, action: string): string | null => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      if (!room) return null;
+      return occupiedRoomNotice(room, action)?.message ?? null;
+    },
+    [occupiedRoomNotice],
+  );
+
   const addRoom = useCallback(() => {
     commit((current) => {
       const id = nextRoomId([
@@ -1211,7 +1342,7 @@ export function useBridge(): BridgeApi {
     [updateRoom],
   );
 
-  const removeRoom = useCallback(
+  const forceRemoveRoom = useCallback(
     (roomId: string) => {
       const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
       if (!room) return;
@@ -1243,6 +1374,20 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  const removeRoom = useCallback(
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      if (!room) return;
+      const refusal = occupiedRoomNotice(room, 'removing it');
+      if (refusal) {
+        setNotice(refusal);
+        return;
+      }
+      forceRemoveRoom(roomId);
+    },
+    [forceRemoveRoom, occupiedRoomNotice],
+  );
+
   /**
    * Choose a team for one side of one room, in the selected round.
    *
@@ -1262,10 +1407,24 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
-  const regeneratePairingCode = useCallback(
+  const forceRegeneratePairingCode = useCallback(
     (roomId: string) =>
       updateRoom(roomId, (room) => ({ ...room, pendingPairingCode: generatePairingCode() })),
     [updateRoom],
+  );
+
+  const regeneratePairingCode = useCallback(
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      if (!room) return;
+      const refusal = occupiedRoomNotice(room, 'replacing its pairing code');
+      if (refusal) {
+        setNotice(refusal);
+        return;
+      }
+      forceRegeneratePairingCode(roomId);
+    },
+    [forceRegeneratePairingCode, occupiedRoomNotice],
   );
 
   /**
@@ -1436,34 +1595,63 @@ export function useBridge(): BridgeApi {
     [applyPublication, rememberAssignmentFallback],
   );
 
+  const publishReviewedPlan = useCallback(
+    async (review: PendingPublicationReview): Promise<void> => {
+      rememberPublicationReview(null);
+      await publishPlan({
+        plan: review.plan,
+        tournamentName: review.tournamentName,
+        successKind: review.plan.cleared.length > 0 ? 'warn' : 'good',
+        successMessage: (outcome) => {
+          if (review.roundId === roomSetupReviewId) {
+            return (
+              `Published room setup for ${outcome.assignments.length + outcome.clearedRoomIds.length} ` +
+              `room(s). Pairing codes are now active and room tokens remain valid.`
+            );
+          }
+          const clearedNote =
+            review.plan.cleared.length > 0
+              ? ` ${review.plan.cleared.length} room(s) were cleared and can no longer open a game.`
+              : '';
+          return `Published round ${review.roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+        },
+        failureMessage: 'Round not published — the rooms still have whatever they had before.',
+        missingRelayMessage: 'Connect the relay before publishing a round.',
+        assignmentFallback: {
+          tournamentName: review.tournamentName,
+          roundId: review.roundId,
+          roundName: review.roundName,
+          plan: review.plan,
+          exportedRoomIds: [],
+          exportDirectory: null,
+        },
+        snapshot: review.snapshot,
+      });
+    },
+    [publishPlan, rememberPublicationReview],
+  );
+
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
     const review = pendingPublicationReviewRef.current;
     if (!review) return;
-    rememberPublicationReview(null);
-    await publishPlan({
-      plan: review.plan,
-      tournamentName: review.tournamentName,
-      successKind: review.plan.cleared.length > 0 ? 'warn' : 'good',
-      successMessage: (outcome) => {
-        const clearedNote =
-          review.plan.cleared.length > 0
-            ? ` ${review.plan.cleared.length} room(s) were cleared and can no longer open a game.`
-            : '';
-        return `Published round ${review.roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
-      },
-      failureMessage: 'Round not published — the rooms still have whatever they had before.',
-      missingRelayMessage: 'Connect the relay before publishing a round.',
-      assignmentFallback: {
-        tournamentName: review.tournamentName,
-        roundId: review.roundId,
-        roundName: review.roundName,
-        plan: review.plan,
-        exportedRoomIds: [],
-        exportDirectory: null,
-      },
-      snapshot: review.snapshot,
-    });
-  }, [publishPlan, rememberPublicationReview]);
+    if (review.blockers.length > 0) {
+      setNotice({
+        kind: 'bad',
+        message:
+          `${review.roundName} still has ${review.blockers.length} occupied room(s): ` +
+          `${review.blockers.map((blocker) => blocker.roomName).join(', ')}. Receive their ` +
+          `results first; replacing them takes the explicit exceptional override.`,
+      });
+      return;
+    }
+    await publishReviewedPlan(review);
+  }, [publishReviewedPlan]);
+
+  const confirmPublicationOverride = useCallback(async (): Promise<void> => {
+    const review = pendingPublicationReviewRef.current;
+    if (!review) return;
+    await publishReviewedPlan(review);
+  }, [publishReviewedPlan]);
 
   const cancelPublicationReview = useCallback((): void => {
     if (!pendingPublicationReviewRef.current) return;
@@ -1517,6 +1705,17 @@ export function useBridge(): BridgeApi {
           'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
       });
     }
+    // Occupancy is a fence, not advice: a room still scoring its published game refuses
+    // ordinary replacement or clearing until its result arrives or the operator takes the
+    // explicit exceptional override. Same-game republication is exempt, so idempotent
+    // retries stay possible.
+    const blockers = occupancyBlockers(
+      plan,
+      current.rooms,
+      currentResultMatchIds(),
+      roomSessionsRef.current,
+      describeLiveGame,
+    );
     const assignmentFallback: AssignmentFallback = {
       tournamentName: tournament.name,
       roundId: round.id,
@@ -1525,18 +1724,24 @@ export function useBridge(): BridgeApi {
       exportedRoomIds: [],
       exportDirectory: null,
     };
-    if (reviewItems.length > 0) {
+    if (reviewItems.length > 0 || blockers.length > 0) {
       rememberPublicationReview({
         tournamentName: tournament.name,
         roundId: round.id,
         roundName: round.displayName,
         plan,
         items: reviewItems,
+        blockers,
         snapshot,
       });
       setNotice({
         kind: 'warn',
-        message: `Round ${round.displayName} has ${reviewItems.length} issue(s) to review before publishing.`,
+        message:
+          blockers.length > 0
+            ? `Round ${round.displayName} would replace ${blockers.length} room(s) that are still scoring ` +
+              `(${blockers.map((blocker) => blocker.roomName).join(', ')}). Receive their results ` +
+              `first, or review the exceptional override.`
+            : `Round ${round.displayName} has ${reviewItems.length} issue(s) to review before publishing.`,
       });
       return;
     }
@@ -1557,7 +1762,7 @@ export function useBridge(): BridgeApi {
       assignmentFallback,
       snapshot,
     });
-  }, [publishPlan, rememberPublicationReview, tournament]);
+  }, [currentResultMatchIds, describeLiveGame, publishPlan, rememberPublicationReview, tournament]);
 
   const publishRoomSetup = useCallback(async () => {
     const current = stateRef.current;
@@ -1566,6 +1771,36 @@ export function useBridge(): BridgeApi {
       return;
     }
     const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
+    // Room setup clears every assignment it sends, so it fences exactly like a round: a room
+    // still scoring keeps its game until its result arrives or the operator overrides.
+    // Pre-tournament rooms have no published game and pass through untouched.
+    const blockers = occupancyBlockers(
+      plan,
+      current.rooms,
+      currentResultMatchIds(),
+      roomSessionsRef.current,
+      describeLiveGame,
+    );
+    if (blockers.length > 0) {
+      rememberPublicationReview({
+        tournamentName: current.tournamentName,
+        roundId: roomSetupReviewId,
+        roundName: 'room setup',
+        plan,
+        items: [],
+        blockers,
+        snapshot: publicationSnapshot(current),
+      });
+      setNotice({
+        kind: 'warn',
+        message:
+          `Room setup would clear ${blockers.length} room(s) that are still scoring ` +
+          `(${blockers.map((blocker) => blocker.roomName).join(', ')}). Receive their results ` +
+          `first, or review the exceptional override.`,
+      });
+      return;
+    }
+    rememberPublicationReview(null);
     await publishPlan({
       plan,
       tournamentName: current.tournamentName,
@@ -1578,7 +1813,7 @@ export function useBridge(): BridgeApi {
       failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
       missingRelayMessage: 'Connect the relay before publishing room setup.',
     });
-  }, [publishPlan]);
+  }, [currentResultMatchIds, describeLiveGame, publishPlan, rememberPublicationReview]);
 
   const pollResults = useCallback(async () => {
     const current = stateRef.current;
@@ -1593,6 +1828,16 @@ export function useBridge(): BridgeApi {
     const isCurrentPoll = () =>
       generation === pollGenerationRef.current &&
       sameRelayConnection(connection, connectionOf(stateRef.current));
+
+    // Sessions ride alongside results without slowing them: a scorer with live presence in
+    // a room is an extra occupancy signal, but publication safety never waits on it. A
+    // failure only loses the "writer connected now" note — the durable unresolved-game fence
+    // stands on persisted publication and result state alone.
+    void relayFetchSessions(connection)
+      .then((sessions) => {
+        if (isCurrentPoll()) roomSessionsRef.current = sessions;
+      })
+      .catch(() => {});
 
     try {
       const fetched = await relayFetchResults(connection);
@@ -1648,7 +1893,10 @@ export function useBridge(): BridgeApi {
   useEffect(() => {
     // Changing the active relay invalidates every in-flight request, even if a replacement happens
     // to reuse the same visible URL. The identity check above is the second, explicit fence.
+    // Sessions belong to the old relay too: room ids may repeat, so a stale snapshot must not
+    // fence the new relay's rooms.
     pollGenerationRef.current += 1;
+    roomSessionsRef.current = [];
     if (!state.relay) return;
     // The first poll is scheduled rather than run inline: polling ends in a `setState`, and a
     // `setState` in an effect body is a cascading render. A tick's delay costs nothing here.
@@ -2090,16 +2338,20 @@ export function useBridge(): BridgeApi {
     addRoom,
     renameRoom,
     removeRoom,
+    forceRemoveRoom,
+    occupiedRoomMessage,
     setRoomTeams,
     plannedTeamsFor,
     planStatus,
     roundProgress,
     phaseRoundProgress,
     regeneratePairingCode,
+    forceRegeneratePairingCode,
     selectRound,
     publish,
     pendingPublicationReview,
     confirmPublicationReview,
+    confirmPublicationOverride,
     cancelPublicationReview,
     assignmentFallback,
     exportAssignmentFallback,

@@ -451,6 +451,60 @@ export async function relayPublishMirror(
   if (response.status !== 200) throw fail(response, 'The relay refused that publication.');
 }
 
+/**
+ * One scorer session the relay knows about, with only the fields QBBridge fences on.
+ *
+ * `status` is the relay's own lifecycle (`open`, `final-received`, `abandoned`): an `open`
+ * session with live presence means a scorer device is connected right now. No QBJ payload,
+ * progress body, operator name, or device identity is retained — presence is a boolean, and
+ * the writer is never named, so session polling cannot leak scorer or player details.
+ */
+export interface RelayRoomSession {
+  roomId: string;
+  matchId: string | null;
+  status: 'open' | 'final-received' | 'abandoned' | 'unknown';
+  /** True while at least one scorer device holds unexpired presence in this room. */
+  hasPresence: boolean;
+  updatedAt: string;
+}
+
+/**
+ * Read the relay's coalesced session state for occupancy fencing.
+ *
+ * Best-effort by design: publication safety never depends on this call succeeding. A room
+ * whose published game has no local result is unresolved whether or not its session is
+ * visible, so a failed or unreachable session read only loses the extra "writer connected
+ * now" signal, never the fence itself.
+ */
+export async function relayFetchSessions(connection: RelayConnection): Promise<RelayRoomSession[]> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/sessions`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with sessions.');
+  const body = parseBody(response);
+  const rows = Array.isArray(body.sessions) ? body.sessions : [];
+  const sessions: RelayRoomSession[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (typeof entry.room_id !== 'string') continue;
+    const status =
+      entry.status === 'open' || entry.status === 'final-received' || entry.status === 'abandoned'
+        ? entry.status
+        : 'unknown';
+    sessions.push({
+      roomId: entry.room_id,
+      matchId: typeof entry.match_id === 'string' ? entry.match_id : null,
+      status,
+      hasPresence: Array.isArray(entry.presence) && entry.presence.length > 0,
+      updatedAt: typeof entry.updated_at === 'string' ? entry.updated_at : '',
+    });
+  }
+  return sessions;
+}
+
 /** One completed game the relay is holding. `qbj` is the scorer's document, untouched. */
 export interface RelayResult {
   resultId: string;

@@ -9,13 +9,21 @@
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { pairingCodeHash } from './pairing';
-import { planRoomSetup, planRound, publicationReviewItems, publishRound } from './publish';
+import {
+  occupancyBlockers,
+  planRoomSetup,
+  planRound,
+  publicationReviewItems,
+  publishRound,
+  roomOccupancy,
+} from './publish';
 import {
   relayClaim,
   relayCheckScorerReadiness,
   relayFetchResults,
   RelayError,
   type RelayConnection,
+  type RelayRoomSession,
 } from './relay';
 import { newRoom, pairingWarnings, roomTombstone, type Room } from './rooms';
 import type { PlannedPairing } from './roundPlans';
@@ -549,5 +557,178 @@ describe('a room that is unused this round', () => {
     // No session is named, so the relay touches none of them. A mirrored session here is how a
     // room change would abandon a game somebody is in the middle of scoring.
     expect((calls[1].body as { sessions: unknown[] }).sessions).toEqual([]);
+  });
+});
+
+describe('occupied room fencing', () => {
+  /** Rooms as a successful round-3 publish leaves them: two live games, one free room. */
+  function liveRooms() {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    const plan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
+    const matchByRoom = new Map(plan.assignments.map((entry) => [entry.roomId, entry.matchId]));
+    const live = rooms.map((room) => ({
+      ...room,
+      relayPublished: true,
+      publishedMatchId: matchByRoom.get(room.id) ?? null,
+      publishedRoundId: matchByRoom.has(room.id) ? tournament.rounds[3].id : null,
+      publishedAssignmentFingerprint: 'fingerprint',
+      assignmentRevision: 1,
+    }));
+    return { tournament, rooms: live, matchByRoom };
+  }
+
+  function session(overrides: Partial<RelayRoomSession> & { roomId: string }): RelayRoomSession {
+    return {
+      matchId: null,
+      status: 'open',
+      hasPresence: false,
+      updatedAt: '2026-09-10T15:00:00Z',
+      ...overrides,
+    };
+  }
+
+  const describeGame = () => 'Round 4 (Cony vs Deering)';
+
+  test('replacing a waiting room blocks with a per-room message', () => {
+    const { tournament, rooms } = liveRooms();
+    const plan = planRound(tournament, tournament.rounds[4], rooms, pairingsFor());
+    const blockers = occupancyBlockers(plan, rooms, new Set(), [], describeGame);
+
+    expect(blockers.map((blocker) => blocker.roomId).sort()).toEqual(['room-1', 'room-2']);
+    expect(blockers[0].message).toMatch(/Room 101 is still scoring Round 4 \(Cony vs Deering\)/);
+    expect(blockers[0].message).toMatch(/Receive the result.*before replacing/);
+    // The never-published room is free to clear.
+    expect(blockers.some((blocker) => blocker.roomId === 'room-3')).toBe(false);
+  });
+
+  test('clearing a waiting room blocks as replacing does', () => {
+    const { rooms, matchByRoom } = liveRooms();
+    const cleared = rooms.map((room) =>
+      room.id === 'room-1' ? { ...room, publishedMatchId: 'match-live' } : room,
+    );
+    const plan = planRoomSetup(
+      cleared.filter((room) => room.id !== 'room-1'),
+      [],
+    );
+    // Room setup clears room-1 only through its absence; model that directly.
+    const clearPlan = {
+      ...plan,
+      publications: [
+        ...plan.publications,
+        {
+          roomId: 'room-1',
+          roomName: 'Room 101',
+          assignment: null,
+          clearedReason: 'No matchup chosen for this round.',
+        },
+      ],
+      cleared: [
+        ...plan.cleared,
+        { roomId: 'room-1', roomName: 'Room 101', reason: 'No matchup chosen for this round.' },
+      ],
+    };
+    // Room-2's game is over, so only room-1's clear is fenced.
+    const received = new Set([matchByRoom.get('room-2')!]);
+    const blockers = occupancyBlockers(clearPlan, cleared, received, [], describeGame);
+    expect(blockers.map((blocker) => blocker.roomId)).toEqual(['room-1']);
+    expect(blockers[0].message).toMatch(/before clearing/);
+  });
+
+  test('rooms with received results advance, including corrections', () => {
+    const { tournament, rooms, matchByRoom } = liveRooms();
+    const plan = planRound(tournament, tournament.rounds[4], rooms, pairingsFor());
+    // Both originals received, plus a correction final for room-1's game: same match, still done.
+    const received = new Set([matchByRoom.get('room-1')!, matchByRoom.get('room-2')!]);
+    expect(occupancyBlockers(plan, rooms, received, [], describeGame)).toEqual([]);
+  });
+
+  test('republishing the identical game is not a replacement', () => {
+    const { tournament, rooms } = liveRooms();
+    const samePlan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
+    expect(occupancyBlockers(samePlan, rooms, new Set(), [], describeGame)).toEqual([]);
+  });
+
+  test('a live foreign session occupies a room QBBridge holds nothing in', () => {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    const plan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
+    const sessions = [
+      session({ roomId: 'room-3', matchId: 'foreign-match', status: 'open', hasPresence: true }),
+    ];
+    const blockers = occupancyBlockers(plan, rooms, new Set(), sessions, describeGame);
+    expect(blockers.map((blocker) => blocker.roomId)).toEqual(['room-3']);
+    expect(blockers[0].message).toMatch(/did not publish/);
+  });
+
+  test('sessions without presence, finished sessions, and resolved games do not fence', () => {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    const plan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
+    const quiet: RelayRoomSession[] = [
+      session({ roomId: 'room-1', matchId: 'foreign-a', status: 'open', hasPresence: false }),
+      session({
+        roomId: 'room-2',
+        matchId: 'foreign-b',
+        status: 'final-received',
+        hasPresence: true,
+      }),
+      session({
+        roomId: 'room-3',
+        matchId: 'foreign-c',
+        status: 'abandoned',
+        hasPresence: true,
+      }),
+    ];
+    expect(occupancyBlockers(plan, rooms, new Set(['foreign-b']), quiet, describeGame)).toEqual([]);
+  });
+
+  test('a connected writer on the live game is named in the unresolved blocker', () => {
+    const { tournament, rooms, matchByRoom } = liveRooms();
+    const plan = planRound(tournament, tournament.rounds[4], rooms, pairingsFor());
+    const sessions = [
+      session({
+        roomId: 'room-1',
+        matchId: matchByRoom.get('room-1')!,
+        status: 'open',
+        hasPresence: true,
+      }),
+    ];
+    const blockers = occupancyBlockers(plan, rooms, new Set(), sessions, describeGame);
+    expect(blockers.map((blocker) => blocker.roomId).sort()).toEqual(['room-1', 'room-2']);
+    expect(blockers.find((blocker) => blocker.roomId === 'room-1')!.message).toMatch(
+      /scorer is connected in this room right now/,
+    );
+    expect(blockers.find((blocker) => blocker.roomId === 'room-2')!.message).not.toMatch(
+      /scorer is connected/,
+    );
+  });
+
+  test('tombstones for already-removed rooms pass through: removal was the explicit act', () => {
+    const { rooms, matchByRoom } = liveRooms();
+    const [removed] = rooms;
+    const remaining = rooms.filter((room) => room.id !== removed.id);
+    const plan = planRoomSetup(remaining, [roomTombstone(removed!)]);
+    // Room-2's game is over; the only remaining clear is the explicit tombstone. The removed
+    // room is gone from the room list, exactly as the caller passes it after a removal.
+    const received = new Set([matchByRoom.get('room-2')!]);
+    expect(occupancyBlockers(plan, remaining, received, [], describeGame)).toEqual([]);
+  });
+
+  test('roomOccupancy distinguishes unresolved, active-session, and free rooms', () => {
+    const { rooms, matchByRoom } = liveRooms();
+    const [first, , third] = rooms;
+    expect(roomOccupancy(first!, new Set())).toEqual({
+      occupied: true,
+      reason: 'unresolved',
+      liveMatchId: matchByRoom.get('room-1'),
+    });
+    expect(roomOccupancy(first!, new Set([matchByRoom.get('room-1')!]))).toEqual({ occupied: false });
+    expect(roomOccupancy(third!, new Set())).toEqual({ occupied: false });
+    expect(
+      roomOccupancy(third!, new Set(), [
+        session({ roomId: 'room-3', matchId: 'foreign-match', status: 'open', hasPresence: true }),
+      ]),
+    ).toEqual({ occupied: true, reason: 'active-session', liveMatchId: null });
   });
 });

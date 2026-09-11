@@ -92,6 +92,14 @@ let relayEpoch = 1;
 let relayRevision = 0;
 const backupControllerId = 'backup-test-controller';
 const backupToken = 'backup-management-secret';
+interface RelaySessionRow {
+  room_id: string;
+  match_id: string | null;
+  status: string;
+  presence: { device_id: string }[];
+  updated_at: string;
+}
+let relaySessions: RelaySessionRow[] = [];
 
 function installFakeTauri(): void {
   calls = [];
@@ -242,6 +250,16 @@ function installFakeTauri(): void {
           }
           return { status: 200, body: '{}' };
         }
+        if (url.endsWith('/sessions')) {
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              revision: relayRevision,
+              sessions: relaySessions,
+            }),
+          };
+        }
         if (url.includes('/results')) {
           if (deferResultRequests) {
             return new Promise<RelayReply>((resolve, reject) => {
@@ -283,6 +301,7 @@ beforeEach(() => {
   activeController = 'primary';
   relayEpoch = 1;
   relayRevision = 0;
+  relaySessions = [];
   installFakeTauri();
 });
 
@@ -380,6 +399,34 @@ async function publishReviewed(rendered: Awaited<ReturnType<typeof setUpTourname
   }
 }
 
+/**
+ * Finish the currently live round the way a tournament does: every room's scorer sends its
+ * final, and the next poll picks the results up. Rooms move to result-received, which is
+ * what lets the next round publish past occupancy fencing.
+ */
+async function receiveRoundResults(
+  rendered: Awaited<ReturnType<typeof setUpTournament>>,
+  specs: { roomId: string; left: string; right: string; roundIndex: number }[],
+): Promise<void> {
+  relayResults = specs.map((spec, index) => {
+    const { result } = scoredResultDocument({
+      left: spec.left,
+      right: spec.right,
+      roomId: spec.roomId,
+      roundIndex: spec.roundIndex,
+    });
+    return {
+      result_id: `res-r${spec.roundIndex}-${index}`,
+      room_id: spec.roomId,
+      received_at: `2026-09-10T16:${String(index).padStart(2, '0')}:00Z`,
+      qbj: result,
+    };
+  });
+  await act(async () => {
+    await rendered.result.current.pollResults();
+  });
+}
+
 describe('a round, published and returned', () => {
   test('the native commands are called with the arguments the Rust side declares', async () => {
     const rendered = await setUpTournament();
@@ -414,6 +461,16 @@ describe('a round, published and returned', () => {
       code: room.pairingCode,
       matchId: room.publishedMatchId,
     }));
+
+    // Round 3 is over: both finals arrive before round 4 may replace them.
+    await receiveRoundResults(rendered, [
+      { roomId: 'room-1', left: 'Cony', right: 'Deering', roundIndex: 3 },
+      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+    ]);
+    expect(rendered.result.current.state.rooms.map((room) => bridgeStatus(rendered, room.id))).toEqual([
+      'result-received',
+      'result-received',
+    ]);
 
     await setUpRound(rendered, 4);
     await publishReviewed(rendered);
@@ -626,6 +683,12 @@ describe('room setup and removal', () => {
     expect(bridgeStatus(rendered, unused.id)).toBe('waiting');
     expect(unused.publishedAssignmentFingerprint).not.toBeNull();
 
+    // The room's game is over, so clearing it no longer strands a scoresheet.
+    await receiveRoundResults(rendered, [
+      { roomId: unused.id, left: 'Wells', right: 'Windham A', roundIndex: 3 },
+    ]);
+    expect(bridgeStatus(rendered, unused.id)).toBe('result-received');
+
     act(() => {
       rendered.result.current.setRoomTeams(unused.id, 'left', null);
       rendered.result.current.setRoomTeams(unused.id, 'right', null);
@@ -646,7 +709,13 @@ describe('room setup and removal', () => {
     await publishReviewed(rendered);
     const room = rendered.result.current.state.rooms[0];
     const oldCode = room.pairingCode;
+    // The room is still scoring, so the ordinary action refuses instead of staging a code
+    // behind the scorer's back.
     act(() => rendered.result.current.regeneratePairingCode(room.id));
+    expect(rendered.result.current.state.rooms[0].pendingPairingCode).toBeNull();
+    expect(rendered.result.current.notice?.message).toMatch(/still scoring/);
+    // The exceptional path stages the replacement explicitly.
+    act(() => rendered.result.current.forceRegeneratePairingCode(room.id));
     const pendingCode = rendered.result.current.state.rooms[0].pendingPairingCode;
     expect(pendingCode).toBeTruthy();
     expect(pendingCode).not.toBe(oldCode);
@@ -681,7 +750,12 @@ describe('room setup and removal', () => {
     ) as { rooms: Record<string, unknown>[] };
     const prior = priorMirror.rooms.find((entry) => entry.room_id === removed.id)!;
 
+    // The removed room is still scoring, so ordinary removal refuses.
     act(() => rendered.result.current.removeRoom(removed.id));
+    expect(rendered.result.current.state.rooms.some((room) => room.id === removed.id)).toBe(true);
+    expect(rendered.result.current.notice?.message).toMatch(/still scoring/);
+    // The exceptional removal is explicit and still owes the relay a clear.
+    act(() => rendered.result.current.forceRemoveRoom(removed.id));
     expect(rendered.result.current.state.rooms.some((room) => room.id === removed.id)).toBe(false);
     expect(loadState().pendingRoomRemovals).toEqual([
       expect.objectContaining({ id: removed.id, pairingCode: removed.pairingCode, pendingPairingCode: null }),
@@ -692,6 +766,10 @@ describe('room setup and removal', () => {
     await waitFor(() =>
       expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
     );
+    // The remaining room's game is over, so room setup may clear the tombstone.
+    await receiveRoundResults(restarted, [
+      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+    ]);
     await act(async () => {
       restarted.result.current.loadFileContents(null, yftFixtureText());
       await restarted.result.current.publishRoomSetup();
@@ -714,6 +792,136 @@ describe('room setup and removal', () => {
     expect(clearing.sessions).toEqual([]);
     expect(restarted.result.current.state.pendingRoomRemovals).toEqual([]);
     expect(restarted.result.current.state.retiredRoomIds).toContain(removed.id);
+    restarted.unmount();
+  });
+});
+
+describe('occupied room fencing', () => {
+  test('a new round cannot silently replace rooms that are still scoring', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    const mirrorsBefore = calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror')).length;
+
+    await setUpRound(rendered, 4);
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    // The whole round is fenced, with every occupied room named.
+    const review = rendered.result.current.pendingPublicationReview;
+    expect(review).not.toBeNull();
+    expect(review!.blockers.map((blocker) => blocker.roomId).sort()).toEqual(['room-1', 'room-2']);
+    expect(review!.blockers[0].message).toMatch(/still scoring Round 4 \(Cony vs Deering\)/);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(
+      mirrorsBefore,
+    );
+    expect(rendered.result.current.notice?.message).toMatch(/still scoring.*Room 101.*Room 102/);
+
+    // The ordinary confirm refuses while blockers stand.
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(rendered.result.current.pendingPublicationReview).not.toBeNull();
+    expect(rendered.result.current.notice?.message).toMatch(/exceptional override/);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(
+      mirrorsBefore,
+    );
+
+    // The explicit override publishes the reviewed plan unchanged.
+    await act(async () => {
+      await rendered.result.current.confirmPublicationOverride();
+    });
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    expect(rendered.result.current.state.relay?.revision).toBe(2);
+    expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId !== null)).toBe(true);
+  });
+
+  test('room setup cannot clear rooms that are still scoring', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    const mirrorsBefore = calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror')).length;
+
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+
+    const review = rendered.result.current.pendingPublicationReview;
+    expect(review).not.toBeNull();
+    expect(review!.roundId).toBe('room-setup');
+    expect(review!.blockers.map((blocker) => blocker.roomId).sort()).toEqual(['room-1', 'room-2']);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(
+      mirrorsBefore,
+    );
+
+    // Once the games are over, room setup publishes directly with no review.
+    await receiveRoundResults(rendered, [
+      { roomId: 'room-1', left: 'Cony', right: 'Deering', roundIndex: 3 },
+      { roomId: 'room-2', left: 'Wells', right: 'Windham A', roundIndex: 3 },
+    ]);
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    expect(rendered.result.current.state.relay?.revision).toBe(2);
+  });
+
+  test('a connected writer on a foreign game occupies the room', async () => {
+    const rendered = await setUpTournament();
+    relaySessions = [
+      {
+        room_id: 'room-1',
+        match_id: 'foreign-match',
+        status: 'open',
+        presence: [{ device_id: 'scorer-tablet' }],
+        updated_at: '2026-09-10T15:00:00Z',
+      },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const review = rendered.result.current.pendingPublicationReview;
+    expect(review).not.toBeNull();
+    expect(review!.blockers.map((blocker) => blocker.roomId)).toEqual(['room-1']);
+    expect(review!.blockers[0].message).toMatch(/did not publish/);
+
+    // Presence gone: the room is free again with nothing persisted about the scare.
+    relaySessions = [];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    act(() => {
+      rendered.result.current.cancelPublicationReview();
+    });
+    await publishReviewed(rendered);
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+  });
+
+  test('the fence survives a restart: an unresolved room is still unresolved', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    rendered.unmount();
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await setUpRound(restarted, 4);
+    await act(async () => {
+      await restarted.result.current.publish();
+    });
+    expect(restarted.result.current.pendingPublicationReview?.blockers.map((b) => b.roomId).sort()).toEqual([
+      'room-1',
+      'room-2',
+    ]);
     restarted.unmount();
   });
 });
@@ -2014,8 +2222,13 @@ describe('preplanned rounds', () => {
     const { rendered, first, second } = await planThreeRounds();
     // Publish once so the room exists on the relay and its removal owes the relay a clear.
     await publishReviewed(rendered);
+    // The room is still scoring, so ordinary removal refuses first.
     act(() => {
       rendered.result.current.removeRoom(first.id);
+    });
+    expect(rendered.result.current.state.rooms.some((room) => room.id === first.id)).toBe(true);
+    act(() => {
+      rendered.result.current.forceRemoveRoom(first.id);
     });
 
     for (const plan of rendered.result.current.state.roundPlans) {
@@ -2093,6 +2306,12 @@ describe('preplanned rounds', () => {
       rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
     });
     await publishReviewed(rendered);
+
+    // Round 1 is over: both finals arrive before round 2 may clear one room.
+    await receiveRoundResults(rendered, [
+      { roomId: first.id, left: 'Cony', right: 'Deering', roundIndex: 0 },
+      { roomId: second.id, left: 'Wells', right: 'Windham A', roundIndex: 0 },
+    ]);
 
     // Round 2 uses only the first room.
     act(() => {
