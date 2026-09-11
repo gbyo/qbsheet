@@ -2053,7 +2053,7 @@ describe('durable result saving', () => {
       expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
     );
     await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
-    expect(fakeFileBytes.get(path)).not.toBe('{"tampered":true}');
+    expect(fakeFileBytes.get(path)).toBe(resultFileContents(document));
     expect(restarted.result.current.state.results[0].savedPath).toBe(path);
     expect(restarted.result.current.state.results[0].ackPending).toBe(acked);
     restarted.unmount();
@@ -2080,7 +2080,7 @@ describe('durable result saving', () => {
       expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
     );
     await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
-    expect(fakeFileBytes.has(path)).toBe(true);
+    expect(fakeFileBytes.get(path)).toBe(resultFileContents(document));
     expect(restarted.result.current.state.results[0].savedPath).toBe(path);
     restarted.unmount();
   });
