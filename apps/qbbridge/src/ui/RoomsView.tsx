@@ -166,10 +166,36 @@ type PoolFilter = {
   poolId: string;
 };
 
+interface PendingRoomAction {
+  kind: 'remove' | 'regen-code';
+  roomId: string;
+  roomName: string;
+  message: string;
+}
+
 export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
   const [poolFilter, setPoolFilter] = useState<PoolFilter | null>(null);
   const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null);
+  const [pendingRoomAction, setPendingRoomAction] = useState<PendingRoomAction | null>(null);
+
+  function requestRoomAction(kind: PendingRoomAction['kind'], roomId: string, roomName: string) {
+    const action = kind === 'remove' ? 'removing it' : 'replacing its pairing code';
+    const message = bridge.occupiedRoomMessage(roomId, action);
+    if (message === null) {
+      if (kind === 'remove') bridge.removeRoom(roomId);
+      else bridge.regeneratePairingCode(roomId);
+      return;
+    }
+    setPendingRoomAction({ kind, roomId, roomName, message });
+  }
+
+  function confirmRoomAction() {
+    if (!pendingRoomAction) return;
+    if (pendingRoomAction.kind === 'remove') bridge.forceRemoveRoom(pendingRoomAction.roomId);
+    else bridge.forceRegeneratePairingCode(pendingRoomAction.roomId);
+    setPendingRoomAction(null);
+  }
   const round = tournament?.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null;
   const selectedPairings = useMemo(
     () => pairingsForRound(state.roundPlans, state.selectedRoundId),
@@ -557,7 +583,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                           size="sm"
                           variant="quiet"
                           isDisabled={bridge.busy}
-                          onPress={() => bridge.regeneratePairingCode(room.id)}
+                          onPress={() => requestRoomAction('regen-code', room.id, room.name)}
                         >
                           New code
                         </Button>
@@ -584,7 +610,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                         size="sm"
                         variant="quiet"
                         isDisabled={bridge.busy}
-                        onPress={() => bridge.removeRoom(room.id)}
+                        onPress={() => requestRoomAction('remove', room.id, room.name)}
                       >
                         Remove
                       </Button>
@@ -599,7 +625,9 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           QBBridge reports only what it can see from the relay: a room is Not published until its setup
           reaches the current relay, Ready to pair after that setup is mirrored, Waiting while an assignment
           is active, and Result received when its published game returns. Publishing a round also clears the
-          assignment of every room with no matchup, so an unused room cannot open last round&rsquo;s game.
+          assignment of every room with no matchup, so an unused room cannot open last round&rsquo;s game. A
+          room that is still scoring refuses ordinary replacement: receive its result first, or take the
+          explicit exceptional override from the review.
         </p>
         <p className="faint">
           Matchups are saved per round on this computer. Switching rounds keeps every round&rsquo;s entries,
@@ -614,20 +642,49 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         isOpen={bridge.pendingPublicationReview !== null}
         title={
           bridge.pendingPublicationReview
-            ? `Review Round ${bridge.pendingPublicationReview.roundName} before publishing`
+            ? bridge.pendingPublicationReview.blockers.length > 0
+              ? `Occupied rooms block ${bridge.pendingPublicationReview.roundName}`
+              : bridge.pendingPublicationReview.roundId === 'room-setup'
+                ? 'Review room setup before publishing'
+                : `Review Round ${bridge.pendingPublicationReview.roundName} before publishing`
             : 'Review round before publishing'
         }
-        confirmLabel="Publish anyway"
+        confirmLabel={
+          bridge.pendingPublicationReview && bridge.pendingPublicationReview.blockers.length > 0
+            ? 'Replace unresolved games'
+            : 'Publish anyway'
+        }
         cancelLabel="Go back"
         confirmVariant="danger"
-        onConfirm={() => void bridge.confirmPublicationReview()}
+        onConfirm={() =>
+          void (bridge.pendingPublicationReview && bridge.pendingPublicationReview.blockers.length > 0
+            ? bridge.confirmPublicationOverride()
+            : bridge.confirmPublicationReview())
+        }
         onCancel={bridge.cancelPublicationReview}
       >
-        <p>
-          QBBridge is holding the exact round plan below. Nothing has been sent to the relay yet. Publish
-          anyway only after checking each consequence; going back leaves the selected teams and relay state
-          unchanged.
-        </p>
+        {bridge.pendingPublicationReview && bridge.pendingPublicationReview.blockers.length > 0 ? (
+          <p>
+            These rooms are still scoring the game on the relay. Publishing now replaces or clears a live game
+            and may strand an active scoresheet. Receive their results first, or replace them only as an
+            explicit recovery action — going back leaves everything unchanged.
+          </p>
+        ) : (
+          <p>
+            QBBridge is holding the exact round plan below. Nothing has been sent to the relay yet. Publish
+            anyway only after checking each consequence; going back leaves the selected teams and relay state
+            unchanged.
+          </p>
+        )}
+        {bridge.pendingPublicationReview && bridge.pendingPublicationReview.blockers.length > 0 ? (
+          <ul>
+            {bridge.pendingPublicationReview.blockers.map((item, index) => (
+              <li key={`blocker:${item.roomId}:${item.message}:${index}`}>
+                <strong>{item.roomName}:</strong> {item.message}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <ul>
           {bridge.pendingPublicationReview?.items.map((item, index) => (
             <li key={`${item.roomId}:${item.message}:${index}`}>
@@ -635,6 +692,27 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
             </li>
           ))}
         </ul>
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={pendingRoomAction !== null}
+        title={
+          pendingRoomAction
+            ? pendingRoomAction.kind === 'remove'
+              ? `Remove ${pendingRoomAction.roomName} while it is scoring?`
+              : `Replace the pairing code for ${pendingRoomAction.roomName} while it is scoring?`
+            : 'Room is still scoring'
+        }
+        confirmLabel={pendingRoomAction?.kind === 'remove' ? 'Remove anyway' : 'Replace code anyway'}
+        cancelLabel="Go back"
+        confirmVariant="danger"
+        onConfirm={confirmRoomAction}
+        onCancel={() => setPendingRoomAction(null)}
+      >
+        <p>{pendingRoomAction?.message}</p>
+        <p>
+          This is the exceptional path: prefer receiving the room&rsquo;s result first. Continuing may strand
+          the scorer currently serving that game.
+        </p>
       </ConfirmDialog>
       {printTarget !== null && typeof document !== 'undefined'
         ? createPortal(

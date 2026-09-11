@@ -98,8 +98,11 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     addRoom: noop,
     renameRoom: noop,
     removeRoom: noop,
+    forceRemoveRoom: noop,
+    occupiedRoomMessage: () => null,
     setRoomTeams: noop,
     regeneratePairingCode: noop,
+    forceRegeneratePairingCode: noop,
     selectRound: noop,
     plannedTeamsFor: (roomId: string) => {
       const pairing = state.roundPlans[0]?.pairings.find((entry) => entry.roomId === roomId);
@@ -114,6 +117,7 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     publish: vi.fn(async () => undefined),
     pendingPublicationReview: null,
     confirmPublicationReview: vi.fn(async () => undefined),
+    confirmPublicationOverride: vi.fn(async () => undefined),
     cancelPublicationReview: noop,
     assignmentFallback: null,
     exportAssignmentFallback: vi.fn(async () => false),

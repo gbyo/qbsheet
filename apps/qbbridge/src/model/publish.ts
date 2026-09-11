@@ -26,7 +26,12 @@
 
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
-import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
+import {
+  relayPublishMirror,
+  type MirrorRoomInput,
+  type RelayConnection,
+  type RelayRoomSession,
+} from './relay';
 import type { Room, RoomTombstone } from './rooms';
 import { isCompletePairing, pairingsByRoom, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
@@ -122,6 +127,106 @@ export function publicationReviewItems(
       continue;
     }
     add(warning.roomId, roomNames.get(warning.roomId) ?? warning.roomId, warning.message);
+  }
+  return items;
+}
+
+/**
+ * Why a room refuses ordinary publication, if it does.
+ *
+ * `unresolved` is the durable fence: the relay holds a game for this room that has produced
+ * no local result, so replacing or clearing it could strand an active scoresheet. It survives
+ * restarts and relay outages because it is derived from persisted publication and result
+ * state, never from transient presence.
+ *
+ * `active-session` is the live signal: a scorer device currently holds presence in this room
+ * on a game QBBridge cannot account for. It is best-effort — presence expires — and never
+ * weakens the durable fence.
+ */
+export type RoomOccupancy =
+  | { occupied: false }
+  | { occupied: true; reason: 'unresolved' | 'active-session'; liveMatchId: string | null };
+
+export function roomOccupancy(
+  room: Room,
+  resultMatchIds: ReadonlySet<string>,
+  sessions: readonly RelayRoomSession[] = [],
+): RoomOccupancy {
+  const live = room.publishedMatchId;
+  if (live !== null && !resultMatchIds.has(live)) {
+    return { occupied: true, reason: 'unresolved', liveMatchId: live };
+  }
+  for (const session of sessions) {
+    if (session.roomId !== room.id) continue;
+    if (session.status !== 'open' || !session.hasPresence) continue;
+    if (session.matchId === null) continue;
+    // The room's own game, resolved or not: someone is still attached to it, so room
+    // actions and non-identical publication wait. (When the result is missing, the
+    // durable rule above already fired; this covers the attached-after-result case.)
+    // A session on any other already-resolved game trusts the durable final over
+    // lingering presence instead. Same-game republication stays possible through the
+    // occupancyBlockers exemption, which is about the plan's content, not about
+    // whether the room is free.
+    if (session.matchId !== live && resultMatchIds.has(session.matchId)) continue;
+    return { occupied: true, reason: 'active-session', liveMatchId: live };
+  }
+  return { occupied: false };
+}
+
+/**
+ * Fencing blockers for one publication plan: one item per room whose live game the plan
+ * would replace or clear while that room is occupied.
+ *
+ * Republishing the identical game (same match id) is exempt — it is the same game, not a
+ * replacement, which keeps idempotent retries possible. Rooms the plan does not know
+ * (tombstones for already-removed rooms) are exempt too: removing the room was the explicit
+ * action, and the tombstone only finishes clearing it.
+ */
+export function occupancyBlockers(
+  plan: PublishPlan,
+  rooms: readonly Room[],
+  resultMatchIds: ReadonlySet<string>,
+  sessions: readonly RelayRoomSession[] = [],
+  describeLiveGame: (room: Room) => string | null = () => null,
+): PublicationReviewItem[] {
+  const byRoom = new Map(rooms.map((room) => [room.id, room]));
+  const items: PublicationReviewItem[] = [];
+  for (const publication of plan.publications) {
+    const room = byRoom.get(publication.roomId);
+    if (!room) continue;
+    const live = room.publishedMatchId;
+    const next = publication.assignment?.matchId ?? null;
+    if (live !== null && next === live) continue;
+    const occupancy = roomOccupancy(room, resultMatchIds, sessions);
+    if (!occupancy.occupied) continue;
+    const action = next === null ? 'clearing' : 'replacing';
+    if (occupancy.reason === 'unresolved') {
+      const context = describeLiveGame(room);
+      const game = context ?? 'its published game';
+      const writer = sessions.some(
+        (session) =>
+          session.roomId === room.id &&
+          session.status === 'open' &&
+          session.hasPresence &&
+          (session.matchId === null || session.matchId === live),
+      );
+      items.push({
+        roomId: room.id,
+        roomName: room.name,
+        message:
+          `${room.name} is still scoring ${game}. Receive the result or resolve that game ` +
+          `before ${action} its assignment.` +
+          (writer ? ' A scorer is connected in this room right now.' : ''),
+      });
+    } else {
+      items.push({
+        roomId: room.id,
+        roomName: room.name,
+        message:
+          `${room.name} has a scorer connected right now. ` +
+          `Check the room before ${action} what it is serving.`,
+      });
+    }
   }
   return items;
 }

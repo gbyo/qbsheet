@@ -75,17 +75,21 @@ function playedEvents(format: IScorekeeperFormat, left: string[], right: string[
 }
 
 /** Assignment → scorer → completed result, the whole way a real game travels. */
-export function scoredResultDocument(options: { left?: string; right?: string } = {}): {
+export function scoredResultDocument(
+  options: { left?: string; right?: string; roomId?: string; roomName?: string; roundIndex?: number } = {},
+): {
   result: { version: string; objects: QbjObject[] };
   matchId: string;
   tournament: BridgeTournament;
 } {
   const tournament = loadedFixture();
+  const round = tournament.rounds[options.roundIndex ?? 3]!;
+  const roomId = options.roomId ?? 'room-1';
   const built = buildAssignment({
     tournament,
-    round: tournament.rounds[3],
-    roomId: 'room-1',
-    roomName: 'Room 101',
+    round,
+    roomId,
+    roomName: options.roomName ?? (roomId === 'room-1' ? 'Room 101' : roomId),
     left: teamNamed(tournament, options.left ?? 'Cony'),
     right: teamNamed(tournament, options.right ?? 'Deering'),
     assignmentRevision: 1,
