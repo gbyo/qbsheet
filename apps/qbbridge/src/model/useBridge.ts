@@ -107,6 +107,12 @@ import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
 export const resultPollIntervalMs = 5000;
+/**
+ * Silence longer than this between poll ticks means the event loop was suspended — laptop
+ * lid, tablet lock, backgrounded tab — and the next tick reconciles instead of assuming
+ * the world stood still. Well above the interval so ordinary stalls never trigger it.
+ */
+export const resumeGapMs = 15000;
 
 /** Routine confirmations are useful briefly, while problems need to remain available. */
 export const noticeAutoDismissMs = 4000;
@@ -445,7 +451,12 @@ export function useBridge(): BridgeApi {
 
   useEffect(() => {
     if (notice?.kind !== 'good') return;
-    const timer = setTimeout(() => setNotice(null), noticeAutoDismissMs);
+    // Fence the dismiss to this notice instance: a stale pre-sleep timer firing after resume
+    // must not clobber a recovery notice that replaced this one while it was pending.
+    const current = notice;
+    const timer = setTimeout(() => {
+      setNotice((previous) => (previous === current ? null : previous));
+    }, noticeAutoDismissMs);
     return () => clearTimeout(timer);
   }, [notice]);
   const readinessKeyRef = useRef<string | null>(null);
@@ -1645,21 +1656,164 @@ export function useBridge(): BridgeApi {
     }
   }, [commit]);
 
+  /**
+   * Reconcile immediately after a sleep, lock, or network gap instead of trusting stale
+   * timers and sockets until the next ordinary poll.
+   *
+   * Sleep ends with three hazards: pre-sleep requests still in flight, a relay that moved
+   * on without us, and results that arrived while nobody polled. The generation bump
+   * fences the first (stale responses can no longer mutate state), a live health read
+   * reports — never adopts — the second, and an immediate connection-guarded fetch
+   * merges the third (ACK retries stay on the ordinary poll path, which runs next). One
+   * concise notice appears only when something actually changed; a quiet resume stays
+   * quiet. Everything here is idempotent reads, so a spurious trigger costs round-trips,
+   * never a reconnect storm.
+   */
+  const resumeInFlightRef = useRef(false);
+  const reconcileAfterResume = useCallback(async (): Promise<void> => {
+    if (resumeInFlightRef.current) return;
+    resumeInFlightRef.current = true;
+    try {
+      // Fence first: anything the device sent before sleep must not land in the new generation.
+      pollGenerationRef.current += 1;
+      const before = stateRef.current;
+      const connection = connectionOf(before);
+      const notes: string[] = [];
+      let relayMoved = false;
+      if (connection) {
+        try {
+          const health = await relayHealth(connection);
+          if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return;
+          setRelayReachable(true);
+          if (health.directorEpoch !== before.relay?.epoch || health.revision !== before.relay?.revision) {
+            relayMoved = true;
+            notes.push(
+              `relay moved while away (epoch ${before.relay?.epoch ?? '?'}→${health.directorEpoch}, ` +
+                `revision ${before.relay?.revision ?? '?'}→${health.revision})`,
+            );
+          }
+        } catch {
+          setRelayReachable(false);
+          notes.push('relay unreachable');
+        }
+        // Re-prove the scorer path only when the relay moved under it. A quiet resume skips
+        // the extra round-trip; reachability itself already surfaces in the relay panel.
+        if (relayMoved) {
+          try {
+            await refreshScorerReadiness(connectionOf(stateRef.current) ?? connection);
+          } catch {
+            // Readiness already reports its own states; a failed recheck is not a resume failure.
+          }
+        }
+      }
+      const knownIds = new Set(before.results.map((entry) => entry.resultId));
+      // Fetch and merge inline with a connection guard instead of the shared poll path: an
+      // overlapping ordinary poll carries a newer poll generation and would invalidate this
+      // fetch, leaving the fresh-check below blind. Either order converges — whichever fetch
+      // commits first merges, the other becomes a no-op, and the filter still sees the union.
+      // ACK retries for durably saved results stay on the ordinary poll path, which runs next.
+      const resumeConnection = connectionOf(stateRef.current);
+      let resumed: Awaited<ReturnType<typeof relayFetchResults>> = [];
+      if (resumeConnection && isNativeHost()) {
+        try {
+          const fetched = await relayFetchResults(resumeConnection);
+          if (sameRelayConnection(resumeConnection, connectionOf(stateRef.current))) {
+            resumed = fetched;
+            setRelayReachable(true);
+            commit((current) => {
+              if (!sameRelayConnection(resumeConnection, connectionOf(current))) return current;
+              const merged: StoredResult[] = fetched
+                .filter((entry) => !current.results.some((row) => row.resultId === entry.resultId))
+                .map((entry) => ({ resultId: entry.resultId, qbj: entry.qbj, receivedAt: entry.receivedAt }));
+              if (merged.length === 0) return current;
+              return { ...current, results: [...current.results, ...merged] };
+            });
+          }
+        } catch {
+          // Leave reachability as-is; the next ordinary poll retries.
+        }
+      }
+      // Compare the fetched payload against the pre-resume snapshot, not post-commit state:
+      // commit applies on render, so stateRef lags it here, and an overlapping ordinary poll
+      // may merge first — either way the union is what arrived while away.
+      const fresh = resumed.filter((entry) => !knownIds.has(entry.resultId));
+      if (fresh.length > 0) {
+        notes.push(`${fresh.length} result${fresh.length === 1 ? '' : 's'} arrived while away`);
+      }
+      if (notes.length > 0) {
+        setNotice({
+          kind: 'warn',
+          message: `Recovered after sleep · ${notes.join('; ')}. Review before publishing.`,
+        });
+      }
+    } finally {
+      resumeInFlightRef.current = false;
+    }
+  }, [commit, refreshScorerReadiness]);
+
+  /**
+   * When the last poll tick ran, wall-clock. A gap far beyond the interval means the event
+   * loop was suspended — laptop lid, tablet lock, backgrounded tab — and the next tick
+   * reconciles instead of assuming the world stood still. Null until the first tick
+   * baselines it inside an event handler, never during render.
+   */
+  const lastPollMsRef = useRef<number | null>(null);
+  const pollTick = useCallback((): void => {
+    const now = Date.now();
+    const previous = lastPollMsRef.current;
+    lastPollMsRef.current = now;
+    if (previous === null) {
+      void pollResults();
+      return;
+    }
+    const gap = now - previous;
+    // A backward jump (clock correction) just re-baselines: only a long forward silence is sleep.
+    if (gap >= 0 && gap > resumeGapMs) void reconcileAfterResume();
+    else void pollResults();
+  }, [pollResults, reconcileAfterResume]);
+
+  /**
+   * Wake the moment the tab is visible or the network returns, rather than waiting for the
+   * interval to notice. A hidden tab going quieter is not a resume; becoming visible is.
+   */
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return;
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') return;
+      lastPollMsRef.current = Date.now();
+      void reconcileAfterResume();
+    };
+    const onOnline = () => {
+      lastPollMsRef.current = Date.now();
+      void reconcileAfterResume();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [reconcileAfterResume]);
+
   useEffect(() => {
     // Changing the active relay invalidates every in-flight request, even if a replacement happens
     // to reuse the same visible URL. The identity check above is the second, explicit fence.
     pollGenerationRef.current += 1;
     if (!state.relay) return;
+    // Baseline the resume-gap clock here in the effect, not during render: the purity rule
+    // forbids Date.now() in render, and a null baseline would mistake sleep-before-first-tick
+    // for an ordinary tick.
+    if (lastPollMsRef.current === null) lastPollMsRef.current = Date.now();
     // The first poll is scheduled rather than run inline: polling ends in a `setState`, and a
     // `setState` in an effect body is a cascading render. A tick's delay costs nothing here.
-    const first = setTimeout(() => void pollResults(), 0);
-    const timer = setInterval(() => void pollResults(), resultPollIntervalMs);
+    const first = setTimeout(() => void pollTick(), 0);
+    const timer = setInterval(() => void pollTick(), resultPollIntervalMs);
     return () => {
       pollGenerationRef.current += 1;
       clearTimeout(first);
       clearInterval(timer);
     };
-  }, [pollResults, state.relay]);
+  }, [pollTick, state.relay]);
 
   const chooseFolder = useCallback(async () => {
     try {
