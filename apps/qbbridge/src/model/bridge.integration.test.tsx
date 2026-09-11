@@ -2791,4 +2791,270 @@ describe('reconciliation aliveness', () => {
     expect(blocker).not.toMatch(/heartbeat|mid-game|moments ago/);
     rendered.unmount();
   });
+
+  test('a persistence failure during the fetch still blocks the close', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    deferResultRequests = true;
+    let reconciling: Promise<TournamentReconciliation | null> | undefined;
+    act(() => {
+      reconciling = rendered.result.current.refreshReconciliation();
+    });
+    await waitFor(() => expect(pendingResultRequests.length).toBe(1));
+    // A state save fails while the relay request is still in flight.
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    let stateWrites = 0;
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(((
+      key: string,
+      value: string,
+    ) => {
+      if (key === storageKey) {
+        stateWrites += 1;
+        throw new Error('storage unavailable mid-fetch');
+      }
+      originalSetItem(key, value);
+    }) as typeof globalThis.localStorage.setItem);
+    act(() => {
+      rendered.result.current.addRoom();
+    });
+    expect(stateWrites).toBeGreaterThan(0);
+    expect(rendered.result.current.persistenceSavePending).toBe(true);
+    // Keep failing state saves until the report is built: background polls commit too, and
+    // a successful one would legitimately clear the flag by persisting everything.
+    act(() => {
+      for (const pending of pendingResultRequests.splice(0)) {
+        pending.resolve({ status: 200, body: JSON.stringify({ results: [] }) });
+      }
+    });
+    const report = await act(async () => await reconciling!);
+    setItem.mockRestore();
+    expect(report?.pendingRecovery).toBe(1);
+    expect(report?.safeToClose).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a clean close with aged-out finals names the retention gap', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      {
+        result_id: 'res-old',
+        room_id: 'room-gone',
+        received_at: '2026-08-20T15:00:00Z',
+        qbj: document,
+      },
+    ];
+    const rendered = await setUpConnectedRooms();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    act(() => {
+      rendered.result.current.markResultImported('res-old');
+    });
+    // The relay no longer serves the old final: it aged out of retention.
+    relayResults = [];
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation?.agedOut).toEqual(['res-old']);
+    // The counts are reported separately, never equated, with the gap explained.
+    expect(rendered.result.current.notice?.message).toMatch(/Safe to close/);
+    expect(rendered.result.current.notice?.message).toMatch(/aged out/);
+    expect(rendered.result.current.notice?.message).not.toMatch(/=/);
+    rendered.unmount();
+  });
+});
+
+describe('guarded recovery operations', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('revoking backup access while live waits for an override, then reports its result', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    let revoked: Promise<boolean>;
+    act(() => {
+      revoked = rendered.result.current.revokeBackup();
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('revoke-backup');
+    expect(
+      calls.some(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/backup/revoke'),
+      ),
+    ).toBe(false);
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    await act(async () => {
+      await expect(revoked!).resolves.toBe(true);
+    });
+    expect(
+      rendered.result.current.auditLog.some(
+        (entry) => entry.action === 'live-override' && entry.fields.action === 'revoke-backup',
+      ),
+    ).toBe(true);
+    rendered.unmount();
+  });
+
+  test('cancelling a held operation resolves with its failure value', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    let revoked: Promise<boolean>;
+    act(() => {
+      revoked = rendered.result.current.revokeBackup();
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('revoke-backup');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    await act(async () => {
+      await expect(revoked!).resolves.toBe(false);
+    });
+    expect(
+      calls.some(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/backup/revoke'),
+      ),
+    ).toBe(false);
+    rendered.unmount();
+  });
+
+  test('takeover, transfer, rotate, and import all wait for an override while live', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    const pending: Promise<unknown>[] = [];
+    act(() => {
+      pending.push(rendered.result.current.takeOverRelay());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('take-over-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.transferRelayToPrimary());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('transfer-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.rotateBackup());
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('rotate-backup');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    act(() => {
+      pending.push(rendered.result.current.importRecoveryPackage('passphrase'));
+    });
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('import-recovery');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    await act(async () => {
+      await expect(Promise.all(pending)).resolves.toEqual([false, false, null, false]);
+    });
+    // Nothing reached the relay: every held operation resolved its failure value instead.
+    expect(
+      calls.some(
+        (call) =>
+          call.command === 'relay_request' &&
+          /takeover|transfer|backup|provision/.test(String(call.args.url)),
+      ),
+    ).toBe(false);
+    rendered.unmount();
+  });
+});
+
+describe('lifecycle durability and reset', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('a missed lifecycle or audit write joins the durability flag instead of vanishing', async () => {
+    const rendered = await setUpTournament();
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(((
+      key: string,
+      value: string,
+    ) => {
+      if (key === 'qbbridge.lifecycle.v1' || key === 'qbbridge.audit.v1')
+        throw new Error('diagnostic storage unavailable');
+      originalSetItem(key, value);
+    }) as typeof globalThis.localStorage.setItem);
+    try {
+      act(() => {
+        rendered.result.current.goLive();
+      });
+      // The transition stays in memory — the tournament has to run — but it is flagged.
+      expect(rendered.result.current.phase).toBe('live');
+      expect(rendered.result.current.persistenceSavePending).toBe(true);
+      // So is a missed audit write from an ordinary action.
+      act(() => {
+        rendered.result.current.addRoom();
+      });
+      expect(rendered.result.current.persistenceSavePending).toBe(true);
+    } finally {
+      setItem.mockRestore();
+    }
+    rendered.unmount();
+  });
+
+  test('switching tournaments resets the phase and clears the old reconciliation', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    // Entered pairings leave the close dirty, so finish through the override.
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation).not.toBeNull();
+    act(() => {
+      rendered.result.current.loadFileContents('/other-tournament.yft', yftFixtureText());
+    });
+    expect(rendered.result.current.pendingFileSwitch).not.toBeNull();
+    act(() => {
+      rendered.result.current.confirmFileSwitch();
+    });
+    // The switch itself is guarded while finished.
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('switch-tournament');
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    // The new tournament starts clean: setup phase, no stale reconciliation.
+    expect(rendered.result.current.phase).toBe('setup');
+    expect(rendered.result.current.reconciliation).toBeNull();
+    rendered.unmount();
+  });
 });

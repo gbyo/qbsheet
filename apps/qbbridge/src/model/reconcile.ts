@@ -136,6 +136,12 @@ export function buildTournamentReconciliation(
     .filter((entry) => entry.saved && entry.ackPending)
     .map((entry) => entry.resultId);
   const relayUnacked = input.relayFinals.filter((entry) => !entry.acked).length;
+  // A result saved locally but still unacknowledged on the relay is one final, not two:
+  // the blocker counts the union of the local and relay unacknowledged ids.
+  const unackedUnion = new Set([
+    ...unacked,
+    ...input.relayFinals.filter((entry) => !entry.acked).map((entry) => entry.resultId),
+  ]);
 
   const agedOut: string[] = [];
   const localOnlyRecent: string[] = [];
@@ -177,9 +183,9 @@ export function buildTournamentReconciliation(
     );
   if (unsaved.length > 0)
     blockers.push(`${plural(unsaved.length, 'local result is', 'local results are')} not saved to disk.`);
-  if (unacked.length > 0 || relayUnacked > 0)
+  if (unackedUnion.size > 0)
     blockers.push(
-      `${plural(unacked.length + relayUnacked, 'final is', 'finals are')} saved but unacknowledged — drain the relay queue first.`,
+      `${plural(unackedUnion.size, 'final is', 'finals are')} saved but unacknowledged — drain the relay queue first.`,
     );
   if (localOnlyRecent.length > 0)
     blockers.push(

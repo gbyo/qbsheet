@@ -104,6 +104,20 @@ describe('final tournament reconciliation', () => {
     expect(report.relayUnacked).toBe(1);
   });
 
+  test('one final pending in both places counts once, not twice', () => {
+    const report = buildTournamentReconciliation(
+      input({
+        relayFinals: [final('b', { acked: false })],
+        local: [local('b', { ackPending: true })],
+      }),
+      NOW,
+    );
+    expect(report.safeToClose).toBe(false);
+    expect(report.blockers.some((blocker) => blocker.includes('1 final is saved but unacknowledged'))).toBe(
+      true,
+    );
+  });
+
   test('two finals for one match are listed as a correction, never merged', () => {
     const report = buildTournamentReconciliation(
       input({
@@ -123,7 +137,7 @@ describe('final tournament reconciliation', () => {
         local: [
           local('old', { ageHours: 24 * 10 }),
           local('recent', { ageHours: 2 }),
-          local('undated', { ageHours: 1 }),
+          { ...local('undated'), receivedAt: 'not-a-date' },
         ],
       }),
       NOW,

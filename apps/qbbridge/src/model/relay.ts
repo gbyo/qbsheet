@@ -544,7 +544,10 @@ export async function relayFetchRetainedFinals(
       acked: typeof entry.director_ack_at === 'string',
     });
   }
-  return { finals, truncated: finals.length >= relayUnackedWindow };
+  // Truncation is measured on the relay's row count, not the parsed finals: a malformed
+  // row is dropped above, and a full page with a dropped row is still a full page whose
+  // counts are lower bounds.
+  return { finals, truncated: rows.length >= relayUnackedWindow };
 }
 
 export interface RelayRoomActivity {

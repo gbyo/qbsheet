@@ -18,6 +18,11 @@ export type GuardedActionId =
   | 'remove-room'
   | 'regenerate-code'
   | 'publish-late-rooms'
+  | 'import-recovery'
+  | 'take-over-relay'
+  | 'transfer-relay'
+  | 'rotate-backup'
+  | 'revoke-backup'
   | 'switch-tournament'
   | 'finish-dirty'
   | 'reopen-tournament';
@@ -58,6 +63,31 @@ function guardLabels(id: GuardedActionId, subject: string | null): { label: stri
       return {
         label: `Publish never-published rooms${what}`,
         base: 'These rooms joined after go-live, so their assignments and pairing codes were never reviewed. Publishing hands their Scorers the official record of play mid-tournament.',
+      };
+    case 'import-recovery':
+      return {
+        label: 'Import recovery package',
+        base: 'The package replaces this machine’s tournament state — rooms, results, relay position — with the backup’s copy. Anything here that is not in the package is gone.',
+      };
+    case 'take-over-relay':
+      return {
+        label: 'Take over relay control',
+        base: 'This machine becomes the active controller and the old primary is fenced from publishing and acknowledging. Only take over when the primary is truly down.',
+      };
+    case 'transfer-relay':
+      return {
+        label: 'Transfer control to the primary',
+        base: 'This machine becomes read-only: publishing and result acknowledgment move to the primary controller.',
+      };
+    case 'rotate-backup':
+      return {
+        label: 'Rotate backup access',
+        base: 'The current backup credential stops working immediately. The backup laptop cannot reconnect until a new recovery package is created and imported there.',
+      };
+    case 'revoke-backup':
+      return {
+        label: 'Revoke backup access',
+        base: 'The backup laptop loses relay access immediately. There is no backup controller until a new recovery package is created.',
       };
     case 'switch-tournament':
       return {
@@ -111,10 +141,16 @@ export function loadTournamentPhase(): TournamentPhase {
   }
 }
 
-export function saveTournamentPhase(phase: TournamentPhase): void {
+/**
+ * Persist the phase. Returns whether the write landed: lifecycle must never break the
+ * run it guards, so callers keep the in-memory transition (the tournament has to run)
+ * and surface a miss through the durability flag instead of throwing.
+ */
+export function saveTournamentPhase(phase: TournamentPhase): boolean {
   try {
     localStorage.setItem(lifecycleStorageKey, phase);
+    return true;
   } catch {
-    // Diagnostics persistence must never break the run it records.
+    return false;
   }
 }
