@@ -25,6 +25,17 @@ export interface ResultSummary {
   rightPoints: number | null;
 }
 
+export type ResultImportStatus = 'new' | 'needs-import' | 'imported';
+
+/** Derive the visible handoff state without implying that YellowFruit was inspected. */
+export function resultImportStatus(entry: {
+  savedPath?: string;
+  importStatus?: 'needs-import' | 'imported';
+}): ResultImportStatus {
+  if (!entry.savedPath) return 'new';
+  return entry.importStatus === 'imported' ? 'imported' : 'needs-import';
+}
+
 /** Keep result names below the common 255-byte filesystem component limit, with some margin. */
 export const maximumResultFileNameBytes = 240;
 const resultFileExtension = '.result.qbj';
@@ -48,6 +59,13 @@ function refId(value: unknown): string | null {
 function resolve(value: unknown, byId: Map<string, Record<string, unknown>>): Record<string, unknown> | null {
   if (isRecord(value) && typeof value.$ref === 'string') return byId.get(value.$ref) ?? null;
   return isRecord(value) ? value : null;
+}
+
+/** The logical game identity carried by a completed result, when present. */
+export function resultMatchId(qbj: unknown): string | null {
+  if (isRecord(qbj) && qbj.type === 'Match' && typeof qbj.id === 'string') return qbj.id;
+  const match = objects(qbj).find((entry) => entry.type === 'Match');
+  return match && typeof match.id === 'string' ? match.id : null;
 }
 
 /**

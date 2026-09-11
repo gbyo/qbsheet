@@ -12,6 +12,8 @@ import {
   maximumResultFileNameBytes,
   resultFileContents,
   resultFileName,
+  resultImportStatus,
+  resultMatchId,
   resultFileSuffix,
   resultSummary,
   sameQbjDocument,
@@ -35,6 +37,15 @@ describe('reading a result for the list', () => {
     expect(resultSummary(null).leftName).toBeNull();
     expect(resultSummary({ version: '2.1.1', objects: [] }).roundName).toBeNull();
     expect(resultSummary({ type: 'Match', id: 'm', match_teams: [] }).roundNumber).toBeNull();
+  });
+
+  test('distinguishes a new save, an explicit import marker, and the game identity', () => {
+    const { result, matchId } = scoredResultDocument();
+    expect(resultImportStatus({})).toBe('new');
+    expect(resultImportStatus({ savedPath: '/results/game.qbj' })).toBe('needs-import');
+    expect(resultImportStatus({ savedPath: '/results/game.qbj', importStatus: 'imported' })).toBe('imported');
+    expect(resultMatchId(result)).toBe(matchId);
+    expect(resultMatchId({ type: 'Match', id: 'bare-match' })).toBe('bare-match');
   });
 });
 
