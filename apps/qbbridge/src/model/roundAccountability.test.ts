@@ -152,7 +152,9 @@ describe('round accounting', () => {
     expect(account.assigned.find((entry) => entry.teamId === 'withdrawn')).toBeUndefined();
     expect(account.incomplete).toEqual([{ roomId: 'room-1', chosenTeamId: 'a', side: 'left' }]);
     const gate = roundPublishGate(account);
-    expect(gate.blocks).toHaveLength(2);
+    // Stale team, stale room, and now the known side's incomplete pairing: all three block.
+    expect(gate.blocks).toHaveLength(3);
+    expect(gate.blocks.some((block) => /only one side chosen/.test(block))).toBe(true);
   });
 
   test('incomplete pairings surface with the chosen side', () => {
@@ -167,6 +169,25 @@ describe('round accounting', () => {
     expect(account.games).toBe(0);
   });
 
+  test('an incomplete pairing blocks publication until the second side is chosen or cleared', () => {
+    const account = accountRound({
+      pairings: [pairing('room-1', 'a', null), pairing('room-2', 'b', 'c')],
+      dispositions: [],
+      roundId: 'r1',
+      teamIds: teams,
+      roomIds: rooms,
+    });
+    const gate = roundPublishGate(
+      account,
+      (id) => `Team ${id}`,
+      (id) => `Room ${id}`,
+    );
+    expect(gate.blocks).toHaveLength(1);
+    // The block names the room, the chosen team, and the side — not a generic review item.
+    expect(gate.blocks[0]).toMatch(/Room room-1.*Team a.*left/);
+    expect(gate.blocks[0]).toMatch(/Choose the second team or clear the room/);
+  });
+
   test('same-team pairings build nothing and read as unaccounted', () => {
     const account = accountRound({
       pairings: [pairing('room-1', 'a', 'a')],
@@ -177,5 +198,25 @@ describe('round accounting', () => {
     });
     expect(account.games).toBe(0);
     expect(account.unaccounted).toContain('a');
+    expect(account.sameTeam).toEqual([{ roomId: 'room-1', teamId: 'a' }]);
+  });
+
+  test('a same-team pairing blocks publication with no exceptional override', () => {
+    const account = accountRound({
+      pairings: [pairing('room-1', 'a', 'a'), pairing('room-2', 'b', 'c')],
+      dispositions: [],
+      roundId: 'r1',
+      teamIds: teams,
+      roomIds: rooms,
+    });
+    const gate = roundPublishGate(
+      account,
+      (id) => `Team ${id}`,
+      (id) => `Room ${id}`,
+    );
+    // The self-match blocks; the leftover unaccounted team only warns. Blocks refuse
+    // overrides, so no confirmation path can publish this round as an "explicit exception".
+    expect(gate.blocks).toHaveLength(1);
+    expect(gate.blocks[0]).toMatch(/Room room-1 matches Team a against itself/);
   });
 });

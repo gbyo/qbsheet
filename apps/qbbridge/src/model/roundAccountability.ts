@@ -176,6 +176,11 @@ export interface RoundAccount {
   contradictions: string[];
   /** Rooms with exactly one side chosen. */
   incomplete: { roomId: string; chosenTeamId: string; side: 'left' | 'right' }[];
+  /**
+   * Pairings that match a team against itself. Structurally invalid input, never a bye or an
+   * "explicit exception": no confirmation path may publish them.
+   */
+  sameTeam: { roomId: string; teamId: string }[];
   /** Pairing sides naming teams the loaded file no longer has. */
   staleTeamIds: string[];
   /** Pairings in rooms that no longer exist locally. */
@@ -202,6 +207,7 @@ export function accountRound(input: {
 }): RoundAccount {
   const roomsByTeam = new Map<string, string[]>();
   const incomplete: RoundAccount['incomplete'] = [];
+  const sameTeam: RoundAccount['sameTeam'] = [];
   const staleTeams = new Set<string>();
   const staleRooms = new Set<string>();
   let games = 0;
@@ -222,8 +228,12 @@ export function accountRound(input: {
         games += 1;
         roomsByTeam.set(knownLeft, [...(roomsByTeam.get(knownLeft) ?? []), pairing.roomId]);
         roomsByTeam.set(knownRight, [...(roomsByTeam.get(knownRight) ?? []), pairing.roomId]);
+        continue;
       }
-      // A same-team pairing builds nothing; it reads as unaccounted, not assigned.
+      // A same-team pairing builds nothing assignable: the team reads as unaccounted AND the
+      // room is recorded as structurally invalid, so the publish gate blocks rather than
+      // offering the self-match as an overridable exception.
+      sameTeam.push({ roomId: pairing.roomId, teamId: knownLeft });
       continue;
     }
     if (knownLeft !== null || knownRight !== null) {
@@ -263,6 +273,7 @@ export function accountRound(input: {
     duplicates,
     contradictions,
     incomplete,
+    sameTeam,
     staleTeamIds: [...staleTeams],
     staleRoomIds: [...staleRooms],
     games,
@@ -281,20 +292,35 @@ export interface PublishGate {
 /**
  * Decide whether a round may publish.
  *
- * Blocks are states where publishing would send a wrong game or contradict stated intent: a
- * team in two rooms, a team both playing and benched, or references to teams/rooms that no
- * longer exist. Warnings are states where the round may be legitimately ragged — a team nobody
- * has placed yet — but the operator must say so on the record. Incomplete pairings are not
- * listed here: `planRound` already publishes those rooms cleared, and the cleared-room review
- * item is their warning.
+ * Blocks are states where publishing would send a wrong game, drop an intended game, or
+ * contradict stated intent: a team in two rooms, a team both playing and benched, references
+ * to teams/rooms that no longer exist, a room with only one side chosen (publishing it would
+ * silently clear the intended game through the generic publish-anyway path), or a team
+ * matched against itself (structurally invalid — never an overridable exception). Warnings
+ * are states where the round may be legitimately ragged — a team nobody has placed yet — but
+ * the operator must say so on the record. (`planRound` still clears bad rooms as
+ * defense-in-depth, but the gate fires first, so a blocked round publishes nothing.)
  */
 export function roundPublishGate(
   account: RoundAccount,
   teamName: (teamId: string) => string = (teamId) => teamId,
+  roomName: (roomId: string) => string = (roomId) => roomId,
 ): PublishGate {
   const blocks: string[] = [];
   const warnings: string[] = [];
 
+  for (const entry of account.incomplete) {
+    blocks.push(
+      `Room ${roomName(entry.roomId)} has only one side chosen (${teamName(entry.chosenTeamId)} on the ${entry.side}). ` +
+        `Choose the second team or clear the room before publishing.`,
+    );
+  }
+  for (const entry of account.sameTeam) {
+    blocks.push(
+      `Room ${roomName(entry.roomId)} matches ${teamName(entry.teamId)} against itself. ` +
+        `A team cannot play itself: correct the pairing before publishing.`,
+    );
+  }
   for (const duplicate of account.duplicates) {
     blocks.push(
       `${teamName(duplicate.teamId)} is assigned in ${duplicate.roomIds.length} rooms this round. ` +

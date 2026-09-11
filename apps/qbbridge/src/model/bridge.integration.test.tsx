@@ -2406,6 +2406,58 @@ describe('round accountability and portable plans', () => {
     }
   });
 
+  test('an incomplete pairing blocks publish with no mirror until the second side is chosen', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      const [, second] = rendered.result.current.state.rooms;
+      act(() => {
+        rendered.result.current.setRoomTeams(second.id, 'right', null);
+      });
+      const mirrorsBefore = mirrorCalls();
+      await act(async () => {
+        await rendered.result.current.publish();
+      });
+      // Blocked: nothing reaches the relay and no review opens to override it through.
+      expect(mirrorCalls()).toBe(mirrorsBefore);
+      expect(rendered.result.current.pendingPublicationReview).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/only one side chosen/);
+
+      // Choosing the second side unblocks: the same publish now sends a mirror.
+      act(() => {
+        rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
+      });
+      await publishReviewed(rendered);
+      expect(mirrorCalls()).toBeGreaterThan(mirrorsBefore);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('a same-team pairing blocks publish with no exceptional override', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      const [, second] = rendered.result.current.state.rooms;
+      act(() => {
+        rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Cony');
+        rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Cony');
+      });
+      const mirrorsBefore = mirrorCalls();
+      await act(async () => {
+        await rendered.result.current.publish();
+      });
+      // A team cannot play itself: blocked, no mirror, and no review to confirm through.
+      expect(mirrorCalls()).toBe(mirrorsBefore);
+      expect(rendered.result.current.pendingPublicationReview).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/against itself/);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
   test('stating a bye moves that team out of unaccounted', async () => {
     const rendered = await setUpTournament();
     try {
@@ -2577,6 +2629,73 @@ describe('round accountability and portable plans', () => {
       expect(confirmed).toBe(true);
       expect(rendered.result.current.pendingPackExport).toBeNull();
       expect(writtenPackFiles.length).toBeGreaterThan(0);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('a partial pack write leaves no manifest and names every missing file', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      // Learn the assignment names with a clean export, then retry into a folder where one
+      // of them already exists: the second write must fail while the first lands.
+      assignmentFolder = '/tournaments/pack-clean';
+      let clean = false;
+      await act(async () => {
+        clean = await rendered.result.current.exportEmergencyPack(1);
+      });
+      expect(clean).toBe(true);
+      const names = writtenAssignmentFiles.map((file) => String(file.fileName));
+      expect(names.length).toBeGreaterThan(1);
+
+      writtenAssignmentFiles = [];
+      writtenPackFiles = [];
+      assignmentFolder = '/tournaments/pack-partial';
+      existingPaths.add(`/tournaments/pack-partial/${names[1]}`);
+      let partial = true;
+      await act(async () => {
+        partial = await rendered.result.current.exportEmergencyPack(1);
+      });
+      expect(partial).toBe(false);
+      // The manifest must never list games whose files were not written...
+      expect(writtenPackFiles.some((file) => String(file.fileName) === 'PACK-MANIFEST.json')).toBe(false);
+      // ...and the failure names the missing file, not just the first error in passing.
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/incomplete/);
+      expect(rendered.result.current.notice?.message).toContain(names[1] as string);
+      expect(rendered.result.current.notice?.message).toMatch(/No manifest was written/);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('confirming a reviewed pack revalidates authority against current rooms', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      await publishReviewed(rendered);
+      // Pack round 1 while its rooms are live: held for review.
+      await act(async () => {
+        await rendered.result.current.exportEmergencyPack(1);
+      });
+      expect(rendered.result.current.pendingPackExport?.warnings.length).toBeGreaterThan(0);
+
+      // Publish the next round before confirming: the same rooms now serve different games,
+      // so the reviewed warnings no longer describe the world.
+      await setUpRound(rendered, 4);
+      await publishReviewed(rendered);
+
+      let confirmed = true;
+      await act(async () => {
+        confirmed = await rendered.result.current.confirmPackExport();
+      });
+      expect(confirmed).toBe(false);
+      // Refused and re-held with fresh warnings — nothing written on a stale review.
+      expect(rendered.result.current.pendingPackExport).not.toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/since the review/);
+      expect(writtenPackFiles.some((file) => String(file.fileName) === 'PACK-MANIFEST.json')).toBe(false);
     } finally {
       rendered.unmount();
     }

@@ -1639,6 +1639,8 @@ export function useBridge(): BridgeApi {
     const pairings = pairingsForRound(current.roundPlans, round.id);
     const teamNameForReview = (id: string): string =>
       tournament.teams.find((team) => team.id === id)?.name ?? id;
+    const roomNameForReview = (id: string): string =>
+      current.rooms.find((room) => room.id === id)?.name ?? id;
     // The accountability gate runs before anything is built: a blocked round publishes nothing,
     // and a warned round publishes only through the explicit review below.
     const account = accountRound({
@@ -1648,7 +1650,7 @@ export function useBridge(): BridgeApi {
       teamIds: new Set(tournament.teams.map((team) => team.id)),
       roomIds: new Set(current.rooms.map((room) => room.id)),
     });
-    const gate = roundPublishGate(account, teamNameForReview);
+    const gate = roundPublishGate(account, teamNameForReview, roomNameForReview);
     if (gate.blocks.length > 0) {
       setNotice({
         kind: 'bad',
@@ -1848,6 +1850,11 @@ export function useBridge(): BridgeApi {
 
   const describePlanDiffProblems = (diff: PlanImportDiff): string => {
     const parts: string[] = [];
+    if (diff.conflictedRoomIds.length > 0) {
+      parts.push(
+        `rooms with two different games in one round: ${diff.conflictedRoomIds.join(', ')}. Fix the file so each room appears once`,
+      );
+    }
     if (diff.unknownRoundIds.length > 0) {
       parts.push(`rounds this setup does not have: ${diff.unknownRoundIds.join(', ')}`);
     }
@@ -1950,6 +1957,7 @@ export function useBridge(): BridgeApi {
             unknownRoundIds: [],
             unknownRoomIds: [],
             unknownTeamIds: [],
+            conflictedRoomIds: [],
             clean: true,
           },
         });
@@ -2046,24 +2054,47 @@ export function useBridge(): BridgeApi {
         setNotice({ kind: 'warn', message: 'Choose an output folder for the emergency pack.' });
         return false;
       }
-      let written = 0;
-      const failures: string[] = [];
-      for (const file of pack.files) {
+      // Manifest-last atomicity: the manifest must never list games whose files were not
+      // written. Assignment files land first (exclusive-create, so a retry never replaces a
+      // scorer-held file); only a complete set earns its manifest and README. A partial run
+      // therefore leaves files-but-no-manifest — explicitly suspect per the README rule —
+      // never a manifest that lies about what is there.
+      const assignments = pack.files.filter((file) => file.kind === 'assignment');
+      const trailers = pack.files.filter((file) => file.kind !== 'assignment');
+      const written: string[] = [];
+      const missing: string[] = [];
+      for (const file of assignments) {
         try {
-          if (file.kind === 'assignment') {
-            await writeAssignmentFile(folder, file.fileName, file.contents);
-          } else {
-            await writeRoundPackFile(folder, file.fileName, file.contents, file.overwrite);
-          }
-          written += 1;
+          await writeAssignmentFile(folder, file.fileName, file.contents);
+          written.push(file.fileName);
         } catch (error) {
-          failures.push(`${file.fileName}: ${(error as Error).message}`);
+          missing.push(`${file.fileName}: ${(error as Error).message}`);
         }
       }
-      if (failures.length > 0) {
+      if (missing.length > 0) {
         setNotice({
           kind: 'bad',
-          message: `Wrote ${written} of ${pack.files.length} pack files to ${folder}. ${failures[0]} Choose another folder and retry the rest.`,
+          message:
+            `Emergency pack incomplete in ${folder}: ${missing.length} of ${assignments.length} game file(s) failed ` +
+            `(${missing.join('; ')}). No manifest was written, so nothing there claims to be a pack. ` +
+            `Delete the ${written.length} partial file(s) or choose an empty folder and export again.`,
+        });
+        return false;
+      }
+      const trailerFailures: string[] = [];
+      for (const file of trailers) {
+        try {
+          await writeRoundPackFile(folder, file.fileName, file.contents, file.overwrite);
+        } catch (error) {
+          trailerFailures.push(`${file.fileName}: ${(error as Error).message}`);
+        }
+      }
+      if (trailerFailures.length > 0) {
+        setNotice({
+          kind: 'bad',
+          message:
+            `All ${assignments.length} game file(s) are in ${folder}, but the manifest/README failed ` +
+            `(${trailerFailures.join('; ')}). Treat the folder as suspect until a clean export rewrites it.`,
         });
         return false;
       }
@@ -2126,9 +2157,33 @@ export function useBridge(): BridgeApi {
   const confirmPackExport = useCallback(async (): Promise<boolean> => {
     const pending = pendingPackExportRef.current;
     if (!pending) return false;
+    const current = stateRef.current;
+    if (!tournament) {
+      rememberPackExport(null);
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before exporting a pack.' });
+      return false;
+    }
+    // Revalidate authority at confirm time, not review time: rooms may have gone live on the
+    // relay while the operator was reading the warnings. Any conflict that was not in the
+    // reviewed set refuses and re-holds for review; resolved conflicts simply drop out.
+    const roundName = (roundId: string): string =>
+      tournament.rounds.find((round) => round.id === roundId)?.displayName ?? roundId;
+    const fresh = packAuthorityWarnings({ pack: pending.pack, rooms: current.rooms, roundName });
+    const reviewed = new Set(pending.warnings);
+    const unreviewed = fresh.filter((warning) => !reviewed.has(warning));
+    if (unreviewed.length > 0) {
+      rememberPackExport({ pack: pending.pack, roundCount: pending.roundCount, warnings: fresh });
+      setNotice({
+        kind: 'bad',
+        message:
+          `${unreviewed.length} more pack room(s) went live on the relay since the review ` +
+          `(${unreviewed.join(' ')}). Re-review the authority warnings before anything is written.`,
+      });
+      return false;
+    }
     rememberPackExport(null);
     return writePackFiles(pending.pack);
-  }, [rememberPackExport, writePackFiles]);
+  }, [rememberPackExport, tournament, writePackFiles]);
 
   const cancelPackExport = useCallback((): void => {
     if (!pendingPackExportRef.current) return;

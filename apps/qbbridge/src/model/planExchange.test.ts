@@ -97,6 +97,42 @@ describe('portable plan format', () => {
     expect(applied.plans[0]!.pairings[0]).toMatchObject({ leftTeamId: 'a', rightTeamId: 'b' });
   });
 
+  test('two rows that disagree about one room are rejected at review and at apply', () => {
+    const plan = samplePlan();
+    plan.rounds[0]!.pairings.push({ roomId: 'room-1', leftTeamId: 'c', rightTeamId: 'd' });
+    const diff = diffPortablePlan(plan, known);
+    expect(diff.clean).toBe(false);
+    expect(diff.conflictedRoomIds).toEqual(['room-1']);
+    const applied = applyPortablePlan(plan, known);
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    // The refusal names the room: the operator fixes the file, not the fallout.
+    expect(applied.error).toMatch(/room-1/);
+  });
+
+  test('exact-duplicate rows still collapse instead of refusing', () => {
+    const plan = samplePlan();
+    plan.rounds[0]!.pairings.push({ roomId: 'room-1', leftTeamId: 'a', rightTeamId: 'b' });
+    expect(diffPortablePlan(plan, known).clean).toBe(true);
+    const applied = applyPortablePlan(plan, known);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    expect(applied.plans[0]!.pairings.filter((pairing) => pairing.roomId === 'room-1')).toHaveLength(2);
+  });
+
+  test('id mappings that merge two rows onto one room are refused', () => {
+    // Two known rooms mapped onto one local room: the mapping itself creates the conflict.
+    const mapped = samplePlan();
+    mapped.rounds[0]!.pairings = [
+      { roomId: 'room-1', leftTeamId: 'a', rightTeamId: 'b' },
+      { roomId: 'room-2', leftTeamId: 'c', rightTeamId: 'd' },
+    ];
+    const applied = applyPortablePlan(mapped, known, { rooms: { 'room-2': 'room-1' } });
+    expect(applied.ok).toBe(false);
+    if (applied.ok) return;
+    expect(applied.error).toMatch(/room-1/);
+  });
+
   test('a different fingerprint warns but still validates ids', () => {
     const plan = samplePlan();
     plan.yftFingerprint = 'fp-reseeded';

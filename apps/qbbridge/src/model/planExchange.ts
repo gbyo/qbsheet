@@ -196,8 +196,36 @@ export interface PlanImportDiff {
   unknownRoundIds: string[];
   unknownRoomIds: { id: string; name: string }[];
   unknownTeamIds: string[];
+  /**
+   * Room ids the file assigns two different games in the same round. Applying either row
+   * would be choosing a game the operator may not have meant, so the file is rejected.
+   */
+  conflictedRoomIds: string[];
   /** True when every id resolves and only the fingerprint question remains. */
   clean: boolean;
+}
+
+/**
+ * Rooms with two rows that disagree about one round. Exact-duplicate rows are harmless (the
+ * normalizer collapses them); disagreeing rows are ambiguous and must refuse, because every
+ * downstream lookup is first-row-wins and would silently publish one of the two games.
+ */
+export function conflictingRoomIds(pairings: readonly PlannedPairing[]): string[] {
+  const firstByRoom = new Map<string, PlannedPairing>();
+  const conflicted = new Set<string>();
+  for (const pairing of pairings) {
+    // All-null rows choose nothing; the apply step drops them, so they compete with nothing.
+    if (pairing.leftTeamId === null && pairing.rightTeamId === null) continue;
+    const first = firstByRoom.get(pairing.roomId);
+    if (!first) {
+      firstByRoom.set(pairing.roomId, pairing);
+      continue;
+    }
+    if (first.leftTeamId !== pairing.leftTeamId || first.rightTeamId !== pairing.rightTeamId) {
+      conflicted.add(pairing.roomId);
+    }
+  }
+  return [...conflicted];
 }
 
 export interface PlanImportKnown {
@@ -219,6 +247,7 @@ export function diffPortablePlan(plan: PortableRoundPlan, known: PlanImportKnown
   const unknownRoomIds: { id: string; name: string }[] = [];
   const unknownTeams = new Set<string>();
   const seenRooms = new Set<string>();
+  const conflictedRooms = new Set<string>();
   let pairingCount = 0;
   let byeCount = 0;
 
@@ -226,6 +255,7 @@ export function diffPortablePlan(plan: PortableRoundPlan, known: PlanImportKnown
     if (!known.roundIds.has(round.roundId) && !unknownRoundIds.includes(round.roundId)) {
       unknownRoundIds.push(round.roundId);
     }
+    for (const roomId of conflictingRoomIds(round.pairings)) conflictedRooms.add(roomId);
     for (const pairing of round.pairings) {
       pairingCount += 1;
       if (!known.roomIds.has(pairing.roomId) && !seenRooms.has(pairing.roomId)) {
@@ -248,6 +278,7 @@ export function diffPortablePlan(plan: PortableRoundPlan, known: PlanImportKnown
     known.yftFingerprint !== null &&
     plan.yftFingerprint === known.yftFingerprint;
   const unknownTeamIds = [...unknownTeams];
+  const conflictedRoomIds = [...conflictedRooms];
   return {
     fingerprintMatch,
     planFingerprint: plan.yftFingerprint,
@@ -259,7 +290,12 @@ export function diffPortablePlan(plan: PortableRoundPlan, known: PlanImportKnown
     unknownRoundIds,
     unknownRoomIds,
     unknownTeamIds,
-    clean: unknownRoundIds.length === 0 && unknownRoomIds.length === 0 && unknownTeamIds.length === 0,
+    conflictedRoomIds,
+    clean:
+      unknownRoundIds.length === 0 &&
+      unknownRoomIds.length === 0 &&
+      unknownTeamIds.length === 0 &&
+      conflictedRoomIds.length === 0,
   };
 }
 
@@ -277,9 +313,12 @@ export type ApplyPlanResult =
  *
  * Refuses unknown ids unless the explicit map resolves every one of them. The map translates
  * planned ids to local ids; anything still unknown after mapping is an error naming the ids,
- * and nothing is partially applied. Replacing whole rounds (not merging pairings) keeps the
- * import an explicit snapshot: a pairing deleted from the plan file disappears locally rather
- * than lingering as a ghost the operator cannot see.
+ * and nothing is partially applied. Two rows that disagree about one room — in the file or
+ * after mapping — are likewise refused with the rooms named: downstream lookups are
+ * first-row-wins, so applying either row would silently publish a game the operator may not
+ * have meant. Replacing whole rounds (not merging pairings) keeps the import an explicit
+ * snapshot: a pairing deleted from the plan file disappears locally rather than lingering as
+ * a ghost the operator cannot see.
  */
 export function applyPortablePlan(
   plan: PortableRoundPlan,
@@ -320,14 +359,32 @@ export function applyPortablePlan(
     if (teamId === null) return null;
     return teamMap[teamId] ?? teamId;
   };
+  const translate = (pairing: {
+    roomId: string;
+    leftTeamId: string | null;
+    rightTeamId: string | null;
+  }): PlannedPairing => ({
+    roomId: roomMap[pairing.roomId] ?? pairing.roomId,
+    leftTeamId: translateTeam(pairing.leftTeamId),
+    rightTeamId: translateTeam(pairing.rightTeamId),
+  });
+  // Explicit id mappings can merge two different rows onto one room (or the file may simply
+  // disagree with itself): either way, applying one row would be choosing a game the
+  // operator may not have meant. Refuse, naming the rooms, instead of first-row-wins.
+  const mappedConflicts = new Set<string>();
+  for (const round of plan.rounds) {
+    for (const roomId of conflictingRoomIds(round.pairings.map(translate))) mappedConflicts.add(roomId);
+  }
+  if (mappedConflicts.size > 0) {
+    return {
+      ok: false,
+      error: `This plan gives room(s) ${[...mappedConflicts].join(', ')} two different games in one round. Fix the file (or the id mappings) so each room appears once.`,
+    };
+  }
   const plans: RoundPlan[] = plan.rounds.map((round) => ({
     roundId: round.roundId,
     pairings: round.pairings
-      .map((pairing): PlannedPairing => ({
-        roomId: roomMap[pairing.roomId] ?? pairing.roomId,
-        leftTeamId: translateTeam(pairing.leftTeamId),
-        rightTeamId: translateTeam(pairing.rightTeamId),
-      }))
+      .map(translate)
       .filter((pairing) => pairing.leftTeamId !== null || pairing.rightTeamId !== null),
   }));
   const dispositions: RoundDisposition[] = plan.rounds.flatMap((round) => {
