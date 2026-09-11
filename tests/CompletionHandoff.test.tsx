@@ -123,12 +123,12 @@ describe('handoff acknowledgement', () => {
     });
   }
 
-  test('the upload confirmation is the only primary action while it is pending', () => {
+  test('the handoff confirmation is the only primary action while it is pending', () => {
     show(pendingDownloaded());
 
     expect(screen.getByText('Waiting for handoff')).toBeInTheDocument();
     expect(screen.getByText(/QBJ downloaded/)).toBeInTheDocument();
-    const confirm = screen.getByRole('button', { name: 'I uploaded the result' });
+    const confirm = screen.getByRole('button', { name: 'I handed off the result' });
     expect(confirm).toHaveClass('is-primary');
     expect(primaryButtons()).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
@@ -140,7 +140,7 @@ describe('handoff acknowledgement', () => {
     const onUpdate = vi.fn().mockResolvedValue(false);
     show(pendingDownloaded(), { onUpdate });
 
-    fireEvent.click(screen.getByRole('button', { name: 'I uploaded the result' }));
+    fireEvent.click(screen.getByRole('button', { name: 'I handed off the result' }));
     expect(onUpdate).toHaveBeenCalledWith('handoff-result', {
       handoffAcknowledgedAt: expect.any(String),
     });
@@ -168,7 +168,7 @@ describe('handoff acknowledgement', () => {
     );
 
     expect(screen.getByText(/Result handoff confirmed/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'I uploaded the result' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'I handed off the result' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
     expect(primaryButtons()).toHaveLength(1);
   });
@@ -292,7 +292,7 @@ describe('accepted variants and manual games', () => {
     expect(screen.getByText('Saved on this device')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Done' })).toHaveClass('is-primary');
     expect(primaryButtons()).toHaveLength(1);
-    expect(screen.queryByRole('button', { name: 'I uploaded the result' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'I handed off the result' })).toBeNull();
     expect(screen.queryByText('This result needs to be handed over')).toBeNull();
 
     const exports = screen.getByText('Files & exports').closest('details');

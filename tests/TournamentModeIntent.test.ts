@@ -9,7 +9,7 @@ const setup: IGameSetup = {
   right: { name: 'Greenwood', players: ['Emma Turner', 'Jordan Lee'] },
 };
 
-function activeGameMenu(): string[] {
+function activeGameMenu(tournamentControlled = false): string[] {
   const rules = new ScoringRules(CommonRuleSets.AcfPowers);
   rules.maximumPlayersPerTeam = 2;
   const format = scoringRulesToScorekeeperFormat(rules);
@@ -25,6 +25,7 @@ function activeGameMenu(): string[] {
     submitting: false,
     canDownloadForms: false,
     canCorrectGame: false,
+    tournamentControlled,
     openDialog: vi.fn(),
     setKeyboardEnabled: vi.fn(),
     record: vi.fn().mockReturnValue(true),
@@ -53,8 +54,12 @@ describe('connected tournament scorer intent', () => {
     expect(welcome).not.toContain('192.168.1.50:8080');
   });
 
-  test('an active scoresheet does not offer Arcade as an ordinary game command', () => {
-    expect(activeGameMenu()).not.toContain('Take a break…');
+  test('a tournament-controlled scoresheet does not offer Arcade as an ordinary game command', () => {
+    expect(activeGameMenu(true)).not.toContain('Take a break…');
+  });
+
+  test('a standalone scoresheet keeps the Arcade break entry', () => {
+    expect(activeGameMenu(false)).toContain('Take a break…');
   });
 
   test('manual result handoff copy does not pretend the transport was an upload', () => {
