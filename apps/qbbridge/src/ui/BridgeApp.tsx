@@ -99,8 +99,9 @@ export default function BridgeApp() {
             ) : null}
             {bridge.persistenceSavePending ? (
               <Notice tone="warning">
-                The relay accepted the last change, but this machine has not saved the new relay revision.
-                Keep QBBridge open and retry before restarting.
+                QBBridge cannot save the current tournament state on this machine. Recent room setup and other
+                changes are only in memory and will be lost if the app restarts. Restore local storage access
+                and retry before restarting.
                 <Button
                   size="sm"
                   variant="quiet"

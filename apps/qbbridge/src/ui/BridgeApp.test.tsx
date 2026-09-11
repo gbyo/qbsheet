@@ -9,8 +9,9 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { UserEvent } from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { resetNativeHost } from '../model/native';
+import { storageKey } from '../model/persistence';
 import { yftFixtureText } from '../tests/fixture';
 import BridgeApp from './BridgeApp';
 
@@ -45,6 +46,7 @@ async function pickTeam(user: UserEvent, label: string, name: string): Promise<v
 
 beforeEach(installFakeTauri);
 afterEach(() => {
+  vi.restoreAllMocks();
   openedFixture = yftFixtureText();
   Reflect.deleteProperty(globalThis as Record<string, unknown>, '__TAURI_INTERNALS__');
   resetNativeHost();
@@ -270,6 +272,46 @@ describe('the shell', () => {
     for (const claim of ['Imported', 'Accepted', 'Official', 'standings', 'Reviewed']) {
       expect(document.body.textContent).not.toContain(claim);
     }
+  });
+
+  test('keeps local edits usable but warns until a retry saves the latest state', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams · 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+
+    const realSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    let storageBlocked = true;
+    vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      if (storageBlocked && key === storageKey) {
+        throw new DOMException('storage blocked', 'QuotaExceededError');
+      }
+      realSetItem(key, value);
+    });
+
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    expect(screen.getByText(/cannot save the current tournament state on this machine/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry saving local state' })).toBeInTheDocument();
+
+    const name = screen.getByRole('textbox', { name: 'Name of Room 1' });
+    await user.clear(name);
+    await user.type(name, 'Auditorium');
+    expect(screen.getByRole('textbox', { name: 'Name of Auditorium' })).toHaveValue('Auditorium');
+
+    storageBlocked = false;
+    await user.click(screen.getByRole('button', { name: 'Retry saving local state' }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText(/cannot save the current tournament state on this machine/i),
+      ).not.toBeInTheDocument(),
+    );
+
+    const saved = JSON.parse(globalThis.localStorage.getItem(storageKey) ?? '{}') as {
+      rooms?: Array<{ name?: string }>;
+    };
+    expect(saved.rooms).toHaveLength(1);
+    expect(saved.rooms?.[0]?.name).toBe('Auditorium');
   });
 
   test('the help screen is reachable and carries the setup sections', async () => {

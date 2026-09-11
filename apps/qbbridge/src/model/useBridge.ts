@@ -428,12 +428,15 @@ export function useBridge(): BridgeApi {
   const commit = useCallback(
     (
       next: BridgeState | ((current: BridgeState) => BridgeState),
-      options: { critical?: boolean } = {},
     ): { state: BridgeState; persisted: PersistResult } => {
       const current = stateRef.current;
       const resolved = typeof next === 'function' ? next(current) : next;
       const persisted = saveState(resolved);
-      if (options.critical) setPersistenceSavePending(!persisted.ok);
+      // Every BridgeState transition contains tournament-day working state. A failed ordinary
+      // edit is still usable in memory, but it must remain visibly non-durable until a later
+      // retry succeeds. The shared flag is deliberately broader than the old critical-only path
+      // so room/setup edits cannot disappear silently on restart.
+      setPersistenceSavePending(!persisted.ok);
       activateState(resolved);
       return { state: resolved, persisted };
     },
@@ -785,9 +788,7 @@ export function useBridge(): BridgeApi {
    */
   const forgetRelayCredential = useCallback(() => {
     pollGenerationRef.current += 1;
-    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null }), {
-      critical: true,
-    }).persisted;
+    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
     setRelayReachable(null);
     setNotice({
@@ -936,48 +937,44 @@ export function useBridge(): BridgeApi {
         outcome.assignments.map((entry) => [entry.roomId, assignmentFingerprint(entry.document)]),
       );
       const cleared = new Set(outcome.clearedRoomIds);
-      return commit(
-        (current) => ({
-          ...current,
-          relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
-          rooms: current.rooms.map((room) => {
-            const wasMirrored = pendingCodes.has(room.id);
-            if (!wasMirrored) return room;
-            const sentPendingCode = pendingCodes.get(room.id) ?? null;
-            const pendingStillCurrent = room.pendingPairingCode === sentPendingCode;
-            const published = {
-              ...room,
-              pairingCode:
-                pendingStillCurrent && sentPendingCode !== null ? sentPendingCode : room.pairingCode,
-              pendingPairingCode: pendingStillCurrent ? null : room.pendingPairingCode,
-              relayPublished: true,
-            };
-            const assignment = byRoom.get(room.id);
-            if (assignment) {
-              return {
-                ...published,
-                publishedMatchId: assignment.matchId,
-                publishedRoundId: assignment.roundId,
-                publishedAssignmentFingerprint: fingerprints.get(room.id) ?? null,
-                assignmentRevision: assignment.assignmentRevision,
-              };
-            }
-            if (!cleared.has(room.id)) return published;
-            // The relay just cleared this room. Local state says so too, or the room table would
-            // keep reporting a game that is no longer on the relay.
+      return commit((current) => ({
+        ...current,
+        relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
+        rooms: current.rooms.map((room) => {
+          const wasMirrored = pendingCodes.has(room.id);
+          if (!wasMirrored) return room;
+          const sentPendingCode = pendingCodes.get(room.id) ?? null;
+          const pendingStillCurrent = room.pendingPairingCode === sentPendingCode;
+          const published = {
+            ...room,
+            pairingCode: pendingStillCurrent && sentPendingCode !== null ? sentPendingCode : room.pairingCode,
+            pendingPairingCode: pendingStillCurrent ? null : room.pendingPairingCode,
+            relayPublished: true,
+          };
+          const assignment = byRoom.get(room.id);
+          if (assignment) {
             return {
               ...published,
-              publishedMatchId: null,
-              publishedRoundId: null,
-              publishedAssignmentFingerprint: null,
-              assignmentRevision: room.assignmentRevision + 1,
+              publishedMatchId: assignment.matchId,
+              publishedRoundId: assignment.roundId,
+              publishedAssignmentFingerprint: fingerprints.get(room.id) ?? null,
+              assignmentRevision: assignment.assignmentRevision,
             };
-          }),
-          pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
-          retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
+          }
+          if (!cleared.has(room.id)) return published;
+          // The relay just cleared this room. Local state says so too, or the room table would
+          // keep reporting a game that is no longer on the relay.
+          return {
+            ...published,
+            publishedMatchId: null,
+            publishedRoundId: null,
+            publishedAssignmentFingerprint: null,
+            assignmentRevision: room.assignmentRevision + 1,
+          };
         }),
-        { critical: true },
-      ).persisted;
+        pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
+        retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
+      })).persisted;
     },
     [commit],
   );
