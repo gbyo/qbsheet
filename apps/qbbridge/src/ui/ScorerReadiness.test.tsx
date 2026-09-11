@@ -133,6 +133,50 @@ describe('Scorer-origin readiness UX', () => {
     expect(token).toHaveValue('still-needed');
   });
 
+  test('cancelling a relay change discards its draft and preserves the connected relay', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    const connectedRelay = bridge.state.relay;
+    bridge.changingRelay = true;
+    bridge.beginRelayChange = vi.fn(() => {
+      bridge.changingRelay = true;
+    });
+    bridge.cancelRelayChange = vi.fn(() => {
+      bridge.changingRelay = false;
+    });
+    bridge.connectRelay = vi.fn(async () => true);
+    const rendered = render(<SetupView bridge={bridge} />);
+
+    await user.type(screen.getByLabelText('Relay URL'), 'https://replacement.example');
+    const tournamentId = screen.getByLabelText('Tournament ID');
+    await user.clear(tournamentId);
+    await user.type(tournamentId, '2345bcdfghjkmnpqrstvwxyz');
+    await user.type(screen.getByLabelText('One-time setup token'), 'abandoned-token');
+    expect(screen.getByRole('button', { name: 'Claim New Relay' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    rendered.rerender(<SetupView bridge={bridge} />);
+    expect(bridge.cancelRelayChange).toHaveBeenCalledOnce();
+    expect(bridge.state.relay).toBe(connectedRelay);
+    expect(screen.getByText('https://relay.example')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Change Relay…' }));
+    rendered.rerender(<SetupView bridge={bridge} />);
+
+    expect(screen.getByLabelText('Relay URL')).toHaveValue('');
+    expect(screen.getByLabelText('Tournament ID')).not.toHaveValue('2345bcdfghjkmnpqrstvwxyz');
+    expect(screen.getByLabelText('One-time setup token')).toHaveValue('');
+    const claim = screen.getByRole('button', { name: 'Claim New Relay' });
+    expect(claim).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Relay URL'), 'https://replacement.example');
+    expect(claim).toBeDisabled();
+    await user.type(screen.getByLabelText('One-time setup token'), 'new-token');
+    expect(claim).toBeEnabled();
+    expect(bridge.connectRelay).not.toHaveBeenCalled();
+    expect(bridge.state.relay).toBe(connectedRelay);
+  });
+
   test('setup names the deployment fix when qbsheet.com is blocked', () => {
     render(<SetupView bridge={bridgeFor('blocked')} />);
 
