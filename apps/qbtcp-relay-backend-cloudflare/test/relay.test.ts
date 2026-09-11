@@ -17,6 +17,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { trimTrailingSlashes } from '../src/protocol/cors';
 import { validateStreamFrame } from '../src/protocol/frames';
 import { resultFingerprint } from '../src/protocol/qbj';
+import FruityServerClient from '../../../src/integrations/fruity/FruityServerClient';
+import { assignmentDocument } from '../../../tests/qbjDocuments';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
 import receiptFixture from '../../../tests/fixtures/qbtcp-stream/receipt.json';
 import helloFixture from '../../../tests/fixtures/qbtcp-stream/hello.json';
@@ -566,6 +568,136 @@ describe('sessions and writers', () => {
     expect(second.token).not.toBe(first.token);
   });
 
+  it('serves the assignment lifecycle through the real scorer QBTCP adapter', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+    const roomId = 'room-scorer';
+    const code = '47474747';
+    const pairingHash = await sha256Hex(code);
+
+    expect(
+      (
+        await mirror(management, tournamentId, {
+          revision: 1,
+          rooms: [{ room_id: roomId, name: 'Room Scorer', pairing_code_hash: pairingHash }],
+          sessions: [],
+        })
+      ).status,
+    ).toBe(200);
+
+    const scorerFetch: typeof fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('origin', 'https://scorer.example');
+      return SELF.fetch(input, { ...init, headers });
+    };
+    const scorer = new FruityServerClient(tournamentBase(tournamentId), scorerFetch);
+    const paired = await scorer.join(code, roomId);
+    expect(paired).toMatchObject({ ok: true });
+    expect(scorer.isQbtcp).toBe(true);
+    expect(scorer.missingCapabilities()).toEqual([]);
+    if (!paired.ok) throw new Error(paired.error);
+
+    const identity = {
+      roomId: paired.value.roomId,
+      roomName: paired.value.roomName,
+      token: paired.value.accessToken,
+      deviceId: 'ordinary-scorer',
+    };
+
+    const initialStatus = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': identity.token, origin: 'https://scorer.example' },
+    });
+    expect(initialStatus.status).toBe(200);
+    expect(await initialStatus.json()).toMatchObject({ state: 'none', session: null });
+
+    const initialAssignment = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment`, {
+      headers: { 'x-yf-room-token': identity.token, origin: 'https://scorer.example' },
+    });
+    expect(initialAssignment.status).toBe(204);
+    expect(await initialAssignment.text()).toBe('');
+
+    const waiting = await scorer.assignment(identity);
+    expect(waiting).toMatchObject({ ok: true, value: { state: 'none', definition: null, session: null } });
+
+    const assignedQbj = assignmentDocument();
+    expect(
+      (
+        await mirror(management, tournamentId, {
+          revision: 2,
+          rooms: [
+            {
+              room_id: roomId,
+              name: 'Room Scorer',
+              pairing_code_hash: pairingHash,
+              assignment_qbj: assignedQbj,
+              match_id: 'Match_sm-4471',
+              round_revision: 3,
+              assignment_revision: 7,
+            },
+          ],
+          sessions: [],
+        })
+      ).status,
+    ).toBe(200);
+
+    const assignedStatus = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': identity.token, origin: 'https://scorer.example' },
+    });
+    expect(assignedStatus.status).toBe(200);
+    expect(await assignedStatus.json()).toMatchObject({
+      state: 'assigned',
+      match_id: 'Match_sm-4471',
+      round_revision: 3,
+      assignment_revision: 7,
+      session: null,
+    });
+
+    const assignedResponse = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment`, {
+      headers: { 'x-yf-room-token': identity.token, origin: 'https://scorer.example' },
+    });
+    expect(assignedResponse.status).toBe(200);
+    expect(assignedResponse.headers.get('content-type')).toBe('application/vnd.quizbowl.qbj+json');
+    expect(await assignedResponse.json()).toEqual(assignedQbj);
+
+    const assigned = await scorer.assignment(identity);
+    expect(assigned).toMatchObject({ ok: true, value: { state: 'assigned' } });
+    if (!assigned.ok) throw new Error(assigned.error);
+    expect(assigned.value.definition).not.toBeNull();
+    expect(assigned.value.definition?.origin).toBe('qbj');
+    expect(assigned.value.scheduledMatchId).toBe('Match_sm-4471');
+
+    const opened = await scorer.openSession(identity, assigned.value.scheduledMatchId!);
+    expect(opened).toMatchObject({ ok: true });
+    if (!opened.ok) throw new Error(opened.error);
+
+    const statusWithSession = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': identity.token, origin: 'https://scorer.example' },
+    });
+    expect(await statusWithSession.json()).toMatchObject({
+      state: 'assigned',
+      session: {
+        session_id: opened.value.sessionId,
+        status: 'open',
+        resumable: true,
+        final_received: false,
+      },
+    });
+
+    expect(
+      (
+        await mirror(management, tournamentId, {
+          revision: 3,
+          rooms: [{ room_id: roomId, name: 'Room Scorer', pairing_code_hash: pairingHash }],
+          sessions: [],
+        })
+      ).status,
+    ).toBe(200);
+
+    const cleared = await scorer.assignment(identity);
+    expect(cleared).toMatchObject({ ok: true, value: { state: 'none', definition: null, session: null } });
+    expect(scorer.isQbtcp).toBe(true);
+  });
+
   it('refuses to start a room with no assignment', async () => {
     const tournamentId = freshTournamentId();
     const management = await claim(tournamentId);
@@ -615,7 +747,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(waiting.status).toBe(200);
-    expect(await waiting.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await waiting.json()).toMatchObject({ room_id: roomId, state: 'none' });
 
     // A later assignment appears through the same token; no new code exchange is involved.
     await mirror(management, tournamentId, {
@@ -639,7 +771,7 @@ describe('sessions and writers', () => {
     expect(assigned.status).toBe(200);
     expect(await assigned.json()).toMatchObject({
       room_id: roomId,
-      assigned: true,
+      state: 'assigned',
       match_id: 'round-1-match',
     });
 
@@ -653,7 +785,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(cleared.status).toBe(200);
-    expect(await cleared.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await cleared.json()).toMatchObject({ room_id: roomId, state: 'none' });
     const pairedAgain = await pair(tournamentId, code, roomId, `prepair-again-${tournamentId.slice(0, 8)}`);
     expect(pairedAgain.status).toBe(200);
 
@@ -668,7 +800,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(tokenAfterCodeChange.status).toBe(200);
-    expect(await tokenAfterCodeChange.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await tokenAfterCodeChange.json()).toMatchObject({ room_id: roomId, state: 'none' });
     const pairedReplacement = await pair(
       tournamentId,
       replacementCode,
