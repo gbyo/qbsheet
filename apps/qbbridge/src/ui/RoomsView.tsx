@@ -14,6 +14,16 @@ import { useMemo, useState } from 'react';
 import { Button, ConfirmDialog, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
 import { pairingLink } from '../model/pairing';
 import type { Room, RoomStatus } from '../model/rooms';
+import {
+  destinationPoolName,
+  formatRanks,
+  phaseForRound,
+  phasePoolNames,
+  planSuggestionPlacements,
+  roundGroups,
+  schedulePairingWarnings,
+  type SuggestionPlacement,
+} from '../model/schedule';
 import type { BridgeApi } from '../model/useBridge';
 import Qr from './Qr';
 
@@ -25,37 +35,116 @@ const status: Record<RoomStatus, { label: string; tone: Tone }> = {
   'result-received': { label: 'Result received', tone: 'success' },
 };
 
+function poolSizeLabel(pool: { teamIds: readonly string[]; expectedSize?: number }): string {
+  if (pool.teamIds.length > 0) return `${pool.teamIds.length} teams`;
+  if (pool.expectedSize !== undefined) return `${pool.expectedSize} teams · not populated in file`;
+  return 'team membership not in file';
+}
+
+function teamName(tournament: NonNullable<BridgeApi['tournament']>, id: string): string {
+  return tournament.teams.find((team) => team.id === id)?.name ?? id;
+}
+
+function sourceLocationLabel(placement: SuggestionPlacement, roomName: string | undefined): string {
+  const source = placement.suggestion.location
+    ? `Source location: ${placement.suggestion.location}`
+    : 'No room location in file';
+  switch (placement.status) {
+    case 'applied':
+      return `Already in ${roomName ?? 'a room'} · ${source}`;
+    case 'available':
+      return `Will fill ${roomName ?? 'an available room'} · ${source}`;
+    case 'overwrite':
+      return `Will replace the pairing in ${roomName ?? 'a room'} · ${source}`;
+    case 'staged':
+      return `Choose a room manually · ${source}`;
+  }
+}
+
+type PoolFilter = {
+  tournament: NonNullable<BridgeApi['tournament']>;
+  phaseId: string;
+  poolId: string;
+};
+
+type PendingPrefill = {
+  tournament: NonNullable<BridgeApi['tournament']>;
+  plan: SuggestionPlacement[];
+};
+
 export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
   const [pendingRound, setPendingRound] = useState<string | null>(null);
+  const [poolFilter, setPoolFilter] = useState<PoolFilter | null>(null);
+  const [pendingPrefill, setPendingPrefill] = useState<PendingPrefill | null>(null);
   const round = tournament?.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null;
+  const phase = tournament ? phaseForRound(tournament, round) : undefined;
+  const roundGroupsForDisplay = useMemo(() => (tournament ? roundGroups(tournament) : []), [tournament]);
+  const phasePools = useMemo(() => phase?.pools ?? [], [phase]);
+  const activePoolFilter =
+    poolFilter?.tournament === tournament &&
+    poolFilter.phaseId === round?.phaseId &&
+    phasePools.some((pool) => pool.id === poolFilter.poolId)
+      ? poolFilter.poolId
+      : '';
+  const suggestions = useMemo(
+    () =>
+      tournament && round
+        ? tournament.suggestedGames.filter(
+            (suggestion) => suggestion.roundId === round.id && suggestion.phaseId === round.phaseId,
+          )
+        : [],
+    [round, tournament],
+  );
+  const suggestionPlacements = useMemo(
+    () => planSuggestionPlacements(suggestions, state.rooms),
+    [state.rooms, suggestions],
+  );
+  const actionableSuggestions = suggestionPlacements.filter(
+    (placement) => placement.roomId !== null && placement.status !== 'applied',
+  );
+  const hasOverwrite = actionableSuggestions.some((placement) => placement.status === 'overwrite');
+
+  // A reload changes the source evidence. A pending confirmation is only valid for the exact
+  // tournament object from which its plan was derived; the derived value closes it otherwise.
+  const activePendingPrefill = pendingPrefill?.tournament === tournament ? pendingPrefill.plan : null;
 
   const warningsByRoom = useMemo(() => {
     const map = new Map<string, string[]>();
-    for (const warning of bridge.warnings) {
+    const warnings = round
+      ? [...bridge.warnings, ...schedulePairingWarnings(tournament!, round, state.rooms)]
+      : bridge.warnings;
+    for (const warning of warnings) {
       map.set(warning.roomId, [...(map.get(warning.roomId) ?? []), warning.message]);
     }
     return map;
-  }, [bridge.warnings]);
+  }, [bridge.warnings, round, state.rooms, tournament]);
 
   const teamOptions = useMemo(() => {
     if (!tournament) return [];
-    const byName = new Map<string, number>();
-    for (const team of tournament.teams) {
-      byName.set(team.name, (byName.get(team.name) ?? 0) + 1);
-    }
+    const selectedIds = new Set(
+      state.rooms
+        .flatMap((room) => [room.leftTeamId, room.rightTeamId])
+        .filter((id): id is string => id !== null),
+    );
     return [...tournament.teams]
+      .filter(
+        (team) =>
+          activePoolFilter === '' ||
+          phasePools.find((pool) => pool.id === activePoolFilter)?.teamIds.includes(team.id) === true ||
+          selectedIds.has(team.id),
+      )
       .sort((left, right) => left.name.localeCompare(right.name))
       .map((team) => ({
         id: team.id,
         name: team.name,
-        // Only where it is needed: two teams that read alike must stay tellable apart, and
-        // every other row stays uncluttered.
-        ...((byName.get(team.name) ?? 0) > 1 && team.poolNames.length > 0
-          ? { detail: team.poolNames[0] }
-          : {}),
+        // The selected phase is the useful context. Do not show a playoff team as if it still
+        // belonged to its prelim pool when the playoff pool is empty in the reloaded file.
+        detail:
+          (phase ? phasePoolNames(phase, team.id) : team.poolNames).join(' · ') ||
+          (phase ? 'No pool listed for this phase' : undefined),
       }));
-  }, [tournament]);
+  }, [activePoolFilter, phase, phasePools, state.rooms, tournament]);
 
   if (!tournament) {
     return (
@@ -89,6 +178,22 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     else bridge.selectRound(roundId);
   };
 
+  const applySuggestionPlan = (plan: readonly SuggestionPlacement[]): void => {
+    for (const placement of plan) {
+      if (placement.roomId === null || placement.status === 'applied' || placement.status === 'staged')
+        continue;
+      bridge.setRoomTeams(placement.roomId, 'left', placement.suggestion.teamIds[0]);
+      bridge.setRoomTeams(placement.roomId, 'right', placement.suggestion.teamIds[1]);
+    }
+    setPendingPrefill(null);
+  };
+
+  const applySuggestions = (): void => {
+    if (actionableSuggestions.length === 0) return;
+    if (hasOverwrite) setPendingPrefill({ tournament, plan: suggestionPlacements });
+    else applySuggestionPlan(suggestionPlacements);
+  };
+
   const pendingRoundName = tournament.rounds.find((entry) => entry.id === pendingRound)?.qbjName ?? '';
 
   return (
@@ -102,12 +207,39 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           value={state.selectedRoundId ?? ''}
           onChange={(event) => requestRound(event.target.value)}
         >
-          {tournament.rounds.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.phaseName ? `${entry.phaseName} · ` : ''}Round {entry.qbjName}
-            </option>
+          {roundGroupsForDisplay.map((group) => (
+            <optgroup key={`${group.phaseId ?? 'other'}:${group.label}`} label={group.label}>
+              {group.rounds.map((entry) => (
+                <option key={entry.id} value={entry.id}>
+                  Round {entry.qbjName}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
+        {phasePools.length > 0 ? (
+          <label htmlFor="team-pool-filter">
+            Team pool
+            <select
+              id="team-pool-filter"
+              value={activePoolFilter}
+              onChange={(event) =>
+                setPoolFilter({
+                  tournament,
+                  phaseId: round?.phaseId ?? '',
+                  poolId: event.target.value,
+                })
+              }
+            >
+              <option value="">All pools</option>
+              {phasePools.map((pool) => (
+                <option key={pool.id} value={pool.id}>
+                  {pool.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <Button onPress={bridge.addRoom}>+ Room</Button>
         <Button
           variant="quiet"
@@ -130,6 +262,102 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         Publish Room Setup once before Round 1 to activate the room codes and pair scorers. It clears any
         active assignment without revoking room tokens; later rounds use the same pairing.
       </p>
+      {round ? (
+        <div className="rooms-schedule-context" aria-label="YellowFruit schedule context">
+          <div className="rooms-schedule-context__heading">
+            <h3>
+              {(phase?.name ?? round.phaseName) || 'Round'} · Round {round.qbjName}
+            </h3>
+            <span className="faint">Read-only context from the loaded .yft</span>
+          </div>
+          {phase?.pools.length ? (
+            <ul className="pool-context">
+              {phase.pools.map((pool) => {
+                const names = tournament.teams
+                  .filter((team) => pool.teamIds.includes(team.id))
+                  .map((team) => team.name);
+                return (
+                  <li key={pool.id}>
+                    <div className="pool-context__summary">
+                      <strong>{pool.name}</strong>
+                      <span>
+                        {' · '}
+                        {pool.tier !== undefined ? `tier ${pool.tier} · ` : ''}
+                        {poolSizeLabel(pool)}
+                        {pool.hasCarryover ? ' · carryover' : ''}
+                        {pool.roundRobins !== undefined ? ` · ${pool.roundRobins}x round robin` : ''}
+                      </span>
+                    </div>
+                    {names.length > 0 ? (
+                      <div className="faint">Teams in this file: {names.join(', ')}</div>
+                    ) : (
+                      <div className="faint">
+                        No team membership is present; this is a schedule slot only.
+                      </div>
+                    )}
+                    {pool.autoAdvanceRules.length > 0 ? (
+                      <ul className="pool-context__rules">
+                        {pool.autoAdvanceRules.map((rule) => (
+                          <li key={`${rule.tier}:${rule.ranksThatAdvance.join(',')}`}>
+                            YellowFruit rule: {formatRanks(rule.ranksThatAdvance)} →{' '}
+                            {destinationPoolName(tournament, phase, rule.tier)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p className="faint">YellowFruit did not provide pool metadata for this phase.</p>
+          )}
+          <p className="faint">
+            QBBridge does not calculate standings or advancement. Pairings remain the operator&rsquo;s manual
+            choice; these labels only describe what YellowFruit stored.
+          </p>
+        </div>
+      ) : null}
+
+      {suggestions.length > 0 ? (
+        <div className="rooms-suggestions" aria-labelledby="yellowfruit-suggestions-heading">
+          <div className="rooms-suggestions__heading">
+            <div>
+              <h3 id="yellowfruit-suggestions-heading">YellowFruit games found</h3>
+              <p className="faint">
+                These are concrete, unplayed two-team Match objects from the file. QBBridge will not generate
+                schedule games from a round-robin template.
+              </p>
+            </div>
+            <Button
+              variant="quiet"
+              isDisabled={bridge.busy || actionableSuggestions.length === 0}
+              onPress={applySuggestions}
+            >
+              Fill pairings from file
+            </Button>
+          </div>
+          <ul className="suggestion-list" aria-label="Concrete unplayed YellowFruit games">
+            {suggestionPlacements.map((placement) => {
+              const room = placement.roomId
+                ? state.rooms.find((entry) => entry.id === placement.roomId)
+                : undefined;
+              return (
+                <li key={placement.suggestion.id}>
+                  <strong>
+                    {teamName(tournament, placement.suggestion.teamIds[0])} vs{' '}
+                    {teamName(tournament, placement.suggestion.teamIds[1])}
+                  </strong>
+                  <span className="faint">
+                    {' · '}
+                    {sourceLocationLabel(placement, room?.name)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
 
       {state.rooms.length === 0 ? (
         <p className="muted">No rooms yet. Add one for each room the tournament is using.</p>
@@ -251,6 +479,20 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         The team selections in every room will be cleared, so this round&rsquo;s pairings have to be entered
         fresh. Rooms, their names and their pairing codes are kept, and nothing is sent to the relay until you
         publish.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={activePendingPrefill !== null}
+        title="Replace entered pairings from file?"
+        confirmLabel="Fill from file"
+        onCancel={() => setPendingPrefill(null)}
+        onConfirm={() => {
+          if (activePendingPrefill) applySuggestionPlan(activePendingPrefill);
+        }}
+      >
+        At least one concrete YellowFruit game would replace team selections you already entered. Room names
+        and pairing codes will stay unchanged. Only the listed unplayed games will be filled; other games
+        remain manual.
       </ConfirmDialog>
     </section>
   );

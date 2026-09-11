@@ -24,6 +24,8 @@
 import {
   readYellowFruitTournament,
   yellowFruitScoringRules,
+  type GameRecord,
+  type FormatWarning,
   type JsonObject,
   type YellowFruitScheduleDescription,
 } from '@qbsheet/tournament-formats';
@@ -60,6 +62,22 @@ export interface BridgeRound {
   phaseName: string;
 }
 
+/**
+ * A concrete, unplayed Match that YellowFruit already put in the file.
+ *
+ * This is a suggestion only. QBBridge never treats it as a room assignment, never generates the
+ * missing games in a round-robin, and still publishes through its ordinary manual assignment path.
+ */
+export interface BridgeGameSuggestion {
+  id: string;
+  roundId: string;
+  phaseId: string;
+  teamIds: [string, string];
+  /** A source location/room label, when the Match carried one. It is never guessed from position. */
+  location?: string;
+  poolId?: string;
+}
+
 export interface BridgeTournament {
   id: string;
   name: string;
@@ -73,6 +91,8 @@ export interface BridgeTournament {
   ruleNotes: string[];
   teams: BridgeTeam[];
   rounds: BridgeRound[];
+  /** Concrete unplayed source Matches, for optional manual prefill in the Rooms view. */
+  suggestedGames: BridgeGameSuggestion[];
   playerCount: number;
 }
 
@@ -108,6 +128,106 @@ function registrationIndex(objects: JsonObject[]): Map<string, { id: string; nam
     }
   }
   return byTeam;
+}
+
+function stringField(source: JsonObject | undefined, keys: readonly string[]): string | undefined {
+  if (!source) return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim() !== '') return value;
+  }
+  return undefined;
+}
+
+function objectField(source: JsonObject | undefined, key: string): JsonObject | undefined {
+  const value = source?.[key];
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : undefined;
+}
+
+function sourceLocation(game: GameRecord): string | undefined {
+  // `source` is the original Match object retained by the formats importer. Prefer its explicit
+  // location before `_qbtcp.room_id`, whose value may be an internal id rather than a display name.
+  return (
+    stringField(game.source, ['location', 'room', 'room_name', 'roomName']) ??
+    stringField(game.extensions, ['location', 'room', 'room_name', 'roomName']) ??
+    stringField(objectField(game.source, '_qbtcp'), ['room_id', 'roomId']) ??
+    game.roomId
+  );
+}
+
+function unplayedGameSuggestion(game: GameRecord, teamIds: ReadonlySet<string>): BridgeGameSuggestion | null {
+  // The QBJ importer marks a Match with any tossup/score detail as complete (or forfeit). Keep the
+  // status check as a second guard so a custom importer cannot turn a scored game into a suggestion.
+  const status = game.status?.toLocaleLowerCase();
+  if (game.result !== undefined || (status !== undefined && !['scheduled', 'released'].includes(status))) {
+    return null;
+  }
+  const [leftId, rightId] = game.teamIds;
+  if (
+    !game.roundId ||
+    !game.phaseId ||
+    typeof leftId !== 'string' ||
+    typeof rightId !== 'string' ||
+    leftId === rightId ||
+    !teamIds.has(leftId) ||
+    !teamIds.has(rightId)
+  ) {
+    return null;
+  }
+  const location = sourceLocation(game);
+  return {
+    id: game.id,
+    roundId: game.roundId,
+    phaseId: game.phaseId,
+    teamIds: [leftId, rightId],
+    ...(location === undefined ? {} : { location }),
+    ...(game.poolId === undefined ? {} : { poolId: game.poolId }),
+  };
+}
+
+const bridgeWarningCodes = new Set([
+  'ambiguous-player-name',
+  'ambiguous-team-name',
+  'dangling-reference',
+  'duplicate-preserved-object',
+  'incomplete-answer-counts',
+  'invalid-match-teams',
+  'missing-tossups-heard',
+  'missing-scoring-rules',
+  'missing-tournament',
+  'multiple-registration-teams',
+  'name-fallback',
+  'team-answer-counts-not-standard',
+  'unresolved-player-reference',
+  'unresolved-team-reference',
+]);
+
+const bridgeWarningMetadata =
+  /(?:advancement|standings?|ranking|rank|schedule|pool|position|tournament_site|start_date|end_date|yfdata|kind|carryover|tiebreaker|final rank)/i;
+const bridgeWarningIdentityOrScoring = /(?:scoring|answer|team|player|registration|match|round|identity)/i;
+
+/**
+ * General Director migration warnings are not automatically QBBridge warnings.
+ *
+ * The formats package still reports every preserved YFT extension, which is valuable to a general
+ * importer but noisy and misleading for a one-game bridge. Keep identity/scoring hazards and omit
+ * metadata that QBBridge intentionally leaves with YellowFruit, including schedule and standings.
+ */
+export function bridgeRelevantWarnings(entries: readonly FormatWarning[]): string[] {
+  return [
+    ...new Set(
+      entries
+        .filter((entry) => {
+          if (bridgeWarningCodes.has(entry.code)) return true;
+          if (entry.code !== 'unsupported-field-preserved' && entry.code !== 'unsupported-object-type')
+            return false;
+          const context = `${entry.path} ${entry.message}`;
+          if (bridgeWarningMetadata.test(context)) return false;
+          return bridgeWarningIdentityOrScoring.test(context);
+        })
+        .map((entry) => entry.message),
+    ),
+  ];
 }
 
 /** Read a stock YellowFruit `.yft`. Nothing here is written back; the file is never modified. */
@@ -155,13 +275,14 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
     phaseName: round.phaseId ? (phaseName.get(round.phaseId) ?? '') : '',
   }));
 
+  const teamIds = new Set(teams.map((team) => team.id));
+  const suggestedGames = imported.games
+    .map((game) => unplayedGameSuggestion(game, teamIds))
+    .filter((game): game is BridgeGameSuggestion => game !== null);
+
   // The importer reports one warning per unread extension field, which on a real file is dozens
   // of copies of the same sentence. The operator needs to know what was left behind once.
-  const warnings = [
-    ...new Set(
-      report.warnings.filter((entry) => entry.code !== 'yft-import-summary').map((entry) => entry.message),
-    ),
-  ];
+  const warnings = bridgeRelevantWarnings(report.warnings);
 
   return {
     ok: true,
@@ -174,6 +295,7 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
       ruleNotes: rulesResult.value.notes,
       teams,
       rounds,
+      suggestedGames,
       playerCount: teams.reduce((total, team) => total + team.players.length, 0),
     },
     warnings,

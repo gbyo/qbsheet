@@ -95,7 +95,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
         </div>
         {tournament && tournament.ruleNotes.length > 0 ? (
           <>
-            <h2 style={{ marginTop: 'var(--qbs-space-4)' }}>What the file left to be derived</h2>
+            <h2 style={{ marginTop: 'var(--qbs-space-4)' }}>Scoring details derived from YellowFruit</h2>
             <ul className="plain">
               {tournament.ruleNotes.map((note) => (
                 <li key={note}>{note}</li>
@@ -104,11 +104,14 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
           </>
         ) : null}
         {bridge.loadWarnings.length > 0 ? (
-          <ul className="plain">
-            {bridge.loadWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
+          <>
+            <h2 style={{ marginTop: 'var(--qbs-space-4)' }}>Warnings that affect scoring or identity</h2>
+            <ul className="plain">
+              {bridge.loadWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </>
         ) : null}
       </section>
 
