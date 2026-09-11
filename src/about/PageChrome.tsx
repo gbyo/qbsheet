@@ -44,6 +44,8 @@ export const qbjDocsUrl = `${githubUrl}/blob/main/docs/QBJ_ASSIGNMENT_PROFILE.md
 export const qbtcpDocsUrl = `${githubUrl}/blob/main/docs/QBTCP.md`;
 export const qbliveDocsUrl = `${githubUrl}/blob/main/docs/QBLIVE.md`;
 export const directorDocsUrl = `${githubUrl}/blob/main/apps/director/README.md`;
+export const bridgeDocsUrl = `${githubUrl}/blob/main/apps/qbbridge/README.md`;
+export const bridgeRelayDocsUrl = `${githubUrl}/blob/main/docs/QBTCP-RELAY-DEPLOY.md`;
 export const licenseUrl = `${githubUrl}/blob/main/LICENSE`;
 export const documentationUrl = `${githubUrl}#documentation`;
 export const buildStepsUrl = `${githubUrl}#deployment`;
@@ -56,7 +58,16 @@ export const buildStepsUrl = `${githubUrl}#deployment`;
  * `depthOf`.
  */
 export type PageSlug =
-  '' | 'scoring' | 'tournaments' | 'director' | 'qblive' | 'self-host' | 'faq' | 'privacy' | 'wiki';
+  | ''
+  | 'scoring'
+  | 'tournaments'
+  | 'director'
+  | 'bridge'
+  | 'qblive'
+  | 'self-host'
+  | 'faq'
+  | 'privacy'
+  | 'wiki';
 
 /**
  * How many directories below `about/` a document sits.
@@ -120,23 +131,25 @@ interface INavPage {
 /**
  * The products this navigation names, which is not the same list as the pages the footer names.
  *
- * `Scorer` is the application itself, one directory above `about/`. Director and QBLive are *pages*,
- * because neither application is served from this website: Director is installed on the machine
- * running the tournament, and QBLive is served from `live.qbsheet.com` by whoever is publishing the
- * tournament. A header link that jumped straight into either one would be describing a deployment
- * this site does not have — which is exactly what `Director` used to do, pointing at a browser build
- * of tournament control that the production site no longer contains.
+ * `Scorer` is the application itself, one directory above `about/`. Director, Bridge and QBLive
+ * are *pages*, because none of those applications is served from this website: Director and Bridge
+ * are installed on the machine running the tournament, and QBLive is served from
+ * `live.qbsheet.com` by whoever is publishing the tournament. A header link that jumped straight
+ * into any of them would be describing a deployment this site does not have — which is exactly what
+ * `Director` used to do, pointing at a browser build of tournament control that the production site
+ * no longer contains.
  *
  * # Why these are not also in the footer
  *
  * The footer is this site's writing: the overview, the two audience pages, self-hosting, the
- * questions, the wiki, the privacy notice. Director and QBLive are the other two products, and the
- * header carries them on every page including the ones with a footer, so listing them again below
- * would both double every product link on the site and present them as siblings of `FAQ` and
+ * questions, the wiki, the privacy notice. Director, Bridge and QBLive are the other products, and
+ * the header carries them on every page including the ones with a footer, so listing them again
+ * below would both double every product link on the site and present them as siblings of `FAQ` and
  * `Privacy` rather than of `Scorer`. `About` remains the route back into the writing.
  */
 const productPages: { slug: PageSlug; label: string }[] = [
   { slug: 'director', label: 'Director' },
+  { slug: 'bridge', label: 'Bridge' },
   { slug: 'qblive', label: 'QBLive' },
 ];
 
@@ -291,10 +304,10 @@ function ActionLink({ link, primary }: { link: IActionLink; primary: boolean }) 
  *
  * `secondary` exists for the product pages, and for nothing else so far. On a page about the scorer,
  * "Open QBSheet" beside the page's own action is exactly right — the reader is one click from the
- * thing being described. On the Director page it would be wrong: Director is not the scorer, it is
- * not on this website, and offering the scorer as the runner-up action to downloading it invites the
- * misreading the whole page exists to prevent. So those pages state both of their actions, and the
- * default — the scorer, then the repository — is untouched.
+ * thing being described. On the Director or Bridge page it would be wrong: neither is the scorer,
+ * neither is on this website, and offering the scorer as the runner-up action to downloading it
+ * invites the misreading the whole page exists to prevent. So those pages state both of their
+ * actions, and the default — the scorer, then the repository — is untouched.
  */
 export function ActionLinks({
   slug,

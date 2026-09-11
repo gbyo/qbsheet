@@ -551,6 +551,126 @@ a:focus-visible {
 }
 
 /*
+ * The Bridge page's diagram: where a game travels during a round.
+ *
+ * Five stops in reading order, joined by arrows that are decoration — the list itself carries the
+ * sequence, so a reader meets five items and no glyphs. The stops are boxes rather than stages
+ * because this is a trip being described rather than steps being taken: `about-stages` numbers
+ * things a reader must do in order, and nobody here does YellowFruit twice.
+ */
+.about-pipeline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-pipeline > li {
+  display: flex;
+  flex: 1 1 140px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.about-pipeline-arrow {
+  align-self: center;
+  padding: 0 10px;
+  color: var(--about-faint);
+  font-size: 1.125rem;
+  line-height: 1;
+}
+
+.about-pipeline-stop {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid var(--about-border);
+  border-radius: 3px;
+  background: var(--about-surface);
+}
+
+.about-pipeline-name {
+  margin: 0;
+  font-weight: 600;
+}
+
+.about-pipeline-detail {
+  margin: 4px 0 0;
+  color: var(--about-muted);
+  font-size: 0.9375rem;
+}
+
+/*
+ * The Bridge page's room card: an example of what one room is given.
+ *
+ * A bordered card rather than another definition list, because the section already speaks in
+ * sentences and the card is an illustration — one room's pairing, not a term being defined. The
+ * rows keep the definition list's two-column shape at a smaller measure.
+ */
+.about-room-card {
+  max-width: 420px;
+  margin: 28px 0 0;
+  border: 1px solid var(--about-border);
+  border-radius: 3px;
+  background: var(--about-surface);
+}
+
+.about-room-card figcaption {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--about-border);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.about-room-card dl {
+  margin: 0;
+  padding: 4px 16px 12px;
+}
+
+.about-room-card dl > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--about-border);
+}
+
+.about-room-card dl > div:last-child {
+  border-bottom: 0;
+}
+
+.about-room-card dt {
+  color: var(--about-muted);
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.about-room-card dd {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+@media (max-width: 700px) {
+  /* The trip reads top to bottom, and the arrows turn to point that way. */
+  .about-pipeline {
+    flex-direction: column;
+    flex-wrap: nowrap;
+  }
+
+  .about-pipeline > li {
+    flex: none;
+    flex-direction: column;
+  }
+
+  .about-pipeline-arrow {
+    padding: 8px 0;
+    transform: rotate(90deg);
+  }
+}
+
+/*
  * A section whose content column is prose rather than a grid or a list.
  *
  * The self-hosting page has two of these, and both are there because the thing being explained is a

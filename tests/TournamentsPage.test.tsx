@@ -188,12 +188,13 @@ describe('the tournaments page', () => {
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
 
     const header = container.querySelector('.about-nav') as HTMLElement;
-    expect(within(header).getAllByRole('link')).toHaveLength(4);
+    expect(within(header).getAllByRole('link')).toHaveLength(5);
     expect(within(header).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
-    // Both product entries are pages on this site now, one directory across from this one. Neither
-    // is a jump into an application: Director is not deployed here at all, and QBLive is somebody
-    // else's server, so the header offers the pages that say so.
+    // All three product entries are pages on this site now, one directory across from this one. None
+    // is a jump into an application: Director and Bridge are not deployed here at all, and QBLive is
+    // somebody else's server, so the header offers the pages that say so.
     expect(within(header).getByRole('link', { name: 'Director' })).toHaveAttribute('href', '../director/');
+    expect(within(header).getByRole('link', { name: 'Bridge' })).toHaveAttribute('href', '../bridge/');
     expect(within(header).getByRole('link', { name: 'QBLive' })).toHaveAttribute('href', '../qblive/');
     expect(within(header).queryByRole('link', { name: /live\.qbsheet\.com/ })).toBeNull();
 
