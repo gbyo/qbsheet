@@ -334,9 +334,9 @@ jobs:
           if (-not (Get-SingleValue 'SELECT `VersionMax` FROM `Upgrade`')) { throw 'Upgrade table is empty.' }
           Write-Host "Dual-scope MSI markers verified in $($msi.Name)."
 
-      # Temporary diagnosis: if the bundle step failed at candle or light, rerun light
-      # verbosely against the produced .wixobj so the real WiX error reaches the log. The
-      # bundler swallows the tool output, which makes template failures undebuggable.
+      # Temporary diagnosis: the bundler swallows candle/light output, so on failure rerun
+      # candle verbosely against the rendered main.wxs with the same arguments tauri uses
+      # (-arch x64, cwd at the wix output dir) and surface the real WiX error in the log.
       # TODO(#986): remove this step once the dual-scope template links cleanly.
       - name: Diagnose MSI link failure
         if: always() && matrix.name == 'Windows'
@@ -346,15 +346,19 @@ jobs:
           if ($built) { Write-Host "MSI present ($($built.Name)); nothing to diagnose."; exit 0 }
           $dir = 'apps/qbbridge/src-tauri/target/x86_64-pc-windows-msvc/release/wix/x64'
           $wixbin = "$env:LOCALAPPDATA/tauri/WixTools314"
-          $wixobj = @(Get-ChildItem "$dir/*.wixobj" | ForEach-Object { $_.FullName })
-          $wxl = @(Get-ChildItem "$dir/*.wxl" | ForEach-Object { $_.FullName })
-          Write-Host "wixobj files: $($wixobj -join ', ')"
-          Write-Host "locale files: $($wxl -join ', ')"
-          if ($wixobj.Count -eq 0) { throw 'No .wixobj files found; candle produced nothing.' }
-          $lightArgs = @('-v', '-o', "$dir/diag.msi", '-cultures:en-us') + $wixobj
-          if ($wxl.Count -gt 0) { $lightArgs += @('-loc', $wxl[0]) }
-          $lightArgs += @('-ext', "$wixbin/WixUIExtension.dll", '-ext', "$wixbin/WixUtilExtension.dll")
-          & "$wixbin/light.exe" @lightArgs
+          if (-not (Test-Path $dir)) { Write-Host "no wix output dir at $dir"; exit 0 }
+          if (-not (Test-Path "$dir/main.wxs")) { Write-Host 'no rendered main.wxs'; exit 0 }
+          Write-Host "--- wix output dir listing ---"
+          Get-ChildItem $dir | ForEach-Object { Write-Host "$($_.Name) $($_.Length)" }
+          Write-Host "--- rendered main.wxs (first 120 lines) ---"
+          Get-Content "$dir/main.wxs" -TotalCount 120 | ForEach-Object { Write-Host $_ }
+          Write-Host "--- rerunning candle verbosely ---"
+          $exe = Get-ChildItem 'apps/qbbridge/src-tauri/target/x86_64-pc-windows-msvc/release/*.exe' | Select-Object -First 1
+          Push-Location $dir
+          & "$wixbin/candle.exe" -v -arch x64 main.wxs "-dSourceDir=$($exe.FullName)" 2>&1 | ForEach-Object { Write-Host $_ }
+          Write-Host "candle exit code: $LASTEXITCODE"
+          Get-ChildItem "$dir/*.wixobj" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "wixobj: $($_.Name)" }
+          Pop-Location
           exit 0
 
   # -----------------------------------------------------------------------------------------------
