@@ -225,6 +225,7 @@ describe('pinned Scorer build UX', () => {
               roomId: 'room-1',
               roomName: 'Room 1',
               matchId: 'Match_1',
+              hasResult: true,
               build: { version: '0.1.0', commit: 'e5f6a7b' },
             },
           ],
@@ -237,7 +238,14 @@ describe('pinned Scorer build UX', () => {
     expect(screen.getAllByText(/0\.1\.0 · a1b2c3d/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Room 1:/)).toBeInTheDocument();
     expect(screen.getByText(/runs 0\.1\.0 · e5f6a7b but this tournament pinned/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Clear pin' }));
+    // Clearing is confirmed: opening the dialog keeps the pin, cancel keeps it too.
+    await user.click(screen.getByRole('button', { name: 'Clear pin…' }));
+    expect(screen.getByRole('alertdialog', { name: 'Clear the pinned Scorer build?' })).toBeInTheDocument();
+    expect(bridge.clearScorerBuildPin).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(bridge.clearScorerBuildPin).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Clear pin…' }));
+    await user.click(screen.getByRole('button', { name: 'Clear Pin' }));
     expect(bridge.clearScorerBuildPin).toHaveBeenCalledOnce();
   });
 });

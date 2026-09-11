@@ -41,6 +41,7 @@ import {
   relayAcknowledgeResults,
   relayClaim,
   relayCheckScorerReadiness,
+  relayFetchLiveScorerBuilds,
   relayFetchResults,
   relayHealth,
   relayProvisionBackup,
@@ -106,9 +107,11 @@ import { schedulePairingWarnings } from './schedule';
 import {
   parseBuildManifest,
   roomScorerBuilds as roomScorerBuildsOf,
+  sameScorerBuilds,
   scorerBuildLabel,
   scorerBuildWarnings as scorerBuildWarningsFor,
   type RoomScorerBuild,
+  type ScorerBuild,
   type ScorerBuildPin,
 } from './scorerBuilds';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
@@ -413,6 +416,14 @@ export function useBridge(): BridgeApi {
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
+  /**
+   * Live heartbeat builds by room id, from relay presence. Transient by design: presence
+   * expires on the relay without fresh heartbeats, and a restarted Bridge must never warn
+   * rooms off a snapshot it cannot re-verify — so this is React state, never persisted
+   * BridgeState. A failed refresh clears it (warnings degrade) while result stamps stay
+   * authoritative.
+   */
+  const [liveScorerBuilds, setLiveScorerBuilds] = useState<ReadonlyMap<string, ScorerBuild>>(() => new Map());
   const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
     state.relay
       ? {
@@ -647,6 +658,8 @@ export function useBridge(): BridgeApi {
         setPersistenceSavePending(false);
         setScorerReadiness(null);
         setRelayReachable(null);
+        // A new tournament means new rooms: presence from the old event must not warn here.
+        setLiveScorerBuilds(new Map());
         setChangingRelay(false);
         invalidateRoundArtifacts();
         activateState(next);
@@ -1167,7 +1180,17 @@ export function useBridge(): BridgeApi {
         return;
       }
       const pin: ScorerBuildPin = { ...parsed.build, pinnedAt: new Date().toISOString() };
-      commit((current) => ({ ...current, scorerBuildPin: pin }));
+      // The pin is a reliability control: success must mean it survived a restart. If local
+      // persistence is degraded the in-memory pin still applies for this session, but the
+      // operator must hear that it is not durable (the global pending banner offers the retry).
+      const { persisted } = commit((current) => ({ ...current, scorerBuildPin: pin }));
+      if (!persisted.ok) {
+        setNotice({
+          kind: 'bad',
+          message: `Scorer build ${scorerBuildLabel(pin)} is pinned for this session only: QBBridge could not save it on this machine, so a restart would lose the pin and its verification. Retry saving local state before relying on it.`,
+        });
+        return;
+      }
       setNotice({
         kind: 'good',
         message: `Pinned Scorer build ${scorerBuildLabel(pin)} for this tournament. Rooms reporting anything else will warn.`,
@@ -1197,8 +1220,13 @@ export function useBridge(): BridgeApi {
   );
 
   const scorerBuildWarnings = useMemo(
-    () => scorerBuildWarningsFor({ pin: state.scorerBuildPin, rooms: roomScorerBuilds }),
-    [state.scorerBuildPin, roomScorerBuilds],
+    () =>
+      scorerBuildWarningsFor({
+        pin: state.scorerBuildPin,
+        rooms: roomScorerBuilds,
+        liveBuilds: liveScorerBuilds,
+      }),
+    [state.scorerBuildPin, roomScorerBuilds, liveScorerBuilds],
   );
 
   useEffect(() => {
@@ -1243,6 +1271,8 @@ export function useBridge(): BridgeApi {
     const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
     setRelayReachable(null);
+    // No relay, no presence: a snapshot without a relay behind it is a stale fence.
+    setLiveScorerBuilds(new Map());
     setNotice({
       kind: persisted.ok ? 'warn' : 'bad',
       message: persisted.ok
@@ -1701,6 +1731,18 @@ export function useBridge(): BridgeApi {
         return { ...current, results: [...current.results, ...fresh] };
       });
 
+      // Advisory live-build snapshot for pre-game off-pin warnings. It never blocks the ACKs
+      // below: a failed sessions read clears the snapshot (warnings degrade for one interval)
+      // while result stamps stay authoritative. Same generation/relay fence as above, so a
+      // slow sessions read cannot paint the new relay's rooms with the old relay's builds.
+      try {
+        const live = await relayFetchLiveScorerBuilds(connection);
+        if (isCurrentPoll())
+          setLiveScorerBuilds((current) => (sameScorerBuilds(current, live) ? current : live));
+      } catch {
+        if (isCurrentPoll()) setLiveScorerBuilds((current) => (current.size === 0 ? current : new Map()));
+      }
+
       if (pendingAckIds.length === 0 || !isCurrentPoll()) return;
       try {
         // The connection is captured from the poll, never reread from state after the await. A
@@ -1738,6 +1780,9 @@ export function useBridge(): BridgeApi {
     const timer = setInterval(() => void pollResults(), resultPollIntervalMs);
     return () => {
       pollGenerationRef.current += 1;
+      // The relay identity changed (or polling stopped): drop the presence snapshot so the
+      // next relay's rooms are never warned off the previous relay's heartbeats.
+      setLiveScorerBuilds(new Map());
       clearTimeout(first);
       clearInterval(timer);
     };

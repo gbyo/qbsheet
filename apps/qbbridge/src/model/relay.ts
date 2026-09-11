@@ -35,6 +35,7 @@
 import { buildRelayMirrorDocument } from '../../../../src/director/relay/relaySync';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 import { relayRequest, type RelayResponse } from './native';
+import type { ScorerBuild } from './scorerBuilds';
 
 /**
  * The alphabet a relay tournament id may use.
@@ -504,6 +505,64 @@ export async function relayFetchResults(connection: RelayConnection): Promise<Re
  * is acknowledged.
  */
 export const relayUnackedWindow = 128;
+
+/**
+ * The live Scorer build each room's heartbeat reports, by room id.
+ *
+ * Read from `GET manage/sessions`: every session carries its room's unexpired presence rows,
+ * and current scorers attach their `{version, commit}` to each heartbeat. This is how Bridge
+ * names an off-pin room *before* it finishes scoring — result stamps stay authoritative, but
+ * they only exist after the game.
+ *
+ * Privacy boundary: device ids and operator names are used here only to prefer the writer's
+ * row and never leave this function. The caller learns room → build and nothing else.
+ */
+export async function relayFetchLiveScorerBuilds(
+  connection: RelayConnection,
+): Promise<Map<string, ScorerBuild>> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/sessions`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with sessions.');
+  const body = parseBody(response);
+  const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+  const live = new Map<string, ScorerBuild>();
+  for (const session of sessions) {
+    if (!session || typeof session !== 'object' || Array.isArray(session)) continue;
+    const entry = session as Record<string, unknown>;
+    if (typeof entry.room_id !== 'string' || entry.room_id === '') continue;
+    if (live.has(entry.room_id)) continue;
+    const presence = Array.isArray(entry.presence) ? entry.presence : [];
+    const builds: { device: string; build: ScorerBuild }[] = [];
+    for (const row of presence) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const presenceRow = row as Record<string, unknown>;
+      const raw = presenceRow.scorer_build;
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const claimed = raw as Record<string, unknown>;
+      if (typeof claimed.version !== 'string' || claimed.version === '' || claimed.version.length > 200)
+        continue;
+      if (typeof claimed.commit !== 'string' || claimed.commit === '' || claimed.commit.length > 200)
+        continue;
+      builds.push({
+        device: typeof presenceRow.device_id === 'string' ? presenceRow.device_id : '',
+        build: { version: claimed.version, commit: claimed.commit },
+      });
+    }
+    if (builds.length === 0) continue;
+    // Prefer the writer's heartbeat: an observer's browser in the same room is not scoring.
+    // (A `&&` chain here would produce `false` when there is no writer, and `??` does not
+    // skip `false` — so resolve each candidate to undefined explicitly.)
+    const writer = typeof entry.writer_device === 'string' ? entry.writer_device : null;
+    const writerBuild = writer === null ? undefined : builds.find((candidate) => candidate.device === writer);
+    const singleBuild = builds.length === 1 ? builds[0] : undefined;
+    const chosen = writerBuild ?? singleBuild ?? null;
+    if (chosen) live.set(entry.room_id, chosen.build);
+  }
+  return live;
+}
 
 /**
  * Acknowledge results whose bytes are on disk.

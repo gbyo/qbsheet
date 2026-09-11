@@ -3,6 +3,7 @@ import {
   normalizeScorerBuildPin,
   parseBuildManifest,
   roomScorerBuilds,
+  roomScorerBuildStatus,
   scorerBuildFromResult,
   scorerBuildLabel,
   scorerBuildWarnings,
@@ -72,9 +73,13 @@ describe('room build verification', () => {
       version: '0.1.0',
       commit: 'e5f6a7b',
     });
-    // No result for room 2, no match for room 3: both unverified, never assumed.
+    expect(builds.find((entry) => entry.roomId === 'room-1')?.hasResult).toBe(true);
+    // No result for room 2, no match for room 3: both unverified, never assumed — and room 2
+    // records that it has no result, so warnings cannot mistake it for a scored legacy game.
     expect(builds.find((entry) => entry.roomId === 'room-2')?.build).toBeNull();
+    expect(builds.find((entry) => entry.roomId === 'room-2')?.hasResult).toBe(false);
     expect(builds.find((entry) => entry.roomId === 'room-3')?.build).toBeNull();
+    expect(builds.find((entry) => entry.roomId === 'room-3')?.hasResult).toBe(false);
   });
 
   test('pre-stamp results read as unverified, not mismatched', () => {
@@ -90,21 +95,26 @@ describe('room build verification', () => {
           roomId: 'room-1',
           roomName: 'Room 101',
           matchId: 'Match_1',
+          hasResult: true,
           build: { version: '0.1.0', commit: 'a1b2c3d' },
         },
         {
           roomId: 'room-2',
           roomName: 'Room 102',
           matchId: 'Match_2',
+          hasResult: true,
           build: { version: '0.1.0', commit: 'e5f6a7b' },
         },
         {
           roomId: 'room-3',
           roomName: 'Room 103',
           matchId: 'Match_3',
+          hasResult: true,
           build: { version: '0.0.0', commit: 'dev' },
         },
-        { roomId: 'room-4', roomName: 'Room 104', matchId: 'Match_4', build: null },
+        { roomId: 'room-4', roomName: 'Room 104', matchId: 'Match_4', hasResult: true, build: null },
+        // Assigned but nothing scored yet: not-yet-observed, never a legacy warning.
+        { roomId: 'room-5', roomName: 'Room 105', matchId: 'Match_5', hasResult: false, build: null },
       ],
     });
     expect(
@@ -112,7 +122,88 @@ describe('room build verification', () => {
     ).toBe(true);
     expect(warnings.some((warning) => /Room 103.*non-release/.test(warning))).toBe(true);
     expect(warnings.some((warning) => /Room 104.*cannot be verified/.test(warning))).toBe(true);
+    expect(warnings.some((warning) => /Room 105/.test(warning))).toBe(false);
     expect(warnings.some((warning) => /2 different Scorer builds/.test(warning))).toBe(true);
+  });
+
+  test('live heartbeats warn pre-game and on reload, never twice for the same build', () => {
+    const pin = { version: '0.1.0', commit: 'a1b2c3d', pinnedAt: '2026-09-11T18:00:00Z' };
+    const offPin = { version: '0.1.0', commit: 'e5f6a7b' };
+    const onPin = { version: '0.1.0', commit: 'a1b2c3d' };
+    const rooms = [
+      // Assigned, nothing scored: the heartbeat is the only signal.
+      { roomId: 'pre', roomName: 'Pre Game', matchId: 'Match_pre', hasResult: false, build: null },
+      // Submitted on the pin, then reloaded onto the wrong build mid-tournament.
+      { roomId: 'reloaded', roomName: 'Reloaded', matchId: 'Match_rel', hasResult: true, build: onPin },
+      // Submitted off-pin and still live on it: the result warning already speaks.
+      { roomId: 'same', roomName: 'Same', matchId: 'Match_same', hasResult: true, build: offPin },
+      // Live on the pin: quiet.
+      { roomId: 'quiet', roomName: 'Quiet', matchId: 'Match_q', hasResult: false, build: null },
+    ] as const;
+    const warnings = scorerBuildWarnings({
+      pin,
+      rooms: [...rooms],
+      liveBuilds: new Map([
+        ['pre', offPin],
+        ['reloaded', offPin],
+        ['same', offPin],
+        ['quiet', onPin],
+      ]),
+    });
+    expect(warnings.some((warning) => /Pre Game.*currently runs 0\.1\.0 · e5f6a7b/.test(warning))).toBe(true);
+    expect(warnings.some((warning) => /Reloaded.*currently runs 0\.1\.0 · e5f6a7b/.test(warning))).toBe(true);
+    // The already-known off-pin result warns once (plus the fleet line); the live heartbeat
+    // saying the same thing adds no second per-room warning.
+    expect(warnings.filter((warning) => /Same.*pinned 0\.1\.0/.test(warning))).toHaveLength(1);
+    expect(warnings.some((warning) => /Same.*currently runs/.test(warning))).toBe(false);
+    expect(warnings.some((warning) => /Quiet/.test(warning))).toBe(false);
+
+    // A live placeholder build is named even though it can never equal a pin.
+    const placeholder = scorerBuildWarnings({
+      pin,
+      rooms: [{ roomId: 'dev', roomName: 'Dev Room', matchId: 'Match_dev', hasResult: false, build: null }],
+      liveBuilds: new Map([['dev', { version: '0.0.0', commit: 'dev' }]]),
+    });
+    expect(placeholder.some((warning) => /Dev Room.*non-release/.test(warning))).toBe(true);
+
+    // Without a pin there is nothing to compare a heartbeat against.
+    expect(
+      scorerBuildWarnings({
+        pin: null,
+        rooms: [{ roomId: 'pre', roomName: 'Pre Game', matchId: 'Match_pre', hasResult: false, build: null }],
+        liveBuilds: new Map([['pre', offPin]]),
+      }),
+    ).toEqual([]);
+  });
+
+  test('per-room status names stamped, legacy, and not-yet-observed states', () => {
+    expect(
+      roomScorerBuildStatus({
+        roomId: 'r1',
+        roomName: 'Room 101',
+        matchId: 'Match_1',
+        hasResult: true,
+        build: { version: '0.1.0', commit: 'a1b2c3d' },
+      }),
+    ).toBe('0.1.0 · a1b2c3d');
+    expect(
+      roomScorerBuildStatus({
+        roomId: 'r4',
+        roomName: 'Room 104',
+        matchId: 'Match_4',
+        hasResult: true,
+        build: null,
+      }),
+    ).toMatch(/no build stamp/);
+    expect(
+      roomScorerBuildStatus({
+        roomId: 'r5',
+        roomName: 'Room 105',
+        matchId: 'Match_5',
+        hasResult: false,
+        build: null,
+      }),
+    ).toMatch(/not yet observed/);
   });
 
   test('a clean pinned fleet is quiet', () => {
@@ -125,8 +216,11 @@ describe('room build verification', () => {
             roomId: 'room-1',
             roomName: 'Room 101',
             matchId: 'Match_1',
+            hasResult: true,
             build: { version: '0.1.0', commit: 'a1b2c3d' },
           },
+          // Assigned but unscored rooms stay quiet too: not-yet-observed is display, not alarm.
+          { roomId: 'room-2', roomName: 'Room 102', matchId: 'Match_2', hasResult: false, build: null },
         ],
       }),
     ).toEqual([]);

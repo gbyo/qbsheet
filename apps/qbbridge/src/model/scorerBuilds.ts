@@ -44,6 +44,10 @@ export interface RoomScorerBuild {
   roomId: string;
   roomName: string;
   matchId: string | null;
+  /** True when at least one result exists for the published match. Absence of a result is the
+   * thing to display: a room with an assignment but no result is not-yet-observed, never a
+   * scored game with a missing stamp. */
+  hasResult: boolean;
   build: ScorerBuild | null;
 }
 
@@ -84,6 +88,19 @@ export function normalizeScorerBuildPin(value: unknown): ScorerBuildPin | null {
   if (typeof record.commit !== 'string' || record.commit.trim() === '') return null;
   if (typeof record.pinnedAt !== 'string' || record.pinnedAt.trim() === '') return null;
   return { version: record.version, commit: record.commit, pinnedAt: record.pinnedAt };
+}
+
+/** True when two room→build snapshots agree, so a refresh that changed nothing keeps state identity. */
+export function sameScorerBuilds(
+  left: ReadonlyMap<string, ScorerBuild>,
+  right: ReadonlyMap<string, ScorerBuild>,
+): boolean {
+  if (left.size !== right.size) return false;
+  for (const [roomId, build] of left) {
+    const other = right.get(roomId);
+    if (!other || other.version !== build.version || other.commit !== build.commit) return false;
+  }
+  return true;
 }
 
 /** `version · commit`, the same one-line identifier the scorer prints about itself. */
@@ -142,25 +159,71 @@ export function roomScorerBuilds(
       roomId: room.id,
       roomName: room.name,
       matchId: room.publishedMatchId,
+      hasResult: candidates.length > 0,
       build: latest ? scorerBuildFromResult(latest.qbj) : null,
     };
   });
 }
 
 /**
+ * The one line the setup UI prints per room. Three states, three messages: a stamped build, a
+ * scored game whose stamp predates stamps (legacy/unverifiable), and an assignment with no
+ * result yet (not-yet-observed — the room may not even have started scoring).
+ */
+export function roomScorerBuildStatus(entry: RoomScorerBuild): string {
+  if (entry.build) return scorerBuildLabel(entry.build);
+  if (entry.matchId !== null && entry.hasResult) return 'scored game has no build stamp — unverifiable';
+  if (entry.matchId !== null) return 'no scored game yet — build not yet observed';
+  return 'no published game — unverified';
+}
+
+/**
  * Name every build divergence between the pin and the rooms.
  *
- * Three distinct states, three distinct messages: rooms that cannot be verified yet (no scored
- * game), rooms verifiably off the pin, and a fleet running more than one build at once. A
- * placeholder stamp (`dev`, `unknown`) is unverifiable, not mismatched — it says the room runs
- * a build outside any release, which is its own warning.
+ * Three distinct states, three distinct messages: rooms with a scored game but no stamp
+ * (legacy/unverifiable), rooms verifiably off the pin, and a fleet running more than one build
+ * at once. A room with an assignment but no result yet is not-yet-observed and stays out of
+ * the warnings (the per-room list names it); a placeholder stamp (`dev`, `unknown`) is
+ * unverifiable, not mismatched — it says the room runs a build outside any release, which is
+ * its own warning.
  */
 export function scorerBuildWarnings(input: {
   pin: ScorerBuildPin | null;
   rooms: readonly RoomScorerBuild[];
+  /**
+   * Live heartbeat builds by room id, from relay presence. Advisory only: result stamps stay
+   * authoritative. Present so a room that reloaded onto the wrong build mid-tournament warns
+   * before it finishes scoring instead of after.
+   */
+  liveBuilds?: ReadonlyMap<string, ScorerBuild>;
 }): string[] {
   const warnings: string[] = [];
-  const unverified = input.rooms.filter((room) => room.matchId !== null && room.build === null);
+  if (input.pin && input.liveBuilds) {
+    for (const room of input.rooms) {
+      const live = input.liveBuilds.get(room.roomId);
+      if (!live) continue;
+      // The result stamp already speaks for builds it agrees with; warn on the live build only
+      // when it says something new. That covers both the pre-game room (no result yet) and the
+      // room that reloaded after submitting (result says pin, heartbeat says otherwise).
+      if (room.build !== null && room.build.version === live.version && room.build.commit === live.commit)
+        continue;
+      if (isPlaceholderBuild(live)) {
+        warnings.push(
+          `Room “${room.roomName}” currently reports a non-release build (${scorerBuildLabel(live)}). Re-pair it from production before it scores.`,
+        );
+      } else if (live.version !== input.pin.version || live.commit !== input.pin.commit) {
+        warnings.push(
+          `Room “${room.roomName}” currently runs ${scorerBuildLabel(live)} but this tournament pinned ${scorerBuildLabel(input.pin)}. Reload the room from production before it scores.`,
+        );
+      }
+    }
+  }
+  // Only rooms with an actual result can claim "a scored game with no stamp". A published
+  // assignment with no result yet is not-yet-observed (shown in the per-room list, not warned):
+  // scoring may not have started, and crying legacy here would train operators to ignore it.
+  const unverified = input.rooms.filter(
+    (room) => room.matchId !== null && room.hasResult && room.build === null,
+  );
   for (const room of unverified) {
     warnings.push(
       `Room “${room.roomName}” has a scored game with no build stamp, so its build cannot be verified against the pin.`,
