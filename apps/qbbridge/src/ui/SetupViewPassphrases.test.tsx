@@ -96,10 +96,7 @@ describe('recovery package passphrases', () => {
     await user.type(field, 'abcdefghijkl');
     await user.click(screen.getByRole('button', { name: 'Create encrypted backup package…' }));
     await waitFor(() => expect(field).toHaveValue(''));
-    expect(bridge.createRecoveryPackage).toHaveBeenCalledWith(
-      'abcdefghijkl',
-      'Tournament backup controller',
-    );
+    expect(bridge.createRecoveryPackage).toHaveBeenCalledWith('abcdefghijkl', 'Tournament backup controller');
   });
 
   test('keeps the creation passphrase after failure or cancellation', async () => {
