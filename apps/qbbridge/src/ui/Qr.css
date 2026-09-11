@@ -1,0 +1,17 @@
+.qr-sheet-stamp {
+  display: none;
+}
+
+/*
+ * Paper survives longer than browser state. Put enough non-secret provenance on every printed QR
+ * to identify an old sheet after a room code is regenerated, without cluttering the normal room
+ * table where the same Qr component is also used.
+ */
+.room-print-sheet .qr-sheet-stamp {
+  display: block;
+  max-width: 2.6in;
+  margin-top: 0.08in;
+  color: #555;
+  font-size: 8pt;
+  line-height: 1.25;
+}
