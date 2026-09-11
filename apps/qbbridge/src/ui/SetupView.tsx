@@ -33,6 +33,10 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   const [tournamentId, setTournamentId] = useState(generateTournamentId);
   const [setupToken, setSetupToken] = useState('');
   const [confirmForget, setConfirmForget] = useState(false);
+  const [confirmRevokeBackup, setConfirmRevokeBackup] = useState(false);
+  const [backupLabel, setBackupLabel] = useState('Tournament backup controller');
+  const [backupPassphrase, setBackupPassphrase] = useState('');
+  const [importPassphrase, setImportPassphrase] = useState('');
 
   const showForm = state.relay === null || bridge.changingRelay;
 
@@ -136,9 +140,84 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               <dd>{state.relay.revision === 0 ? 'None yet' : `Revision ${state.relay.revision}`}</dd>
             </dl>
             <p className="muted">
-              The management credential is kept on this machine only. It never enters an assignment, a pairing
-              link, a QR code, or a saved result.
+              The management credential is kept in this computer&rsquo;s operating-system secure storage. It
+              never enters an assignment, a pairing link, a QR code, a saved result, or an ordinary backup.
             </p>
+            <dl className="facts">
+              <dt>Controller</dt>
+              <dd>
+                {state.relay.controllerRole === 'backup'
+                  ? `Backup${state.relay.controllerLabel ? ` · ${state.relay.controllerLabel}` : ''}`
+                  : 'Primary'}
+              </dd>
+            </dl>
+            {state.relay.controllerRole === 'backup' ? (
+              <div className="scorer-readiness" aria-live="polite">
+                <h3>Backup controller recovery</h3>
+                <p>
+                  This profile is standby control. Importing the package does not change the relay; takeover
+                  is an explicit action that advances the relay epoch and fences the old primary from mirror
+                  and ACK writes.
+                </p>
+                <div className="row">
+                  <Button
+                    variant="primary"
+                    onPress={() => void bridge.takeOverRelay()}
+                    isDisabled={bridge.busy}
+                  >
+                    Take over tournament control
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    onPress={() => void bridge.transferRelayToPrimary()}
+                    isDisabled={bridge.busy}
+                  >
+                    Transfer control back to primary
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="scorer-readiness" aria-live="polite">
+                <h3>Encrypted backup control</h3>
+                <p>
+                  Provision one named backup controller before play. QBBridge puts only the backup credential
+                  and the local recovery state inside an authenticated encrypted package; the primary
+                  credential is never copied into it. Keep the package and passphrase separate.
+                </p>
+                <TextField
+                  label="Backup controller name"
+                  value={backupLabel}
+                  onChange={setBackupLabel}
+                  autoComplete="off"
+                />
+                <TextField
+                  label="New recovery passphrase"
+                  type="password"
+                  value={backupPassphrase}
+                  onChange={setBackupPassphrase}
+                  description="At least 12 characters. Use a different channel to tell the backup operator."
+                  autoComplete="new-password"
+                />
+                <div className="row">
+                  <Button
+                    variant="primary"
+                    onPress={() => void bridge.createRecoveryPackage(backupPassphrase, backupLabel)}
+                    isDisabled={
+                      bridge.busy || backupLabel.trim() === '' || backupPassphrase.trim().length < 12
+                    }
+                  >
+                    Create encrypted backup package…
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    onPress={() => setConfirmRevokeBackup(true)}
+                    isDisabled={bridge.busy}
+                  >
+                    Revoke backup access…
+                  </Button>
+                </div>
+              </div>
+            )}
             {!showForm ? (
               <div className="row">
                 <Button onPress={bridge.beginRelayChange}>Change Relay…</Button>
@@ -244,6 +323,28 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
             </div>
           </form>
         ) : null}
+
+        <div className="scorer-readiness" aria-live="polite">
+          <h3>Open encrypted backup package</h3>
+          <p>
+            On a backup laptop, open the package created by the primary and enter its passphrase. The package
+            is decrypted only in memory, and the imported bearer is stored in the operating-system secure
+            store.
+          </p>
+          <TextField
+            label="Recovery passphrase"
+            type="password"
+            value={importPassphrase}
+            onChange={setImportPassphrase}
+            autoComplete="off"
+          />
+          <Button
+            onPress={() => void bridge.importRecoveryPackage(importPassphrase)}
+            isDisabled={bridge.busy || importPassphrase.trim().length < 12}
+          >
+            Open encrypted recovery package…
+          </Button>
+        </div>
       </section>
 
       <ConfirmDialog
@@ -261,6 +362,22 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
         <span className="code">{state.relay?.tournamentId}</span>. The relay&rsquo;s setup token was used up
         when this credential was claimed, so the same relay cannot be claimed again and QBBridge will not be
         able to publish to it or collect its results. Rooms already holding an assignment keep scoring.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={confirmRevokeBackup}
+        title="Revoke backup controller access?"
+        confirmLabel="Revoke Backup Access"
+        confirmVariant="danger"
+        onCancel={() => setConfirmRevokeBackup(false)}
+        onConfirm={() => {
+          setConfirmRevokeBackup(false);
+          void bridge.revokeBackup();
+        }}
+      >
+        This invalidates the provisioned backup credential without deleting rooms, retained finals, or the
+        primary relay credential. Create a new encrypted package before the next event if another backup
+        laptop is needed.
       </ConfirmDialog>
 
       <ConfirmDialog

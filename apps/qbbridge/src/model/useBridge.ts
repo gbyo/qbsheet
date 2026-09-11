@@ -8,7 +8,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { assignmentFingerprint, plannedAssignmentFingerprint } from './assignment';
-import { chooseResultFolder, isNativeHost, openYellowFruitFile, writeResultFile } from './native';
+import {
+  chooseResultFolder,
+  deleteRelayCredential,
+  isNativeHost,
+  loadRelayCredential,
+  openRecoveryPackage,
+  openYellowFruitFile,
+  relayCredentialKey,
+  storeRelayCredential,
+  writeRecoveryPackage,
+  writeResultFile,
+} from './native';
 import { generatePairingCode } from './pairing';
 import { planRoomSetup, planRound, publishRound, type PublishOutcome, type PublishPlan } from './publish';
 import {
@@ -16,8 +27,15 @@ import {
   relayClaim,
   relayCheckScorerReadiness,
   relayFetchResults,
+  relayHealth,
+  relayProvisionBackup,
+  relayRevokeBackup,
+  relayRotateBackup,
+  relayTakeover,
+  relayTransfer,
   relayUnackedWindow,
   RelayError,
+  type BackupProvisionResult,
   type RelayConnection,
   type ScorerReadinessResult,
 } from './relay';
@@ -55,6 +73,12 @@ import {
   type StoredResult,
 } from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
+import {
+  decryptRecoveryPackage,
+  encryptRecoveryPackage,
+  recoveryPackageFileName,
+  recoveryPackageState,
+} from './recovery';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
@@ -105,6 +129,13 @@ export interface BridgeApi {
   confirmFileSwitch(): void;
   cancelFileSwitch(): void;
   connectRelay(input: { baseUrl: string; tournamentId: string; setupToken: string }): Promise<boolean>;
+  importRecoveryPackage(passphrase: string): Promise<boolean>;
+  createRecoveryPackage(passphrase: string, label?: string): Promise<boolean>;
+  provisionBackup(label: string): Promise<BackupProvisionResult | null>;
+  rotateBackup(label?: string): Promise<BackupProvisionResult | null>;
+  revokeBackup(): Promise<boolean>;
+  takeOverRelay(): Promise<boolean>;
+  transferRelayToPrimary(): Promise<boolean>;
   /** True when a claimed credential is held in memory until local persistence succeeds. */
   relayCredentialSavePending: boolean;
   retryRelayCredentialSave(): Promise<boolean>;
@@ -186,11 +217,14 @@ function describeReconciliation(report: PlanReconciliation): string {
 }
 
 function connectionOf(state: BridgeState): RelayConnection | null {
-  if (!state.relay) return null;
+  if (!state.relay || typeof state.relay.managementToken !== 'string') return null;
   return {
     baseUrl: state.relay.baseUrl,
     tournamentId: state.relay.tournamentId,
     managementToken: state.relay.managementToken,
+    ...(state.relay.controllerRole ? { controllerRole: state.relay.controllerRole } : {}),
+    ...(state.relay.controllerId ? { controllerId: state.relay.controllerId } : {}),
+    ...(state.relay.controllerLabel ? { controllerLabel: state.relay.controllerLabel } : {}),
   };
 }
 
@@ -309,6 +343,7 @@ export function useBridge(): BridgeApi {
   const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
   const savingBatchRef = useRef(false);
   const [savingBatch, setSavingBatch] = useState(false);
+  const credentialMigrationRef = useRef<string | null>(null);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
@@ -324,6 +359,61 @@ export function useBridge(): BridgeApi {
     setState(next);
   }, []);
 
+  /**
+   * Migrate legacy localStorage credentials to the OS secure store, or restore a secure-only
+   * credential after a restart. The bearer remains in memory only; every native save omits it from
+   * the JSON blob so a profile backup/cloud-sync copy cannot become a plaintext credential backup.
+   */
+  useEffect(() => {
+    const relay = state.relay;
+    if (!relay || !isNativeHost()) return;
+    const key = relayCredentialKey(
+      relay.baseUrl,
+      relay.tournamentId,
+      relay.controllerRole ?? 'primary',
+      relay.controllerId ?? '',
+    );
+    if (credentialMigrationRef.current === key) return;
+    credentialMigrationRef.current = key;
+    const sameRelay = (current: BridgeState): boolean =>
+      current.relay?.baseUrl === relay.baseUrl && current.relay?.tournamentId === relay.tournamentId;
+    if (typeof relay.managementToken === 'string' && relay.managementToken !== '') {
+      void storeRelayCredential(key, relay.managementToken)
+        .then(() => {
+          const current = stateRef.current;
+          if (sameRelay(current)) saveState(current, { secureCredential: true });
+        })
+        .catch((error) => {
+          setNotice({
+            kind: 'bad',
+            message: `QBBridge could not move the relay credential into secure storage. Keep this profile private and repair secure storage before continuing. ${(error as Error).message}`,
+          });
+        });
+      return;
+    }
+    void loadRelayCredential(key)
+      .then((token) => {
+        const current = stateRef.current;
+        if (!token || !sameRelay(current) || !current.relay) {
+          setRelayReachable(false);
+          setNotice({
+            kind: 'bad',
+            message:
+              'This profile has relay metadata but no secure management credential. Import the encrypted recovery package or connect a relay again; the consumed setup token cannot recover it.',
+          });
+          return;
+        }
+        activateState({ ...current, relay: { ...current.relay, managementToken: token } });
+      })
+      .catch((error) => {
+        setRelayReachable(false);
+        setNotice({
+          kind: 'bad',
+          message: `QBBridge could not read the relay credential from secure storage. ${(error as Error).message}`,
+        });
+      });
+  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId]);
+
   const commit = useCallback(
     (
       next: BridgeState | ((current: BridgeState) => BridgeState),
@@ -331,7 +421,7 @@ export function useBridge(): BridgeApi {
     ): { state: BridgeState; persisted: PersistResult } => {
       const current = stateRef.current;
       const resolved = typeof next === 'function' ? next(current) : next;
-      const persisted = saveState(resolved);
+      const persisted = saveState(resolved, { secureCredential: true });
       if (options.critical) setPersistenceSavePending(!persisted.ok);
       activateState(resolved);
       return { state: resolved, persisted };
@@ -418,7 +508,7 @@ export function useBridge(): BridgeApi {
           tournamentName: report.tournament.name,
           selectedRoundId: firstRoundId,
         };
-        const persisted = saveState(next);
+        const persisted = saveState(next, { secureCredential: true });
         if (!persisted.ok) {
           setNotice({
             kind: 'bad',
@@ -547,7 +637,25 @@ export function useBridge(): BridgeApi {
     async (connection: RelayConnection): Promise<boolean> => {
       const replacing = isRelayReplacement(stateRef.current, connection);
       const next = stateWithRelay(stateRef.current, connection);
-      const persisted = saveState(next);
+      try {
+        await storeRelayCredential(
+          relayCredentialKey(connection.baseUrl, connection.tournamentId, 'primary'),
+          connection.managementToken,
+        );
+      } catch (error) {
+        // A claim is one-time. Do not activate a credential that cannot be placed in the OS store;
+        // retain it only in the existing in-session retry ref and never in a persisted diagnostic.
+        pendingRelayClaimRef.current = connection;
+        setRelayCredentialSavePending(true);
+        setChangingRelay(true);
+        setRelayReachable(null);
+        setNotice({
+          kind: 'bad',
+          message: `The relay claim succeeded, but QBBridge could not save the returned management credential in secure storage. Repair secure storage and retry. ${(error as Error).message}`,
+        });
+        return false;
+      }
+      const persisted = saveState(next, { secureCredential: true });
       if (!persisted.ok) {
         // The claim crossed a one-time boundary, so retain only the returned credential needed for
         // an in-session retry. It is deliberately not placed in BridgeState or any user-visible
@@ -559,7 +667,7 @@ export function useBridge(): BridgeApi {
         setNotice({
           kind: 'bad',
           message:
-            'The relay claim succeeded, but QBBridge could not save the returned management credential. The new relay is not active yet; fix local storage and retry saving the credential.',
+            'The relay claim succeeded, but QBBridge could not save the returned management credential. The new relay is not active yet; fix local persistence and retry saving the credential.',
         });
         return false;
       }
@@ -605,7 +713,7 @@ export function useBridge(): BridgeApi {
           setNotice({ kind: 'bad', message: 'Retry saving the previously claimed relay credential first.' });
           return false;
         }
-        const preflight = saveState(stateRef.current);
+        const preflight = saveState(stateRef.current, { secureCredential: true });
         if (!preflight.ok) {
           setNotice({
             kind: 'bad',
@@ -619,6 +727,7 @@ export function useBridge(): BridgeApi {
           baseUrl: input.baseUrl.replace(/\/+$/, ''),
           tournamentId: claimed.tournamentId,
           managementToken: claimed.managementToken,
+          controllerRole: 'primary',
         };
         return await activateClaimedRelay(connection);
       } catch (error) {
@@ -652,6 +761,255 @@ export function useBridge(): BridgeApi {
     }
   }, [activateClaimedRelay]);
 
+  const provisionBackup = useCallback(async (label: string): Promise<BackupProvisionResult | null> => {
+    const connection = connectionOf(stateRef.current);
+    if (!connection) {
+      setNotice({ kind: 'bad', message: 'Connect a relay before provisioning backup control access.' });
+      return null;
+    }
+    try {
+      const provisioned = await relayProvisionBackup(connection, label);
+      setNotice({
+        kind: 'warn',
+        message:
+          'Backup control access was provisioned. Create its encrypted recovery package now; the credential is never shown again by QBBridge.',
+      });
+      return provisioned;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `Backup control access was not provisioned. ${(error as Error).message}`,
+      });
+      return null;
+    }
+  }, []);
+
+  const rotateBackup = useCallback(async (label?: string): Promise<BackupProvisionResult | null> => {
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return null;
+    try {
+      const rotated = await relayRotateBackup(connection, label);
+      setNotice({
+        kind: 'warn',
+        message:
+          'The backup controller credential was rotated. Create a new encrypted recovery package before relying on the backup laptop.',
+      });
+      return rotated;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `Backup control access was not rotated. ${(error as Error).message}`,
+      });
+      return null;
+    }
+  }, []);
+
+  const revokeBackup = useCallback(async (): Promise<boolean> => {
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return false;
+    try {
+      await relayRevokeBackup(connection);
+      setNotice({
+        kind: 'good',
+        message: 'Backup controller access was revoked. Retained results and room access were unchanged.',
+      });
+      return true;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `Backup control access was not revoked. ${(error as Error).message}`,
+      });
+      return false;
+    }
+  }, []);
+
+  const createRecoveryPackage = useCallback(
+    async (passphrase: string, label = 'Tournament backup controller'): Promise<boolean> => {
+      const current = stateRef.current;
+      const connection = connectionOf(current);
+      if (!connection) {
+        setNotice({ kind: 'bad', message: 'Connect a relay before creating a recovery package.' });
+        return false;
+      }
+      setBusy(true);
+      let provisioned: BackupProvisionResult | null = null;
+      try {
+        provisioned = await relayProvisionBackup(connection, label);
+        const payload = recoveryPackageState(current, provisioned);
+        const contents = await encryptRecoveryPackage(payload, passphrase);
+        const path = await writeRecoveryPackage('', recoveryPackageFileName, contents);
+        setNotice({
+          kind: 'good',
+          message: `Encrypted backup control package saved to ${path}. Keep the file and passphrase separate; the package contains no primary credential.`,
+        });
+        return true;
+      } catch (error) {
+        if (provisioned) {
+          try {
+            await relayRevokeBackup(connection);
+          } catch {
+            setNotice({
+              kind: 'bad',
+              message:
+                'The recovery package could not be written, and the temporary backup credential could not be revoked. Revoke or rotate backup control access before continuing.',
+            });
+            return false;
+          }
+        }
+        setNotice({
+          kind: 'bad',
+          message: `The encrypted recovery package was not created. ${(error as Error).message}`,
+        });
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+
+  const importRecoveryPackage = useCallback(
+    async (passphrase: string): Promise<boolean> => {
+      setBusy(true);
+      try {
+        const opened = await openRecoveryPackage();
+        if (!opened) return false;
+        const packageData = await decryptRecoveryPackage(opened.contents, passphrase);
+        const imported = packageData.state;
+        const connection = connectionOf(imported);
+        if (!connection || connection.controllerRole !== 'backup') {
+          throw new Error('The recovery package does not contain backup controller access.');
+        }
+        await storeRelayCredential(
+          relayCredentialKey(
+            connection.baseUrl,
+            connection.tournamentId,
+            connection.controllerRole ?? 'backup',
+            connection.controllerId ?? '',
+          ),
+          connection.managementToken,
+        );
+        const health = await relayHealth(connection);
+        const next: BridgeState = {
+          ...imported,
+          relay: imported.relay
+            ? {
+                ...imported.relay,
+                epoch: health.directorEpoch,
+                revision: health.revision,
+                controllerRole: 'backup',
+              }
+            : null,
+        };
+        const persisted = saveState(next, { secureCredential: true });
+        if (!persisted.ok) throw new Error('The imported recovery state could not be saved locally.');
+        pollGenerationRef.current += 1;
+        readinessKeyRef.current = null;
+        pendingRelayClaimRef.current = null;
+        setRelayCredentialSavePending(false);
+        setPersistenceSavePending(false);
+        setTournament(null);
+        setLoadWarnings([]);
+        setChangingRelay(false);
+        setRelayReachable(true);
+        activateState(next);
+        const readiness = await refreshScorerReadiness(connection);
+        setNotice({
+          kind: 'good',
+          message: `Encrypted recovery package imported for ${connection.tournamentId}. Reload the authoritative .yft, then take over explicitly before publishing. ${readiness.message}`,
+        });
+        return true;
+      } catch (error) {
+        setRelayReachable(false);
+        setNotice({
+          kind: 'bad',
+          message: `The recovery package was not imported. ${(error as Error).message}`,
+        });
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activateState, refreshScorerReadiness],
+  );
+
+  const takeOverRelay = useCallback(async (): Promise<boolean> => {
+    const current = stateRef.current;
+    const connection = connectionOf(current);
+    if (!connection || connection.controllerRole !== 'backup') {
+      setNotice({ kind: 'bad', message: 'Import a backup recovery package before taking over.' });
+      return false;
+    }
+    setBusy(true);
+    try {
+      const takeoverId =
+        typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const outcome = await relayTakeover(connection, takeoverId);
+      const persisted = commit(
+        (stateAtCommit) =>
+          stateAtCommit.relay
+            ? {
+                ...stateAtCommit,
+                relay: { ...stateAtCommit.relay, epoch: outcome.directorEpoch, revision: outcome.revision },
+              }
+            : stateAtCommit,
+        { critical: true },
+      ).persisted;
+      if (!persisted.ok) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'The relay takeover succeeded, but the new epoch could not be saved locally. Keep this window open and retry local persistence before publishing.',
+        });
+        return false;
+      }
+      setRelayReachable(true);
+      setNotice({
+        kind: 'warn',
+        message:
+          'This backup is now the active relay controller. The old primary is fenced from publishing and acknowledging; reload the .yft and review the recovered room state before publishing the next round.',
+      });
+      return true;
+    } catch (error) {
+      setRelayReachable(false);
+      setNotice({ kind: 'bad', message: `Relay takeover was not completed. ${(error as Error).message}` });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [commit]);
+
+  const transferRelayToPrimary = useCallback(async (): Promise<boolean> => {
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return false;
+    setBusy(true);
+    try {
+      const outcome = await relayTransfer(connection, 'primary');
+      commit((current) =>
+        current.relay
+          ? {
+              ...current,
+              relay: { ...current.relay, epoch: outcome.directorEpoch, revision: outcome.revision },
+            }
+          : current,
+      );
+      setRelayReachable(false);
+      setNotice({
+        kind: 'warn',
+        message:
+          'Relay control was transferred to the primary controller. This backup is now read-only; open the primary QBBridge profile before publishing or acknowledging results.',
+      });
+      return true;
+    } catch (error) {
+      setNotice({ kind: 'bad', message: `Relay control was not transferred. ${(error as Error).message}` });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [commit]);
+
   const beginRelayChange = useCallback(() => setChangingRelay(true), []);
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
 
@@ -680,7 +1038,26 @@ export function useBridge(): BridgeApi {
    * no way back: the relay's setup token was consumed by the claim that produced this
    * credential, so the same relay cannot be claimed again.
    */
-  const forgetRelayCredential = useCallback(() => {
+  const forgetRelayCredential = useCallback(async () => {
+    const existing = stateRef.current.relay;
+    if (existing) {
+      try {
+        await deleteRelayCredential(
+          relayCredentialKey(
+            existing.baseUrl,
+            existing.tournamentId,
+            existing.controllerRole ?? 'primary',
+            existing.controllerId ?? '',
+          ),
+        );
+      } catch (error) {
+        setNotice({
+          kind: 'bad',
+          message: `QBBridge could not delete the relay credential from secure storage. Nothing was forgotten. ${(error as Error).message}`,
+        });
+        return;
+      }
+    }
     pollGenerationRef.current += 1;
     const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null }), {
       critical: true,
@@ -696,7 +1073,7 @@ export function useBridge(): BridgeApi {
   }, [commit]);
 
   const retryStatePersistence = useCallback((): boolean => {
-    const persisted = saveState(stateRef.current);
+    const persisted = saveState(stateRef.current, { secureCredential: true });
     if (persisted.ok) {
       setPersistenceSavePending(false);
       setNotice({ kind: 'good', message: 'The current relay state is saved locally.' });
@@ -1358,6 +1735,13 @@ export function useBridge(): BridgeApi {
     confirmFileSwitch,
     cancelFileSwitch,
     connectRelay,
+    importRecoveryPackage,
+    createRecoveryPackage,
+    provisionBackup,
+    rotateBackup,
+    revokeBackup,
+    takeOverRelay,
+    transferRelayToPrimary,
     relayCredentialSavePending,
     retryRelayCredentialSave,
     persistenceSavePending,

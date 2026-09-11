@@ -98,6 +98,10 @@ export interface RelayConnection {
   baseUrl: string;
   tournamentId: string;
   managementToken: string;
+  /** Stored only as local metadata; the relay derives authorization from the bearer hash. */
+  controllerRole?: 'primary' | 'backup';
+  controllerId?: string;
+  controllerLabel?: string;
 }
 
 function manageBase(baseUrl: string, tournamentId: string): string {
@@ -125,6 +129,25 @@ function fail(response: RelayResponse, fallback: string): RelayError {
 export interface ClaimResult {
   tournamentId: string;
   managementToken: string;
+}
+
+export interface BackupProvisionResult {
+  tournamentId: string;
+  managementToken: string;
+  controllerId: string;
+  label: string;
+}
+
+export interface RelayHealth {
+  tournamentId: string;
+  directorEpoch: number;
+  revision: number;
+  activeController: 'primary' | 'backup';
+  authenticatedAs: 'primary' | 'backup';
+  controllerActive: boolean;
+  backupProvisioned: boolean;
+  backupControllerId: string | null;
+  backupControllerLabel: string | null;
 }
 
 export interface ScorerReadinessResult {
@@ -192,6 +215,168 @@ export async function relayClaim(options: {
     throw new RelayError('The relay answered a claim without a management credential.', 200);
   }
   return { tournamentId: body.tournamentId, managementToken: body.managementToken };
+}
+
+/** Provision a second, independently revocable relay controller. The token is returned once. */
+export async function relayProvisionBackup(
+  connection: RelayConnection,
+  label: string,
+  replace = false,
+): Promise<BackupProvisionResult> {
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/backup/provision`,
+    bearer: connection.managementToken,
+    body: { label, replace },
+  });
+  if (response.status !== 200) throw fail(response, 'The relay could not provision backup control access.');
+  const body = parseBody(response);
+  if (
+    typeof body.tournamentId !== 'string' ||
+    typeof body.backupToken !== 'string' ||
+    typeof body.controllerId !== 'string' ||
+    typeof body.label !== 'string'
+  ) {
+    throw new RelayError('The relay answered without a backup controller credential.', response.status);
+  }
+  return {
+    tournamentId: body.tournamentId,
+    managementToken: body.backupToken,
+    controllerId: body.controllerId,
+    label: body.label,
+  };
+}
+
+/** Rotate the provisioned backup credential without changing active publication authority. */
+export async function relayRotateBackup(
+  connection: RelayConnection,
+  label?: string,
+): Promise<BackupProvisionResult> {
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/backup/rotate`,
+    bearer: connection.managementToken,
+    body: label === undefined ? {} : { label },
+  });
+  if (response.status !== 200) throw fail(response, 'The relay could not rotate backup control access.');
+  const body = parseBody(response);
+  if (
+    typeof body.tournamentId !== 'string' ||
+    typeof body.backupToken !== 'string' ||
+    typeof body.controllerId !== 'string' ||
+    typeof body.label !== 'string'
+  ) {
+    throw new RelayError('The relay answered without a rotated backup credential.', response.status);
+  }
+  return {
+    tournamentId: body.tournamentId,
+    managementToken: body.backupToken,
+    controllerId: body.controllerId,
+    label: body.label,
+  };
+}
+
+export async function relayRevokeBackup(connection: RelayConnection): Promise<void> {
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/backup/revoke`,
+    bearer: connection.managementToken,
+    body: {},
+  });
+  if (response.status !== 200) throw fail(response, 'The relay could not revoke backup control access.');
+}
+
+/** Read current epoch/revision and controller state without exposing any credential. */
+export async function relayHealth(connection: RelayConnection): Promise<RelayHealth> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/health`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay health check failed.');
+  const body = parseBody(response);
+  const mirror =
+    body.mirror && typeof body.mirror === 'object' ? (body.mirror as Record<string, unknown>) : {};
+  const controller =
+    body.controller && typeof body.controller === 'object'
+      ? (body.controller as Record<string, unknown>)
+      : {};
+  if (
+    typeof body.tournamentId !== 'string' ||
+    typeof mirror.director_epoch !== 'number' ||
+    typeof mirror.revision !== 'number' ||
+    (controller.authenticated_as !== 'primary' && controller.authenticated_as !== 'backup') ||
+    (controller.active_controller !== 'primary' && controller.active_controller !== 'backup') ||
+    typeof controller.active !== 'boolean' ||
+    typeof controller.backup_provisioned !== 'boolean'
+  ) {
+    throw new RelayError('The relay answered with invalid controller health.', response.status);
+  }
+  return {
+    tournamentId: body.tournamentId,
+    directorEpoch: mirror.director_epoch,
+    revision: mirror.revision,
+    authenticatedAs: controller.authenticated_as,
+    activeController: controller.active_controller,
+    controllerActive: controller.active,
+    backupProvisioned: controller.backup_provisioned,
+    backupControllerId:
+      typeof controller.backup_controller_id === 'string' ? controller.backup_controller_id : null,
+    backupControllerLabel:
+      typeof controller.backup_controller_label === 'string' ? controller.backup_controller_label : null,
+  };
+}
+
+export async function relayTakeover(
+  connection: RelayConnection,
+  takeoverId: string,
+): Promise<{ directorEpoch: number; revision: number; idempotent: boolean }> {
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/takeover`,
+    bearer: connection.managementToken,
+    body: { takeover_id: takeoverId },
+  });
+  if (response.status !== 200) throw fail(response, 'The relay refused backup takeover.');
+  const body = parseBody(response);
+  if (
+    typeof body.director_epoch !== 'number' ||
+    body.active_controller !== 'backup' ||
+    typeof body.revision !== 'number'
+  ) {
+    throw new RelayError('The relay answered with invalid takeover state.', response.status);
+  }
+  return {
+    directorEpoch: body.director_epoch,
+    revision: body.revision,
+    idempotent: body.idempotent === true,
+  };
+}
+
+export async function relayTransfer(
+  connection: RelayConnection,
+  controller: 'primary' | 'backup',
+): Promise<{ directorEpoch: number; revision: number; activeController: 'primary' | 'backup' }> {
+  const response = await relayRequest({
+    method: 'POST',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/transfer`,
+    bearer: connection.managementToken,
+    body: { controller },
+  });
+  if (response.status !== 200) throw fail(response, 'The relay refused controller transfer.');
+  const body = parseBody(response);
+  if (
+    typeof body.director_epoch !== 'number' ||
+    typeof body.revision !== 'number' ||
+    (body.active_controller !== 'primary' && body.active_controller !== 'backup')
+  ) {
+    throw new RelayError('The relay answered with invalid transfer state.', response.status);
+  }
+  return {
+    directorEpoch: body.director_epoch,
+    revision: body.revision,
+    activeController: body.active_controller,
+  };
 }
 
 export interface MirrorRoomInput {

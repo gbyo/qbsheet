@@ -1,4 +1,4 @@
-//! The four native operations.
+//! The native operations, including secure relay-credential storage.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -15,6 +15,7 @@ const MAX_RESULT_BYTES: usize = 4 * 1024 * 1024;
 const RELAY_TIMEOUT: Duration = Duration::from_secs(20);
 /// The largest relay response read. `manage/mirror` accepts 8 MiB; a results page can approach it.
 const MAX_RELAY_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_RECOVERY_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct CommandError {
@@ -94,6 +95,156 @@ pub async fn choose_result_folder(app: AppHandle) -> CommandResult<Option<String
         .into_path()
         .map_err(|error| CommandError::new("invalid_path", error.to_string()))?;
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// Read an encrypted recovery package. The native layer treats it as opaque bytes: it never
+/// parses, logs, decrypts, or places a management credential in a file path or diagnostic.
+#[tauri::command]
+pub async fn open_recovery_package(app: AppHandle) -> CommandResult<Option<OpenedFile>> {
+    let chosen = app
+        .dialog()
+        .file()
+        .add_filter("QBSheet encrypted recovery package", &["qbr"])
+        .set_title("Open QBSheet recovery package")
+        .blocking_pick_file();
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let path = chosen
+        .into_path()
+        .map_err(|error| CommandError::new("invalid_path", error.to_string()))?;
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    if metadata.len() > MAX_RECOVERY_PACKAGE_BYTES as u64 {
+        return Err(CommandError::new(
+            "recovery_package_too_large",
+            "That recovery package is larger than the 2 MiB limit.",
+        ));
+    }
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    Ok(Some(OpenedFile {
+        path: path.to_string_lossy().into_owned(),
+        contents,
+    }))
+}
+
+/// Choose a folder and write one encrypted recovery package exclusively into it.
+#[tauri::command]
+pub async fn write_recovery_package(
+    app: AppHandle,
+    directory: String,
+    file_name: String,
+    contents: String,
+) -> CommandResult<String> {
+    if contents.len() > MAX_RECOVERY_PACKAGE_BYTES {
+        return Err(CommandError::new(
+            "recovery_package_too_large",
+            "That recovery package is larger than the 2 MiB limit.",
+        ));
+    }
+    let directory = if directory.is_empty() {
+        let chosen = app
+            .dialog()
+            .file()
+            .set_title("Choose a folder for the encrypted QBSheet recovery package")
+            .blocking_pick_folder();
+        let Some(chosen) = chosen else {
+            return Err(CommandError::new(
+                "cancelled",
+                "No recovery-package folder was chosen.",
+            ));
+        };
+        chosen
+            .into_path()
+            .map_err(|error| CommandError::new("invalid_path", error.to_string()))?
+    } else {
+        PathBuf::from(directory)
+    };
+    if !directory.is_dir() {
+        return Err(CommandError::new(
+            "no_such_folder",
+            "That recovery-package folder no longer exists. Choose it again.",
+        ));
+    }
+    let path = directory.join(safe_file_name(&file_name)?);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                CommandError::new(
+                    "recovery_package_exists",
+                    "That recovery package file already exists and was not replaced.",
+                )
+            } else {
+                CommandError::new("write_failed", error.to_string())
+            }
+        })?;
+    std::io::Write::write_all(&mut file, contents.as_bytes())
+        .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+const RELAY_CREDENTIAL_SERVICE: &str = "com.qbsheet.bridge.relay";
+
+fn relay_credential_entry(key: &str) -> Result<keyring::Entry, CommandError> {
+    keyring::Entry::new(RELAY_CREDENTIAL_SERVICE, key)
+        .map_err(|error| CommandError::new("secure_storage_unavailable", error.to_string()))
+}
+
+/// Store the management credential in Windows Credential Manager/macOS Keychain. The value is
+/// intentionally never returned, logged, serialized into BridgeState, or included in a package.
+#[tauri::command]
+pub async fn store_relay_credential(key: String, token: String) -> CommandResult<()> {
+    if key.is_empty() || key.len() > 512 || token.is_empty() || token.len() > 1024 {
+        return Err(CommandError::new(
+            "invalid_credential",
+            "The relay credential could not be stored.",
+        ));
+    }
+    relay_credential_entry(&key)?
+        .set_password(&token)
+        .map_err(|error| CommandError::new("secure_storage_unavailable", error.to_string()))
+}
+
+/// Load a management credential from platform secure storage. `None` means that this relay has no
+/// credential on this user profile; it is not an error and does not reveal a secret.
+#[tauri::command]
+pub async fn load_relay_credential(key: String) -> CommandResult<Option<String>> {
+    if key.is_empty() || key.len() > 512 {
+        return Err(CommandError::new(
+            "invalid_credential",
+            "The relay credential could not be loaded.",
+        ));
+    }
+    match relay_credential_entry(&key)?.get_password() {
+        Ok(token) => Ok(Some(token)),
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(error) => Err(CommandError::new(
+            "secure_storage_unavailable",
+            error.to_string(),
+        )),
+    }
+}
+
+/// Delete one relay credential from platform secure storage. Missing entries are already gone.
+#[tauri::command]
+pub async fn delete_relay_credential(key: String) -> CommandResult<()> {
+    if key.is_empty() || key.len() > 512 {
+        return Err(CommandError::new(
+            "invalid_credential",
+            "The relay credential could not be deleted.",
+        ));
+    }
+    match relay_credential_entry(&key)?.delete_credential() {
+        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+        Err(error) => Err(CommandError::new(
+            "secure_storage_unavailable",
+            error.to_string(),
+        )),
+    }
 }
 
 /// A filename, checked to be exactly that.

@@ -230,6 +230,17 @@ describe('migrating a version 1 state', () => {
 describe('reading a version 2 state', () => {
   beforeEach(() => globalThis.localStorage.clear());
 
+  test('secure saves never put the relay bearer in local storage', () => {
+    storeV1({ version: 2, roundPlans: [] });
+    const state = loadState();
+    expect(saveState(state, { secureCredential: true }).ok).toBe(true);
+    const raw = globalThis.localStorage.getItem(storageKey) ?? '';
+    expect(raw).not.toContain('management-secret-do-not-lose');
+    expect((JSON.parse(raw) as { relay?: Record<string, unknown> }).relay).not.toHaveProperty(
+      'managementToken',
+    );
+  });
+
   test('restores the plans as written', () => {
     const state = {
       ...v1,

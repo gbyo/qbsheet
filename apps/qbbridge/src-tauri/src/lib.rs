@@ -22,6 +22,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_yellowfruit_file,
             commands::choose_result_folder,
+            commands::open_recovery_package,
+            commands::write_recovery_package,
+            commands::store_relay_credential,
+            commands::load_relay_credential,
+            commands::delete_relay_credential,
             commands::write_result_file,
             commands::relay_request,
         ])

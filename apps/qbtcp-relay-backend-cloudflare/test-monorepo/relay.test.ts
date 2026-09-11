@@ -348,6 +348,164 @@ describe('rotating the management credential', () => {
   });
 });
 
+describe('backup controller recovery and split-brain fencing', () => {
+  it('provisions, rotates, takes over, and explicitly transfers control without exposing tokens', async () => {
+    const tournamentId = freshTournamentId();
+    const primary = await claim(tournamentId);
+    await mirrorRoom(primary, tournamentId, 'room-a', { code: '42424242' });
+
+    const provision = await SELF.fetch(`${manageBase(tournamentId)}/backup/provision`, {
+      method: 'POST',
+      headers: manageHeaders(primary),
+      body: JSON.stringify({ label: 'Backup laptop' }),
+    });
+    expect(provision.status).toBe(200);
+    const provisioned = (await provision.json()) as {
+      tournamentId: string;
+      controllerId: string;
+      label: string;
+      backupToken: string;
+    };
+    expect(provisioned).toMatchObject({ tournamentId, label: 'Backup laptop' });
+    expect(provisioned.controllerId).toMatch(/^backup-/);
+    expect(provisioned.backupToken).toMatch(/^[0-9a-f]{64}$/);
+
+    const primaryHealth = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(primary),
+    });
+    expect(primaryHealth.status).toBe(200);
+    const primaryHealthText = await primaryHealth.text();
+    expect(primaryHealthText).not.toContain(primary);
+    expect(primaryHealthText).not.toContain(provisioned.backupToken);
+    expect(JSON.parse(primaryHealthText)).toMatchObject({
+      controller: {
+        authenticated_as: 'primary',
+        active: true,
+        active_controller: 'primary',
+        backup_provisioned: true,
+        backup_controller_id: provisioned.controllerId,
+        backup_controller_label: 'Backup laptop',
+      },
+    });
+
+    const rotated = await SELF.fetch(`${manageBase(tournamentId)}/backup/rotate`, {
+      method: 'POST',
+      headers: manageHeaders(primary),
+      body: JSON.stringify({ label: 'Backup laptop 2' }),
+    });
+    expect(rotated.status).toBe(200);
+    const rotatedBody = (await rotated.json()) as {
+      backupToken: string;
+      controllerId: string;
+      label: string;
+    };
+    expect(rotatedBody.controllerId).toBe(provisioned.controllerId);
+    expect(rotatedBody.label).toBe('Backup laptop 2');
+    expect(rotatedBody.backupToken).toMatch(/^[0-9a-f]{64}$/);
+    expect(rotatedBody.backupToken).not.toBe(provisioned.backupToken);
+
+    const staleBackupHealth = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(provisioned.backupToken),
+    });
+    expect(staleBackupHealth.status).toBe(401);
+
+    const backup = rotatedBody.backupToken;
+    const beforeTakeover = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(backup),
+    });
+    expect(beforeTakeover.status).toBe(200);
+    expect(await beforeTakeover.json()).toMatchObject({
+      mirror: { director_epoch: 1, revision: 1 },
+      controller: { authenticated_as: 'backup', active: false, active_controller: 'primary' },
+    });
+
+    const takeover = await SELF.fetch(`${manageBase(tournamentId)}/takeover`, {
+      method: 'POST',
+      headers: manageHeaders(backup),
+      body: JSON.stringify({ takeover_id: 'handoff-1' }),
+    });
+    expect(takeover.status).toBe(200);
+    const takeoverBody = (await takeover.json()) as {
+      director_epoch: number;
+      revision: number;
+      active_controller: string;
+      idempotent: boolean;
+    };
+    expect(takeoverBody).toMatchObject({
+      director_epoch: 2,
+      revision: 0,
+      active_controller: 'backup',
+      idempotent: false,
+    });
+
+    const repeatedTakeover = await SELF.fetch(`${manageBase(tournamentId)}/takeover`, {
+      method: 'POST',
+      headers: manageHeaders(backup),
+      body: JSON.stringify({ takeover_id: 'handoff-1' }),
+    });
+    expect(repeatedTakeover.status).toBe(200);
+    expect(await repeatedTakeover.json()).toMatchObject({ director_epoch: 2, revision: 0, idempotent: true });
+
+    const duplicateTakeover = await SELF.fetch(`${manageBase(tournamentId)}/takeover`, {
+      method: 'POST',
+      headers: manageHeaders(backup),
+      body: JSON.stringify({ takeover_id: 'handoff-2' }),
+    });
+    expect(duplicateTakeover.status).toBe(409);
+    expect(await duplicateTakeover.json()).toMatchObject({ error: 'conflict' });
+
+    const stalePrimaryMirror = await mirror(primary, tournamentId, { epoch: 2, revision: 1 });
+    expect(stalePrimaryMirror.status).toBe(409);
+    expect(await stalePrimaryMirror.json()).toMatchObject({
+      error: 'superseded',
+      active_controller: 'backup',
+    });
+
+    const stalePrimaryAck = await SELF.fetch(`${manageBase(tournamentId)}/acks`, {
+      method: 'POST',
+      headers: manageHeaders(primary),
+      body: JSON.stringify({ results: ['missing-result'] }),
+    });
+    expect(stalePrimaryAck.status).toBe(409);
+    expect(await stalePrimaryAck.json()).toMatchObject({ error: 'superseded' });
+
+    const backupMirror = await mirror(backup, tournamentId, { epoch: 2, revision: 1 });
+    expect(backupMirror.status).toBe(200);
+
+    const transfer = await SELF.fetch(`${manageBase(tournamentId)}/transfer`, {
+      method: 'POST',
+      headers: manageHeaders(backup),
+      body: JSON.stringify({ controller: 'primary' }),
+    });
+    expect(transfer.status).toBe(200);
+    expect(await transfer.json()).toMatchObject({
+      director_epoch: 3,
+      revision: 0,
+      active_controller: 'primary',
+      idempotent: false,
+    });
+
+    expect((await mirror(primary, tournamentId, { epoch: 3, revision: 1 })).status).toBe(200);
+    const staleBackupMirror = await mirror(backup, tournamentId, { epoch: 3, revision: 2 });
+    expect(staleBackupMirror.status).toBe(409);
+    expect(await staleBackupMirror.json()).toMatchObject({
+      error: 'superseded',
+      active_controller: 'primary',
+    });
+
+    const revoke = await SELF.fetch(`${manageBase(tournamentId)}/backup/revoke`, {
+      method: 'POST',
+      headers: manageHeaders(primary),
+      body: '{}',
+    });
+    expect(revoke.status).toBe(200);
+    const revokedBackupHealth = await SELF.fetch(`${manageBase(tournamentId)}/health`, {
+      headers: manageHeaders(backup),
+    });
+    expect(revokedBackupHealth.status).toBe(401);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Discovery: the stream capability contract, exactly as #770 defines it
 // ---------------------------------------------------------------------------
