@@ -208,7 +208,11 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                 <div className="row">
                   <Button
                     variant="primary"
-                    onPress={() => void bridge.createRecoveryPackage(backupPassphrase, backupLabel)}
+                    onPress={() => {
+                      void bridge.createRecoveryPackage(backupPassphrase, backupLabel).then((created) => {
+                        if (created) setBackupPassphrase('');
+                      });
+                    }}
                     isDisabled={
                       bridge.busy || backupLabel.trim() === '' || backupPassphrase.trim().length < 12
                     }
@@ -346,7 +350,11 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
             autoComplete="off"
           />
           <Button
-            onPress={() => void bridge.importRecoveryPackage(importPassphrase)}
+            onPress={() => {
+              void bridge.importRecoveryPackage(importPassphrase).then((imported) => {
+                if (imported) setImportPassphrase('');
+              });
+            }}
             isDisabled={bridge.busy || importPassphrase.trim().length < 12}
           >
             Open encrypted recovery package…
