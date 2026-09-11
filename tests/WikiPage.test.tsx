@@ -68,6 +68,7 @@ describe('a wiki article', () => {
     // beside the scorer. A wiki article is the deepest document here, so it is where a product link
     // written against the wrong depth shows up first.
     expect(within(nav).getByRole('link', { name: 'Director' })).toHaveAttribute('href', '../../director/');
+    expect(within(nav).getByRole('link', { name: 'Bridge' })).toHaveAttribute('href', '../../bridge/');
     expect(within(nav).getByRole('link', { name: 'QBLive' })).toHaveAttribute('href', '../../qblive/');
 
     // The wiki has no index page: its own `Home` is the front page, so that is where the navigation

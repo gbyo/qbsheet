@@ -125,9 +125,10 @@ describe('the QBLive page', () => {
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
 
     const nav = container.querySelector('.about-nav') as HTMLElement;
-    expect(within(nav).getAllByRole('link')).toHaveLength(4);
+    expect(within(nav).getAllByRole('link')).toHaveLength(5);
     expect(within(nav).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
     expect(within(nav).getByRole('link', { name: 'Director' })).toHaveAttribute('href', '../director/');
+    expect(within(nav).getByRole('link', { name: 'Bridge' })).toHaveAttribute('href', '../bridge/');
     const self = within(nav).getByRole('link', { name: 'QBLive' });
     expect(self).toHaveAttribute('href', './');
     expect(self).toHaveAttribute('aria-current', 'page');

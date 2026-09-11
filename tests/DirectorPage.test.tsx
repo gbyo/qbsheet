@@ -143,12 +143,13 @@ describe('the Director page', () => {
     expect(container.querySelector('.about-brand')).toHaveAttribute('href', '../');
 
     const nav = container.querySelector('.about-nav') as HTMLElement;
-    expect(within(nav).getAllByRole('link')).toHaveLength(4);
+    expect(within(nav).getAllByRole('link')).toHaveLength(5);
     expect(within(nav).getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../../');
     // A page names itself as `./`, and `aria-current` belongs on that link and nowhere else.
     const self = within(nav).getByRole('link', { name: 'Director' });
     expect(self).toHaveAttribute('href', './');
     expect(self).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Bridge' })).toHaveAttribute('href', '../bridge/');
     const qblive = within(nav).getByRole('link', { name: 'QBLive' });
     expect(qblive).toHaveAttribute('href', '../qblive/');
     expect(qblive).not.toHaveAttribute('aria-current');
