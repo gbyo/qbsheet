@@ -18,7 +18,6 @@ import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
 import { protestStatusLabels, protestSubjectLabels } from './ProcedureDialogs';
 import SpreadsheetCopyPanel from './SpreadsheetCopyPanel';
 import { DisplaySideMapping, identityDisplaySideMapping, mapSides } from './DisplaySideMapping';
-import './presubmit-review.css';
 
 /** "+15" / "-5". */
 function signed(value: number): string {
@@ -177,7 +176,10 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
   const totalTuh = game.tossupsRead;
   const displayedScore = mapSides({ left: game.left.points, right: game.right.points }, displaySides);
   const hasAttention =
-    blockers.length > 0 || warnings.length > 0 || openProtests.length > 0 || unsyncedRosterAdditions.length > 0;
+    blockers.length > 0 ||
+    warnings.length > 0 ||
+    openProtests.length > 0 ||
+    unsyncedRosterAdditions.length > 0;
   const reversibleFinish =
     game.phase.kind === 'complete' && (game.phase.reason === 'forfeit' || game.phase.reason === 'short');
   const finalScoreLabel =
@@ -222,7 +224,12 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
       </p>
 
       <div className="scorer-review-edit-actions">
-        <button type="button" className="scorer-action scorer-review-edit" onClick={onReview} disabled={submitting}>
+        <button
+          type="button"
+          className="scorer-action scorer-review-edit"
+          onClick={onReview}
+          disabled={submitting}
+        >
           Edit game
         </button>
         {reversibleFinish && (
@@ -277,7 +284,9 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
                   <li key={warning}>{warning}</li>
                 ))}
               </ul>
-              {blockers.length === 0 && <p className="scorer-review-attention-note">These do not block submission.</p>}
+              {blockers.length === 0 && (
+                <p className="scorer-review-attention-note">These do not block submission.</p>
+              )}
             </div>
           )}
 
@@ -293,7 +302,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
                 ))}
               </ul>
               <p className="scorer-review-attention-note">
-                The result may still be sent. Tournament control will see the open protest before accepting it.
+                The result may still be sent. Tournament control will see the open protest before accepting
+                it.
               </p>
             </div>
           )}
@@ -315,7 +325,9 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
 
       <details className="scorer-review-section">
         <summary>Player stats</summary>
-        <p className="scorer-review-section-note">Use these lines to check tossups heard and individual scoring.</p>
+        <p className="scorer-review-section-note">
+          Use these lines to check tossups heard and individual scoring.
+        </p>
         <div className="scorer-check-teams">
           <TeamLines format={format} team={game[displaySides.left]} />
           <TeamLines format={format} team={game[displaySides.right]} />
@@ -343,7 +355,10 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
       </details>
 
       <section className="scorer-review-submit-final" aria-label="Submit result">
-        <label className="scorer-checkbox scorer-confirm scorer-review-confirm" htmlFor="scorer-final-confirm">
+        <label
+          className="scorer-checkbox scorer-confirm scorer-review-confirm"
+          htmlFor="scorer-final-confirm"
+        >
           <input
             id="scorer-final-confirm"
             type="checkbox"
@@ -366,7 +381,9 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
           </button>
         </div>
         {blockers.length > 0 && (
-          <p className="scorer-review-submit-blocked">Fix the blocking scoresheet problem above before submitting.</p>
+          <p className="scorer-review-submit-blocked">
+            Fix the blocking scoresheet problem above before submitting.
+          </p>
         )}
       </section>
     </div>
