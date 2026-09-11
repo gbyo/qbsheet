@@ -11,8 +11,10 @@ import { pairingMatchId } from './identity';
 import {
   assignedRoomCount,
   completePairingsFor,
+  dedupeRoundPlans,
   isCompletePairing,
   pairingFor,
+  pairingsByRoom,
   pairingsForRound,
   planForRound,
   planPublicationStatus,
@@ -285,6 +287,116 @@ describe('planned versus live', () => {
         pairing: undefined,
       }),
     ).toBe('other-round');
+  });
+});
+
+describe('the canonical plan shape', () => {
+  test('exact duplicate rows collapse to one', () => {
+    const doubled: RoundPlan[] = [
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+          { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+        ],
+      },
+    ];
+    expect(dedupeRoundPlans(doubled)).toEqual([
+      { roundId: R1, pairings: [{ roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' }] },
+    ]);
+  });
+
+  test('conflicting rows for one room leave that room unplanned, never guessed', () => {
+    // The persisted plan shows A-vs-B in one row and C-vs-D in another for the same room.
+    // Choosing either would be choosing a game the operator may not have meant, so the room
+    // keeps no pairing at all — and every consumer then agrees it has none.
+    const conflicted: RoundPlan[] = [
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+          { roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+          { roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+        ],
+      },
+    ];
+    expect(dedupeRoundPlans(conflicted)).toEqual([
+      { roundId: R1, pairings: [{ roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' }] },
+    ]);
+  });
+
+  test('a conflict that empties a round drops the round', () => {
+    const conflicted: RoundPlan[] = [
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+          { roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+        ],
+      },
+    ];
+    expect(dedupeRoundPlans(conflicted)).toEqual([]);
+  });
+
+  test('duplicate round ids merge into one plan under the same per-room rule', () => {
+    const doubled: RoundPlan[] = [
+      { roundId: R1, pairings: [{ roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' }] },
+      { roundId: R1, pairings: [{ roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' }] },
+      { roundId: R2, pairings: [{ roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' }] },
+    ];
+    expect(dedupeRoundPlans(doubled)).toEqual([
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+          { roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+        ],
+      },
+      { roundId: R2, pairings: [{ roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' }] },
+    ]);
+  });
+
+  test('a room conflicted across duplicate round ids is dropped while the rest merges', () => {
+    const doubled: RoundPlan[] = [
+      { roundId: R1, pairings: [{ roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' }] },
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+          { roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+        ],
+      },
+    ];
+    expect(dedupeRoundPlans(doubled)).toEqual([
+      { roundId: R1, pairings: [{ roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: 'Team_D' }] },
+    ]);
+  });
+
+  test('empty rows never survive canonicalization', () => {
+    const sparse: RoundPlan[] = [
+      {
+        roundId: R1,
+        pairings: [
+          { roomId: 'room-1', leftTeamId: null, rightTeamId: null },
+          { roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: null },
+        ],
+      },
+    ];
+    expect(dedupeRoundPlans(sparse)).toEqual([
+      { roundId: R1, pairings: [{ roomId: 'room-2', leftTeamId: 'Team_C', rightTeamId: null }] },
+    ]);
+  });
+
+  test('a plan without duplicates is returned unchanged', () => {
+    expect(dedupeRoundPlans(plans())).toEqual(plans());
+  });
+
+  test('the room index keeps the first entry, like the UI lookup does', () => {
+    const pairings = [
+      { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_B' },
+      { roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+    ];
+    expect(pairingsByRoom(pairings).get('room-1')).toEqual(pairings[0]);
   });
 });
 
