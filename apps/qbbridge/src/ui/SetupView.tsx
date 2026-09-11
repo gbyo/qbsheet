@@ -56,8 +56,8 @@ function RecoveryFreshnessPanel({ state }: { state: BridgeState }) {
   if (!freshness) {
     return (
       <p className="faint">
-        No recovery package has been created from this profile yet. Create one before play so a
-        backup laptop can take over.
+        No recovery package has been created from this profile yet. Create one before play so a backup laptop
+        can take over.
       </p>
     );
   }
@@ -72,9 +72,8 @@ function RecoveryFreshnessPanel({ state }: { state: BridgeState }) {
       </dl>
       {changes.length > 0 ? (
         <p className="muted">
-          Since the package was created: {changes.join('; ')}. A backup taking over from this
-          package would rebuild from old rooms, plans, or codes — create a fresh package before
-          play.
+          Since the package was created: {changes.join('; ')}. A backup taking over from this package would
+          rebuild from old rooms, plans, or codes — create a fresh package before play.
         </p>
       ) : (
         <p className="muted">Nothing material changed since the package was created.</p>
@@ -282,6 +281,8 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                     Revoke backup access…
                   </Button>
                 </div>
+                <h4>Package freshness</h4>
+                <RecoveryFreshnessPanel state={state} />
               </div>
             )}
             {!showForm ? (

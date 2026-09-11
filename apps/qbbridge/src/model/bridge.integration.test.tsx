@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
+import { describeRecoveryFreshness } from './recovery';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
@@ -1005,6 +1006,9 @@ describe('persistence', () => {
       relay: null,
       scorerReadiness: null,
       yftPath: null,
+      yftFingerprint: null,
+      lastRecoveryPackage: null,
+      recoverySource: null,
       tournamentName: null,
       rooms: [],
       pendingRoomRemovals: [],
@@ -1609,6 +1613,110 @@ describe('backup controller recovery', () => {
     );
     expect(ack?.args.bearer).toBe(backupToken);
     expect(backup.result.current.state.results[0].ackPending).toBe(false);
+    backup.unmount();
+  });
+
+  test('creating a package records a baseline that later changes age', async () => {
+    const primary = await setUpTournament();
+    expect(primary.result.current.state.lastRecoveryPackage).toBeNull();
+
+    await act(async () => {
+      expect(
+        await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop'),
+      ).toBe(true);
+    });
+    const baseline = primary.result.current.state.lastRecoveryPackage;
+    expect(baseline).toMatchObject({
+      yftFingerprint: primary.result.current.state.yftFingerprint,
+      relayEpoch: 1,
+      relayRevision: 0,
+    });
+    expect(describeRecoveryFreshness(primary.result.current.state)?.stale).toBe(false);
+
+    act(() => {
+      primary.result.current.addRoom();
+    });
+    const aged = describeRecoveryFreshness(primary.result.current.state);
+    expect(aged?.stale).toBe(true);
+    // A new room brings a new pairing code with it, so both categories move; plans do not.
+    expect(aged?.changed).toMatchObject({ rooms: true, codes: true, plans: false });
+    primary.unmount();
+  });
+
+  test('an imported package cannot publish before its source file is verified', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({ verified: false });
+
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(/source file has not been verified/);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    // Loading the exact bytes the package was created from unlocks publication.
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({ verified: true });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
+    backup.unmount();
+  });
+
+  test('an imported profile refuses to publish past a relay that moved since import', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    // The old primary kept playing after the package: the relay moved on.
+    relayRevision = 2;
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(
+      /relay moved since this recovery profile last synced/,
+    );
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    // Taking over re-syncs to the live position, so publication can proceed.
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
     backup.unmount();
   });
 });

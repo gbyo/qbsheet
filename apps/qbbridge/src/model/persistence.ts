@@ -262,20 +262,23 @@ function readYftFingerprint(value: unknown): string | null {
 function readRecoveryBaseline(value: unknown): RecoveryBaseline | null {
   if (!isRecord(value)) return null;
   const digests = readRecoveryDigests(value.digests);
+  const { createdAt, yftFingerprint, relayEpoch, relayRevision } = value;
   if (
-    typeof value.createdAt !== 'string' ||
+    typeof createdAt !== 'string' ||
     !digests ||
-    !Number.isInteger(value.relayEpoch) ||
-    !Number.isInteger(value.relayRevision)
+    typeof relayEpoch !== 'number' ||
+    !Number.isInteger(relayEpoch) ||
+    typeof relayRevision !== 'number' ||
+    !Number.isInteger(relayRevision)
   ) {
     return null;
   }
   return {
-    createdAt: value.createdAt,
-    yftFingerprint: readYftFingerprint(value.yftFingerprint),
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
     digests,
-    relayEpoch: value.relayEpoch,
-    relayRevision: value.relayRevision,
+    relayEpoch,
+    relayRevision,
   };
 }
 
@@ -286,19 +289,22 @@ function readRecoveryBaseline(value: unknown): RecoveryBaseline | null {
  */
 function readRecoverySource(value: unknown): RecoverySource | null {
   if (!isRecord(value)) return null;
+  const { createdAt, yftFingerprint, packageRelayEpoch, packageRelayRevision, verified } = value;
   if (
-    typeof value.createdAt !== 'string' ||
-    !Number.isInteger(value.packageRelayEpoch) ||
-    !Number.isInteger(value.packageRelayRevision)
+    typeof createdAt !== 'string' ||
+    typeof packageRelayEpoch !== 'number' ||
+    !Number.isInteger(packageRelayEpoch) ||
+    typeof packageRelayRevision !== 'number' ||
+    !Number.isInteger(packageRelayRevision)
   ) {
     return null;
   }
   return {
-    createdAt: value.createdAt,
-    yftFingerprint: readYftFingerprint(value.yftFingerprint),
-    packageRelayEpoch: value.packageRelayEpoch,
-    packageRelayRevision: value.packageRelayRevision,
-    verified: value.verified === true,
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
+    packageRelayEpoch,
+    packageRelayRevision,
+    verified: verified === true,
   };
 }
 

@@ -668,9 +668,7 @@ export function useBridge(): BridgeApi {
           // the package was created from unlock publication, and any other file re-locks it.
           const source = currentState.recoverySource;
           const verified =
-            source !== null &&
-            source.yftFingerprint !== null &&
-            fingerprint === source.yftFingerprint;
+            source !== null && source.yftFingerprint !== null && fingerprint === source.yftFingerprint;
           if (source !== null && !source.verified && verified) recoveryUnlocked = true;
           return {
             ...currentState,
@@ -1466,6 +1464,44 @@ export function useBridge(): BridgeApi {
             'Round not published because this profile is running on an imported recovery package whose source file has not been verified. Reload the authoritative .yft that matches the recovery package, then publish again.',
         });
         return null;
+      }
+      if (current.recoverySource !== null) {
+        // An import adopts the relay position once, at import time; the previous primary may
+        // have kept publishing afterwards, and this profile has no other relay traffic that
+        // would have noticed. Compare the live position before package-time rooms reach the
+        // relay — a mismatch means review and an explicit re-sync (takeover or re-import),
+        // never a blind publish. An unreachable relay is not a refusal: the relay's own
+        // revision check still backs every publish, and an active game must not gain a new
+        // dependence on an extra round-trip.
+        let livePosition: { directorEpoch: number; revision: number } | null = null;
+        try {
+          const health = await relayHealth(connection);
+          livePosition = { directorEpoch: health.directorEpoch, revision: health.revision };
+        } catch {
+          livePosition = null;
+        }
+        if (livePosition !== null) {
+          if (!sameRelayConnection(connection, connectionOf(stateRef.current))) {
+            setNotice({
+              kind: 'bad',
+              message:
+                'Round not published because the relay changed after this plan was prepared. Review it again.',
+            });
+            return null;
+          }
+          const localRelay = stateRef.current.relay;
+          if (
+            !localRelay ||
+            livePosition.directorEpoch !== localRelay.epoch ||
+            livePosition.revision !== localRelay.revision
+          ) {
+            setNotice({
+              kind: 'bad',
+              message: `Round not published because the relay moved since this recovery profile last synced (relay now: epoch ${livePosition.directorEpoch}, revision ${livePosition.revision}). Review the recovered room state against the live relay, then take over explicitly or re-import a fresh package to re-sync before publishing.`,
+            });
+            return null;
+          }
+        }
       }
       if (input.plan.publications.length === 0) {
         setNotice({ kind: 'bad', message: 'There are no rooms to publish. Add a room first.' });
