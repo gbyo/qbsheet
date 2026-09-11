@@ -14,11 +14,7 @@ import {
   type DirectorState,
   type TournamentRules,
 } from '@qbsheet/tournament-domain';
-import {
-  buildPlayerStatisticsTable,
-  buildStandingsTable,
-  buildTeamStatisticsTable,
-} from '../src/tables';
+import { buildPlayerStatisticsTable, buildStandingsTable, buildTeamStatisticsTable } from '../src/tables';
 
 const at = '2026-09-10T10:00:00.000Z';
 
