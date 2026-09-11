@@ -334,6 +334,23 @@ jobs:
           if (-not (Get-SingleValue 'SELECT `VersionMax` FROM `Upgrade`')) { throw 'Upgrade table is empty.' }
           Write-Host "Dual-scope MSI markers verified in $($msi.Name)."
 
+      # Temporary diagnosis: if the bundle step failed at candle or light, rerun light
+      # verbosely against the produced .wixobj so the real WiX error reaches the log. The
+      # bundler swallows the tool output, which makes template failures undebuggable.
+      # TODO(#986): remove this step once the dual-scope template links cleanly.
+      - name: Diagnose MSI link failure
+        if: failure() && matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $dir = 'apps/qbbridge/src-tauri/target/x86_64-pc-windows-msvc/release/wix/x64'
+          $wixbin = "$env:LOCALAPPDATA/tauri/WixTools314"
+          $wxl = Get-ChildItem "$dir/*.wxl" | Select-Object -First 1
+          Write-Host "wixobj files:"
+          Get-ChildItem "$dir/*.wixobj" | ForEach-Object { Write-Host "  $($_.Name)" }
+          Write-Host "locale file: $($wxl.FullName)"
+          & "$wixbin/light.exe" -v -o "$dir/diag.msi" -cultures:en-us -loc $wxl.FullName "$dir/*.wixobj" -ext "$wixbin/WixUIExtension.dll" -ext "$wixbin/WixUtilExtension.dll"
+          exit 0
+
   # -----------------------------------------------------------------------------------------------
   # Dispatch runs upload no release, so without this job nobody looks at what they produced.
   # -----------------------------------------------------------------------------------------------
