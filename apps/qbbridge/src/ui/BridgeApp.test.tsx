@@ -166,11 +166,11 @@ describe('the shell', () => {
     expect(screen.getByText('Both sides are the same team.')).toBeInTheDocument();
   });
 
-  test('switching rounds asks before it clears the pairings', async () => {
+  test('switching rounds keeps each round\u2019s own pairings, with no dialog in the way', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
     await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
-    await screen.findByText('12 teams · 48 players');
+    await screen.findByText('12 teams \u00b7 48 players');
     await user.click(screen.getByRole('tab', { name: 'Rooms' }));
     await user.click(screen.getByRole('button', { name: '+ Room' }));
     await pickTeam(user, 'Left team in Room 1', 'Cony');
@@ -178,21 +178,42 @@ describe('the shell', () => {
     const rounds = screen.getByLabelText('Round');
     await user.selectOptions(rounds, 'Phase_Prelims__round_5');
 
-    // Nothing has changed yet: the dialog is the gate.
-    const dialog = await screen.findByRole('alertdialog', { name: 'Switch to Round 5?' });
-    expect(within(dialog).getByText(/selections in every room will be cleared/)).toBeInTheDocument();
-    // The page behind a modal is inert and hidden from assistive technology, so the only thing
-    // reachable is the question. That is the property `window.confirm` fakes and a hand-rolled
-    // overlay usually misses.
-    expect(screen.queryByRole('combobox', { name: 'Left team in Room 1' })).toBeNull();
-    expect(screen.getByRole('combobox', { name: 'Left team in Room 1', hidden: true })).toHaveValue('Cony');
-
-    await user.click(within(dialog).getByRole('button', { name: 'Switch Round' }));
+    // No confirmation, because nothing is being discarded. Round 5 is simply empty.
+    expect(screen.queryByRole('alertdialog')).toBeNull();
     await waitFor(() =>
       expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue(''),
     );
-    // The room and its pairing code survive the switch.
+
+    // Enter a different matchup for round 5, then go back. Round 1's entry is still there.
+    await pickTeam(user, 'Left team in Room 1', 'Wells');
+    await user.selectOptions(rounds, 'Phase_Prelims__round_1');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Cony'),
+    );
+    await user.selectOptions(rounds, 'Phase_Prelims__round_5');
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Wells'),
+    );
+
+    // The room and its pairing code survive all of it.
     expect(screen.getByRole('row', { name: /Room 1/ })).toBeInTheDocument();
+  });
+
+  test('the round control reports how much of the selected round is set up', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams \u00b7 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+
+    expect(screen.getByTestId('round-progress')).toHaveTextContent('0/2 assigned');
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+    // One side is not a game.
+    expect(screen.getByTestId('round-progress')).toHaveTextContent('0/2 assigned');
+    await pickTeam(user, 'Right team in Room 1', 'Deering');
+    await waitFor(() => expect(screen.getByTestId('round-progress')).toHaveTextContent('1/2 assigned'));
   });
 
   test('the results screen names the YellowFruit step and claims nothing about it', async () => {

@@ -20,9 +20,21 @@
  */
 
 import type { Room, RoomTombstone } from './rooms';
+import type { PlannedPairing, RoundPlan } from './roundPlans';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
+/**
+ * The one key, unchanged across schema versions.
+ *
+ * The version lives *inside* the value, not in the key. Bumping the key would be a silent data
+ * loss dressed as a migration: the old value would sit in local storage forever while QBBridge
+ * started empty, taking the relay management credential, the active pairing codes, and any unsaved
+ * result with it.
+ */
 export const storageKey = 'qbbridge.state.v1';
+
+/** The current schema version. See `migrateV1`. */
+export const currentStateVersion = 2;
 
 export interface StoredResult {
   resultId: string;
@@ -44,7 +56,7 @@ export interface ScorerReadinessSnapshot {
 }
 
 export interface BridgeState {
-  version: 1;
+  version: 2;
   relay: {
     baseUrl: string;
     tournamentId: string;
@@ -72,6 +84,13 @@ export interface BridgeState {
   retiredRoomIds: string[];
   /** The round selected in the pairing table. A `Round.id` from the loaded file. */
   selectedRoundId: string | null;
+  /**
+   * What the operator intends to run, per round. Local planning data; see `roundPlans.ts`.
+   *
+   * Sparse in both directions: a round with nothing entered has no entry, and a round's plan lists
+   * only the rooms with a side chosen. Changing the selected round never touches this.
+   */
+  roundPlans: RoundPlan[];
   resultFolder: string | null;
   results: StoredResult[];
 }
@@ -80,7 +99,7 @@ export type PersistResult = { ok: true } | { ok: false; error: unknown };
 
 export function emptyState(): BridgeState {
   return {
-    version: 1,
+    version: currentStateVersion,
     relay: null,
     scorerReadiness: null,
     yftPath: null,
@@ -89,6 +108,7 @@ export function emptyState(): BridgeState {
     pendingRoomRemovals: [],
     retiredRoomIds: [],
     selectedRoundId: null,
+    roundPlans: [],
     resultFolder: null,
     results: [],
   };
@@ -106,6 +126,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Read one persisted room, keeping only the fields a room is allowed to have.
+ *
+ * Built field by field rather than by spreading the stored object. A v1 room carried
+ * `leftTeamId`/`rightTeamId`, and a spread would carry them straight back into a v2 `Room` where
+ * nothing reads them and nothing clears them — a stale matchup riding along under a type that says
+ * it does not exist. See `migrateV1` for where those two values actually go.
+ */
 function normalizeRoom(value: unknown): Room | null {
   if (!isRecord(value) || typeof value.id !== 'string' || typeof value.name !== 'string') return null;
   if (typeof value.pairingCode !== 'string') return null;
@@ -115,7 +143,8 @@ function normalizeRoom(value: unknown): Room | null {
       ? value.assignmentRevision
       : 0;
   return {
-    ...(value as unknown as Room),
+    id: value.id,
+    name: value.name,
     pairingCode: value.pairingCode,
     pendingPairingCode: typeof value.pendingPairingCode === 'string' ? value.pendingPairingCode : null,
     relayPublished:
@@ -126,6 +155,36 @@ function normalizeRoom(value: unknown): Room | null {
     publishedRoundId: typeof value.publishedRoundId === 'string' ? value.publishedRoundId : null,
     assignmentRevision,
   };
+}
+
+/** The legacy matchup a v1 room carried, if it had one. Only `migrateV1` looks at this. */
+function legacyTeams(value: unknown): { leftTeamId: string | null; rightTeamId: string | null } {
+  if (!isRecord(value)) return { leftTeamId: null, rightTeamId: null };
+  return {
+    leftTeamId: typeof value.leftTeamId === 'string' && value.leftTeamId !== '' ? value.leftTeamId : null,
+    rightTeamId: typeof value.rightTeamId === 'string' && value.rightTeamId !== '' ? value.rightTeamId : null,
+  };
+}
+
+function normalizeRoundPlans(value: unknown): RoundPlan[] {
+  if (!Array.isArray(value)) return [];
+  const plans: RoundPlan[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry) || typeof entry.roundId !== 'string' || !Array.isArray(entry.pairings)) {
+      continue;
+    }
+    const pairings: PlannedPairing[] = [];
+    for (const pairing of entry.pairings) {
+      if (!isRecord(pairing) || typeof pairing.roomId !== 'string') continue;
+      const leftTeamId = typeof pairing.leftTeamId === 'string' ? pairing.leftTeamId : null;
+      const rightTeamId = typeof pairing.rightTeamId === 'string' ? pairing.rightTeamId : null;
+      // Sparse means sparse: a stored row of two nulls is dropped rather than restored.
+      if (leftTeamId === null && rightTeamId === null) continue;
+      pairings.push({ roomId: pairing.roomId, leftTeamId, rightTeamId });
+    }
+    if (pairings.length > 0) plans.push({ roundId: entry.roundId, pairings });
+  }
+  return plans;
 }
 
 function normalizeTombstone(value: unknown): RoomTombstone | null {
@@ -190,6 +249,70 @@ function restoreResults(value: unknown): StoredResult[] {
   });
 }
 
+/**
+ * Bring a version 1 state forward.
+ *
+ * v1 rooms held the currently selected round's matchup directly. v2 keeps rooms physical and moves
+ * intent into `roundPlans`, so the migration has exactly one interesting job: the matchups sitting
+ * on the rooms belong to `selectedRoundId`, and they become that round's plan.
+ *
+ * Everything else is preserved verbatim and deliberately. What is in a live v1 state is a relay
+ * management credential, active pairing codes, the mirror revision the relay has fenced on,
+ * publication state per room, tombstones for rooms already cleared, and results that may not yet
+ * be written to disk. Losing any of it is not a cosmetic regression: losing the credential locks
+ * the operator out of their own relay, losing the revision makes the next mirror stale-refuse, and
+ * losing a result loses a game. So this migration adds a field and moves two, and touches nothing
+ * else.
+ *
+ * A v1 state with no `selectedRoundId` yields no plan. There is no round to attribute those
+ * selections to, and inventing one — the first round of the file, say — would be guessing which
+ * round the operator was about to publish.
+ */
+export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>): BridgeState {
+  const storedRooms = Array.isArray(state.rooms) ? state.rooms : [];
+  const rooms = storedRooms.map(normalizeRoom).filter((room): room is Room => room !== null);
+  const pendingRoomRemovals = Array.isArray(state.pendingRoomRemovals)
+    ? state.pendingRoomRemovals.map(normalizeTombstone).filter((room): room is RoomTombstone => room !== null)
+    : [];
+  const retiredRoomIds = Array.isArray(state.retiredRoomIds)
+    ? state.retiredRoomIds.filter((id): id is string => typeof id === 'string')
+    : [];
+  const selectedRoundId = typeof state.selectedRoundId === 'string' ? state.selectedRoundId : null;
+
+  const pairings: PlannedPairing[] = [];
+  if (selectedRoundId !== null) {
+    for (const stored of storedRooms) {
+      const room = normalizeRoom(stored);
+      if (room === null) continue;
+      const { leftTeamId, rightTeamId } = legacyTeams(stored);
+      if (leftTeamId === null && rightTeamId === null) continue;
+      pairings.push({ roomId: room.id, leftTeamId, rightTeamId });
+    }
+  }
+
+  return {
+    version: currentStateVersion,
+    relay: state.relay ?? null,
+    scorerReadiness: readScorerReadiness(state.scorerReadiness),
+    yftPath: typeof state.yftPath === 'string' ? state.yftPath : null,
+    tournamentName: typeof state.tournamentName === 'string' ? state.tournamentName : null,
+    rooms,
+    pendingRoomRemovals,
+    retiredRoomIds,
+    selectedRoundId,
+    roundPlans:
+      selectedRoundId !== null && pairings.length > 0 ? [{ roundId: selectedRoundId, pairings }] : [],
+    resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
+    results: restoreResults(state.results),
+  };
+}
+
+/** Read a version 2 state, normalizing every field the same way the migration does. */
+function readV2(state: Partial<BridgeState> & Record<string, unknown>): BridgeState {
+  const migrated = migrateV1(state);
+  return { ...migrated, roundPlans: normalizeRoundPlans(state.roundPlans) };
+}
+
 export function loadState(): BridgeState {
   const store = storage();
   if (!store) return emptyState();
@@ -202,33 +325,13 @@ export function loadState(): BridgeState {
   if (!raw) return emptyState();
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return emptyState();
-    const state = parsed as Partial<BridgeState>;
-    if (state.version !== 1) return emptyState();
-    const rooms = Array.isArray(state.rooms)
-      ? state.rooms.map(normalizeRoom).filter((room): room is Room => room !== null)
-      : [];
-    const pendingRoomRemovals = Array.isArray(state.pendingRoomRemovals)
-      ? state.pendingRoomRemovals
-          .map(normalizeTombstone)
-          .filter((room): room is RoomTombstone => room !== null)
-      : [];
-    const retiredRoomIds = Array.isArray(state.retiredRoomIds)
-      ? state.retiredRoomIds.filter((id): id is string => typeof id === 'string')
-      : [];
-    return {
-      version: 1,
-      relay: state.relay ?? null,
-      scorerReadiness: readScorerReadiness(state.scorerReadiness),
-      yftPath: state.yftPath ?? null,
-      tournamentName: state.tournamentName ?? null,
-      rooms,
-      pendingRoomRemovals,
-      retiredRoomIds,
-      selectedRoundId: state.selectedRoundId ?? null,
-      resultFolder: state.resultFolder ?? null,
-      results: restoreResults(state.results),
-    };
+    if (!isRecord(parsed)) return emptyState();
+    const state = parsed as Partial<BridgeState> & Record<string, unknown>;
+    // Exactly the two versions this build understands. A version from the future is not
+    // downgraded — guessing at a shape a later build wrote is how a credential gets dropped.
+    if (state.version === 2) return readV2(state);
+    if (state.version === 1) return migrateV1(state);
+    return emptyState();
   } catch {
     return emptyState();
   }

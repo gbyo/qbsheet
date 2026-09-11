@@ -18,6 +18,7 @@ import {
   type RelayConnection,
 } from './relay';
 import { newRoom, roomTombstone, type Room } from './rooms';
+import type { PlannedPairing } from './roundPlans';
 import { loadedFixture } from '../tests/fixture';
 import * as native from './native';
 
@@ -43,24 +44,32 @@ function stubRelay(answer: (call: Call) => native.RelayResponse): Call[] {
   return calls;
 }
 
+/** The physical rooms. Deliberately carrying no matchup — that is the round plan's job now. */
 function roomsFor(): Room[] {
-  const tournament = loadedFixture();
-  const cony = tournament.teams.find((team) => team.name === 'Cony')!;
-  const deering = tournament.teams.find((team) => team.name === 'Deering')!;
-  const wells = tournament.teams.find((team) => team.name === 'Wells')!;
-  const windham = tournament.teams.find((team) => team.name === 'Windham A')!;
   return [
-    { ...newRoom('room-1', 'Room 101', '48213906'), leftTeamId: cony.id, rightTeamId: deering.id },
-    { ...newRoom('room-2', 'Room 102', '19435077'), leftTeamId: wells.id, rightTeamId: windham.id },
-    // No matchup chosen: this room is simply not in the publication.
+    newRoom('room-1', 'Room 101', '48213906'),
+    newRoom('room-2', 'Room 102', '19435077'),
+    // Never given a matchup below: this room is cleared rather than omitted.
     newRoom('room-3', 'Room 103', '75038112'),
+  ];
+}
+
+function teamId(name: string): string {
+  return loadedFixture().teams.find((team) => team.name === name)!.id;
+}
+
+/** One round's planned pairings, as the Rooms screen would have saved them. */
+function pairingsFor(): PlannedPairing[] {
+  return [
+    { roomId: 'room-1', leftTeamId: teamId('Cony'), rightTeamId: teamId('Deering') },
+    { roomId: 'room-2', leftTeamId: teamId('Wells'), rightTeamId: teamId('Windham A') },
   ];
 }
 
 describe('planning a round', () => {
   test('covers every configured room, not only the ones playing', () => {
     const tournament = loadedFixture();
-    const plan = planRound(tournament, tournament.rounds[3], roomsFor());
+    const plan = planRound(tournament, tournament.rounds[3], roomsFor(), pairingsFor());
 
     // Room 103 has no matchup. It is still in the plan — as a room whose assignment is being
     // cleared — because a room left out of a mirror keeps whatever the relay last gave it.
@@ -78,8 +87,9 @@ describe('planning a round', () => {
   test('a team that is no longer in the file clears that room rather than leaving it alone', () => {
     const tournament = loadedFixture();
     const rooms = roomsFor();
-    rooms[0] = { ...rooms[0], rightTeamId: 'Team_Deleted' };
-    const plan = planRound(tournament, tournament.rounds[0], rooms);
+    const pairings = pairingsFor();
+    pairings[0] = { ...pairings[0], rightTeamId: 'Team_Deleted' };
+    const plan = planRound(tournament, tournament.rounds[0], rooms, pairings);
 
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
     // Not "skipped": skipping is what would leave Room 101 serving its previous game.
@@ -94,8 +104,9 @@ describe('planning a round', () => {
   test('a room with the same team on both sides is cleared, not published', () => {
     const tournament = loadedFixture();
     const rooms = roomsFor();
-    rooms[0] = { ...rooms[0], rightTeamId: rooms[0].leftTeamId };
-    const plan = planRound(tournament, tournament.rounds[0], rooms);
+    const pairings = pairingsFor();
+    pairings[0] = { ...pairings[0], rightTeamId: pairings[0].leftTeamId };
+    const plan = planRound(tournament, tournament.rounds[0], rooms, pairings);
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
     expect(plan.cleared.map((entry) => entry.reason)).toContain('Both sides of this room are the same team.');
   });
@@ -108,7 +119,7 @@ describe('the mirror body', () => {
     const calls = stubRelay(() => ({ status: 200, body: '{}' }));
     const tournament = loadedFixture();
     const rooms = roomsFor();
-    const plan = planRound(tournament, tournament.rounds[3], rooms);
+    const plan = planRound(tournament, tournament.rounds[3], rooms, pairingsFor());
 
     const outcome = await publishRound(connection, {
       epoch: 1,
@@ -172,7 +183,7 @@ describe('the mirror body', () => {
       epoch: 1,
       lastRevision: 0,
       tournamentName: tournament.name,
-      plan: planRound(tournament, tournament.rounds[3], rooms),
+      plan: planRound(tournament, tournament.rounds[3], rooms, pairingsFor()),
       rooms,
     });
     // Round five, same rooms, same codes, and each room keeps its identity.
@@ -181,7 +192,7 @@ describe('the mirror body', () => {
       epoch: 1,
       lastRevision: 1,
       tournamentName: tournament.name,
-      plan: planRound(tournament, tournament.rounds[4], nextRooms),
+      plan: planRound(tournament, tournament.rounds[4], nextRooms, pairingsFor()),
       rooms: nextRooms,
     });
 
@@ -210,7 +221,7 @@ describe('the mirror body', () => {
         epoch: 1,
         lastRevision: 3,
         tournamentName: tournament.name,
-        plan: planRound(tournament, tournament.rounds[0], rooms),
+        plan: planRound(tournament, tournament.rounds[0], rooms, pairingsFor()),
         rooms,
       }),
     ).rejects.toThrow(/revision 12.*Nothing was sent to the rooms/);
@@ -219,12 +230,13 @@ describe('the mirror body', () => {
   test('a round with no matchups can publish a clear-only mirror', async () => {
     const calls = stubRelay(() => ({ status: 200, body: '{}' }));
     const tournament = loadedFixture();
-    const rooms = roomsFor().map((room) => ({ ...room, leftTeamId: null, rightTeamId: null }));
+    // No plan for this round at all, which is what an unpaired round looks like.
+    const rooms = roomsFor();
     const outcome = await publishRound(connection, {
       epoch: 1,
       lastRevision: 0,
       tournamentName: tournament.name,
-      plan: planRound(tournament, tournament.rounds[0], rooms),
+      plan: planRound(tournament, tournament.rounds[0], rooms, []),
       rooms,
     });
     expect(outcome).toMatchObject({
@@ -294,7 +306,7 @@ describe('the mirror body', () => {
         epoch: 1,
         lastRevision: 0,
         tournamentName: tournament.name,
-        plan: planRound(tournament, tournament.rounds[0], []),
+        plan: planRound(tournament, tournament.rounds[0], [], []),
         rooms: [],
       }),
     ).rejects.toThrow(/no rooms to publish/i);
@@ -429,12 +441,19 @@ describe('a room that is unused this round', () => {
       (name) => tournament.teams.find((team) => team.name === name)!.id,
     );
 
+    // Three physical rooms, unchanged between the two rounds.
+    const rooms: Room[] = [
+      newRoom('room-1', 'Room 101', '48213906'),
+      newRoom('room-2', 'Room 102', '19435077'),
+      newRoom('room-3', 'Room 103', '75038112'),
+    ];
+
     // Round 4: all three rooms playing.
-    const roundFourRooms: Room[] = [
-      { ...newRoom('room-1', 'Room 101', '48213906'), leftTeamId: cony, rightTeamId: deering },
-      { ...newRoom('room-2', 'Room 102', '19435077'), leftTeamId: wells, rightTeamId: windham },
+    const roundFourPairings: PlannedPairing[] = [
+      { roomId: 'room-1', leftTeamId: cony, rightTeamId: deering },
+      { roomId: 'room-2', leftTeamId: wells, rightTeamId: windham },
       {
-        ...newRoom('room-3', 'Room 103', '75038112'),
+        roomId: 'room-3',
         leftTeamId: tournament.teams.find((team) => team.name === 'Plymouth A')!.id,
         rightTeamId: tournament.teams.find((team) => team.name === 'Plymouth B')!.id,
       },
@@ -443,28 +462,31 @@ describe('a room that is unused this round', () => {
       epoch: 1,
       lastRevision: 0,
       tournamentName: tournament.name,
-      plan: planRound(tournament, tournament.rounds[3], roundFourRooms),
-      rooms: roundFourRooms,
+      plan: planRound(tournament, tournament.rounds[3], rooms, roundFourPairings),
+      rooms,
     });
 
     const roundFour = (calls[0].body as { rooms: Record<string, unknown>[] }).rooms;
     expect(roundFour).toHaveLength(3);
     expect(roundFour[2].assignment_qbj).toBeTruthy();
 
-    // Round 5: the same rooms, but 103 sits out. Its team selections are gone, exactly as a
-    // round change leaves them.
-    const roundFiveRooms: Room[] = [
-      { ...roundFourRooms[0], leftTeamId: cony, rightTeamId: wells, assignmentRevision: 1 },
-      { ...roundFourRooms[1], leftTeamId: deering, rightTeamId: windham, assignmentRevision: 1 },
-      { ...roundFourRooms[2], leftTeamId: null, rightTeamId: null, assignmentRevision: 1 },
+    // Round 5: the same physical rooms, but 103 sits out — round 5's plan simply has no entry
+    // for it. Round 4's plan is untouched and still says 103 was playing.
+    const roundFiveRooms: Room[] = rooms.map((room) => ({ ...room, assignmentRevision: 1 }));
+    const roundFivePairings: PlannedPairing[] = [
+      { roomId: 'room-1', leftTeamId: cony, rightTeamId: wells },
+      { roomId: 'room-2', leftTeamId: deering, rightTeamId: windham },
     ];
     const outcome = await publishRound(connection, {
       epoch: 1,
       lastRevision: 1,
       tournamentName: tournament.name,
-      plan: planRound(tournament, tournament.rounds[4], roundFiveRooms),
+      plan: planRound(tournament, tournament.rounds[4], roundFiveRooms, roundFivePairings),
       rooms: roundFiveRooms,
     });
+
+    // The round 4 plan is still exactly what it was: publishing round 5 read it not at all.
+    expect(roundFourPairings.find((entry) => entry.roomId === 'room-3')).toBeTruthy();
 
     const roundFive = (calls[1].body as { rooms: Record<string, unknown>[]; sessions: unknown[] }).rooms;
     const unused = roundFive.find((room) => room.room_id === 'room-3')!;

@@ -1,10 +1,19 @@
 /**
  * A room, as QBBridge needs to know it.
  *
- * Deliberately thin: an id, a name, a pairing code, whichever two teams the operator picked for
- * the current round, and what the last publish did. There is no schedule here, no pool, and no
- * notion of what a room is *supposed* to play. The operator knows that, or YellowFruit does.
+ * Deliberately thin, and deliberately about one thing: a physical room in a building, its pairing
+ * identity, and what the relay is currently holding for it. There is no schedule here, no pool,
+ * and no notion of what a room is *supposed* to play.
+ *
+ * In particular there is **no matchup**. A room used to carry `leftTeamId`/`rightTeamId`, which
+ * made it simultaneously a physical room, the relay's current state, and the editable matchup for
+ * whichever round was selected — three things that change for unrelated reasons. The operator's
+ * intent now lives in `roundPlans.ts`, one plan per round, and that separation is what lets a whole
+ * set of prelims be entered before the tournament and survive switching rounds.
  */
+
+import type { PlannedPairing } from './roundPlans';
+import { isCompletePairing } from './roundPlans';
 
 export type RoomStatus =
   /** Configured locally; this room has not reached the current relay. */
@@ -23,8 +32,6 @@ export interface Room {
   pairingCode: string;
   /** A replacement code is not active until a successful mirror publishes its hash. */
   pendingPairingCode: string | null;
-  leftTeamId: string | null;
-  rightTeamId: string | null;
   /** True once a successful mirror has listed this room on the configured relay. */
   relayPublished: boolean;
   /** The match id of the assignment last published for this room, if any. */
@@ -56,8 +63,6 @@ export function newRoom(id: string, name: string, pairingCode: string): Room {
     name,
     pairingCode,
     pendingPairingCode: null,
-    leftTeamId: null,
-    rightTeamId: null,
     relayPublished: false,
     publishedMatchId: null,
     publishedRoundId: null,
@@ -88,33 +93,43 @@ export function resetRelayPublication(room: Room): Room {
 }
 
 /**
- * Cheap warnings about the current pairing table.
+ * Cheap warnings about the selected round's plan.
  *
  * Three things a person mistypes, and nothing else. This is not a schedule-legality engine: a
  * rematch, an odd bracket, a carryover — those are the operator's call and YellowFruit's to
  * validate at import. A warning never blocks a publish.
+ *
+ * The matchups come in as the selected round's pairings rather than being read off the rooms, so
+ * the warnings describe the round on screen. Entering round 5 never produces warnings about the
+ * round 1 that happens to be live on the relay.
  */
-export function pairingWarnings(rooms: readonly Room[], teamName: (id: string) => string): PairingWarning[] {
+export function pairingWarnings(
+  rooms: readonly Room[],
+  pairings: readonly PlannedPairing[],
+  teamName: (id: string) => string,
+): PairingWarning[] {
   const warnings: PairingWarning[] = [];
   const seenNames = new Map<string, string>();
   const seenTeams = new Map<string, string>();
+  const byRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
   for (const room of rooms) {
     const key = room.name.trim().toLocaleLowerCase();
     if (key && seenNames.has(key)) {
-      warnings.push({ roomId: room.id, message: `Another room is also called “${room.name}”.` });
+      warnings.push({ roomId: room.id, message: `Another room is also called \u201c${room.name}\u201d.` });
     } else if (key) {
       seenNames.set(key, room.id);
     }
 
-    if (!room.leftTeamId || !room.rightTeamId) {
+    const pairing = byRoom.get(room.id);
+    if (!pairing?.leftTeamId || !pairing.rightTeamId) {
       warnings.push({ roomId: room.id, message: 'This room has no matchup yet.' });
       continue;
     }
-    if (room.leftTeamId === room.rightTeamId) {
+    if (pairing.leftTeamId === pairing.rightTeamId) {
       warnings.push({ roomId: room.id, message: 'Both sides are the same team.' });
       continue;
     }
-    for (const teamId of [room.leftTeamId, room.rightTeamId]) {
+    for (const teamId of [pairing.leftTeamId, pairing.rightTeamId]) {
       const elsewhere = seenTeams.get(teamId);
       if (elsewhere !== undefined && elsewhere !== room.id) {
         warnings.push({
@@ -129,7 +144,8 @@ export function pairingWarnings(rooms: readonly Room[], teamName: (id: string) =
   return warnings;
 }
 
-/** Rooms with two different teams chosen. Only these get an assignment. */
-export function publishableRooms(rooms: readonly Room[]): Room[] {
-  return rooms.filter((room) => room.leftTeamId && room.rightTeamId && room.leftTeamId !== room.rightTeamId);
+/** Rooms with a complete matchup in this round's plan. Only these get an assignment. */
+export function publishableRooms(rooms: readonly Room[], pairings: readonly PlannedPairing[]): Room[] {
+  const byRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
+  return rooms.filter((room) => isCompletePairing(byRoom.get(room.id)));
 }

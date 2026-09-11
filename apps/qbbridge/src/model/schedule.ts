@@ -8,6 +8,7 @@
 
 import type { YellowFruitPhaseSchedule } from '@qbsheet/tournament-formats';
 import type { PairingWarning, Room } from './rooms';
+import { isCompletePairing, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
 
 export interface RoundGroup {
@@ -61,15 +62,17 @@ export function schedulePairingWarnings(
   tournament: Pick<BridgeTournament, 'schedule'>,
   round: Pick<BridgeRound, 'phaseId'> | null,
   rooms: readonly Room[],
+  pairings: readonly PlannedPairing[],
 ): PairingWarning[] {
   const phase = phaseForRound(tournament, round);
   if (!phase || phase.pools.length < 2) return [];
 
+  const plannedByRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
   const warnings: PairingWarning[] = [];
   for (const room of rooms) {
-    const leftTeamId = room.leftTeamId;
-    const rightTeamId = room.rightTeamId;
-    if (!leftTeamId || !rightTeamId || leftTeamId === rightTeamId) continue;
+    const planned = plannedByRoom.get(room.id);
+    if (!isCompletePairing(planned)) continue;
+    const { leftTeamId, rightTeamId } = planned;
     const leftPools = phase.pools.filter((pool) => pool.teamIds.includes(leftTeamId));
     const rightPools = phase.pools.filter((pool) => pool.teamIds.includes(rightTeamId));
     if (leftPools.length === 0 || rightPools.length === 0) continue;

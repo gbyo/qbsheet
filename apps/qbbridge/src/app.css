@@ -651,3 +651,22 @@ section.panel.help {
   color: var(--qbs-text-muted);
   line-height: var(--qbs-leading-relaxed);
 }
+
+/*
+ * Setup completeness, beside the round selector and under it.
+ *
+ * Plain text rather than a component: the question it answers — "is every room paired for this
+ * round yet" — is read at a glance and never interacted with.
+ */
+.round-progress {
+  color: var(--qbs-color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.round-progress-chip {
+  display: inline-block;
+  margin-right: var(--qbs-space-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

@@ -12,9 +12,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, ConfirmDialog, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
+import { Button, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
 import wordmark from '../assets/qbsheet-wordmark.svg';
 import { pairingLink, type PairingLink } from '../model/pairing';
+import { pairingsForRound, type PlanPublicationStatus } from '../model/roundPlans';
 import { buildRoomPrintData, type RoomPrintData } from '../model/print';
 import type { Room, RoomStatus } from '../model/rooms';
 import {
@@ -33,6 +34,21 @@ const status: Record<RoomStatus, { label: string; tone: Tone }> = {
   'ready-to-pair': { label: 'Ready to pair', tone: 'info' },
   waiting: { label: 'Waiting', tone: 'info' },
   'result-received': { label: 'Result received', tone: 'success' },
+};
+
+/**
+ * How the selected round's plan for this room compares with the relay.
+ *
+ * Separate from `status` above, which is about the room: while round 1 is live every room reads
+ * `Waiting`, and that says nothing about whether round 5's plan has been published. `Live` here is
+ * the only label that claims the relay is serving the matchup on screen.
+ */
+const planStatus: Record<PlanPublicationStatus, { label: string; tone: Tone } | null> = {
+  'no-game': null,
+  planned: { label: 'Planned', tone: 'neutral' },
+  live: { label: 'Live', tone: 'success' },
+  edited: { label: 'Edited since publish', tone: 'warning' },
+  'other-round': { label: 'Relay holds another round', tone: 'info' },
 };
 
 type PrintTarget = 'all' | string;
@@ -100,10 +116,13 @@ type PoolFilter = {
 
 export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
-  const [pendingRound, setPendingRound] = useState<string | null>(null);
   const [poolFilter, setPoolFilter] = useState<PoolFilter | null>(null);
   const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null);
   const round = tournament?.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null;
+  const selectedPairings = useMemo(
+    () => pairingsForRound(state.roundPlans, state.selectedRoundId),
+    [state.roundPlans, state.selectedRoundId],
+  );
   const phase = tournament ? phaseForRound(tournament, round) : undefined;
   const roundGroupsForDisplay = useMemo(() => (tournament ? roundGroups(tournament) : []), [tournament]);
   const phasePools = useMemo(() => phase?.pools ?? [], [phase]);
@@ -125,19 +144,19 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const warningsByRoom = useMemo(() => {
     const map = new Map<string, string[]>();
     const warnings = round
-      ? [...bridge.warnings, ...schedulePairingWarnings(tournament!, round, state.rooms)]
+      ? [...bridge.warnings, ...schedulePairingWarnings(tournament!, round, state.rooms, selectedPairings)]
       : bridge.warnings;
     for (const warning of warnings) {
       map.set(warning.roomId, [...(map.get(warning.roomId) ?? []), warning.message]);
     }
     return map;
-  }, [bridge.warnings, round, state.rooms, tournament]);
+  }, [bridge.warnings, round, selectedPairings, state.rooms, tournament]);
 
   const teamOptions = useMemo(() => {
     if (!tournament) return [];
     const selectedIds = new Set(
-      state.rooms
-        .flatMap((room) => [room.leftTeamId, room.rightTeamId])
+      selectedPairings
+        .flatMap((pairing) => [pairing.leftTeamId, pairing.rightTeamId])
         .filter((id): id is string => id !== null),
     );
     return [...tournament.teams]
@@ -157,7 +176,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           (phase ? phasePoolNames(phase, team.id) : team.poolNames).join(' · ') ||
           (phase ? 'No pool listed for this phase' : undefined),
       }));
-  }, [activePoolFilter, phase, phasePools, state.rooms, tournament]);
+  }, [activePoolFilter, phase, phasePools, selectedPairings, tournament]);
 
   if (!tournament) {
     return (
@@ -217,15 +236,6 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         ? []
         : printableRooms.filter((entry) => entry.roomId === printTarget);
 
-  const requestRound = (roundId: string): void => {
-    if (roundId === state.selectedRoundId) return;
-    // Changing rounds clears every selection, so ask first when there is something to lose.
-    if (bridge.roundChangeDiscardsSelections) setPendingRound(roundId);
-    else bridge.selectRound(roundId);
-  };
-
-  const pendingRoundName = tournament.rounds.find((entry) => entry.id === pendingRound)?.displayName ?? '';
-
   return (
     <>
       <section className="panel wide">
@@ -236,7 +246,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           <select
             id="round"
             value={state.selectedRoundId ?? ''}
-            onChange={(event) => requestRound(event.target.value)}
+            onChange={(event) => bridge.selectRound(event.target.value)}
           >
             {roundGroupsForDisplay.map((group) => (
               <optgroup key={`${group.phaseId ?? 'other'}:${group.label}`} label={group.label}>
@@ -248,6 +258,15 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
               </optgroup>
             ))}
           </select>
+          {/*
+            Setup completeness, in the place the round is chosen. The point of preplanning is
+            knowing on Friday night that every room in every prelim round has a game, and a count
+            beside the selector answers that without another screen.
+          */}
+          <span className="round-progress" data-testid="round-progress">
+            Round {round?.displayName ?? '—'} · {bridge.roundProgress.assigned}/{bridge.roundProgress.total}{' '}
+            assigned
+          </span>
           {phasePools.length > 0 ? (
             <label htmlFor="team-pool-filter">
               Team pool
@@ -364,6 +383,16 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           </p>
         ) : null}
 
+        {bridge.phaseRoundProgress.length > 1 ? (
+          <p className="faint" data-testid="phase-progress">
+            {bridge.phaseRoundProgress.map((entry) => (
+              <span key={entry.roundId} className="round-progress-chip">
+                R{entry.displayName} {entry.assigned}/{bridge.roundProgress.total}
+              </span>
+            ))}
+          </p>
+        ) : null}
+
         {state.rooms.length === 0 ? (
           <p className="muted">No rooms yet. Add one for each room the tournament is using.</p>
         ) : (
@@ -385,6 +414,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                 const link = linkFor(room);
                 const roomWarnings = warningsByRoom.get(room.id) ?? [];
                 const state_ = status[bridge.roomStatus(room)];
+                const plan = planStatus[bridge.planStatus(room)];
                 return (
                   <tr key={room.id}>
                     <td>
@@ -401,7 +431,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                       <TeamComboBox
                         label={`Left team in ${room.name}`}
                         options={teamOptions}
-                        selectedId={room.leftTeamId}
+                        selectedId={bridge.plannedTeamsFor(room.id).leftTeamId}
                         onSelect={(id) => bridge.setRoomTeams(room.id, 'left', id)}
                       />
                     </td>
@@ -409,7 +439,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                       <TeamComboBox
                         label={`Right team in ${room.name}`}
                         options={teamOptions}
-                        selectedId={room.rightTeamId}
+                        selectedId={bridge.plannedTeamsFor(room.id).rightTeamId}
                         onSelect={(id) => bridge.setRoomTeams(room.id, 'right', id)}
                       />
                     </td>
@@ -447,6 +477,11 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                     </td>
                     <td>
                       <StatusBadge tone={state_.tone}>{state_.label}</StatusBadge>
+                      {plan ? (
+                        <div className="faint" data-testid={`plan-status-${room.id}`}>
+                          <StatusBadge tone={plan.tone}>{plan.label}</StatusBadge>
+                        </div>
+                      ) : null}
                     </td>
                     <td>
                       <Button
@@ -478,22 +513,14 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           is active, and Result received when its published game returns. Publishing a round also clears the
           assignment of every room with no matchup, so an unused room cannot open last round&rsquo;s game.
         </p>
-
-        <ConfirmDialog
-          isOpen={pendingRound !== null}
-          title={`Switch to Round ${pendingRoundName}?`}
-          confirmLabel="Switch Round"
-          onCancel={() => setPendingRound(null)}
-          onConfirm={() => {
-            const roundId = pendingRound;
-            setPendingRound(null);
-            if (roundId) bridge.selectRound(roundId);
-          }}
-        >
-          The team selections in every room will be cleared, so this round&rsquo;s pairings have to be entered
-          fresh. Rooms, their names and their pairing codes are kept, and nothing is sent to the relay until
-          you publish.
-        </ConfirmDialog>
+        <p className="faint">
+          Matchups are saved per round on this computer. Switching rounds keeps every round&rsquo;s entries,
+          so a whole set of prelims can be entered before the tournament, and only the round you publish
+          reaches the relay. The second badge compares this round&rsquo;s entry with the relay: Planned has
+          not been sent, Live is exactly what the relay is serving, Edited since publish means the entry
+          changed after it was published, and Relay holds another round means this room is currently serving a
+          different round&rsquo;s game.
+        </p>
       </section>
       {printTarget !== null && typeof document !== 'undefined'
         ? createPortal(

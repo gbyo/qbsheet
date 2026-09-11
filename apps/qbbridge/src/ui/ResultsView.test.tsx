@@ -6,13 +6,14 @@ import ResultsView from './ResultsView';
 
 function bridgeWhileBatchSaving(): BridgeApi {
   const state: BridgeState = {
-    version: 1,
+    version: 2,
     relay: null,
     scorerReadiness: null,
     yftPath: null,
     tournamentName: null,
     rooms: [],
     selectedRoundId: null,
+    roundPlans: [],
     pendingRoomRemovals: [],
     retiredRoomIds: [],
     resultFolder: '/tournaments/results',
@@ -29,7 +30,10 @@ function bridgeWhileBatchSaving(): BridgeApi {
     busy: false,
     native: true,
     changingRelay: false,
-    roundChangeDiscardsSelections: false,
+    plannedTeamsFor: () => ({ leftTeamId: null, rightTeamId: null }),
+    planStatus: () => 'no-game' as const,
+    roundProgress: { roundId: null, assigned: 0, total: 0 },
+    phaseRoundProgress: [],
     warnings: [],
     savingResults: true,
     resultBusy: vi.fn(() => true),

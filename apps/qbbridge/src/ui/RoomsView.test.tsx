@@ -24,8 +24,6 @@ function testRoom(
 ): Room {
   return {
     ...newRoom(id, name, code),
-    leftTeamId: 'Team_Cony',
-    rightTeamId: 'Team_Deering',
     relayPublished: published,
     publishedMatchId: published ? `match-${id}` : null,
     publishedRoundId: published ? tournamentRoundId : null,
@@ -34,11 +32,25 @@ function testRoom(
 
 function testBridge(rooms: Room[]): BridgeApi {
   const tournament = loadedFixture();
+  const selectedRoundId = tournament.rounds[0]?.id ?? null;
   const state: BridgeState = {
     ...emptyState(),
     relay,
     rooms,
-    selectedRoundId: tournament.rounds[0]?.id ?? null,
+    selectedRoundId,
+    roundPlans:
+      selectedRoundId === null
+        ? []
+        : [
+            {
+              roundId: selectedRoundId,
+              pairings: rooms.map((room) => ({
+                roomId: room.id,
+                leftTeamId: 'Team_Cony',
+                rightTeamId: 'Team_Deering',
+              })),
+            },
+          ],
   };
   const noop = vi.fn();
   return {
@@ -76,7 +88,16 @@ function testBridge(rooms: Room[]): BridgeApi {
     setRoomTeams: noop,
     regeneratePairingCode: noop,
     selectRound: noop,
-    roundChangeDiscardsSelections: false,
+    plannedTeamsFor: (roomId: string) => {
+      const pairing = state.roundPlans[0]?.pairings.find((entry) => entry.roomId === roomId);
+      return {
+        leftTeamId: pairing?.leftTeamId ?? null,
+        rightTeamId: pairing?.rightTeamId ?? null,
+      };
+    },
+    planStatus: () => 'planned' as const,
+    roundProgress: { roundId: selectedRoundId, assigned: rooms.length, total: rooms.length },
+    phaseRoundProgress: [],
     publish: vi.fn(async () => undefined),
     publishRoomSetup: vi.fn(async () => undefined),
     roomStatus: vi.fn((room: Room): RoomStatus =>
