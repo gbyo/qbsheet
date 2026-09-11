@@ -327,12 +327,15 @@ export function useBridge(): BridgeApi {
   const commit = useCallback(
     (
       next: BridgeState | ((current: BridgeState) => BridgeState),
-      options: { critical?: boolean } = {},
     ): { state: BridgeState; persisted: PersistResult } => {
       const current = stateRef.current;
       const resolved = typeof next === 'function' ? next(current) : next;
       const persisted = saveState(resolved);
-      if (options.critical) setPersistenceSavePending(!persisted.ok);
+      // Every BridgeState transition contains tournament-day working state. A failed ordinary
+      // edit is still usable in memory, but it must remain visibly non-durable until a later
+      // retry succeeds. The shared flag is deliberately broader than the old critical-only path
+      // so room/setup edits cannot disappear silently on restart.
+      setPersistenceSavePending(!persisted.ok);
       activateState(resolved);
       return { state: resolved, persisted };
     },
@@ -682,9 +685,7 @@ export function useBridge(): BridgeApi {
    */
   const forgetRelayCredential = useCallback(() => {
     pollGenerationRef.current += 1;
-    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null }), {
-      critical: true,
-    }).persisted;
+    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
     setRelayReachable(null);
     setNotice({
@@ -873,7 +874,6 @@ export function useBridge(): BridgeApi {
           pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
           retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
         }),
-        { critical: true },
       ).persisted;
     },
     [commit],
