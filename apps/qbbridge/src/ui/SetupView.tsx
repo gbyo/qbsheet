@@ -53,9 +53,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   // A claim consumes the token even if the local write needs a retry. Derive the field value from
   // that state so the one-time value disappears without an effect-driven cascading render.
   const visibleSetupToken =
-    bridge.relayCredentialSavePending || (state.relay !== null && !bridge.changingRelay)
-      ? ''
-      : setupToken;
+    bridge.relayCredentialSavePending || (state.relay !== null && !bridge.changingRelay) ? '' : setupToken;
   const readiness = bridge.scorerReadiness;
   const readinessStatus = readiness?.status ?? 'unknown';
   const readinessHeading =

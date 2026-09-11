@@ -419,11 +419,7 @@ export function useBridge(): BridgeApi {
         return;
       }
       const current = stateRef.current;
-      const differentFile =
-        current.yftPath !== null &&
-        path !== null &&
-        current.yftPath !== path &&
-        current.tournamentName !== null;
+      const differentFile = current.yftPath !== null && path !== null && current.yftPath !== path;
       if (differentFile) {
         pendingFileRef.current = { path, tournament: report.tournament, warnings: report.warnings };
         setPendingFileSwitch({ path, tournamentName: report.tournament.name });
