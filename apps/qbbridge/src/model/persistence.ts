@@ -46,6 +46,8 @@ export interface StoredResult {
   savedPath?: string;
   /** True after the file is on disk, until the relay confirms the result was acknowledged. */
   ackPending?: boolean;
+  /** An operator's local handoff marker; this is never inferred from relay state. */
+  importStatus?: 'needs-import' | 'imported';
 }
 
 /** The last persisted result of the fixed ordinary Scorer-origin check. */
@@ -255,9 +257,21 @@ function restoreResults(value: unknown): StoredResult[] {
     const result = entry as StoredResult;
     // States written by the first QBBridge build only had savedPath. Treat those saves as pending;
     // the relay ACK is idempotent, so retrying is safer than silently losing the knowledge.
-    return result.savedPath !== undefined && result.ackPending === undefined
-      ? { ...result, ackPending: true }
-      : result;
+    const withAck =
+      result.savedPath !== undefined && result.ackPending === undefined
+        ? { ...result, ackPending: true }
+        : result;
+    // Older builds stopped at "Saved". A saved file needs an explicit operator handoff marker;
+    // never infer that YellowFruit imported it.
+    if (withAck.savedPath === undefined) {
+      const unsaved = { ...withAck };
+      delete unsaved.importStatus;
+      return unsaved;
+    }
+    return {
+      ...withAck,
+      importStatus: withAck.importStatus === 'imported' ? 'imported' : 'needs-import',
+    };
   });
 }
 

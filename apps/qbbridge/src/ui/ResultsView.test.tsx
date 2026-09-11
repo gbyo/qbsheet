@@ -60,11 +60,19 @@ function bridgeWhileBatchSaving(): BridgeApi {
     regeneratePairingCode: vi.fn(),
     selectRound: vi.fn(),
     publish: vi.fn(async () => undefined),
+    pendingPublicationReview: null,
+    confirmPublicationReview: vi.fn(async () => undefined),
+    cancelPublicationReview: vi.fn(),
+    assignmentFallback: null,
+    exportAssignmentFallback: vi.fn(async () => false),
     publishRoomSetup: vi.fn(async () => undefined),
     roomStatus: vi.fn(),
     chooseFolder: vi.fn(async () => undefined),
     saveNewResults: vi.fn(async () => undefined),
     saveResult: vi.fn(async () => undefined),
+    markResultImported: vi.fn(),
+    unmarkResultImported: vi.fn(),
+    needsImportCount: 0,
     pollResults: vi.fn(async () => undefined),
     unsavedResultWarning: null,
   };
@@ -123,5 +131,37 @@ describe('ResultsView save controls', () => {
       screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
     );
     expect(bridge.saveResult).toHaveBeenCalledWith('new-a');
+  });
+
+  test('shows the local import marker and lets the operator filter it', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeWhileBatchSaving();
+    const { result } = scoredResultDocument();
+    bridge.savingResults = false;
+    bridge.resultBusy = vi.fn(() => false);
+    bridge.needsImportCount = 1;
+    bridge.state.results = [
+      {
+        resultId: 'saved-result',
+        qbj: result,
+        receivedAt: '2026-09-11T15:00:00Z',
+        savedPath: '/results/saved.qbj',
+        importStatus: 'needs-import',
+      },
+      {
+        resultId: 'imported-result',
+        qbj: result,
+        receivedAt: '2026-09-11T14:00:00Z',
+        savedPath: '/results/imported.qbj',
+        importStatus: 'imported',
+      },
+    ];
+
+    render(<ResultsView bridge={bridge} />);
+    expect(screen.getAllByText('Needs import').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Marked imported').length).toBeGreaterThan(0);
+    await user.selectOptions(screen.getByLabelText('Show'), 'needs-import');
+    expect(screen.getByText('/results/saved.qbj')).toBeInTheDocument();
+    expect(screen.queryByText('/results/imported.qbj')).not.toBeInTheDocument();
   });
 });
