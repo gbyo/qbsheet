@@ -142,8 +142,9 @@ describe('answer tier columns', () => {
     const state = liveState(structuredClone(defaultRules));
     const teams = buildTeamStatisticsTable(state, scope, naming);
     // Default rules configure bonuses but not bouncebacks or lightning: the
-    // parity set appends TUH/PPTUH/bonus facts, while BB and lightning columns
-    // stay out rather than publishing em dashes for a format without them.
+    // parity set appends TUH/PPTUH/Pts-X/bonus facts, while BB and lightning
+    // columns stay out rather than publishing em dashes for a format without
+    // them.
     expect(teams.columns.map((column) => column.id)).toEqual([
       'team',
       'games',
@@ -152,6 +153,7 @@ describe('answer tier columns', () => {
       'negs',
       'tuh',
       'pptuh',
+      'ppx',
       'bonuses',
       'bonuspoints',
       'ppb',

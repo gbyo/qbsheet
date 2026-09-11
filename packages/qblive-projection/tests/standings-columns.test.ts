@@ -215,6 +215,7 @@ describe('Live standings parity columns', () => {
       'negs',
       'tuh',
       'pptuh',
+      'ppx',
       'bonuses',
       'bonuspoints',
       'ppb',

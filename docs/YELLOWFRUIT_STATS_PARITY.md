@@ -32,7 +32,9 @@ welcome but listed as such; they are not parity failures.
 Owning work: #746 (TUH/normalized scoring/fractional GP), #747 (lightning),
 #748 (bouncebacks), #749 (player metadata), #750 (Director), #751
 (printable/exports), #753 (QBLive/iOS). Gate tests: `parityMatrix.test.ts`
-(domain goldens), `tests/QbLiveParity.test.ts` (Director/QBLive reconciliation),
+(domain goldens incl. numerators/denominators/final values/applicability),
+`tests/ParityMatrixSurfaces.test.ts` (Director/print/CSV/JSON/QBLive agreement),
+`tests/QbLiveParity.test.ts` (Director/QBLive reconciliation),
 per-surface suites named below.
 
 ## Shared knownness contract
@@ -66,26 +68,26 @@ layer and is pinned by the reconciliation test:
 
 ## Team / standings inventory
 
-| YellowFruit field                  | Definition (numerator / denominator)                                  | Applicability                           | Forfeit / OT                                    | QBSheet owner                                                           | Surfaces                                           | Status                                                           |
-| ---------------------------------- | --------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
-| Rank, tied rank                    | competition ranks (1, 1, 3) over record, points, margin, powers, gets | always                                  | forfeits count in W/L                           | `canonicalCompetitionRanks` (#750)                                      | Director display ranks, printable `=`, QBLive rank | exact                                                            |
-| Record                             | W–L, plus ties when present                                           | always                                  | forfeit is a decision                           | `formatRecord`                                                          | all                                                | exact                                                            |
-| Win %                              | (W + T/2) / GP                                                        | always; `—` with no games               | forfeits count                                  | domain `winPercentage`                                                  | all (`100.0%`)                                     | exact                                                            |
-| Games played                       | decided games counted                                                 | always                                  | forfeits count; pure forfeits add no TUH        | domain `gamesPlayed`                                                    | all                                                | exact                                                            |
-| Normalized Pts/X                   | PPTUH × X over regulation TUH (OT excluded where YF excludes it)      | single-X scope                          | forfeit supplies no TUH                         | `normalizedPointsPerX` (#755)                                           | Director Pts/X, printable                          | exact                                                            |
-| Superpowers / powers / gets / negs | counts valued per game under that game's own definition (#671)        | tier defined by the format              | —                                               | domain aggregates                                                       | all, semantic columns                              | exact                                                            |
-| Team TUH                           | Σ exact tossups-read; unknown if any non-forfeit game lacks it        | always                                  | pure forfeits contribute nothing                | domain `tossupsHeard[K nown]` (#746)                                    | all                                                | exact                                                            |
-| PPTUH                              | points / TUH; null unless known and heard                             | TUH known                               | —                                               | `playerPptuh` (#751)                                                    | all (`17.50`)                                      | exact                                                            |
-| Bonuses heard / bonus points       | Σ heard / Σ points                                                    | bonuses used                            | —                                               | domain                                                                  | all                                                | exact                                                            |
-| PPB                                | bonus points / bonuses heard; null when none heard                    | bonuses used                            | —                                               | `formatPpb`                                                             | all (`20.00`)                                      | exact                                                            |
-| Bounceback points                  | Σ known; unknown if any breakdown missing                             | bouncebacks used                        | forfeit without detail is skipped, never zeroed | domain `bouncebackPoints[Known]` (#748)                                 | all                                                | exact                                                            |
-| BB parts heard                     | Σ opponent unconverted bonus value in parts                           | regular bonuses + known opponent detail | irregular bonuses decline to null               | `bouncebackPartsHeardForTeam` (#748)                                    | all                                                | exact                                                            |
-| BB parts converted                 | Σ own bouncebacks in parts                                            | same                                    | same                                            | domain (#748)                                                           | all                                                | exact                                                            |
-| BB %                               | converted / heard parts; null unless known and heard                  | same                                    | —                                               | domain `bouncebackConversion`                                           | all (`33.3%`)                                      | exact                                                            |
-| Total bonus %                      | (own + BB converted) / (own + BB heard) parts                         | every part known                        | —                                               | domain `totalBonusConversion`                                           | all (`59.0%`)                                      | exact                                                            |
-| Lightning points                   | Σ known; unknown if any game lacks the breakdown                      | lightning used                          | —                                               | domain `lightningPoints[Known]` (#747)                                  | all                                                | exact                                                            |
-| Lightning / game                   | `lightningPoints / nonForfeitMatches`                                 | lightning used; known total             | pure forfeits excluded                          | `TeamStanding.lightningGames`: applicable non-forfeit games only (#755) | Director/print/QBLive (`40.0`)                     | exact                                                            |
-| Classifications                    | team reporting groups                                                 | present                                 | —                                               | `Team.classifications`                                                  | Director/print Group                               | exact; QBLive omits by design (#753, no second label vocabulary) |
+| YellowFruit field                  | Definition (numerator / denominator)                                  | Applicability                           | Forfeit / OT                                    | QBSheet owner                                                           | Surfaces                                                                   | Status                                                           |
+| ---------------------------------- | --------------------------------------------------------------------- | --------------------------------------- | ----------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Rank, tied rank                    | competition ranks (1, 1, 3) over record, points, margin, powers, gets | always                                  | forfeits count in W/L                           | `canonicalCompetitionRanks` (#750)                                      | Director display ranks, printable `=`, QBLive rank                         | exact                                                            |
+| Record                             | W–L, plus ties when present                                           | always                                  | forfeit is a decision                           | `formatRecord`                                                          | all                                                                        | exact                                                            |
+| Win %                              | (W + T/2) / GP                                                        | always; `—` with no games               | forfeits count                                  | domain `winPercentage`                                                  | all (`100.0%`)                                                             | exact                                                            |
+| Games played                       | decided games counted                                                 | always                                  | forfeits count; pure forfeits add no TUH        | domain `gamesPlayed`                                                    | all                                                                        | exact                                                            |
+| Normalized Pts/X                   | PPTUH × X over regulation TUH (OT excluded where YF excludes it)      | single-X scope                          | forfeit supplies no TUH                         | `normalizedPointsPerX` (#755)                                           | Director Pts/X, printable, QBLive `ppx` + team-stats (same value/rounding) | exact                                                            |
+| Superpowers / powers / gets / negs | counts valued per game under that game's own definition (#671)        | tier defined by the format              | —                                               | domain aggregates                                                       | all, semantic columns                                                      | exact                                                            |
+| Team TUH                           | Σ exact tossups-read; unknown if any non-forfeit game lacks it        | always                                  | pure forfeits contribute nothing                | domain `tossupsHeard[K nown]` (#746)                                    | all                                                                        | exact                                                            |
+| PPTUH                              | points / TUH; null unless known and heard                             | TUH known                               | —                                               | `playerPptuh` (#751)                                                    | all (`17.50`)                                                              | exact                                                            |
+| Bonuses heard / bonus points       | Σ heard / Σ points                                                    | bonuses used                            | —                                               | domain                                                                  | all                                                                        | exact                                                            |
+| PPB                                | bonus points / bonuses heard; null when none heard                    | bonuses used                            | —                                               | `formatPpb`                                                             | all (`20.00`)                                                              | exact                                                            |
+| Bounceback points                  | Σ known; unknown if any breakdown missing                             | bouncebacks used                        | forfeit without detail is skipped, never zeroed | domain `bouncebackPoints[Known]` (#748)                                 | all                                                                        | exact                                                            |
+| BB parts heard                     | Σ opponent unconverted bonus value in parts                           | regular bonuses + known opponent detail | irregular bonuses decline to null               | `bouncebackPartsHeardForTeam` (#748)                                    | all                                                                        | exact                                                            |
+| BB parts converted                 | Σ own bouncebacks in parts                                            | same                                    | same                                            | domain (#748)                                                           | all                                                                        | exact                                                            |
+| BB %                               | converted / heard parts; null unless known and heard                  | same                                    | —                                               | domain `bouncebackConversion`                                           | all (`33.3%`)                                                              | exact                                                            |
+| Total bonus %                      | (own + BB converted) / (own + BB heard) parts                         | every part known                        | —                                               | domain `totalBonusConversion`                                           | all (`59.0%`)                                                              | exact                                                            |
+| Lightning points                   | Σ known; unknown if any game lacks the breakdown                      | lightning used                          | —                                               | domain `lightningPoints[Known]` (#747)                                  | all                                                                        | exact                                                            |
+| Lightning / game                   | `lightningPoints / nonForfeitMatches`                                 | lightning used; known total             | pure forfeits excluded                          | `TeamStanding.lightningGames`: applicable non-forfeit games only (#755) | Director/print/QBLive (`40.0`)                                             | exact                                                            |
+| Classifications                    | team reporting groups                                                 | present                                 | —                                               | `Team.classifications`                                                  | Director/print Group                                                       | exact; QBLive omits by design (#753, no second label vocabulary) |
 
 ## Individuals inventory
 
@@ -122,19 +124,19 @@ Per-game values normalized to the round's common regulation X, then averaged;
 any metric missing a denominator for one included game is null for the row.
 Pure forfeits are results, not denominators.
 
-| YellowFruit field      | QBSheet owner                  | Status |
-| ---------------------- | ------------------------------ | ------ |
-| Games / results        | `deriveRoundStats`             | exact  |
-| Pts / team / X TUH     | normalized average             | exact  |
-| Superpower % / Power % | positives share                | exact  |
-| TU conversion %        | converted / read               | exact  |
-| Negs / X               | scaled rate                    | exact  |
-| PPB                    | points / heard                 | exact  |
-| Bonus Conv %           | points / Σ(BH × game max)      | exact  |
-| BB %                   | Σ converted / Σ heard parts    | exact  |
-| Total Bonus %          | own+BB parts ratio             | exact  |
-| Lightning / G          | points per team per game       | exact  |
-| Overall row            | same formulas across the scope | exact  |
+| YellowFruit field      | QBSheet owner                                                                     | Status |
+| ---------------------- | --------------------------------------------------------------------------------- | ------ |
+| Games / results        | `deriveRoundStats`                                                                | exact  |
+| Pts / team / X TUH     | normalized average                                                                | exact  |
+| Superpower % / Power % | positives share                                                                   | exact  |
+| TU conversion %        | converted / read                                                                  | exact  |
+| Negs / X               | scaled rate                                                                       | exact  |
+| PPB                    | points / heard                                                                    | exact  |
+| Bonus Conv %           | points / Σ(BH × game max)                                                         | exact  |
+| BB %                   | Σ converted / Σ heard parts over applicable games only (proven-N/A games excused) | exact  |
+| Total Bonus %          | own+BB parts ratio (own parts stay whole-scope)                                   | exact  |
+| Lightning / G          | points per team per game over applicable non-forfeit games                        | exact  |
+| Overall row            | same formulas across the scope                                                    | exact  |
 
 ## September 2026 audit resolutions (#755)
 
@@ -143,15 +145,20 @@ fixed in the canonical domain/report layer, and pinned by a hermetic
 regression test. Presentation code formats/selects/hides but never re-derives
 these values.
 
-| Gap                                                                              | Fix                                                                                                          | Test                                                                    |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| Printable Games/box scores showed internal `phaseId`                             | `boxScoreReport.ts` renders `phaseName`                                                                      | `boxScoreReport.test.ts` (#853)                                         |
-| QBLive/tier applicability followed current rules, not each game's own definition | `scopeScoringApplicability` in domain `stats.ts`; historical tiers union with mixed-definition flag          | `scopeApplicability.test.ts`, `historical-applicability.test.ts` (#868) |
-| Team Pts/X and round Pts/team/X could include overtime points/TUH                | `normalizedPointsPerX` + `regulationDerivationForTeam`; regulation-split round derivations                   | `roundStatsOptional.test.ts`, `statsDisplay.test.ts`                    |
-| Lightning/G divided by all games played                                          | `TeamStanding.lightningGames`: lightning-applicable non-forfeit games; forfeit+lightning fixture pinned      | `scopeApplicability.test.ts` ("lightning denominator")                  |
-| Mixed bounceback-enabled/disabled scopes shared one denominator                  | disabled-definition games contribute neither opportunities nor unknowns                                      | `bouncebackParity.test.ts` ("mixed … stay known")                       |
-| Roster UI could not view/edit year/UG/D2                                         | `TeamsView.tsx` year control + tri-state UG/D2 (`Yes`/`No`/`Unknown`), persisted via `useDirectorController` | `TeamsView.test.tsx` (#882)                                             |
-| Parity fixtures missed the above cases                                           | per-PR regression tests above; matrix extended below                                                         | —                                                                       |
+| Gap                                                                              | Fix                                                                                                          | Test                                                                                         |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Printable Games/box scores showed internal `phaseId`                             | `boxScoreReport.ts` renders `phaseName`                                                                      | `boxScoreReport.test.ts` (#853)                                                              |
+| QBLive/tier applicability followed current rules, not each game's own definition | `scopeScoringApplicability` in domain `stats.ts`; historical tiers union with mixed-definition flag          | `scopeApplicability.test.ts`, `historical-applicability.test.ts` (#868)                      |
+| Team Pts/X and round Pts/team/X could include overtime points/TUH                | `normalizedPointsPerX` + `regulationDerivationForTeam`; regulation-split round derivations                   | `roundStatsOptional.test.ts`, `statsDisplay.test.ts`                                         |
+| Lightning/G divided by all games played                                          | `TeamStanding.lightningGames`: lightning-applicable non-forfeit games; forfeit+lightning fixture pinned      | `scopeApplicability.test.ts` ("lightning denominator")                                       |
+| Mixed bounceback-enabled/disabled scopes shared one denominator                  | disabled-definition games contribute neither opportunities nor unknowns                                      | `bouncebackParity.test.ts` ("mixed … stay known")                                            |
+| Non-bounceback games storing numeric `bouncebacks: 0` entered parts denominators | pinned-definition N/A skip covers `0` and `null` in team aggregation, round stats, and report adapters       | `parityMatrix.test.ts` 15, `ParityMatrixSurfaces` mixed-N/A test                             |
+| Non-lightning games with absent `lightningPoints` unknowned mixed scopes         | `accumulateTeamLightning`: N/A games contribute nothing; forfeit placeholders skipped                        | `parityMatrix.test.ts` 16, `ParityMatrixSurfaces` mixed-N/A test                             |
+| QBLive published no normalized Pts/X                                             | canonical `ppx` column on standings + team-stats via `ppxFor` (regulation numerator/denominator, 2-decimal)  | `parity-columns.test.ts`, `ParityMatrixSurfaces` Pts/X tests                                 |
+| Round sums/denominators included proven-N/A games                                | `applicableGames` scoping + null-when-empty sums; definition flags carry proven applicability                | `roundStats.test.ts` N/A tests, `ParityMatrixSurfaces` mixed-N/A test                        |
+| Unknown overtime splits could smuggle overtime into Pts/X on some surfaces       | every surface consumes `regulationDerivationForTeam`; unknown split declines Pts/X, PPTUH stands             | `parityMatrix.test.ts` 17–18, QBLive fail-closed test, `ParityMatrixSurfaces` overtime tests |
+| Roster UI could not view/edit year/UG/D2                                         | `TeamsView.tsx` year control + tri-state UG/D2 (`Yes`/`No`/`Unknown`), persisted via `useDirectorController` | `TeamsView.test.tsx` (#882)                                                                  |
+| Parity fixtures missed the above cases                                           | per-PR regression tests above; matrix extended below                                                         | —                                                                                            |
 
 ## Fixture matrix
 
@@ -166,18 +173,18 @@ numerator/denominator pairs plus final display):
 4. regular bouncebacks (parts, BB %, total %);
 5. irregular bonuses (parts uncomputable → null, never zero);
 6. lightning (totals + rate; unknown breakdown → null);
-7. overtime excluded from regulation PPX;
+7. overtime excluded from regulation TUH;
 8. substitutions → fractional GP (0.5);
-9. 24-TU custom X + custom point values;
-10. ties (shared rank);
-11. pure forfeit (W/L counts, no TUH);
-12. score-only partial result (detail unknown);
-13. multi-round aggregation;
-14. multi-round aggregation plus phase scoping (carryover scopes ride the same
-    composition, covered by the Director `StandingsView` carryover test);
-15. player metadata (year/UG/D2, incl. unknown);
-16. mixed historical definitions (per-game valuation);
-17. zero-vs-unknown semifinal cases (0 allowed, 0 heard, 0 converted).
+9. 24-TU custom X + custom point values with mirror winners tied at rank 1;
+10. pure forfeit (W/L counts, no TUH);
+11. score-only partial result (detail unknown);
+12. multi-round aggregation plus phase scoping;
+13. known zero vs unknown (explicit zeroes stay comparable; nulls decline);
+14. mixed historical definitions (per-game valuation);
+15. mixed bounceback history where the off game stores `bouncebacks: 0` (N/A, not parts);
+16. mixed lightning history where the off game carries no lightning field (N/A, not unknown);
+17. overtime with a known split (normalized Pts/X excludes overtime points);
+18. overtime-capable game with an unknown split (Pts/X declines, never guesses).
 
 September 2026 audit modes (owning regression tests alongside the matrix):
 
@@ -199,7 +206,14 @@ CSV/JSON exports (`team-csv-identity`, snapshot tests), QBLive columns/cells
 (`qblive-projection` parity tests + `tests/QbLiveParity.test.ts`
 reconciliation), iOS decode + privacy (`QBLiveFixtureTests`, maximal/privacy
 fixtures). iOS renders the maximal tables generically — no stat-specific Swift
-(the `TablesView` fallback contract, verified by review).
+(the `TablesView` fallback contract, verified by review); the QBLive `ppx`
+column therefore reaches installed apps with no client change.
+
+`tests/ParityMatrixSurfaces.test.ts` additionally proves the hardest scopes agree
+everywhere: mixed bounceback/lightning N/A history (numerators, denominators,
+final values, and rounding identical across Director, printable, CSV/JSON, and
+QBLive) and overtime known/unknown splits (Pts/X excludes overtime when known,
+declines to `—`/null on every surface when the split is unknown).
 
 ## Maintenance
 
