@@ -9,6 +9,7 @@
 import { describe, expect, test } from 'vitest';
 import { scoredResultDocument } from '../tests/scoredResult';
 import {
+  maximumResultFileNameBytes,
   resultFileContents,
   resultFileName,
   resultFileSuffix,
@@ -88,6 +89,52 @@ describe('file names', () => {
     expect(name).not.toContain('/');
     expect(name).not.toContain('\\');
     expect(name.split(/[/\\]/)).toHaveLength(1);
+  });
+
+  test('bounds long ASCII names without removing the result suffix', () => {
+    const summary = {
+      roundName: '12',
+      roundNumber: 12,
+      location: `Room-${'North-'.repeat(80)}`,
+      leftName: `Alpha-${'A'.repeat(120)}`,
+      rightName: `Beta-${'B'.repeat(120)}`,
+      leftPoints: null,
+      rightPoints: null,
+    };
+    const resultId = 'result-long-ascii';
+    const name = resultFileName(summary, resultId);
+    const otherResultId = 'result-long-ascii-2';
+    const otherName = resultFileName(summary, otherResultId);
+
+    expect(new TextEncoder().encode(name).byteLength).toBe(maximumResultFileNameBytes);
+    expect(name.endsWith(`_${resultFileSuffix(resultId)}.result.qbj`)).toBe(true);
+    expect(otherName.endsWith(`_${resultFileSuffix(otherResultId)}.result.qbj`)).toBe(true);
+    expect(name).not.toBe(otherName);
+    expect(name.startsWith('R12_')).toBe(true);
+  });
+
+  test('bounds multibyte Unicode names at character boundaries without removing the result suffix', () => {
+    const summary = {
+      roundName: '12',
+      roundNumber: 12,
+      location: `🏆-${'北'.repeat(100)}`,
+      leftName: `東京-${'🦊'.repeat(100)}`,
+      rightName: `Équipe-${'雪'.repeat(100)}`,
+      leftPoints: null,
+      rightPoints: null,
+    };
+    const resultId = 'result-multibyte';
+    const name = resultFileName(summary, resultId);
+    const descriptivePrefix = name.slice(0, -`_${resultFileSuffix(resultId)}.result.qbj`.length);
+
+    expect(new TextEncoder().encode(name).byteLength).toBeLessThanOrEqual(maximumResultFileNameBytes);
+    expect(name.endsWith(`_${resultFileSuffix(resultId)}.result.qbj`)).toBe(true);
+    expect(
+      Array.from(descriptivePrefix).some((character) => {
+        const codePoint = character.codePointAt(0) ?? 0;
+        return codePoint >= 0xd800 && codePoint <= 0xdfff;
+      }),
+    ).toBe(false);
   });
 
   test('an unreadable result still gets a file name', () => {
