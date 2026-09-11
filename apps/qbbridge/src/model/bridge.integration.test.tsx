@@ -1832,9 +1832,10 @@ describe('acknowledging saved results', () => {
     deferWrites = true;
     await act(async () => {
       await rendered.result.current.chooseFolder();
-      await Promise.resolve();
     });
-    expect(pendingWrites).toHaveLength(1);
+    // The automatic save reaches the write over several async hops; poll for it instead of
+    // assuming one microtask is enough (a loaded CI runner starves the chain and flakes).
+    await waitFor(() => expect(pendingWrites).toHaveLength(1));
 
     // Pressing Save while the automatic save is in flight joins it: the call must still be
     // pending — claiming nothing yet — rather than resolving against work still in flight.
