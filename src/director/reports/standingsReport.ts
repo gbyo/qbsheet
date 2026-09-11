@@ -14,6 +14,7 @@ import {
   acceptedGameRecords,
   canonicalCompetitionRanks,
   deriveTeamStandings,
+  exhibitionTeamIdsOf,
   normalizedPointsPerX,
   orderDayItems,
   phaseCompetitiveField,
@@ -401,7 +402,7 @@ function addDisplayRanks(
     const teamIds = entry.section.teams.map((row) => row.teamId);
     if (teamIds.length === 0) continue;
     const standings = deriveTeamStandings(state, entry.games, { teamIds });
-    const ranks = canonicalCompetitionRanks(standings, entry.games, rules);
+    const ranks = canonicalCompetitionRanks(standings, entry.games, rules, exhibitionTeamIdsOf(state));
     for (const [teamId, rank] of ranks) displayRanks[`${entry.section.id}:${teamId}`] = rank;
   }
 }

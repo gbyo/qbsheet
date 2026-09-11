@@ -2,7 +2,7 @@ import type { DirectorState, Team } from './model';
 
 /** Teams currently eligible for automatic tournament competition. */
 export function activeTournamentTeams(state: DirectorState): Team[] {
-  return state.teams.filter((team) => team.status === 'confirmed');
+  return state.teams.filter((team) => team.status === 'confirmed' || team.status === 'exhibition');
 }
 
 export type PhaseFieldSource = 'tournament-field' | 'pools' | 'advancement' | 'explicit';
@@ -68,7 +68,9 @@ export function phaseCompetitiveField(state: DirectorState, phaseId: string): Ph
     ...new Set(
       teamIds.filter((teamId) => {
         const status = teamsById.get(teamId)?.status;
-        return status !== undefined && status !== 'confirmed' && status !== 'dropped';
+        return (
+          status !== undefined && status !== 'confirmed' && status !== 'exhibition' && status !== 'dropped'
+        );
       }),
     ),
   ];
@@ -80,7 +82,7 @@ export function phaseCompetitiveField(state: DirectorState, phaseId: string): Ph
     phaseId,
     teams: [...new Set(teamIds)]
       .map((teamId) => teamsById.get(teamId))
-      .filter((team): team is Team => team?.status === 'confirmed'),
+      .filter((team): team is Team => team?.status === 'confirmed' || team?.status === 'exhibition'),
     source,
     issues,
   };

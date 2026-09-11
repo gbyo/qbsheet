@@ -261,7 +261,13 @@ export function TeamsView({
         <StateLabel
           state={team.status}
           label={
-            team.status === 'confirmed' ? 'Confirmed' : team.status === 'waitlist' ? 'Waitlist' : 'Dropped'
+            team.status === 'confirmed'
+              ? 'Confirmed'
+              : team.status === 'waitlist'
+                ? 'Waitlist'
+                : team.status === 'exhibition'
+                  ? 'Exhibition'
+                  : 'Dropped'
           }
         />
       ),
@@ -496,6 +502,51 @@ function TeamActions({
     );
   };
 
+  const changeExhibition = async () => {
+    const toExhibition = team.status === 'confirmed';
+    const decidedGames = state.games.filter(
+      (game) =>
+        (game.status === 'accepted' || game.status === 'forfeit') &&
+        game.scores.some((score) => score.teamId === team.id),
+    );
+    const approved = await confirmAction({
+      title: toExhibition
+        ? `Mark ${team.displayName} exhibition?`
+        : `Return ${team.displayName} to confirmed?`,
+      body: decidedGames.length
+        ? `${decidedGames.length} decided game${decidedGames.length === 1 ? '' : 's'} will be reinterpreted under the new status.`
+        : 'No decided games involve this team yet.',
+      consequence: toExhibition
+        ? 'Exhibition team — games remain visible but do not count toward opponents’ competitive statistics. The team keeps its own results but can no longer qualify for later phases except by explicit assignment.'
+        : 'Games against this team will count toward opponents’ competitive statistics again.',
+      confirmLabel: toExhibition ? 'Mark exhibition' : 'Return to confirmed',
+      tone: 'danger',
+    });
+    if (!approved) return;
+    let changed = false;
+    try {
+      changed = controller.setTeamExhibition(team.id, toExhibition);
+    } catch (reason: unknown) {
+      onAnnounce(
+        errorNotice(
+          reason instanceof Error
+            ? `Team status was not changed: ${reason.message}`
+            : 'Team status was not changed.',
+        ),
+      );
+      return;
+    }
+    if (!changed) {
+      onAnnounce(errorNotice('Team status was not changed; review the Director error.'));
+      return;
+    }
+    onAnnounce(
+      toExhibition
+        ? `${team.displayName} marked as an exhibition team.`
+        : `${team.displayName} returned to confirmed status.`,
+    );
+  };
+
   return (
     <ActionMenu label={`Actions for ${team.displayName}`} triggerLabel={`Actions for ${team.displayName}`}>
       {(close) => (
@@ -519,6 +570,17 @@ function TeamActions({
           >
             {team.status === 'dropped' ? 'Restore team' : 'Drop team'}
           </MenuItem>
+          {(team.status === 'confirmed' || team.status === 'exhibition') && (
+            <MenuItem
+              icon="flag"
+              onSelect={() => {
+                close();
+                void changeExhibition();
+              }}
+            >
+              {team.status === 'exhibition' ? 'Return to confirmed' : 'Mark as exhibition…'}
+            </MenuItem>
+          )}
         </>
       )}
     </ActionMenu>

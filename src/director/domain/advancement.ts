@@ -12,6 +12,7 @@ import { activePhaseTeams, phaseCompetitiveField } from './field';
 import {
   acceptedGameRecords,
   deriveTeamStandings,
+  exhibitionTeamIdsOf,
   rankTeamStandings,
   tiebreakerIsComparable,
   teamTiebreakerValue,
@@ -127,7 +128,9 @@ export function advancementBasisTokenV1(state: DirectorState, phase: Phase): str
       advancementRule: phase.advancementRule,
     },
     pools: phase.poolIds.map((poolId) => state.pools.find((pool) => pool.id === poolId)?.teamIds ?? []),
-    teams: state.teams.filter((team) => team.status === 'confirmed').map((team) => team.id),
+    teams: state.teams
+      .filter((team) => team.status === 'confirmed' || team.status === 'exhibition')
+      .map((team) => team.id),
     games: state.games.filter((game) => roundIds.has(game.roundId)),
     tiebreakers: phase.advancementRule?.tiebreakers ?? state.tournament?.rules.tiebreakers,
   });
@@ -252,7 +255,19 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
   const rule = phase.advancementRule;
   const qualifiersPerPool = rule?.qualifiersPerPool ?? 0;
   const unresolved: AdvancementPreview['unresolved'] = [];
-  const poolStandings = standingsByPool(state, phase);
+  // Exhibition teams keep their own aggregates but can never qualify out of a
+  // phase on results; only an explicit TD assignment may place one in a later
+  // phase (#895).
+  const exhibitionIds = exhibitionTeamIdsOf(state);
+  const excludedExhibition = new Set<DirectorId>();
+  const poolStandings = standingsByPool(state, phase).map(({ poolId, standings }) => ({
+    poolId,
+    standings: standings.filter((standing) => {
+      if (!exhibitionIds.has(standing.teamId)) return true;
+      excludedExhibition.add(standing.teamId);
+      return false;
+    }),
+  }));
   const qualifiedStandings = poolStandings.flatMap(({ poolId, standings }) => {
     const selected = rule ? standings.slice(0, qualifiersPerPool) : [];
     if (rule && selected.length > 0 && selected.length < standings.length) {
@@ -309,6 +324,15 @@ export function previewAdvancement(state: DirectorState, phase: Phase): Advancem
     unresolved,
     explanation: [
       `Ranked ${poolStandings.reduce((count, entry) => count + entry.standings.length, 0)} eligible teams using the configured record and tiebreak order.`,
+      ...(excludedExhibition.size > 0
+        ? [
+            `${excludedExhibition.size} exhibition team(s) (${[...excludedExhibition]
+              .map((teamId) => state.teams.find((team) => team.id === teamId)?.displayName ?? teamId)
+              .join(
+                ', ',
+              )}) keep their own results but cannot qualify: exhibition teams advance only by explicit assignment.`,
+          ]
+        : []),
       rule
         ? `Preview includes ${rule.qualifiersPerPool} qualifier(s) per pool.`
         : 'No advancement rule is configured.',

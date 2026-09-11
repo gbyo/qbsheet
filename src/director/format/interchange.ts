@@ -1685,6 +1685,9 @@ export function exportSqbsTournament(
         typeof player.schoolYear === 'number' ? `${player.name} (${player.schoolYear})` : player.name,
       ),
       divisionIndex: divisionOf(team.id),
+      // Native exhibition state travels on the wire so genuine SQBS applies
+      // its own exhibition treatment to the same raw games (#895).
+      exhibition: team.status === 'exhibition',
     };
   });
 

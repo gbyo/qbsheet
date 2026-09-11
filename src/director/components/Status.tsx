@@ -82,6 +82,7 @@ const toneByState: Record<string, StatusTone> = {
   withdrawn: 'danger',
   archived: 'neutral',
   draft: 'neutral',
+  exhibition: 'neutral',
   idle: 'neutral',
   'not-started': 'neutral',
   open: 'neutral',
