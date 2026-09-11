@@ -25,7 +25,7 @@
  *   disambiguating text the caller supplies.
  */
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Button as AriaButton,
   ComboBox,
@@ -62,6 +62,7 @@ export function TeamComboBox({
   isDisabled,
 }: TeamComboBoxProps) {
   const [filter, setFilter] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
   const selected = options.find((option) => option.id === selectedId) ?? null;
 
   const visible = useMemo(() => {
@@ -88,16 +89,16 @@ export function TeamComboBox({
     >
       <Label className="qbs-visually-hidden">{label}</Label>
       <div className="qbs-combobox__control">
-        <Input className="qbs-combobox__input" placeholder={placeholder} />
+        <Input ref={inputRef} className="qbs-combobox__input" placeholder={placeholder} />
         {selectedId !== null ? (
           <AriaButton
             // Not the ComboBox's own trigger: this clears, and it needs its own name.
             slot={null}
             aria-label={`Clear ${label}`}
             className="qbs-combobox__clear"
-            excludeFromTabOrder
             onPress={() => {
               setFilter('');
+              inputRef.current?.focus();
               onSelect(null);
             }}
           >
