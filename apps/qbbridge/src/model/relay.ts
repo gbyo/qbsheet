@@ -69,9 +69,9 @@ export function generateTournamentId(): string {
  * that survives a copy through a terminal, a password manager and a text field without a
  * character being mangled or a line being wrapped.
  *
- * This is a secret, briefly. The operator pastes it into `wrangler secret put` and then into the
- * claim, after which the relay has exchanged it for a management credential and it is worthless.
- * QBBridge never stores it: it lives in one component's state until the window is closed.
+ * This is a secret, briefly. The operator pastes it into Cloudflare's deployment form and then
+ * into the claim, after which the relay has exchanged it for a management credential and it is
+ * worthless. QBBridge never stores it: it lives in one component's state until the window is closed.
  */
 export function generateSetupToken(): string {
   const bytes = new Uint8Array(32);

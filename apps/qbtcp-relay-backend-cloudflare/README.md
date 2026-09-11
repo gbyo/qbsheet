@@ -34,18 +34,17 @@ The relay implements the streaming contract from #770 without extending it:
 
 ## Deploying
 
-1. Click **Deploy to Cloudflare** above. Cloudflare clones the repository, reads
-   `wrangler.jsonc`, provisions the Durable Object, and deploys.
-2. Set the one-time setup token as a secret:
-
-   ```bash
-   wrangler secret put RELAY_SETUP_TOKEN
-   ```
-
-   Paste any long random string. Director asks for it once and then never needs it again.
-
+1. In QBBridge Help, generate a one-time setup token and keep the page open.
+2. Click **Deploy to Cloudflare** above. On Cloudflare's deployment form, set
+   `RELAY_SETUP_TOKEN` to that token and leave `RELAY_ALLOWED_ORIGINS` as
+   `https://qbsheet.com` unless scorekeepers use another browser origin. Cloudflare reads
+   `.dev.vars.example`, provisions the Durable Object, and deploys without a terminal.
 3. Copy the deployed Worker URL (`https://qbtcp-relay-backend.<subdomain>.workers.dev`).
-4. In QBBridge, paste the URL and the setup token.
+4. In QBBridge, paste the URL and the same setup token.
+
+If the Worker was created without those fields, open it in **Workers & Pages**, then select
+**Settings → Variables and Secrets → Add**. Add both names as **Secret** values and select
+**Deploy**.
 
 QBBridge exchanges the setup token for a durable management credential, stores that credential in
 the operating system's secure store, and the setup token becomes worthless. It cannot be exchanged
@@ -55,7 +54,7 @@ The full operator path — guided setup, claim security, pairing, validation, fa
 guidance, safe teardown, and diagnostics — is documented in
 [`docs/QBTCP-RELAY-DEPLOY.md`](../../docs/QBTCP-RELAY-DEPLOY.md).
 
-Which browser origins may call authenticated endpoints and open the stream:
+For command-line deployments, the equivalent origin setting is:
 
 ```bash
 wrangler secret put RELAY_ALLOWED_ORIGINS  # e.g. https://qbsheet.com

@@ -18,14 +18,14 @@ Cloud_, _QBSheet servers_, _upload tournament to QBSheet_, or _QBSheet account r
 
 1. In Director, open Rooms → **Internet QBTCP** and choose to enable it. Read the
    ownership note: the relay will live in a Cloudflare account the tournament controls.
-2. Click **Deploy to Cloudflare** in
+2. Generate the one-time setup token shown in QBBridge Help and keep that page open.
+3. Click **Deploy to Cloudflare** in
    [`apps/qbtcp-relay-backend-cloudflare`](../apps/qbtcp-relay-backend-cloudflare/README.md).
-   Cloudflare clones the repository, provisions the Durable Object, and deploys.
-3. Set the one-time setup secret:
-   ```bash
-   wrangler secret put RELAY_SETUP_TOKEN
-   ```
-   Paste any long random string. Director asks for it once and never again.
+   In Cloudflare's deployment form, set `RELAY_SETUP_TOKEN` to the generated token and leave
+   `RELAY_ALLOWED_ORIGINS` as `https://qbsheet.com` unless scorekeepers use another browser
+   origin. Cloudflare provisions the Durable Object and deploys; no terminal is required.
+   If the Worker already exists without these values, open **Settings → Variables and Secrets →
+   Add**, add both as **Secret** values, and select **Deploy**.
 4. Copy the deployed Worker URL (`https://<name>.<subdomain>.workers.dev`). No custom
    domain is required; one can be added later as an advanced setting.
 5. Back in Director, enter the relay address, the 24-character tournament id from
