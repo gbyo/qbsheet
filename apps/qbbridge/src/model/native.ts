@@ -143,6 +143,24 @@ export async function writeAssignmentFile(
   return invoke<string>('write_assignment_file', { directory, fileName, contents });
 }
 
+export interface DestinationProbeReport {
+  probeBytes: number;
+  freeBytes: number | null;
+}
+
+/**
+ * Prove the configured result folder takes a result file: exclusive write, fsync, rename,
+ * byte-for-byte readback, then delete. Leaves nothing behind and never touches a real
+ * result name, so it is safe to run before Round 1.
+ */
+export async function probeResultDestination(directory: string): Promise<DestinationProbeReport> {
+  requireNative('Probing the result destination');
+  const report = await invoke<{ probeBytes: number; freeBytes: number | null }>('probe_result_destination', {
+    directory,
+  });
+  return { probeBytes: report.probeBytes, freeBytes: report.freeBytes };
+}
+
 export interface RelayResponse {
   status: number;
   body: string;

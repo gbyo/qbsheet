@@ -322,11 +322,26 @@ jobs:
           echo "All three platforms produced inspectable bundles."
 
   # -----------------------------------------------------------------------------------------------
+  # No tag becomes a release without proving the exact published tree still interoperates with
+  # YellowFruit, the relay contract, and the Scorer transport. This is the same torture suite
+  # that runs weekly; here it gates promotion rather than reporting drift.
+  # -----------------------------------------------------------------------------------------------
+  interop:
+    name: Tournament torture gate
+    needs: guard
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/cross-repo-tournament-torture.yml
+    with:
+      yellowfruit_ref: ''
+
+  # -----------------------------------------------------------------------------------------------
   # Make the draft visible, once every platform is in it.
   # -----------------------------------------------------------------------------------------------
   publish:
     name: Publish
-    needs: [guard, draft, bundle]
+    needs: [guard, draft, bundle, interop]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -14,6 +14,16 @@ on:
         required: false
         default: ''
         type: string
+  # Release promotion gate: qbbridge-release.yml calls this on every tag so no Bridge release
+  # ships without proving the exact published tree still interoperates. Weekly runs catch drift;
+  # this run gates promotion.
+  workflow_call:
+    inputs:
+      yellowfruit_ref:
+        description: Optional YellowFruit branch or ref; otherwise use the matching branch, then master
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read

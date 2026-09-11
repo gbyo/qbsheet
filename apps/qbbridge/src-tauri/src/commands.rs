@@ -376,6 +376,78 @@ pub async fn write_assignment_file(
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DestinationProbe {
+    /// Bytes the probe wrote and read back intact.
+    pub probe_bytes: u64,
+    /// Bytes available to unprivileged writers on the destination volume, if reported.
+    pub free_bytes: Option<u64>,
+}
+
+/// Prove the configured result destination can take a result file before Round 1.
+///
+/// Writes a uniquely named probe with an exclusive create, fsyncs it, renames it, reads it
+/// back byte-for-byte, then deletes it, leaving nothing behind. The name can never collide
+/// with a real result, and a failed probe removes its own partial file. A full disk or a
+/// vanished folder fails here with the operating system's reason instead of mid-tournament.
+fn probe_destination_inner(
+    directory: &Path,
+    first: &Path,
+    second: &Path,
+    mut file: std::fs::File,
+) -> CommandResult<DestinationProbe> {
+    const PROBE_BYTES: &[u8] = b"qbsheet-bridge readiness probe";
+    std::io::Write::write_all(&mut file, PROBE_BYTES)
+        .map_err(|error| CommandError::new("probe_write_failed", error.to_string()))?;
+    file.sync_all()
+        .map_err(|error| CommandError::new("probe_sync_failed", error.to_string()))?;
+    drop(file);
+    std::fs::rename(first, second)
+        .map_err(|error| CommandError::new("probe_rename_failed", error.to_string()))?;
+    let read_back = std::fs::read(second)
+        .map_err(|error| CommandError::new("probe_read_failed", error.to_string()))?;
+    if read_back.as_slice() != PROBE_BYTES {
+        return Err(CommandError::new(
+            "probe_mismatch",
+            "The result folder returned different bytes than were written.",
+        ));
+    }
+    Ok(DestinationProbe {
+        probe_bytes: PROBE_BYTES.len() as u64,
+        free_bytes: fs2::free_space(directory).ok(),
+    })
+}
+
+#[tauri::command]
+pub async fn probe_result_destination(directory: String) -> CommandResult<DestinationProbe> {
+    let directory = PathBuf::from(directory);
+    if !directory.is_dir() {
+        return Err(CommandError::new(
+            "no_such_folder",
+            "That result output folder no longer exists. Choose it again.",
+        ));
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let first = directory.join(format!(".readiness-probe-{pid}-{stamp}.tmp"));
+    let second = directory.join(format!(".readiness-probe-{pid}-{stamp}.verified"));
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&first)
+        .map_err(|error| CommandError::new("probe_write_failed", error.to_string()))?;
+    let outcome = probe_destination_inner(&directory, &first, &second, file);
+    // A failed probe removes its own partial file either way; the `.verified` name only
+    // exists after a successful rename, and a passed probe removes both names.
+    std::fs::remove_file(&first).ok();
+    std::fs::remove_file(&second).ok();
+    outcome
+}
+
+#[derive(Debug, Serialize)]
 pub struct RelayResponse {
     pub status: u16,
     pub body: String,
@@ -473,7 +545,8 @@ pub async fn relay_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_relay_response_chunk, safe_file_name, write_result_file, MAX_RELAY_RESPONSE_BYTES,
+        append_relay_response_chunk, probe_result_destination, safe_file_name, write_result_file,
+        MAX_RELAY_RESPONSE_BYTES,
     };
 
     #[test]
@@ -585,5 +658,64 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&directory).ok();
+    }
+
+    fn probe_temp_dir() -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "qbbridge-probe-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    #[test]
+    fn a_destination_probe_leaves_nothing_behind() {
+        let directory = probe_temp_dir();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let report = runtime
+            .block_on(probe_result_destination(
+                directory.to_string_lossy().into_owned(),
+            ))
+            .expect("a writable folder should pass the probe");
+        assert!(report.probe_bytes > 0);
+        assert!(
+            report.free_bytes.unwrap_or(0) > 0,
+            "the temp volume should report free space"
+        );
+        assert_eq!(
+            std::fs::read_dir(&directory).unwrap().count(),
+            0,
+            "the probe must remove its own files"
+        );
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_vanished_folder_fails_the_probe_with_its_name() {
+        let missing = std::env::temp_dir().join(format!(
+            "qbbridge-probe-missing-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let error = runtime
+            .block_on(probe_result_destination(
+                missing.to_string_lossy().into_owned(),
+            ))
+            .expect_err("a vanished folder must fail the probe");
+        assert_eq!(error.code, "no_such_folder");
     }
 }
