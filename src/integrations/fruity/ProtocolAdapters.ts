@@ -523,7 +523,7 @@ export class QbtcpAdapter extends BaseAdapter {
     const result = await this.request<unknown>(this.routes.pair, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(roomId ? { code, roomId } : { code }),
+      body: JSON.stringify(roomId ? { code, room_id: roomId } : { code }),
     });
     if (!result.ok) return result;
     const body = isRecord(result.value) ? result.value : {};

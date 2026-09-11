@@ -936,15 +936,22 @@ function RoomPairingRepair(props: {
         code,
         room.roomId,
         room.deviceId,
-        // A re-pair repairs the room capability, not the topology: the fallback the room
-        // already holds survives, so a new code does not silently drop the LAN path.
+        // Re-pair the same advertised fallback. The exchange reports whether the LAN
+        // was repaired, temporarily unavailable, or positively paired to another room.
         room.lanBaseUrl,
       );
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      onPaired(result.value);
+      const repairedRoom =
+        result.lanOutcome === 'transient-failure' && room.lanBaseUrl && room.lanRoomToken
+          ? { ...result.value, lanBaseUrl: room.lanBaseUrl, lanRoomToken: room.lanRoomToken }
+          : result.value;
+      // A transient LAN outage must not erase a still-valid fallback. A room mismatch or definitive
+      // rejection deliberately passes the primary-only value through, so App.onPaired clears the
+      // stale LAN capability instead of merging it into the repaired room.
+      onPaired(repairedRoom);
     } catch {
       setError('This room could not be paired. Check the connection and try again.');
     } finally {

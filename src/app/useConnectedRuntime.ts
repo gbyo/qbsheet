@@ -116,6 +116,8 @@ export interface ICredentialRepair {
   lanSessionToken?: string;
 }
 
+export type RoomCredentialEndpoint = 'primary' | 'lan';
+
 export interface IConnectedRuntimeInput {
   client: FruityServerClient;
   identity: IRoomIdentity;
@@ -132,7 +134,7 @@ export interface IConnectedRuntimeInput {
    */
   enabled: boolean;
   /** Offer to pair this room again, in place. Never navigates. */
-  onRepairConnection?: () => void;
+  onRepairConnection?: (endpoint: RoomCredentialEndpoint) => void;
   /** A repair produced new session credentials. Persist them; the game does not change. */
   onCredentialsRepaired?: (repair: ICredentialRepair) => void;
   /** The highest progress sequence this room has already used, as it was last persisted. */
@@ -493,6 +495,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState<string | undefined>(undefined);
   const [roomCredentialProblem, setRoomCredentialProblem] = useState(false);
+  const [roomCredentialEndpoint, setRoomCredentialEndpoint] = useState<RoomCredentialEndpoint>('primary');
   /** Control accepted the credential and refused the operation. A person, not a code, resolves it. */
   const [forbidden, setForbidden] = useState<string | null>(null);
   const [sessionCredentialProblem, setSessionCredentialProblem] = useState(false);
@@ -1329,6 +1332,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         // idempotent, so re-applying would only restate the same contract state.
       }
       if (classified.credentialProblem) {
+        setRoomCredentialEndpoint(viaPrimary ? 'primary' : 'lan');
         setRoomCredentialProblem(true);
         setForbidden(null);
         timeline.record('room-refused');
@@ -1418,7 +1422,12 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
               title: 'Tournament connection changed — keep scoring',
               body: 'Tournament control no longer recognizes this room, so results will not be sent automatically until the connection is repaired. The game is saved on this device and can be handed over as a file.',
               actions: onRepairConnection
-                ? [{ label: 'Repair connection…', onSelect: onRepairConnection }]
+                ? [
+                    {
+                      label: 'Repair connection…',
+                      onSelect: () => onRepairConnection(roomCredentialEndpoint),
+                    },
+                  ]
                 : undefined,
               offerDownload: true,
             },
@@ -1487,6 +1496,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     ],
     [
       roomCredentialProblem,
+      roomCredentialEndpoint,
       forbidden,
       sessionCredentialProblem,
       writerConflict,
