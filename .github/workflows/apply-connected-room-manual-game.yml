@@ -3,14 +3,14 @@ name: Apply connected-room manual-game fix
 on:
   push:
     branches:
-      - fix/connected-room-manual-game
+      - "fix/connected-room-manual-game"
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
