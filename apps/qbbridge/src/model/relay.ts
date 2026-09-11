@@ -393,9 +393,7 @@ function numberRecord(value: unknown): Record<string, number> | null {
  * Operator names and help messages are dropped at this boundary — the dashboard needs
  * presence and status, never who typed what.
  */
-export async function relayFetchDirectorSessions(
-  connection: RelayConnection,
-): Promise<DirectorSession[]> {
+export async function relayFetchDirectorSessions(connection: RelayConnection): Promise<DirectorSession[]> {
   const response = await relayRequest({
     method: 'GET',
     url: `${manageBase(connection.baseUrl, connection.tournamentId)}/sessions`,
@@ -433,17 +431,13 @@ export function parseDirectorSessions(sessions: unknown, status: number | null):
       status,
       writerDevice: typeof entry.writer_device === 'string' ? entry.writer_device : null,
       updatedAt: typeof entry.updated_at === 'string' ? entry.updated_at : '',
-      progressSequence:
-        typeof entry.progress_sequence === 'number' ? entry.progress_sequence : null,
-      progressUpdatedAt:
-        typeof entry.progress_updated_at === 'string' ? entry.progress_updated_at : null,
+      progressSequence: typeof entry.progress_sequence === 'number' ? entry.progress_sequence : null,
+      progressUpdatedAt: typeof entry.progress_updated_at === 'string' ? entry.progress_updated_at : null,
       results: Array.isArray(entry.results)
         ? (entry.results as Record<string, unknown>[])
             .filter(
               (result): result is Record<string, unknown> =>
-                !!result &&
-                typeof result === 'object' &&
-                typeof result.result_id === 'string',
+                !!result && typeof result === 'object' && typeof result.result_id === 'string',
             )
             .map((result) => ({
               resultId: result.result_id as string,
@@ -456,9 +450,7 @@ export function parseDirectorSessions(sessions: unknown, status: number | null):
         ? (entry.presence as Record<string, unknown>[])
             .filter(
               (item): item is Record<string, unknown> =>
-                !!item &&
-                typeof item === 'object' &&
-                typeof item.device_id === 'string',
+                !!item && typeof item === 'object' && typeof item.device_id === 'string',
             )
             .map((item) => ({
               deviceId: item.device_id as string,
