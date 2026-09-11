@@ -52,6 +52,7 @@ function bridgeWhileBatchSaving(): BridgeApi {
     revokeBackup: vi.fn(async () => false),
     takeOverRelay: vi.fn(async () => false),
     transferRelayToPrimary: vi.fn(async () => false),
+    reconcileRelayPosition: vi.fn(async () => false),
     relayCredentialSavePending: false,
     retryRelayCredentialSave: vi.fn(async () => false),
     persistenceSavePending: false,

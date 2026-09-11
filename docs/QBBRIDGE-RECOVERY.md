@@ -44,8 +44,12 @@ from the active controller.
 ## Return control and revoke access
 
 When the primary laptop is available again, the active backup chooses **Transfer control back to
-primary**. This advances the epoch again and makes the backup read-only. The primary profile should
-then refresh its state before publishing.
+primary**. This advances the epoch again and makes the backup read-only. The original primary
+profile must then choose **Refresh relay position** in **Tournament → Relay → Primary recovery**
+before publishing: the refresh reads relay health, transactionally updates only the local epoch
+and revision, and requires the operator to review the recovered room state. It never overwrites
+rooms, plans, results, or the tournament file, and a still-superseded primary is told it cannot
+publish yet rather than being handed write authority.
 
 From the active primary, **Revoke backup access…** invalidates the backup credential without
 deleting rooms, assignments, retained results, or the primary credential. If a package was lost,

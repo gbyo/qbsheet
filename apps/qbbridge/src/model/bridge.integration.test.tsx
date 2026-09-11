@@ -198,7 +198,7 @@ function installFakeTauri(): void {
         }
         if (url.endsWith('/takeover')) {
           activeController = 'backup';
-          relayEpoch = 2;
+          relayEpoch += 1;
           relayRevision = 0;
           return {
             status: 200,
@@ -208,6 +208,27 @@ function installFakeTauri(): void {
               revision: relayRevision,
               active_controller: activeController,
               idempotent: false,
+            }),
+          };
+        }
+        if (url.endsWith('/transfer')) {
+          let target: 'primary' | 'backup' = 'primary';
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as { controller?: unknown };
+            if (parsed.controller === 'backup') target = 'backup';
+          } catch {
+            target = 'primary';
+          }
+          activeController = target;
+          relayEpoch += 1;
+          relayRevision = 0;
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              director_epoch: relayEpoch,
+              revision: relayRevision,
+              active_controller: activeController,
             }),
           };
         }
@@ -239,6 +260,44 @@ function installFakeTauri(): void {
           if (deferMirror) {
             deferredMirrorStarted = true;
             await deferMirror;
+          }
+          const presented = JSON.stringify(args);
+          const writer = presented.includes(backupToken) ? 'backup' : 'primary';
+          if (writer !== activeController) {
+            return {
+              status: 409,
+              body: JSON.stringify({
+                code: 'superseded',
+                message: `This ${writer} controller is no longer active.`,
+                active_controller: activeController,
+                director_epoch: relayEpoch,
+              }),
+            };
+          }
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as {
+              director_epoch?: unknown;
+              revision?: unknown;
+            };
+            const epoch = typeof parsed.director_epoch === 'number' ? parsed.director_epoch : null;
+            const revision = typeof parsed.revision === 'number' ? parsed.revision : null;
+            if (epoch !== null && revision !== null) {
+              if (epoch < relayEpoch || (epoch === relayEpoch && revision <= relayRevision)) {
+                return {
+                  status: 409,
+                  body: JSON.stringify({
+                    code: 'conflict',
+                    message: 'That mirror state is older than what the relay holds.',
+                    currentRevision: relayRevision,
+                    director_epoch: relayEpoch,
+                  }),
+                };
+              }
+              relayEpoch = epoch;
+              relayRevision = revision;
+            }
+          } catch {
+            // An unparseable test body keeps the legacy accept behavior.
           }
           return { status: 200, body: '{}' };
         }
@@ -1610,6 +1669,95 @@ describe('backup controller recovery', () => {
     expect(ack?.args.bearer).toBe(backupToken);
     expect(backup.result.current.state.results[0].ackPending).toBe(false);
     backup.unmount();
+  });
+
+  test('a primary reconciles its fencing position after control is transferred back', async () => {
+    const primary = await setUpTournament();
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 1, revision: 1 });
+    const roomsBefore = primary.result.current.state.rooms.map((room) => ({ ...room }));
+    const plansBefore = JSON.parse(JSON.stringify(primary.result.current.state.roundPlans)) as unknown;
+    const claimsBefore = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/manage/claim'),
+    ).length;
+
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await primary.result.current.createRecoveryPackage(
+        'correct horse battery staple',
+        'Backup laptop',
+      );
+    });
+    expect(created).toBe(true);
+
+    // The backup profile runs alongside the still-mounted primary, as a second laptop would.
+    // Clearing shared storage is safe: the primary's working state stays in memory.
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    expect(activeController).toBe('backup');
+
+    // A still-superseded primary learns the new position but gains no write authority.
+    let reconciled: boolean | undefined;
+    await act(async () => {
+      reconciled = await primary.result.current.reconcileRelayPosition();
+    });
+    expect(reconciled).toBe(false);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 2, revision: 0 });
+    expect(primary.result.current.notice?.message).toMatch(/backup.*still active|cannot publish/i);
+
+    await publishReviewed(primary);
+    expect(primary.result.current.notice?.kind).toBe('bad');
+    expect(primary.result.current.notice?.message).toMatch(/Refresh relay position/);
+
+    await act(async () => {
+      expect(await backup.result.current.transferRelayToPrimary()).toBe(true);
+    });
+    expect(activeController).toBe('primary');
+    backup.unmount();
+
+    await act(async () => {
+      reconciled = await primary.result.current.reconcileRelayPosition();
+    });
+    expect(reconciled).toBe(true);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 3, revision: 0 });
+    // Only the fencing position moved; working state is untouched.
+    expect(primary.result.current.state.rooms).toEqual(roomsBefore);
+    expect(primary.result.current.state.roundPlans).toEqual(plansBefore);
+    expect(primary.result.current.notice?.message).toMatch(/Review the recovered room state/);
+
+    // The original primary publishes at the new epoch with its existing credential.
+    await setUpRound(primary, 4);
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 3, revision: 1 });
+    const mirrors = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+    const lastMirror = mirrors[mirrors.length - 1]!;
+    expect(lastMirror.args.bearer).toBe('management-secret');
+    const lastBody = JSON.parse(String(lastMirror.args.body)) as {
+      director_epoch: number;
+      revision: number;
+    };
+    expect(lastBody.director_epoch).toBe(3);
+    expect(lastBody.revision).toBe(1);
+    expect(
+      calls.filter(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/manage/claim'),
+      ),
+    ).toHaveLength(claimsBefore);
+
+    primary.unmount();
+    backup.unmount();
+    globalThis.localStorage.clear();
   });
 });
 

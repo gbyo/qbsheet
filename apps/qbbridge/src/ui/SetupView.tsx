@@ -157,7 +157,29 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                   ? `Backup${state.relay.controllerLabel ? ` · ${state.relay.controllerLabel}` : ''}`
                   : 'Primary'}
               </dd>
+              <dt>Relay epoch</dt>
+              <dd>{state.relay.epoch}</dd>
             </dl>
+            {state.relay.controllerRole !== 'backup' ? (
+              <div className="scorer-readiness" aria-live="polite">
+                <h3>Primary recovery</h3>
+                <p>
+                  After a backup transfers control back, this profile still holds its pre-takeover epoch until
+                  it refreshes. Refreshing updates only the relay epoch and revision from relay health; rooms,
+                  plans, results, and the tournament file are left untouched. Review the room state before
+                  publishing the next round.
+                </p>
+                <div className="row">
+                  <Button
+                    variant="quiet"
+                    onPress={() => void bridge.reconcileRelayPosition()}
+                    isDisabled={bridge.busy}
+                  >
+                    Refresh relay position
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             {state.relay.controllerRole === 'backup' ? (
               <div className="scorer-readiness" aria-live="polite">
                 <h3>Backup controller recovery</h3>
