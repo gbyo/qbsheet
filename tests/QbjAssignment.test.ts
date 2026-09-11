@@ -15,6 +15,7 @@ import { playerIdentityKey } from '../src/game/GameDefinition';
 import { defineGame, orderCandidates, readQbjSource } from '../src/qbj/ParseQbjAssignment';
 import { readQbjScoringRules } from '../src/qbj/QbjScoringRules';
 import { buildResultDocument, buildLegacyMatchOnly, qbjFileName } from '../src/qbj/QbjResult';
+import { resetScorerBuildStamp, scorerBuildStamp, setScorerBuildStamp } from '../src/qbj/scorerBuildStamp';
 import { qbjSerializationVersion, isPlainObject, QbjObject } from '../src/qbj/QbjSerialization';
 import {
   qbtcpExtensionKey,
@@ -668,6 +669,25 @@ describe('assignment to result', () => {
     expect(extension.scorer_build).toEqual({ version: '0.0.0', commit: 'dev' });
     // And the stamp reads back through the same parser tournament control uses.
     expect(readQbtcpExtension(match)?.scorerBuild).toEqual({ version: '0.0.0', commit: 'dev' });
+  });
+
+  test('a staged release build stamps results until reset', () => {
+    setScorerBuildStamp({ version: '0.1.0', commit: 'a1b2c3d' });
+    try {
+      const { definition } = openOne(assignmentDocument());
+      const format = definition.scorekeeperFormat;
+      const match = objectOfType(
+        buildResultDocument({ definition, format, game: deriveGame(format, setupFor(definition), []) }),
+        'Match',
+      );
+      expect(readQbtcpExtension(match)?.scorerBuild).toEqual({
+        version: '0.1.0',
+        commit: 'a1b2c3d',
+      });
+    } finally {
+      resetScorerBuildStamp();
+    }
+    expect(scorerBuildStamp()).toEqual({ version: '0.0.0', commit: 'dev' });
   });
 
   test('a malformed scorer stamp degrades to absent, never to a guessed build', () => {

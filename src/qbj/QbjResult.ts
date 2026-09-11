@@ -31,7 +31,7 @@
  * `PortableQbj` and `docs/QBJ_ASSIGNMENT_PROFILE.md` for that boundary.
  */
 import { IGameDefinition, playerIdentityKey } from '../game/GameDefinition';
-import { buildVersion } from '../pwa/BuildVersion';
+import { scorerBuildStamp } from './scorerBuildStamp';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
@@ -159,7 +159,7 @@ export function buildResultMatch(options: IQbjResultOptions): QbjObject {
   // the stamp is read back out of the relayed result, which is also why USB-carried results
   // prove their build without any network at all.
   return withQbtcpExtension(match, {
-    scorerBuild: { version: buildVersion.version, commit: buildVersion.commit },
+    scorerBuild: { ...scorerBuildStamp() },
     roundRevision: definition.round.revision,
     ...(definition.round.assignmentRevision !== undefined
       ? { assignmentRevision: definition.round.assignmentRevision }

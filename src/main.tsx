@@ -9,6 +9,8 @@
 import { createRoot } from 'react-dom/client';
 import { lazy, Suspense } from 'react';
 import RenderErrorBoundary from './app/RenderErrorBoundary';
+import { buildVersion } from './pwa/BuildVersion';
+import { setScorerBuildStamp } from './qbj/scorerBuildStamp';
 import { registerServiceWorker } from './pwa/registerServiceWorker';
 import { watchForErrors } from './app/ErrorLog';
 import { startDisplayPreferences } from './app/displayPreference';
@@ -106,4 +108,7 @@ if (container) {
   }
 }
 
+// Results stamp the build that scored them (see `qbj/scorerBuildStamp.ts`): set it here, once,
+// from the injected build identity, before any game can be scored in this process.
+setScorerBuildStamp({ version: buildVersion.version, commit: buildVersion.commit });
 registerServiceWorker();
