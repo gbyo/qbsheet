@@ -128,8 +128,13 @@ export interface BridgeApi {
   plannedTeamsFor(roomId: string): { leftTeamId: string | null; rightTeamId: string | null };
   /** How this room's planned game for the selected round compares with what the relay holds. */
   planStatus(room: Room): PlanPublicationStatus;
-  /** Rooms with a complete matchup in the selected round, and how many rooms there are. */
-  roundProgress: { roundId: string | null; assigned: number; total: number };
+  /**
+   * How many complete matchups the selected round has planned. Descriptive, never a fraction:
+   * QBBridge does not know how many games a round should contain — a bye, a playoff phase using
+   * fewer rooms, or an intentionally idle room all make the physical room count a wrong
+   * denominator — so no expected total is reported.
+   */
+  roundProgress: { roundId: string | null; assigned: number };
   /** Assignment counts for every round in the selected round's phase, for the pre-tournament view. */
   phaseRoundProgress: { roundId: string; displayName: string; assigned: number }[];
   regeneratePairingCode(roomId: string): void;
@@ -1259,9 +1264,8 @@ export function useBridge(): BridgeApi {
     () => ({
       roundId: state.selectedRoundId,
       assigned: assignedRoomCount(state.roundPlans, state.selectedRoundId),
-      total: state.rooms.length,
     }),
-    [state.roundPlans, state.rooms.length, state.selectedRoundId],
+    [state.roundPlans, state.selectedRoundId],
   );
 
   /**

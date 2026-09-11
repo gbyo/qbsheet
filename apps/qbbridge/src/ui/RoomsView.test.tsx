@@ -96,7 +96,7 @@ function testBridge(rooms: Room[]): BridgeApi {
       };
     },
     planStatus: () => 'planned' as const,
-    roundProgress: { roundId: selectedRoundId, assigned: rooms.length, total: rooms.length },
+    roundProgress: { roundId: selectedRoundId, assigned: rooms.length },
     phaseRoundProgress: [],
     publish: vi.fn(async () => undefined),
     publishRoomSetup: vi.fn(async () => undefined),

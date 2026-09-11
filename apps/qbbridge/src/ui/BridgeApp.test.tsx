@@ -199,7 +199,7 @@ describe('the shell', () => {
     expect(screen.getByRole('row', { name: /Room 1/ })).toBeInTheDocument();
   });
 
-  test('the round control reports how much of the selected round is set up', async () => {
+  test('the round control reports how many games the selected round has planned', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
     await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
@@ -208,12 +208,55 @@ describe('the shell', () => {
     await user.click(screen.getByRole('button', { name: '+ Room' }));
     await user.click(screen.getByRole('button', { name: '+ Room' }));
 
-    expect(screen.getByTestId('round-progress')).toHaveTextContent('0/2 assigned');
+    expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 0 games planned');
     await pickTeam(user, 'Left team in Room 1', 'Cony');
     // One side is not a game.
-    expect(screen.getByTestId('round-progress')).toHaveTextContent('0/2 assigned');
+    expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 0 games planned');
     await pickTeam(user, 'Right team in Room 1', 'Deering');
-    await waitFor(() => expect(screen.getByTestId('round-progress')).toHaveTextContent('1/2 assigned'));
+    await waitFor(() =>
+      expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 1 game planned'),
+    );
+    // Clearing a side removes the game again.
+    await user.click(screen.getByRole('button', { name: 'Clear Left team in Room 1' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 0 games planned'),
+    );
+  });
+
+  test('an unused room never makes a planned round look incomplete', async () => {
+    // Three configured rooms, one planned game: a bye-like round with idle rooms. The count is
+    // descriptive — there is no denominator to fall short of.
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+    await screen.findByText('12 teams \u00b7 48 players');
+    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+
+    await pickTeam(user, 'Left team in Room 1', 'Cony');
+    await pickTeam(user, 'Right team in Room 1', 'Deering');
+    await waitFor(() =>
+      expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 1 game planned'),
+    );
+    // No fraction anywhere: neither the selector count nor the per-round chips name a denominator.
+    expect(screen.getByTestId('round-progress').textContent).not.toContain('/');
+    expect(screen.getByTestId('phase-progress')).toHaveTextContent('R1 1 game');
+    expect(screen.getByTestId('phase-progress').textContent).not.toContain('/');
+
+    // Adding another idle room changes nothing about the planned game.
+    await user.click(screen.getByRole('button', { name: '+ Room' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 1 \u00b7 1 game planned'),
+    );
+
+    // A playoff phase with fewer rooms in use shows the same descriptive count.
+    await user.selectOptions(screen.getByLabelText('Round'), 'Phase_Playoffs__round_7');
+    await waitFor(() =>
+      expect(screen.getByTestId('round-progress')).toHaveTextContent('Round 7 \u00b7 0 games planned'),
+    );
+    expect(screen.getByTestId('round-progress').textContent).not.toContain('/');
   });
 
   test('the results screen names the YellowFruit step and claims nothing about it', async () => {

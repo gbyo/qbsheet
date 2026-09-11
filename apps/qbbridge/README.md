@@ -30,7 +30,9 @@ letting the operator or YellowFruit know it, the operator or YellowFruit knows i
 7. Add a room for each room in use.
 8. Optionally, plan the rounds: choose a round, fill in its rooms, choose the next, and so on. Each
    round keeps its own matchups, so a whole set of prelims can be entered the night before. The
-   count beside the round selector (`Round 1 · 6/6 assigned`) says how much of each round is done.
+   count beside the round selector (`Round 1 · 6 games planned`) says how many games each round
+   has planned. It is deliberately not a fraction: QBBridge does not know how many games a round
+   should contain, so an idle room never makes a correct round look incomplete.
 
 **Each round**
 

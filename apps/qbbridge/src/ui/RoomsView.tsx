@@ -53,6 +53,16 @@ const planStatus: Record<PlanPublicationStatus, { label: string; tone: Tone } | 
 
 type PrintTarget = 'all' | string;
 
+/** "1 game planned", "0 games planned" — a count, never a fraction of the room capacity. */
+function gamesPlannedLabel(count: number): string {
+  return count === 1 ? '1 game planned' : `${count} games planned`;
+}
+
+/** "R1 5 games" — the per-round chips beside the selector. */
+function gamesLabel(count: number): string {
+  return count === 1 ? '1 game' : `${count} games`;
+}
+
 function RoomPrintSheet({ data }: { data: RoomPrintData }) {
   return (
     <article className="room-print-sheet" data-room-id={data.roomId}>
@@ -259,13 +269,13 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
             ))}
           </select>
           {/*
-            Setup completeness, in the place the round is chosen. The point of preplanning is
-            knowing on Friday night that every room in every prelim round has a game, and a count
-            beside the selector answers that without another screen.
+            Setup progress, in the place the round is chosen. A descriptive count of planned
+            games, deliberately not a fraction: byes, playoff phases using fewer rooms, and
+            intentionally idle rooms all make the configured room count a wrong denominator,
+            and a false incomplete state pressures the operator to invent a missing game.
           */}
           <span className="round-progress" data-testid="round-progress">
-            Round {round?.displayName ?? '—'} · {bridge.roundProgress.assigned}/{bridge.roundProgress.total}{' '}
-            assigned
+            Round {round?.displayName ?? '—'} · {gamesPlannedLabel(bridge.roundProgress.assigned)}
           </span>
           {phasePools.length > 0 ? (
             <label htmlFor="team-pool-filter">
@@ -387,7 +397,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           <p className="faint" data-testid="phase-progress">
             {bridge.phaseRoundProgress.map((entry) => (
               <span key={entry.roundId} className="round-progress-chip">
-                R{entry.displayName} {entry.assigned}/{bridge.roundProgress.total}
+                R{entry.displayName} {gamesLabel(entry.assigned)}
               </span>
             ))}
           </p>
