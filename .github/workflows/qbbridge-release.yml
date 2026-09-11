@@ -358,6 +358,9 @@ jobs:
           & "$wixbin/candle.exe" -v -arch x64 main.wxs "-dSourceDir=$($exe.FullName)" 2>&1 | ForEach-Object { Write-Host $_ }
           Write-Host "candle exit code: $LASTEXITCODE"
           Get-ChildItem "$dir/*.wixobj" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "wixobj: $($_.Name)" }
+          Write-Host "--- rerunning light verbosely (same args tauri uses) ---"
+          & "$wixbin/light.exe" -v -o "$dir/diag.msi" -cultures:en-us -loc "$dir/locale.wxl" "$dir/main.wixobj" -ext "$wixbin/WixUIExtension.dll" -ext "$wixbin/WixUtilExtension.dll" 2>&1 | ForEach-Object { Write-Host $_ }
+          Write-Host "light exit code: $LASTEXITCODE"
           Pop-Location
           exit 0
 
