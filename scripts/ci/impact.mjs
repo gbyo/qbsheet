@@ -349,7 +349,7 @@ export const RULES = [
   {
     glob: 'scripts/release/**',
     domains: ['scorer'],
-    why: 'the Director release guard; tests/release holds it, and the scorer job runs the root suite',
+    why: 'the Director and QBBridge release guards; tests/release holds them, and the scorer job runs the root suite',
   },
   { glob: 'scripts/**', domains: SCORER, why: 'an unmapped build script; assume it reaches the build' },
 
@@ -407,12 +407,19 @@ export const RULES = [
   { glob: '.github/dependabot.yml', domains: [], docs: true, why: 'repository furniture' },
   { glob: '.github/labeler.yml', domains: [], docs: true, why: 'repository furniture' },
   {
-    // The one workflow with no path filter to include itself in: it is triggered by a tag, so the
-    // push that changes it is never the event that runs it. A `workflow_dispatch` run is what
-    // validates it, and routing it through the scorer jobs would test nothing about the change.
+    // One of the two workflows with no path filter to include itself in: they are triggered by a
+    // tag, so the push that changes one is never the event that runs it. A `workflow_dispatch` run
+    // is what validates it, and routing it through the scorer jobs would test nothing about the
+    // change.
     glob: '.github/workflows/director-release.yml',
     domains: [],
     why: 'the Director release pipeline; a dispatch run validates it, not CI',
+  },
+  {
+    // The same, for QBBridge. See `.github/workflows/qbbridge-release.yml`.
+    glob: '.github/workflows/qbbridge-release.yml',
+    domains: [],
+    why: 'the QBBridge release pipeline; a dispatch run validates it, not CI',
   },
   {
     // Every other workflow carries its own path filter, and that filter includes the workflow file.

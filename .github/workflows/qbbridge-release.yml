@@ -1,0 +1,397 @@
+name: QBBridge release
+
+# Publishes QBSheet Bridge.
+#
+# QBBridge is a Tauri desktop application, so a release is not one artifact but one set per
+# operating system, each of which can only be built on that operating system. This workflow builds
+# them in parallel and gathers them into a single GitHub release.
+#
+# # How to release
+#
+# Bump the version everywhere `scripts/release/qbbridge-version.mjs` looks, merge that, then push a
+# tag: `qbbridge-v0.3.0`. `docs/QBBRIDGE_RELEASE.md` is the procedure in full.
+#
+# # Deliberately the same shape as `director-release.yml`
+#
+# Two release pipelines that differ only where they must are two pipelines one person can hold in
+# their head. The four properties that one keeps, this one keeps for the same reasons: the version
+# is checked before a runner is spent on it, the release is created once before anything is built,
+# a release is all of QBBridge or none of it, and `workflow_dispatch` builds without releasing.
+# Read that file's header for why each of them is worth the machinery.
+#
+# # The three places it deliberately differs
+#
+# * **No updater, anywhere.** QBBridge has no `plugins.updater` and no `tauri-plugin-updater`.
+#   There is no keypair, no `latest.json`, no `--config` overlay, and no secret in this file.
+#   Nothing already installed is offered a QBBridge release; operators download it. `guard` fails
+#   the release if the configuration ever starts claiming otherwise.
+# * **This release is never `make_latest`.** Director's updater endpoint is
+#   `releases/latest/download/latest.json`, so whichever release GitHub calls latest is the one
+#   installed copies of Director resolve their update against. A QBBridge release holding that slot
+#   serves Director a 404 for every update check. QBBridge gains nothing from the slot — it has no
+#   updater to point at it — so it declines it, and Director keeps it. This is the cost
+#   `docs/DIRECTOR_RELEASE.md` predicted once a second component started releasing.
+# * **No macOS `actool` toolchain probe.** That step exists in Director's workflow because
+#   Director's 0.1.0 macOS bundle died inside it. `apps/qbbridge/src/bundleConfig.test.ts` already
+#   fails the cause — an Icon Composer source directory in a `bundle.icon` list — in milliseconds,
+#   and it runs on every ordinary CI run rather than only here.
+#
+# # Not routed by change impact
+#
+# `scripts/ci/impact.mjs` classifies this as affecting nothing, for the same reason it does so for
+# `director-release.yml`: it has no path filter to carry, because it is triggered by a tag, so the
+# push that changes it is never the event that runs it. A dispatch run is the substitute.
+#
+# # What this does not do
+#
+# The bundles are not code-signed. macOS refuses an unsigned application on first open until the
+# user opens it from the context menu, and Windows SmartScreen warns. Both need paid certificates
+# this repository does not hold; `docs/DIRECTOR_RELEASE.md` records what to add and why wiring it
+# speculatively would be worse than not wiring it, and it applies here unchanged.
+
+on:
+  push:
+    tags:
+      - 'qbbridge-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs for the same tag must not race for the same draft. Not `cancel-in-progress`: a
+# half-cancelled release is worse than a slow one.
+concurrency:
+  group: qbbridge-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # -----------------------------------------------------------------------------------------------
+  # What version this is, and whether every manifest agrees on it.
+  # -----------------------------------------------------------------------------------------------
+  guard:
+    name: Version
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # No `npm ci`: the guard is dependency-free, so the job that decides whether this release is
+      # worth installing anything for does not have to install anything.
+      - name: Check the version
+        id: version
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ]; then
+            node scripts/release/qbbridge-version.mjs --tag "$TAG"
+          else
+            node scripts/release/qbbridge-version.mjs
+          fi
+
+  # -----------------------------------------------------------------------------------------------
+  # The empty draft the three bundle jobs upload into.
+  #
+  # Created here rather than by the bundle jobs so that exactly one thing creates it. The lookup and
+  # the creation both go through `gh api` rather than `gh release`, because a draft release has no
+  # tag reference behind it yet and addressing one by tag name is unreliable; the id this job
+  # outputs is not.
+  # -----------------------------------------------------------------------------------------------
+  draft:
+    name: Draft release
+    needs: guard
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release-id: ${{ steps.draft.outputs.release-id }}
+    steps:
+      - name: Create or reuse the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Reused rather than recreated, so re-running a failed release after fixing one platform
+          # keeps the bundles the other two already uploaded.
+          #
+          # Not piped through `head`: under `pipefail`, closing the pipe on a paginating `gh` is a
+          # SIGPIPE and therefore a failed release. The first line is taken from the variable
+          # instead, which also settles the one case that can return two — GitHub does not bind a
+          # draft to its tag, so a previous abandoned draft can carry the same `tag_name`.
+          matches=$(gh api "repos/${GH_REPO}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${TAG}\") | .id")
+          existing=${matches%%$'\n'*}
+
+          if [ -n "$existing" ]; then
+            echo "Reusing release ${existing} for ${TAG}."
+            echo "release-id=${existing}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          cat > "${RUNNER_TEMP}/notes.md" <<'NOTES'
+          QBSheet Bridge carries stock YellowFruit rounds to QBSheet Scorer over Internet QBTCP and
+          brings the result QBJ back. Install the file for your system:
+
+          * **Windows** — the `-setup.exe`, or the `.msi` for deployment by an administrator.
+          * **macOS** — the `.dmg`. One download for both Apple silicon and Intel.
+          * **Linux** — the `.AppImage` to run without installing, or the `.deb` or `.rpm`.
+
+          These builds are not code-signed. macOS will refuse the application on first open:
+          right-click it in Applications and choose Open. Windows will show a SmartScreen warning.
+
+          QBBridge does not update itself. Download a later release to move to it.
+
+          QBBridge is not Director: it keeps no standings, statistics, schedule, or tournament state
+          of its own. See `apps/qbbridge/README.md`.
+          NOTES
+
+          id=$(gh api --method POST "repos/${GH_REPO}/releases" \
+            -f "tag_name=${TAG}" \
+            -f "name=QBSheet Bridge ${VERSION}" \
+            -F "body=@${RUNNER_TEMP}/notes.md" \
+            -F draft=true \
+            -F prerelease=false \
+            --jq .id)
+
+          echo "Created draft release ${id} for ${TAG}."
+          echo "release-id=${id}" >> "$GITHUB_OUTPUT"
+
+  # -----------------------------------------------------------------------------------------------
+  # One bundle set per operating system.
+  #
+  # macOS builds `universal-apple-darwin` rather than one bundle per architecture, so an operator
+  # downloading QBBridge does not have to know which processor their Mac has.
+  # -----------------------------------------------------------------------------------------------
+  bundle:
+    name: ${{ matrix.name }}
+    needs: [guard, draft]
+    # `always()` because `draft` is skipped on a dispatch run, and a skipped dependency would
+    # otherwise skip this too. The guard is not optional, though, so it still has to have passed.
+    if: always() && needs.guard.result == 'success' && needs.draft.result != 'failure'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      # To upload the bundles into the draft.
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+          - name: macOS
+            runner: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          # 22.04 rather than `ubuntu-latest` on purpose: the `.deb` and the AppImage link against
+          # the runner's glibc and will not start on anything older, so the runner image decides the
+          # oldest distribution QBBridge supports. When this image is retired, moving it forward
+          # raises that floor — worth saying so in the release notes when it happens.
+          - name: Linux
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      # The same list the `rust-qbbridge` job of `ci.yml` installs, which is what the QBBridge crate
+      # needs in order to compile, and nothing more: Tauri's Linux bundlers fetch their own tooling.
+      - name: Install QBBridge Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Cache Cargo dependencies and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/qbbridge/src-tauri/target
+          key: ${{ runner.os }}-cargo-qbbridge-release-${{ matrix.target }}-${{ hashFiles('apps/qbbridge/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-qbbridge-release-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-qbbridge-
+
+      # From the repository root, and only from the repository root. `apps/qbbridge` is a workspace
+      # of the root manifest and depends on `@qbsheet/tournament-formats` and `@qbsheet/ui`, which
+      # the root `prepare` script builds out of `packages/` and which are published nowhere. An
+      # install inside `apps/qbbridge` cannot resolve them.
+      - name: Install dependencies
+        run: npm ci
+
+      # tauri-action installs nothing itself. What it does is run `tauri build` through the app's
+      # own `tauri` script and upload every bundle it produced into the draft. The frontend is built
+      # by `beforeBuildCommand` in `tauri.conf.json`, as it is in a local build.
+      #
+      # Pinned to v1 on purpose, not the v0 major tag. Director's 0.1.0 release ran against a v0
+      # that had silently stopped accepting `uploadWorkflowArtifacts`, so dispatch runs uploaded
+      # nothing to inspect and nobody could tell. A floating major tag must never be allowed to
+      # change what a release contains.
+      #
+      # No `TAURI_SIGNING_PRIVATE_KEY` and no `--config` overlay: QBBridge has no updater, so there
+      # is nothing to sign and no signature any installed copy could check. See the header.
+      - name: Build and upload the QBBridge bundles
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/qbbridge
+          args: --target ${{ matrix.target }}
+          # Empty on a dispatch run: no release to upload to, so the bundles become workflow
+          # artifacts instead.
+          releaseId: ${{ needs.draft.outputs.release-id }}
+          uploadWorkflowArtifacts: ${{ github.ref_type != 'tag' }}
+
+  # -----------------------------------------------------------------------------------------------
+  # Dispatch runs upload no release, so without this job nobody looks at what they produced.
+  # -----------------------------------------------------------------------------------------------
+  verify-dispatch:
+    name: Verify dispatch bundles
+    needs: bundle
+    if: github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+    steps:
+      - name: Require one bundle artifact per platform
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          names=$(gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/artifacts" --paginate \
+            --jq '.artifacts[] | .name')
+          echo "Workflow artifacts:"
+          echo "$names"
+          # tauri-action names them `{platform}-{arch}-{bundle}`, e.g. `windows-x86_64-nsis`.
+          for platform in macos windows linux; do
+            count=$(echo "$names" | grep -c -- "^${platform}-" || true)
+            if [ "$count" -lt 1 ]; then
+              echo "::error::no workflow artifact from the ${platform} bundle job to inspect"
+              exit 1
+            fi
+          done
+          echo "All three platforms produced inspectable bundles."
+
+  # -----------------------------------------------------------------------------------------------
+  # Make the draft visible, once every platform is in it.
+  # -----------------------------------------------------------------------------------------------
+  publish:
+    name: Publish
+    needs: [guard, draft, bundle]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ needs.draft.outputs.release-id }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          echo "Assets in the draft:"
+          names=$(gh api "repos/${GH_REPO}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | "  \(.name)  \(.size) bytes"')
+          echo "$names"
+
+          # The all-platform gate, made explicit. Job dependencies already keep a failed platform
+          # from reaching this step, but a green job that uploaded nothing — which is how Director's
+          # 0.1.0 macOS bundle went missing — must fail here rather than publish a release the notes
+          # promise and the platform cannot download.
+          assets=$(echo "$names" | sed 's/^ *//; s/  .*//')
+          require_one() {
+            count=$(echo "$assets" | grep -c -- "$1" || true)
+            if [ "$count" -ne 1 ]; then
+              echo "::error::expected exactly one draft asset matching '$1', found ${count}"
+              exit 1
+            fi
+          }
+          require_one 'setup\.exe$'
+          require_one '\.msi$'
+          require_one '\.dmg$'
+          require_one '\.AppImage$'
+          require_one '\.deb$'
+          require_one '\.rpm$'
+
+          # No updater artifacts, asserted rather than assumed. `guard` checks the configuration;
+          # this checks what the runners actually produced. A stray `.sig` or `latest.json` in a
+          # QBBridge release is a signature nothing serves and no installed copy could verify.
+          for unwanted in '\.sig$' '^latest\.json$'; do
+            if echo "$assets" | grep -q -- "$unwanted"; then
+              echo "::error::draft carries an updater artifact matching '${unwanted}', but QBBridge has no updater"
+              exit 1
+            fi
+          done
+          echo "Draft carries the full documented platform set and nothing else."
+
+          # `make_latest=false`, deliberately. Director's updater resolves
+          # `releases/latest/download/latest.json`, so the release GitHub calls latest belongs to
+          # Director; a QBBridge release in that slot answers every Director update check with a
+          # 404. QBBridge has no updater and so loses nothing by declining it. See the header.
+          gh api --method PATCH "repos/${GH_REPO}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -f make_latest=false \
+            --jq .html_url
+
+          {
+            echo "## QBSheet Bridge ${VERSION} published"
+            echo
+            echo "<https://github.com/${GH_REPO}/releases/tag/${TAG}>"
+            echo
+            echo "Installers only: QBBridge has no updater, so operators download this release."
+            echo "It is deliberately not marked latest — that slot serves Director's updater."
+          } >> "$GITHUB_STEP_SUMMARY"
