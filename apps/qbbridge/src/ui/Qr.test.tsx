@@ -40,6 +40,9 @@ describe('printed pairing QR provenance', () => {
     render(<Qr url={pairing.url} roomName="Room 204" />);
 
     expect(screen.getByRole('img', { name: /Pairing QR code for Room 204/ })).toBeInTheDocument();
-    expect(screen.getByText(/Use only the newest sheet for this room/)).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText(/Use only the newest sheet for this room/)).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
   });
 });
