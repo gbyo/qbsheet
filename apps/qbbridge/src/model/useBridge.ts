@@ -99,8 +99,11 @@ import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 import {
   decryptRecoveryPackage,
   encryptRecoveryPackage,
+  recoveryDigests,
   recoveryPackageFileName,
   recoveryPackageState,
+  yftFingerprint,
+  type RecoveryBaseline,
 } from './recovery';
 import { schedulePairingWarnings } from './schedule';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
@@ -416,6 +419,7 @@ export function useBridge(): BridgeApi {
     path: string | null;
     tournament: BridgeTournament;
     warnings: string[];
+    fingerprint: string;
   } | null>(null);
   const pendingRelayClaimRef = useRef<RelayConnection | null>(null);
   const [relayCredentialSavePending, setRelayCredentialSavePending] = useState(false);
@@ -532,6 +536,24 @@ export function useBridge(): BridgeApi {
     stateRef.current = state;
   }, [state]);
 
+  /**
+   * Verification is session-bound. A restart unloads the tournament document, so a stored
+   * `verified: true` must not survive one: without the bytes in memory there is nothing the
+   * fingerprint was checked against. Re-lock on mount; loading the matching `.yft` unlocks
+   * again. Primary profiles never carry a recovery source and are untouched.
+   */
+  const recoveryRelockRef = useRef(false);
+  useEffect(() => {
+    if (recoveryRelockRef.current) return;
+    recoveryRelockRef.current = true;
+    const source = stateRef.current.recoverySource;
+    if (!source?.verified) return;
+    const relocked = { ...stateRef.current, recoverySource: { ...source, verified: false } };
+    stateRef.current = relocked;
+    setState(relocked);
+    saveState(relocked, { secureCredential: true });
+  }, []);
+
   const setResultSaving = useCallback((resultId: string, saving: boolean) => {
     const next = new Set(savingResultIdsRef.current);
     if (saving) next.add(resultId);
@@ -595,15 +617,18 @@ export function useBridge(): BridgeApi {
       path: string | null,
       report: { ok: true; tournament: BridgeTournament; warnings: string[] },
       startNew: boolean,
+      fingerprint: string,
     ): boolean => {
       const current = stateRef.current;
       const firstRoundId = report.tournament.rounds[0]?.id ?? null;
       let reconciliationReport: PlanReconciliation | null = null;
+      let recoveryUnlocked = false;
       if (startNew) {
         const next: BridgeState = {
           ...emptyState(),
           resultFolder: current.resultFolder,
           yftPath: path,
+          yftFingerprint: fingerprint,
           tournamentName: report.tournament.name,
           selectedRoundId: firstRoundId,
         };
@@ -639,9 +664,19 @@ export function useBridge(): BridgeApi {
             teamIds,
             roomIds: new Set(currentState.rooms.map((room) => room.id)),
           });
+          // Verification is recomputed on every load, never inherited: only the exact bytes
+          // the package was created from unlock publication, and any other file re-locks it.
+          const source = currentState.recoverySource;
+          const verified =
+            source !== null &&
+            source.yftFingerprint !== null &&
+            fingerprint === source.yftFingerprint;
+          if (source !== null && !source.verified && verified) recoveryUnlocked = true;
           return {
             ...currentState,
             yftPath: path,
+            yftFingerprint: fingerprint,
+            recoverySource: source ? { ...source, verified } : null,
             tournamentName: report.tournament.name,
             roundPlans: reconciliationReport.plans,
             selectedRoundId:
@@ -658,9 +693,12 @@ export function useBridge(): BridgeApi {
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
           ? ` ${describeReconciliation(reconciliationReport)}`
           : '';
+      const recoveryNote = recoveryUnlocked
+        ? ' This file matches the recovery package, so publication is unlocked.'
+        : '';
       setNotice({
         kind: reconciliationNote === '' ? 'good' : 'warn',
-        message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.${reconciliationNote}`,
+        message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.${reconciliationNote}${recoveryNote}`,
       });
       return true;
     },
@@ -681,7 +719,12 @@ export function useBridge(): BridgeApi {
       const current = stateRef.current;
       const differentFile = current.yftPath !== null && path !== null && current.yftPath !== path;
       if (differentFile) {
-        pendingFileRef.current = { path, tournament: report.tournament, warnings: report.warnings };
+        pendingFileRef.current = {
+          path,
+          tournament: report.tournament,
+          warnings: report.warnings,
+          fingerprint: yftFingerprint(contents),
+        };
         setPendingFileSwitch({ path, tournamentName: report.tournament.name });
         setNotice({
           kind: 'warn',
@@ -694,7 +737,7 @@ export function useBridge(): BridgeApi {
       // leave a stale confirmation dialog able to switch away from the file now on screen.
       pendingFileRef.current = null;
       setPendingFileSwitch(null);
-      applyLoadedFile(path, report, false);
+      applyLoadedFile(path, report, false, yftFingerprint(contents));
     },
     [applyLoadedFile],
   );
@@ -707,6 +750,7 @@ export function useBridge(): BridgeApi {
         pending.path,
         { ok: true, tournament: pending.tournament, warnings: pending.warnings },
         true,
+        pending.fingerprint,
       )
     )
       return;
@@ -939,6 +983,16 @@ export function useBridge(): BridgeApi {
         const payload = recoveryPackageState(current, provisioned);
         const contents = await encryptRecoveryPackage(payload, passphrase);
         const path = await writeRecoveryPackage('', recoveryPackageFileName, contents);
+        // The baseline is what freshness compares against: the exact digests, file identity
+        // and relay position this package captured. Anything that moves afterwards ages it.
+        const baseline: RecoveryBaseline = {
+          createdAt: payload.createdAt,
+          yftFingerprint: current.yftFingerprint ?? null,
+          digests: recoveryDigests(current),
+          relayEpoch: current.relay?.epoch ?? 0,
+          relayRevision: current.relay?.revision ?? 0,
+        };
+        commit((baselineState) => ({ ...baselineState, lastRecoveryPackage: baseline }));
         setNotice({
           kind: 'good',
           message: `Encrypted backup control package saved to ${path}. Keep the file and passphrase separate; the package contains no primary credential.`,
@@ -991,6 +1045,16 @@ export function useBridge(): BridgeApi {
           connection.managementToken,
         );
         const health = await relayHealth(connection);
+        // The package position is a claim about the past, never current truth: the live relay
+        // position is adopted, and any drift between the two is reported, not reconciled. A
+        // package whose relay moved on is still useful for authorization — the credential is
+        // what grants control — but its rooms, plans and revision are explicitly stale.
+        const packageRelay = imported.relay;
+        const relayDrift =
+          packageRelay &&
+          (health.directorEpoch !== packageRelay.epoch || health.revision !== packageRelay.revision)
+            ? ` The relay has moved since this package was created (package: epoch ${packageRelay.epoch}, revision ${packageRelay.revision}; relay now: epoch ${health.directorEpoch}, revision ${health.revision}). Room state below is from package time — review it before publishing.`
+            : '';
         const next: BridgeState = {
           ...imported,
           relay: imported.relay
@@ -1001,6 +1065,17 @@ export function useBridge(): BridgeApi {
                 controllerRole: 'backup',
               }
             : null,
+          // An import is not a package creation: the primary's baseline stays with the
+          // primary, and this profile now carries the package's provenance instead.
+          lastRecoveryPackage: null,
+          yftFingerprint: null,
+          recoverySource: {
+            createdAt: packageData.createdAt,
+            yftFingerprint: packageData.sourceYftFingerprint,
+            packageRelayEpoch: packageRelay?.epoch ?? 0,
+            packageRelayRevision: packageRelay?.revision ?? 0,
+            verified: false,
+          },
         };
         const persisted = saveState(next, { secureCredential: true });
         if (!persisted.ok) throw new Error('The imported recovery state could not be saved locally.');
@@ -1017,7 +1092,7 @@ export function useBridge(): BridgeApi {
         const readiness = await refreshScorerReadiness(connection);
         setNotice({
           kind: 'good',
-          message: `Encrypted recovery package imported for ${connection.tournamentId}. Reload the authoritative .yft, then take over explicitly before publishing. ${readiness.message}`,
+          message: `Encrypted recovery package imported for ${connection.tournamentId}. Reload the authoritative .yft, then take over explicitly before publishing.${relayDrift} ${readiness.message}`,
         });
         return true;
       } catch (error) {
@@ -1375,6 +1450,20 @@ export function useBridge(): BridgeApi {
           kind: 'bad',
           message:
             'Round not published because the relay changed after this plan was prepared. Review it again.',
+        });
+        return null;
+      }
+      // A recovery import carries rooms and plans from package time. Publication stays locked
+      // until the exact `.yft` bytes the package was created from are loaded and verified —
+      // publishing a stale snapshot as current truth is precisely what this gate prevents.
+      // Packages that predate fingerprints record nothing to compare, so there is nothing to
+      // enforce and the gate stays open.
+      const source = current.recoverySource;
+      if (source !== null && source.yftFingerprint !== null && !source.verified) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'Round not published because this profile is running on an imported recovery package whose source file has not been verified. Reload the authoritative .yft that matches the recovery package, then publish again.',
         });
         return null;
       }

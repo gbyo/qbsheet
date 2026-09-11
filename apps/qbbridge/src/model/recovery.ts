@@ -8,6 +8,7 @@
  */
 
 import { normalizeState, type BridgeState } from './persistence';
+import { fnv1a64 } from '../../../../src/director/transfers/canonical';
 import { isRelayTournamentId, normalizeRelayBaseUrl } from '../../../../src/director/relay/relayConfig';
 
 const packageFormat = 'qbsheet-bridge-recovery';
@@ -31,7 +32,153 @@ export interface RecoveryPackageState {
   kind: typeof packageFormat;
   version: typeof packageVersion;
   createdAt: string;
+  /**
+   * Identity hash of the `.yft` bytes the primary had loaded when the package was created, or
+   * null when no file was loaded or the package predates fingerprinting. The backup must be
+   * holding these exact bytes before its first publication — see the publish gate.
+   */
+  sourceYftFingerprint: string | null;
+  /**
+   * Content digests of the state captured above, so the primary can say *what* moved since the
+   * package was created, and so an old package can never be mistaken for a fresh one. Null when
+   * the package predates digests; the state snapshot itself remains the fallback.
+   */
+  digests: RecoveryDigests | null;
   state: BridgeState;
+}
+
+/**
+ * What a freshness comparison watches. Identity and codes are separate digests on purpose: a
+ * regenerated pairing code must not read as a rebuilt room list, and a renamed room must not
+ * hide behind unchanged codes. Order-insensitive by construction (sorted before hashing), so
+ * only content moves the needle.
+ */
+export interface RecoveryDigests {
+  roomIdentity: string;
+  pairingCodes: string;
+  plans: string;
+  results: string;
+}
+
+/**
+ * The primary's baseline: what the world looked like when its current package was created.
+ * Compared against live state by `describeRecoveryFreshness`.
+ */
+export interface RecoveryBaseline {
+  createdAt: string;
+  yftFingerprint: string | null;
+  digests: RecoveryDigests;
+  relayEpoch: number;
+  relayRevision: number;
+}
+
+/** Provenance a backup carries after importing a package, until it proves its own state fresh. */
+export interface RecoveryProvenance {
+  createdAt: string;
+  yftFingerprint: string | null;
+  packageRelayEpoch: number;
+  packageRelayRevision: number;
+}
+
+/**
+ * Import provenance as kept in BridgeState. `verified` turns true only when the loaded `.yft`
+ * bytes hash exactly to the package's source fingerprint — the key that unlocks publication.
+ */
+export interface RecoverySource extends RecoveryProvenance {
+  verified: boolean;
+}
+
+/**
+ * Identity hash over `.yft` file bytes. A synchronous FNV-1a 64-bit hash, deliberately: this
+ * answers "is this the same file?" at load time on a synchronous path, not "can anyone forge
+ * this file?" — and it matches the change-detection hashing the result ledger already uses.
+ */
+export function yftFingerprint(contents: string): string {
+  return fnv1a64(contents);
+}
+
+/** Content digests of the state a package would capture. Pure and synchronous. */
+export function recoveryDigests(state: BridgeState): RecoveryDigests {
+  const roomIds = [...state.rooms].map((room) => room.id).sort();
+  const byId = new Map(state.rooms.map((room) => [room.id, room]));
+  const tombstones = [...state.pendingRoomRemovals].map((room) => room.id).sort();
+  const plans = [...state.roundPlans]
+    .map((plan) => ({
+      roundId: plan.roundId,
+      pairings: [...plan.pairings]
+        .map((pairing) => [pairing.roomId, pairing.leftTeamId, pairing.rightTeamId])
+        .sort(),
+    }))
+    .sort((a, b) => (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
+  const results = [...state.results]
+    .map((entry) => [entry.resultId, entry.savedPath ?? null])
+    .sort();
+  return {
+    roomIdentity: fnv1a64(
+      JSON.stringify([roomIds.map((id) => [id, byId.get(id)?.name ?? '']), tombstones]),
+    ),
+    pairingCodes: fnv1a64(
+      JSON.stringify(
+        roomIds.map((id) => [id, byId.get(id)?.pairingCode ?? '', byId.get(id)?.pendingPairingCode ?? null]),
+      ),
+    ),
+    plans: fnv1a64(JSON.stringify(plans)),
+    results: fnv1a64(JSON.stringify(results)),
+  };
+}
+
+export interface RecoveryFreshness {
+  createdAt: string;
+  /** Milliseconds since the package was created. Never negative; unparseable dates read as 0. */
+  ageMs: number;
+  /** Which categories moved since the package was created. */
+  changed: {
+    rooms: boolean;
+    codes: boolean;
+    plans: boolean;
+    yft: boolean;
+    relay: boolean;
+    results: boolean;
+  };
+  /** True when any category moved. */
+  stale: boolean;
+  baselineRelay: { epoch: number; revision: number };
+  currentRelay: { epoch: number; revision: number };
+}
+
+/**
+ * Compare live state against the baseline recorded at package creation.
+ *
+ * Null when the primary has no package baseline to compare against — no package, no opinion.
+ * Every comparison is exact-equality on digests or positions; nothing here guesses whether a
+ * change matters, it only names what moved so the operator can decide before play.
+ */
+export function describeRecoveryFreshness(
+  state: BridgeState,
+  nowMs: number = Date.now(),
+): RecoveryFreshness | null {
+  const baseline = state.lastRecoveryPackage;
+  if (!baseline) return null;
+  const live = recoveryDigests(state);
+  const createdMs = Date.parse(baseline.createdAt);
+  const relay = state.relay;
+  const changed = {
+    rooms: live.roomIdentity !== baseline.digests.roomIdentity,
+    codes: live.pairingCodes !== baseline.digests.pairingCodes,
+    plans: live.plans !== baseline.digests.plans,
+    yft: (state.yftFingerprint ?? null) !== baseline.yftFingerprint,
+    relay:
+      !relay || relay.epoch !== baseline.relayEpoch || relay.revision !== baseline.relayRevision,
+    results: live.results !== baseline.digests.results,
+  };
+  return {
+    createdAt: baseline.createdAt,
+    ageMs: Number.isNaN(createdMs) ? 0 : Math.max(0, nowMs - createdMs),
+    changed,
+    stale: Object.values(changed).some(Boolean),
+    baselineRelay: { epoch: baseline.relayEpoch, revision: baseline.relayRevision },
+    currentRelay: { epoch: relay?.epoch ?? baseline.relayEpoch, revision: relay?.revision ?? 0 },
+  };
 }
 
 interface RecoveryEnvelope {
@@ -98,6 +245,8 @@ export function recoveryPackageState(state: BridgeState, backup: BackupCredentia
     kind: packageFormat,
     version: packageVersion,
     createdAt: new Date().toISOString(),
+    sourceYftFingerprint: state.yftFingerprint ?? null,
+    digests: recoveryDigests(state),
     state: { ...state, relay },
   };
 }
@@ -130,6 +279,32 @@ export async function encryptRecoveryPackage(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isDigestString(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{16}$/.test(value);
+}
+
+/**
+ * Read package digests leniently: a package that predates them yields null, never an error.
+ * Exported for persisted-state normalization, which applies the same rule to its baseline.
+ */
+export function readRecoveryDigests(value: unknown): RecoveryDigests | null {
+  if (!isRecord(value)) return null;
+  if (
+    !isDigestString(value.roomIdentity) ||
+    !isDigestString(value.pairingCodes) ||
+    !isDigestString(value.plans) ||
+    !isDigestString(value.results)
+  ) {
+    return null;
+  }
+  return {
+    roomIdentity: value.roomIdentity,
+    pairingCodes: value.pairingCodes,
+    plans: value.plans,
+    results: value.results,
+  };
 }
 
 /** Decrypt and minimally validate an untrusted package before it reaches BridgeState. */
@@ -190,6 +365,11 @@ export async function decryptRecoveryPackage(
   if (typeof payload.createdAt !== 'string' || !isRecord(payload.state)) {
     throw new Error('The recovery package is missing its BridgeState.');
   }
+  // Fingerprints and digests are provenance, not access control: a package that predates them
+  // decrypts with nulls, and the import flow treats nulls as "unknown, verify everything".
+  const sourceYftFingerprint =
+    typeof payload.sourceYftFingerprint === 'string' ? payload.sourceYftFingerprint : null;
+  const digests = readRecoveryDigests(payload.digests);
   const state = normalizeState(payload.state);
   const relay = state && isRecord(state.relay) ? state.relay : null;
   const baseUrl = relay && typeof relay.baseUrl === 'string' ? normalizeRelayBaseUrl(relay.baseUrl) : null;
@@ -233,6 +413,8 @@ export async function decryptRecoveryPackage(
     kind: packageFormat,
     version: packageVersion,
     createdAt: payload.createdAt,
+    sourceYftFingerprint,
+    digests,
     state: { ...state, relay: safeRelay },
   };
 }
