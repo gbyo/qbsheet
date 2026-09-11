@@ -348,6 +348,7 @@ jobs:
           $wixbin = "$env:LOCALAPPDATA/tauri/WixTools314"
           if (-not (Test-Path $dir)) { Write-Host "no wix output dir at $dir"; exit 0 }
           if (-not (Test-Path "$dir/main.wxs")) { Write-Host 'no rendered main.wxs'; exit 0 }
+          $abs = (Resolve-Path $dir).Path
           Write-Host "--- wix output dir listing ---"
           Get-ChildItem $dir | ForEach-Object { Write-Host "$($_.Name) $($_.Length)" }
           Write-Host "--- rendered main.wxs (first 120 lines) ---"
@@ -359,7 +360,7 @@ jobs:
           Write-Host "candle exit code: $LASTEXITCODE"
           Get-ChildItem "$dir/*.wixobj" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "wixobj: $($_.Name)" }
           Write-Host "--- rerunning light verbosely (same args tauri uses) ---"
-          & "$wixbin/light.exe" -v -o "$dir/diag.msi" -cultures:en-us -loc "$dir/locale.wxl" "$dir/main.wixobj" -ext "$wixbin/WixUIExtension.dll" -ext "$wixbin/WixUtilExtension.dll" 2>&1 | ForEach-Object { Write-Host $_ }
+          & "$wixbin/light.exe" -v -o "$abs/diag.msi" -cultures:en-us -loc "$abs/locale.wxl" "$abs/main.wixobj" -ext "$wixbin/WixUIExtension.dll" -ext "$wixbin/WixUtilExtension.dll" 2>&1 | ForEach-Object { Write-Host $_ }
           Write-Host "light exit code: $LASTEXITCODE"
           Pop-Location
           exit 0
