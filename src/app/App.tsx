@@ -556,7 +556,7 @@ export default function App() {
           ok: false,
           message: result.cancelled
             ? 'Folder selection was cancelled. The existing backup setting is unchanged.'
-            : 'QBSheet could not update that backup folder. The existing backup setting is unchanged.',
+            : 'QBSheet could not update that backup folder. The existing setting is unchanged.',
         };
       },
       onReconnectExternalBackup: async () => {
