@@ -52,9 +52,11 @@ jobs:
       scorer: ${{ steps.impact.outputs.scorer }}
       scorer-browser: ${{ steps.impact.outputs.scorer-browser }}
       director-ui: ${{ steps.impact.outputs.director-ui }}
+      qbbridge: ${{ steps.impact.outputs.qbbridge }}
       tournament-js: ${{ steps.impact.outputs.tournament-js }}
       qblive-js: ${{ steps.impact.outputs.qblive-js }}
       rust-director: ${{ steps.impact.outputs.rust-director }}
+      rust-qbbridge: ${{ steps.impact.outputs.rust-qbbridge }}
       rust-tournament-store: ${{ steps.impact.outputs.rust-tournament-store }}
       rust-qbtcp: ${{ steps.impact.outputs.rust-qbtcp }}
       docs-only: ${{ steps.impact.outputs.docs-only }}
@@ -263,6 +265,37 @@ jobs:
           if-no-files-found: ignore
 
   # -----------------------------------------------------------------------------------------------
+  # QBSheet Bridge. A small utility application; no browser suite, because it drives no browser.
+  # -----------------------------------------------------------------------------------------------
+  qbbridge:
+    name: QBSheet Bridge
+    needs: changes
+    if: needs.changes.outputs.qbbridge == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test QBSheet Bridge
+        run: npm run qbbridge:test
+
+      - name: Build QBSheet Bridge frontend
+        run: npm run qbbridge:build
+
+  # -----------------------------------------------------------------------------------------------
   # The tournament packages. Consumed by Director and by nothing in the scorer.
   # -----------------------------------------------------------------------------------------------
   tournament-js:
@@ -402,6 +435,61 @@ jobs:
         working-directory: apps/director/src-tauri
         run: cargo test --all-targets --all-features
 
+  rust-qbbridge:
+    name: Rust - QBSheet Bridge native crate
+    needs: changes
+    if: needs.changes.outputs.rust-qbbridge == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            build-essential \
+            curl \
+            file \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            wget
+
+      - name: Cache Cargo dependencies and target
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/qbbridge/src-tauri/target
+          key: ${{ runner.os }}-cargo-qbbridge-${{ hashFiles('apps/qbbridge/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-qbbridge-
+
+      - name: Check Rust formatting
+        working-directory: apps/qbbridge/src-tauri
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        working-directory: apps/qbbridge/src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: apps/qbbridge/src-tauri
+        run: cargo test --all-targets --all-features
+
   rust-tournament-store:
     name: Rust - Tournament store
     needs: changes
@@ -498,9 +586,11 @@ jobs:
       - scorer
       - scorer-browser
       - director-ui
+      - qbbridge
       - tournament-js
       - qblive-js
       - rust-director
+      - rust-qbbridge
       - rust-tournament-store
       - rust-qbtcp
     runs-on: ubuntu-latest

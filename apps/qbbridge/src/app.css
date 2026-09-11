@@ -1,0 +1,268 @@
+/*
+ * The platform's own UI face and a plain, dense layout.
+ *
+ * This is a utility that sits next to YellowFruit on a folding table. It has three areas, no
+ * sidebar, no dashboard, no animation, and nothing that needs explaining before a round.
+ */
+
+:root {
+  --ink: #17181b;
+  --ink-soft: #5c6069;
+  --line: #d6d8dd;
+  --paper: #ffffff;
+  --shell: #f4f5f7;
+  --accent: #1d4ed8;
+  --good: #15803d;
+  --warn: #a16207;
+  --bad: #b91c1c;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--shell);
+  color: var(--ink);
+  font:
+    13px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.titlebar {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.titlebar h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.titlebar .subtle {
+  color: var(--ink-soft);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 12px;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs button {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 8px 12px;
+  font: inherit;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.tabs button[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+main {
+  flex: 1;
+  padding: 16px;
+}
+
+section.panel {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  max-width: 960px;
+}
+
+section.panel h2 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+dl.facts dt {
+  color: var(--ink-soft);
+}
+
+dl.facts dd {
+  margin: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+
+th {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+button,
+select,
+input[type='text'],
+input[type='password'] {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--paper);
+  padding: 4px 8px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  padding: 6px 14px;
+}
+
+button.primary:disabled {
+  background: var(--line);
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+}
+
+.status {
+  font-size: 12px;
+}
+
+.status.good {
+  color: var(--good);
+}
+
+.status.warn {
+  color: var(--warn);
+}
+
+.status.bad {
+  color: var(--bad);
+}
+
+.notice {
+  border-left: 3px solid var(--warn);
+  padding: 6px 10px;
+  margin: 8px 0;
+  background: #fffbeb;
+}
+
+.notice.bad {
+  border-left-color: var(--bad);
+  background: #fef2f2;
+}
+
+.notice.good {
+  border-left-color: var(--good);
+  background: #f0fdf4;
+}
+
+ul.plain {
+  margin: 6px 0;
+  padding-left: 18px;
+}
+
+.qr {
+  width: 66px;
+  height: 66px;
+}
+
+.qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.result {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.result .dot {
+  width: 9px;
+  color: var(--accent);
+}
+
+.result .dot.saved {
+  color: var(--good);
+}
+
+.muted {
+  color: var(--ink-soft);
+}
+
+pre.help {
+  white-space: pre-wrap;
+  font: inherit;
+  margin: 0;
+}

@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "bridge-main",
+  "description": "Local capability for the QBSheet Bridge main window.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": ["core:default", "bridge-operations"]
+}
