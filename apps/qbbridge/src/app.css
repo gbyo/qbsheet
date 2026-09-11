@@ -80,6 +80,24 @@ main {
   margin-bottom: var(--qbs-space-4);
 }
 
+.page-notice > span:last-child {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--qbs-space-3);
+}
+
+.page-notice__message {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.page-notice__dismiss {
+  flex: none;
+}
+
 section.panel {
   background: var(--qbs-surface);
   border: 1px solid var(--qbs-border);
