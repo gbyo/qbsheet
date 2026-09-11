@@ -9,12 +9,12 @@
  * game — so the backup is always offered, always available, and never deleted.
  *
  * What changed is when it is *demanded*. A result tournament control has accepted has arrived, and
- * requiring a download, a manual upload and a confirmation on top of that is asking a room to
+ * requiring a download, a manual handoff and a confirmation on top of that is asking a room to
  * deliver the same game twice, eleven times a day. The predictable result is a scorekeeper who
- * presses "I uploaded the result" without uploading anything, which costs the acknowledgement the
- * only thing it was worth. So the handoff is required exactly where delivery did not happen or the
- * tournament asked for the file by name: a pending or refused submission, a game with no
- * tournament control behind it, or an assignment carrying its own handoff instruction.
+ * confirms the handoff without actually doing it, which costs the acknowledgement the only thing it
+ * was worth. So the handoff is required exactly where delivery did not happen or the tournament
+ * asked for the file by name: a pending or refused submission, a game with no tournament control
+ * behind it, or an assignment carrying its own handoff instruction.
  *
  * # A game nobody is waiting for
  *
@@ -27,10 +27,10 @@
  *
  * # And the acknowledgement is not proof
  *
- * The button records that the room says it uploaded the file. This application has no way to check
- * a shared drive, a folder or an email, and it does not pretend otherwise: the wording is about what
- * the scorekeeper did, not about what arrived. Claiming verification we do not have is worse than
- * claiming nothing, because it is the claim a director would rely on.
+ * The button records that the room says it handed off the file. This application has no way to check
+ * a USB drive, shared folder, email, or any other manual path, and it does not pretend otherwise: the
+ * wording is about what the scorekeeper did, not about what arrived. Claiming verification we do not
+ * have is worse than claiming nothing, because it is the claim a director would rely on.
  *
  * # Nothing is deleted here
  *
@@ -296,7 +296,7 @@ export default function CompletionScreen(props: {
         disabled={handoffPending}
         onClick={() => void acknowledgeHandoff()}
       >
-        {handoffPending ? 'Saving…' : 'I uploaded the result'}
+        {handoffPending ? 'Saving…' : 'I handed off the result'}
       </button>
     )
   ) : (
@@ -324,7 +324,7 @@ export default function CompletionScreen(props: {
           <p className="final-instruction">{record.package.handoffInstruction}</p>
         ) : (
           connected && (
-            <p className="shell-hint">Upload the QBJ using the instructions provided for this room.</p>
+            <p className="shell-hint">Hand off the QBJ using the instructions provided for this room.</p>
           )
         )}
         {handoffRecovery}

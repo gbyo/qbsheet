@@ -2309,6 +2309,10 @@ export default function Scorer(props: IScorerProps) {
     onRedo: redoWithFeedback,
     canDownloadForms: onDownloadForm !== undefined,
     canCorrectGame: onCorrectGame !== undefined,
+    // A scoring path exists only for games served by tournament control; standalone games
+    // (file, manual, practice) score on this device alone. Arcade is a between-games diversion
+    // and is not offered during a tournament-controlled game (#832).
+    tournamentControlled: scoringPath !== undefined,
     openDialog: (next) => {
       setDialog(next);
     },

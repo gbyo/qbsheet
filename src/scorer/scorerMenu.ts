@@ -83,6 +83,13 @@ export interface IScorerMenuInput {
   canCorrectGame: boolean;
   /** Whether the phone-only More menu should expose the currently available redo action. */
   canRedo?: boolean;
+  /**
+   * True when this game is served by tournament control (a paired room with a live scoring path).
+   *
+   * Arcade is a between-games diversion, not an operational action during a tournament game, so it
+   * is offered only to standalone games. Absent/undefined means standalone and keeps the entry.
+   */
+  tournamentControlled?: boolean;
 
   openDialog: (dialog: MenuDialog) => void;
   setKeyboardEnabled: (enabled: boolean) => void;
@@ -124,6 +131,7 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     print,
     onRedo,
     openExport,
+    tournamentControlled = false,
   } = input;
 
   const general: IGameMenuItem[] = [
@@ -276,11 +284,14 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
    * Its own group, because it belongs to none of the others and filing it under GAME would be
    * claiming it is a property of the scoresheet. Offered in every phase and never disabled — not
    * during a submission either, alongside the backup and the paper copy, because like them it cannot
-   * change anything. A room waiting on tournament control is exactly the room this is for.
+   * change anything.
+   *
+   * Standalone games only: a room scoring under tournament control is there to complete its
+   * assigned game, and Arcade is not an operational action during a tournament game (#832).
    */
-  const between: IGameMenuItem[] = [
-    { label: 'Take a break…', icon: 'arcade', onSelect: () => openDialog('arcade') },
-  ];
+  const between: IGameMenuItem[] = tournamentControlled
+    ? []
+    : [{ label: 'Take a break…', icon: 'arcade', onSelect: () => openDialog('arcade') }];
 
   /** The two that end a game. Last, and behind their own rule. */
   const ending: IGameMenuItem[] = [];
