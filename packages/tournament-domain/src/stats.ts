@@ -567,18 +567,18 @@ function accumulateBouncebackSide(
   rules: TournamentRules | null | undefined,
   detailKnown: boolean,
 ): void {
-  if (game.status === 'forfeit' && own.bouncebacks === null) {
-    // A pure-forfeit placeholder carries no signal; a partial forfeit unknowns the
-    // side that kept no breakdown while the entered side aggregates as-entered.
-    if (!isPureForfeitPlaceholder(game)) {
+  if (own.bouncebacks === null) {
+    // An absent breakdown is N/A — not unknown — where the stored historical
+    // definition defines no bouncebacks, or the game is a pure-forfeit placeholder.
+    // Entered detail always aggregates as-entered; any other missing breakdown
+    // unknowns the scope (#755, #844).
+    const noOpportunity: boolean =
+      !!(rules && !rules.bouncebacks && game.definitionDigest) ||
+      (game.status === 'forfeit' && isPureForfeitPlaceholder(game));
+    if (!noOpportunity) {
       totals.pointsKnown = false;
       totals.partsKnown = false;
     }
-    return;
-  }
-  if (own.bouncebacks === null) {
-    totals.pointsKnown = false;
-    totals.partsKnown = false;
     return;
   }
   totals.points += own.bouncebacks ?? 0;

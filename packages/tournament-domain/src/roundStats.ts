@@ -151,11 +151,17 @@ export function deriveRoundStats(
         if (isPureForfeitPlaceholder(game)) continue;
         const rules = rulesForGame(state, game);
         const [left, right] = game.scores;
+        // A side with no breakdown where the stored definition defines no bouncebacks
+        // is N/A rather than unknown; a game excused on both sides contributes
+        // nothing at all (#755).
+        const sideExcused = (bouncebacks: number | null): boolean =>
+          bouncebacks === null && !!rules && !rules.bouncebacks && !!game.definitionDigest;
         if (!left || !right) {
           bouncebackPartsKnown = false;
           bouncebackUnknownGames += 1;
           continue;
         }
+        if (sideExcused(left.bouncebacks) && sideExcused(right.bouncebacks)) continue;
         const leftHeard =
           rules && gameDetailedCountsKnown(game)
             ? bouncebackPartsHeardForTeam(right.bonuses, right.bonusPoints, rules)
@@ -168,8 +174,8 @@ export function deriveRoundStats(
           !rules ||
           leftHeard === null ||
           rightHeard === null ||
-          left.bouncebacks === null ||
-          right.bouncebacks === null ||
+          (!sideExcused(left.bouncebacks) && left.bouncebacks === null) ||
+          (!sideExcused(right.bouncebacks) && right.bouncebacks === null) ||
           !(rules.bonusValue > 0)
         ) {
           bouncebackPartsKnown = false;
