@@ -179,6 +179,19 @@ export function resultFileName(summary: ResultSummary, resultId: string): string
   return `${truncateUtf8(descriptivePrefix, availablePrefixBytes)}${stableSuffix}`;
 }
 
+/**
+ * The path the native writer returns for a result file.
+ *
+ * QBBridge only permits overwrite when this exact path is the one already stored for the result.
+ * Keep the small platform-aware join here rather than comparing directories or filename suffixes:
+ * a folder change must become a new exclusive save.
+ */
+export function resultFilePath(directory: string, fileName: string): string {
+  const separator = directory.includes('\\') && !directory.includes('/') ? '\\' : '/';
+  const trimmed = directory.replace(/[\\/]+$/g, '');
+  return trimmed.length > 0 ? `${trimmed}${separator}${fileName}` : `${separator}${fileName}`;
+}
+
 /** Six lowercase hex characters that identify one retained relay result. */
 export function resultFileSuffix(resultId: string): string {
   return fnv1a64(resultId).slice(0, 6);

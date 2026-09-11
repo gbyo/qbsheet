@@ -18,7 +18,7 @@ import {
   RelayError,
   type RelayConnection,
 } from './relay';
-import { resultFileContents, resultFileName, resultSummary } from './results';
+import { resultFileContents, resultFileName, resultFilePath, resultSummary } from './results';
 import { nextRoomId } from './identity';
 import { newRoom, pairingWarnings, roomTombstone, type Room, type RoomStatus } from './rooms';
 import { loadState, saveState, type BridgeState, type StoredResult } from './persistence';
@@ -79,6 +79,10 @@ export interface BridgeApi {
   chooseFolder(): Promise<void>;
   saveNewResults(): Promise<void>;
   saveResult(resultId: string): Promise<void>;
+  /** True when this row cannot start a save because a save or another bridge action is active. */
+  resultBusy(resultId: string): boolean;
+  /** True while an individual or batch result save is in progress. */
+  savingResults: boolean;
   pollResults(): Promise<void>;
   /** Set when unsaved results are approaching the relay's unacknowledged window. */
   unsavedResultWarning: string | null;
@@ -93,6 +97,15 @@ function connectionOf(state: BridgeState): RelayConnection | null {
   };
 }
 
+/** Compare the relay identity a request was made against with the relay currently in state. */
+function sameRelayConnection(left: RelayConnection | null, right: RelayConnection | null): boolean {
+  return (
+    left?.baseUrl === right?.baseUrl &&
+    left?.tournamentId === right?.tournamentId &&
+    left?.managementToken === right?.managementToken
+  );
+}
+
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
@@ -102,6 +115,11 @@ export function useBridge(): BridgeApi {
   const [busy, setBusy] = useState(false);
   const [changingRelay, setChangingRelay] = useState(false);
   const stateRef = useRef(state);
+  const pollGenerationRef = useRef(0);
+  const savingResultIdsRef = useRef(new Set<string>());
+  const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
+  const savingBatchRef = useRef(false);
+  const [savingBatch, setSavingBatch] = useState(false);
 
   const commit = useCallback((next: BridgeState | ((current: BridgeState) => BridgeState)) => {
     setState((current) => {
@@ -115,6 +133,14 @@ export function useBridge(): BridgeApi {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  const setResultSaving = useCallback((resultId: string, saving: boolean) => {
+    const next = new Set(savingResultIdsRef.current);
+    if (saving) next.add(resultId);
+    else next.delete(resultId);
+    savingResultIdsRef.current = next;
+    setSavingResultIds(next);
+  }, []);
 
   const loadFileContents = useCallback(
     (path: string | null, contents: string) => {
@@ -172,6 +198,9 @@ export function useBridge(): BridgeApi {
       setBusy(true);
       try {
         const claimed = await relayClaim(input);
+        // Invalidate an in-flight poll before publishing the replacement into state. This also
+        // fences a reconnect that happens to reuse the same URL, tournament id, and credential.
+        pollGenerationRef.current += 1;
         commit((current) => ({
           ...current,
           relay: {
@@ -212,6 +241,7 @@ export function useBridge(): BridgeApi {
    * credential, so the same relay cannot be claimed again.
    */
   const forgetRelayCredential = useCallback(() => {
+    pollGenerationRef.current += 1;
     commit((current) => ({ ...current, relay: null }));
     setChangingRelay(true);
     setRelayReachable(null);
@@ -474,29 +504,78 @@ export function useBridge(): BridgeApi {
     const current = stateRef.current;
     const connection = connectionOf(current);
     if (!connection || !isNativeHost()) return;
+
+    // Each request supersedes an older overlapping request. The connection check handles relay
+    // replacement, while the generation check also handles a slow earlier poll from the same
+    // relay returning after a newer poll has already completed.
+    const generation = pollGenerationRef.current + 1;
+    pollGenerationRef.current = generation;
+    const isCurrentPoll = () =>
+      generation === pollGenerationRef.current &&
+      sameRelayConnection(connection, connectionOf(stateRef.current));
+
     try {
       const fetched = await relayFetchResults(connection);
+      if (!isCurrentPoll()) return;
+
+      const currentAtSuccess = stateRef.current;
+      const pendingAckIds = [
+        ...new Set(
+          fetched
+            .filter((entry) => {
+              const local = currentAtSuccess.results.find((row) => row.resultId === entry.resultId);
+              return local?.savedPath !== undefined && local.ackPending !== false;
+            })
+            .map((entry) => entry.resultId),
+        ),
+      ];
       setRelayReachable(true);
       commit((current) => {
-        const known = new Set(current.results.map((entry) => entry.resultId));
+        if (!sameRelayConnection(connection, connectionOf(current))) return current;
         const fresh: StoredResult[] = fetched
-          .filter((entry) => !known.has(entry.resultId))
+          .filter((entry) => !current.results.some((row) => row.resultId === entry.resultId))
           .map((entry) => ({ resultId: entry.resultId, qbj: entry.qbj, receivedAt: entry.receivedAt }));
         if (fresh.length === 0) return current;
         return { ...current, results: [...current.results, ...fresh] };
       });
+
+      if (pendingAckIds.length === 0 || !isCurrentPoll()) return;
+      try {
+        // The connection is captured from the poll, never reread from state after the await. A
+        // relay replacement can therefore not accidentally receive an ACK for the old relay.
+        await relayAcknowledgeResults(connection, pendingAckIds);
+      } catch {
+        // The file is already safe locally. Leave ackPending set so this result is retried on a
+        // later poll, including after a restart.
+        return;
+      }
+      if (!isCurrentPoll()) return;
+      const acknowledged = new Set(pendingAckIds);
+      commit((current) => {
+        if (!sameRelayConnection(connection, connectionOf(current))) return current;
+        return {
+          ...current,
+          results: current.results.map((entry) =>
+            acknowledged.has(entry.resultId) ? { ...entry, ackPending: false } : entry,
+          ),
+        };
+      });
     } catch {
-      setRelayReachable(false);
+      if (isCurrentPoll()) setRelayReachable(false);
     }
   }, [commit]);
 
   useEffect(() => {
+    // Changing the active relay invalidates every in-flight request, even if a replacement happens
+    // to reuse the same visible URL. The identity check above is the second, explicit fence.
+    pollGenerationRef.current += 1;
     if (!state.relay) return;
     // The first poll is scheduled rather than run inline: polling ends in a `setState`, and a
     // `setState` in an effect body is a cascading render. A tick's delay costs nothing here.
     const first = setTimeout(() => void pollResults(), 0);
     const timer = setInterval(() => void pollResults(), resultPollIntervalMs);
     return () => {
+      pollGenerationRef.current += 1;
       clearTimeout(first);
       clearInterval(timer);
     };
@@ -514,25 +593,26 @@ export function useBridge(): BridgeApi {
   /**
    * Write one result and record where it went.
    *
-   * `overwrite` is false for every ordinary save: the native writer refuses an existing file
-   * rather than replacing it, so a second, corrected result for the same game cannot land on top
-   * of the first. It is true only when the operator asks for a specific already-saved result to
-   * be written again, which is a decision about that one file.
+   * The native writer refuses an existing file unless the target is exactly the result's previous
+   * savedPath. That keeps a folder change exclusive while still allowing an intentional Save again
+   * to rewrite this result's own file.
    */
   const writeOne = useCallback(
-    async (entry: StoredResult, folder: string, overwrite: boolean): Promise<void> => {
+    async (entry: StoredResult, folder: string): Promise<void> => {
       const summary = resultSummary(entry.qbj);
+      const fileName = resultFileName(summary, entry.resultId);
+      const targetPath = resultFilePath(folder, fileName);
       const path = await writeResultFile(
         folder,
-        resultFileName(summary, entry.resultId),
+        fileName,
         // The bytes are the relay's document, serialized. Nothing is recalculated on the way out.
         resultFileContents(entry.qbj),
-        overwrite,
+        entry.savedPath === targetPath,
       );
       commit((current) => ({
         ...current,
         results: current.results.map((row) =>
-          row.resultId === entry.resultId ? { ...row, savedPath: path } : row,
+          row.resultId === entry.resultId ? { ...row, savedPath: path, ackPending: true } : row,
         ),
       }));
     },
@@ -546,18 +626,38 @@ export function useBridge(): BridgeApi {
    * it. A failure is swallowed on purpose: the file exists, the local record says so, and an
    * unacknowledged result costs nothing beyond being offered again on the next poll.
    */
-  const acknowledgeSaved = useCallback(async (resultIds: string[]): Promise<void> => {
-    const connection = connectionOf(stateRef.current);
-    if (!connection || resultIds.length === 0) return;
-    try {
-      await relayAcknowledgeResults(connection, resultIds);
-    } catch {
-      // Deliberately quiet. See above.
-    }
-  }, []);
+  const acknowledgeSaved = useCallback(
+    async (connection: RelayConnection | null, resultIds: readonly string[]): Promise<void> => {
+      if (
+        !connection ||
+        resultIds.length === 0 ||
+        !sameRelayConnection(connection, connectionOf(stateRef.current))
+      )
+        return;
+      try {
+        await relayAcknowledgeResults(connection, resultIds);
+      } catch {
+        // Deliberately quiet. See above; ackPending remains true for a later poll retry.
+        return;
+      }
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return;
+      const acknowledged = new Set(resultIds);
+      commit((current) => {
+        if (!sameRelayConnection(connection, connectionOf(current))) return current;
+        return {
+          ...current,
+          results: current.results.map((entry) =>
+            acknowledged.has(entry.resultId) ? { ...entry, ackPending: false } : entry,
+          ),
+        };
+      });
+    },
+    [commit],
+  );
 
   const saveResult = useCallback(
     async (resultId: string) => {
+      if (savingBatchRef.current || savingResultIdsRef.current.has(resultId)) return;
       const current = stateRef.current;
       const folder = current.resultFolder;
       const entry = current.results.find((row) => row.resultId === resultId);
@@ -566,20 +666,23 @@ export function useBridge(): BridgeApi {
         return;
       }
       if (!entry) return;
+      const connection = connectionOf(current);
+      setResultSaving(resultId, true);
       try {
-        // Re-saving a result the operator already saved rewrites that result's own file; a
-        // first save must not be allowed to land on a file that is already there.
-        await writeOne(entry, folder, entry.savedPath !== undefined);
-        await acknowledgeSaved([entry.resultId]);
+        await writeOne(entry, folder);
+        await acknowledgeSaved(connection, [entry.resultId]);
         setNotice({ kind: 'good', message: 'Result saved.' });
       } catch (error) {
         setNotice({ kind: 'bad', message: `That result was not saved. ${(error as Error).message}` });
+      } finally {
+        setResultSaving(resultId, false);
       }
     },
-    [acknowledgeSaved, writeOne],
+    [acknowledgeSaved, setResultSaving, writeOne],
   );
 
   const saveNewResults = useCallback(async () => {
+    if (savingBatchRef.current || savingResultIdsRef.current.size > 0) return;
     const current = stateRef.current;
     const folder = current.resultFolder;
     if (!folder) {
@@ -591,29 +694,37 @@ export function useBridge(): BridgeApi {
       setNotice({ kind: 'good', message: 'Every result is already saved.' });
       return;
     }
+    savingBatchRef.current = true;
+    setSavingBatch(true);
     setBusy(true);
     const failures: string[] = [];
     const written: string[] = [];
-    for (const entry of unsaved) {
-      try {
-        await writeOne(entry, folder, false);
-        written.push(entry.resultId);
-      } catch (error) {
-        // One bad filename or one full disk must not stop the other eleven, and the one that
-        // failed stays unsaved rather than being marked done.
-        failures.push((error as Error).message);
+    const connection = connectionOf(current);
+    try {
+      for (const entry of unsaved) {
+        try {
+          await writeOne(entry, folder);
+          written.push(entry.resultId);
+        } catch (error) {
+          // One bad filename or one full disk must not stop the other eleven, and the one that
+          // failed stays unsaved rather than being marked done.
+          failures.push((error as Error).message);
+        }
       }
+      await acknowledgeSaved(connection, written);
+      setNotice(
+        failures.length === 0
+          ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
+          : {
+              kind: 'bad',
+              message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
+            },
+      );
+    } finally {
+      savingBatchRef.current = false;
+      setSavingBatch(false);
+      setBusy(false);
     }
-    await acknowledgeSaved(written);
-    setBusy(false);
-    setNotice(
-      failures.length === 0
-        ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
-        : {
-            kind: 'bad',
-            message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
-          },
-    );
   }, [acknowledgeSaved, writeOne]);
 
   const resultMatchIds = useMemo(
@@ -648,11 +759,16 @@ export function useBridge(): BridgeApi {
    * disk. Past the threshold the operator is told plainly, because the failure beyond it is
    * silent: the relay would keep accepting finals and stop showing them.
    */
-  const unsavedCount = state.results.filter((entry) => !entry.savedPath).length;
+  const unsavedCount = state.results.filter((entry) => !entry.savedPath || entry.ackPending).length;
   const unsavedResultWarning =
     unsavedCount >= unsavedResultWarningThreshold
-      ? `${unsavedCount} results are still unsaved. The relay shows the oldest ${relayUnackedWindow} unsaved results at a time — save these before more games finish.`
+      ? `${unsavedCount} results are still unsaved or awaiting relay acknowledgment. The relay shows the oldest ${relayUnackedWindow} unconfirmed results at a time — save these before more games finish.`
       : null;
+
+  const resultBusy = useCallback(
+    (resultId: string) => busy || savingBatch || savingResultIds.has(resultId),
+    [busy, savingBatch, savingResultIds],
+  );
 
   return {
     state,
@@ -683,6 +799,8 @@ export function useBridge(): BridgeApi {
     chooseFolder,
     saveNewResults,
     saveResult,
+    resultBusy,
+    savingResults: savingBatch || savingResultIds.size > 0,
     pollResults,
     unsavedResultWarning,
   };

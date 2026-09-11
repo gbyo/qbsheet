@@ -30,6 +30,8 @@ export interface StoredResult {
   receivedAt: string;
   /** The path written, once a save succeeded. Absent means unsaved. */
   savedPath?: string;
+  /** True after the file is on disk, until the relay confirms the result was acknowledged. */
+  ackPending?: boolean;
 }
 
 export interface BridgeState {
@@ -139,8 +141,22 @@ function normalizeTombstone(value: unknown): RoomTombstone | null {
  * A state that will not parse is replaced rather than repaired: this holds a morning's setup, not
  * a tournament's results, and asking the operator to add three rooms again is a better failure
  * than starting from something half-understood. Unsaved results are the one thing that would hurt
- * to lose, and they also live on the relay, which is why nothing here acknowledges them.
+ * to lose, and they also live on the relay. A saved result keeps a pending-ack bit here so a failed
+ * acknowledgment can be retried after a restart.
  */
+function restoreResults(value: unknown): StoredResult[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry as StoredResult;
+    const result = entry as StoredResult;
+    // States written by the first QBBridge build only had savedPath. Treat those saves as pending;
+    // the relay ACK is idempotent, so retrying is safer than silently losing the knowledge.
+    return result.savedPath !== undefined && result.ackPending === undefined
+      ? { ...result, ackPending: true }
+      : result;
+  });
+}
+
 export function loadState(): BridgeState {
   const store = storage();
   if (!store) return emptyState();
@@ -172,7 +188,7 @@ export function loadState(): BridgeState {
       retiredRoomIds,
       selectedRoundId: state.selectedRoundId ?? null,
       resultFolder: state.resultFolder ?? null,
-      results: Array.isArray(state.results) ? state.results : [],
+      results: restoreResults(state.results),
     };
   } catch {
     return emptyState();
