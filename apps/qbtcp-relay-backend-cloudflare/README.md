@@ -222,12 +222,64 @@ npm run typecheck
 npm run dev
 ```
 
-`src/protocol/` implements the #770 contract inline (rather than importing it) so this directory
-is self-contained and deployable straight from the repository — "Deploy to Cloudflare" cannot
-resolve monorepo workspace packages. Drift is prevented structurally: `test/relay.test.ts`
-validates the relay against the canonical fixtures in `tests/fixtures/qbtcp-stream/`, which the
-#770 TypeScript and Rust suites also read. If the contract moves and the relay does not follow,
-that suite fails.
+### This directory is deployed by itself
+
+**Deploy to Cloudflare does not clone QBSheet.** It copies _this directory alone_ into a new
+repository in the operator's account, runs `npm install` against the `package.json` in it, and runs
+`wrangler deploy`. Nothing above this directory exists at any point in that build.
+
+So the rule is absolute, and it is a rule about where failures land rather than about tidiness: an
+import that leaves this directory, or a dependency pinned to a path like
+`file:../../packages/something`, resolves perfectly in the monorepo and then fails in a stranger's
+Cloudflare build log, where nobody who can fix it will see it.
+
+Concretely, all four of these must pass after copying this directory somewhere with no QBSheet
+around it:
+
+```bash
+npm install
+npm test
+npm run typecheck
+npm run deploy
+```
+
+`scripts/ci/relay-standalone.mjs` enforces that. Run `node scripts/ci/relay-standalone.mjs` from
+the repository root for the fast structural check (it walks every module the standalone commands
+compile and rejects anything resolving outside this directory, any bare specifier the manifest does
+not declare, and any `file:`/`link:`/`workspace:` dependency), or `--isolated` to do the real
+thing: copy the directory to a temporary directory, install, typecheck, test, and bundle it there.
+CI runs the fast check through `tests/relay/standaloneBoundary.test.ts` and the isolated build in
+the `relay-standalone` job of `.github/workflows/qblive.yml`.
+
+### How shared code is handled
+
+`src/protocol/` implements the #770 contract inline rather than importing it, for the reason above.
+The same applies to the handful of generic helpers the backends share:
+`randomToken`, `sha256Hex`, `timingSafeEqual`, and `clampPage` live in
+[`src/protocol/credentials.ts`](src/protocol/credentials.ts) as this package's own copies, even
+though `@qbsheet/cloudflare-runtime-core` holds the same four for the backends that _are_ installed
+from the workspace. Thirty lines of WebCrypto is the cheaper side of that trade; a workspace
+dependency is not a dependency once this directory has been copied away.
+
+The same goes for the one constant this package needs from Director — the ordinary Scorer origin
+that `manage/scorer-readiness` reports on. The relay owns it in
+[`src/protocol/cors.ts`](src/protocol/cors.ts) and does not import Director.
+
+Duplication has a cost, and it is paid in one place: `tests/relay/standaloneBoundary.test.ts`
+imports both copies of every helper and both copies of the constant and asserts they agree — same
+hex encoding, same constant-time comparison with no early return, same clamping, same origin. A
+change to the shared package that this directory does not follow fails there.
+
+### How drift from the protocol is prevented
+
+`test/` is this package's own suite and stays inside the boundary, so it passes in the copied
+directory. `test-monorepo/relay.test.ts` is the other half: it drives the real Worker against the
+canonical fixtures in `tests/fixtures/qbtcp-stream/` — which the #770 TypeScript and Rust suites
+also read — and against the real scorer and Director clients in `src/`. Those imports leave this
+directory deliberately, which is exactly why that suite is not in `test/`: neither `npm test` nor
+`npm run typecheck` reads it, so it cannot break the standalone build. The monorepo runs it with
+`npm run test:monorepo` and `npm run typecheck:monorepo`. If the contract moves and the relay does
+not follow, that suite fails.
 
 The transport-neutral conformance harness in `packages/qbtcp-relay-conformance` runs the same
 expectations against any relay implementation, Cloudflare or otherwise.

@@ -139,6 +139,45 @@ jobs:
       - name: Test in workerd
         working-directory: ${{ matrix.directory }}
         run: npm test
+      # The relay's cross-surface drift suite, which is the half that is *allowed* to import the
+      # monorepo: it drives the real Worker against the canonical #770 fixtures and the real scorer
+      # and Director clients, and it is what stops the relay's inlined copy of the contract
+      # drifting. It lives outside `test/` so that the two steps above keep passing in the copy
+      # Cloudflare makes — see the `relay-standalone` job below.
+      - name: Cross-surface drift suite
+        if: matrix.directory == 'apps/qbtcp-relay-backend-cloudflare'
+        working-directory: ${{ matrix.directory }}
+        run: |
+          npm run typecheck:monorepo
+          npm run test:monorepo
+
+  # -----------------------------------------------------------------------------------------------
+  # The QBTCP relay, built the way an operator's Cloudflare account builds it.
+  #
+  # Every other check in this file runs the relay *inside* a QBSheet checkout, which is not the
+  # condition that matters: "Deploy to Cloudflare" copies that one directory into a repository with
+  # nothing else in it. With the monorepo still on disk above it, a `file:../../packages/...`
+  # dependency resolves and a `../../../src/director/...` import resolves, so the relay can lose its
+  # independence with every job green. That is exactly how it was lost twice.
+  #
+  # This job removes the parent directory, which is the whole difference.
+  # -----------------------------------------------------------------------------------------------
+  relay-standalone:
+    name: Relay deploys on its own
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Copies the relay to a temporary directory outside the workspace, installs only what its
+      # own manifest declares, then typechecks, tests, and bundles it there. No npm cache and no
+      # root `npm ci`: a warm workspace is the thing this job exists to do without.
+      - name: Install, test, and bundle the relay with no QBSheet present
+        run: node scripts/ci/relay-standalone.mjs --isolated
 
   conformance:
     name: Conformance against the real backend

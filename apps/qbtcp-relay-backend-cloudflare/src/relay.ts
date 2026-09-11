@@ -40,10 +40,7 @@
  * platform limits so an operator sees pressure before Cloudflare says no.
  */
 
-import { clampPage } from '@qbsheet/cloudflare-runtime-core';
 import { DurableObject } from 'cloudflare:workers';
-
-import { scoresheetOrigin } from '../../../src/director/relay/relayConfig';
 
 import { utf8ByteLength } from './protocol/bytes';
 import {
@@ -52,7 +49,9 @@ import {
   normalizeOrigin,
   parseAllowedOrigins,
   publicCorsHeaders,
+  scoresheetOrigin,
 } from './protocol/cors';
+import { clampPage } from './protocol/credentials';
 import {
   DEFAULT_MAX_STREAM_FRAME_BYTES,
   isDuplicateFinal,
@@ -3304,9 +3303,8 @@ function validRevision(value: unknown): number | null {
 }
 
 // Row counting stays service-typed: the Durable Object's `SqlStorage` cursor is not
-// interchangeable with the shared `SqlDatabase` test interface, and this helper runs at
-// every health read. Shared counting utilities live in `@qbsheet/cloudflare-runtime-core`
-// for harnesses and future services that speak the narrower interface.
+// interchangeable with the narrower `SqlDatabase` test interface, and this helper runs at
+// every health read.
 function countRows(sql: SqlStorage, table: string, where = '1 = 1'): number {
   return (
     sql.exec<{ count: number }>(`SELECT COUNT(*) AS count FROM ${table} WHERE ${where}`).toArray()[0]
