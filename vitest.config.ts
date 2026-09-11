@@ -42,8 +42,10 @@ const nodeTestFiles = [
   'tests/SpreadsheetGame.test.ts',
   // The CI change-impact classifier. Pure path and lockfile analysis, so it wants no browser.
   'tests/ci/impact.test.ts',
-  // The Director release version guard. Reads manifests off disk; nothing browser-shaped.
+  // The release version guards. They read manifests off disk through `import.meta.url`, which
+  // jsdom would resolve to an `https:` URL that `readFileSync` refuses; nothing browser-shaped.
   'tests/release/director-version.test.ts',
+  'tests/release/qbbridge-version.test.ts',
   // The QBSheet Live demo backend. A Node HTTP server and a projection, so no browser — and `.mjs`
   // because it tests the script as `node` runs it rather than a compiled copy of it.
   'scripts/qblive-demo/*.test.mjs',
