@@ -23,6 +23,7 @@ import {
 import { generateTournamentId } from '../model/relay';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
+import { LiveOverrideDialog } from './LiveOverrideDialog';
 
 export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
@@ -353,6 +354,112 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
           </Button>
         </div>
       </section>
+
+      <section className="panel">
+        <h2>Tournament lifecycle</h2>
+        <p>
+          <strong>
+            {bridge.phase === 'live'
+              ? 'Live: rooms are scoring.'
+              : bridge.phase === 'finished'
+                ? 'Finished: this tournament is closed.'
+                : 'Setup: planning freely.'}
+          </strong>{' '}
+          <span className="muted">
+            {bridge.phase === 'setup'
+              ? 'Going live guards high-impact setup actions behind explicit audited overrides.'
+              : 'High-impact setup actions need an explicit override, which is audited.'}
+          </span>
+        </p>
+        <div className="row">
+          {bridge.phase === 'setup' ? (
+            <Button variant="primary" onPress={bridge.goLive} isDisabled={bridge.busy}>
+              Go live
+            </Button>
+          ) : null}
+          {bridge.phase === 'live' ? (
+            <>
+              <Button
+                variant="primary"
+                onPress={() => void bridge.refreshReconciliation()}
+                isDisabled={bridge.busy || bridge.reconciliationRunning}
+              >
+                {bridge.reconciliationRunning ? 'Reconciling…' : 'Reconcile tournament'}
+              </Button>
+              <Button
+                onPress={() => void bridge.finishTournament()}
+                isDisabled={bridge.busy || bridge.reconciliationRunning}
+              >
+                Finish tournament…
+              </Button>
+            </>
+          ) : null}
+          {bridge.phase === 'finished' ? (
+            <Button onPress={bridge.reopenTournament} isDisabled={bridge.busy}>
+              Reopen tournament…
+            </Button>
+          ) : null}
+        </div>
+        {bridge.reconciliation ? (
+          <div aria-live="polite" style={{ marginTop: 'var(--qbs-space-3)' }}>
+            <p>
+              <strong>
+                {bridge.reconciliation.safeToClose
+                  ? `Safe to close: ${bridge.reconciliation.relayCount} relay finals = ${bridge.reconciliation.localSavedCount} durable local QBJs = ${bridge.reconciliation.importedCount} verified YellowFruit games.`
+                  : 'Not ready to close:'}
+              </strong>
+            </p>
+            {!bridge.reconciliation.safeToClose ? (
+              <ul className="plain">
+                {bridge.reconciliation.blockers.map((blocker) => (
+                  <li key={blocker}>{blocker}</li>
+                ))}
+              </ul>
+            ) : null}
+            <p className="faint">
+              {bridge.reconciliation.relayCount} relay finals · {bridge.reconciliation.localSavedCount} saved
+              locally · {bridge.reconciliation.importedCount} marked imported
+              {bridge.reconciliation.truncated ? ' · relay counts are lower bounds' : ''} ·{' '}
+              {bridge.reconciliation.agedOut.length > 0
+                ? `${bridge.reconciliation.agedOut.length} aged out of relay retention · `
+                : ''}
+              {bridge.reconciliation.corrections.length > 0
+                ? `${bridge.reconciliation.corrections.length} unresolved correction(s): ` +
+                  bridge.reconciliation.corrections
+                    .map((entry) => `${entry.matchId} (${entry.resultIds.join(', ')})`)
+                    .join('; ')
+                : 'no unresolved corrections'}
+            </p>
+          </div>
+        ) : null}
+        {bridge.auditLog.length > 0 ? (
+          <>
+            <h3 style={{ marginTop: 'var(--qbs-space-4)' }}>Operator history</h3>
+            <ul className="plain faint">
+              {bridge.auditLog.slice(-8).map((entry) => (
+                <li key={entry.seq}>
+                  #{entry.seq} {new Date(entry.at).toLocaleString()} · {entry.action}
+                  {Object.keys(entry.fields).length > 0 ? (
+                    <>
+                      {' '}
+                      ·{' '}
+                      {Object.entries(entry.fields)
+                        .map(([key, value]) => `${key}=${String(value)}`)
+                        .join(' ')}
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </section>
+
+      <LiveOverrideDialog
+        pending={bridge.pendingLiveOverride}
+        onConfirm={bridge.confirmLiveOverride}
+        onCancel={bridge.cancelLiveOverride}
+      />
 
       <ConfirmDialog
         isOpen={confirmForget}

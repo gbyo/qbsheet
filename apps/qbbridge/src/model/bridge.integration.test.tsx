@@ -1459,8 +1459,13 @@ describe('critical relay persistence', () => {
     const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
     let writes = 0;
     const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
-      writes += 1;
-      if (writes === 2) throw new Error('storage became unavailable after the claim');
+      // Only the BridgeState save can fail the claim into its pending path. Diagnostic keys
+      // (audit, lifecycle) share the store and must pass through, or any future diagnostic
+      // write silently shifts this fault to the wrong save.
+      if (key === storageKey) {
+        writes += 1;
+        if (writes === 2) throw new Error('storage became unavailable after the claim');
+      }
       originalSetItem(key, value);
     });
     const rendered = renderHook(() => useBridge());
@@ -2353,5 +2358,116 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+/**
+ * Tournament-live guards (#1016). Phase and audit history persist in localStorage, so this
+ * suite owns its keys and always leaves them clean for the suites around it.
+ */
+describe('tournament lifecycle guards', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('setup actions run at once with no override', async () => {
+    const rendered = await setUpTournament();
+    const [first] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.removeRoom(first.id);
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(1);
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    expect(rendered.result.current.auditLog.some((entry) => entry.action === 'room-removed')).toBe(true);
+    rendered.unmount();
+  });
+
+  test('a live room removal waits for an explicit audited override', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    expect(rendered.result.current.phase).toBe('live');
+    const [first] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.removeRoom(first.id);
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(2);
+    const pending = rendered.result.current.pendingLiveOverride;
+    expect(pending?.action.id).toBe('remove-room');
+    expect(pending?.action.label).toMatch(/Room 101/);
+    expect(pending?.action.consequences).toMatch(/tombstone/);
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.state.rooms).toHaveLength(1);
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    const actions = rendered.result.current.auditLog.map((entry) => entry.action);
+    expect(actions).toContain('live-override');
+    expect(actions).toContain('room-removed');
+    rendered.unmount();
+  });
+
+  test('a live relay change is held for override while setup change is instant', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    expect(rendered.result.current.state.relay).not.toBeNull();
+    expect(rendered.result.current.changingRelay).toBe(false);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('change-relay');
+    act(() => {
+      rendered.result.current.cancelLiveOverride();
+    });
+    expect(rendered.result.current.pendingLiveOverride).toBeNull();
+    expect(rendered.result.current.changingRelay).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a clean end of day finishes with a safe-to-close proof', async () => {
+    const rendered = await setUpConnectedRooms();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    expect(rendered.result.current.reconciliation?.safeToClose).toBe(true);
+    expect(rendered.result.current.notice?.message).toMatch(/Safe to close/);
+    expect(
+      rendered.result.current.auditLog.some(
+        (entry) => entry.action === 'lifecycle' && entry.fields.phase === 'finished',
+      ),
+    ).toBe(true);
+    rendered.unmount();
+  });
+
+  test('an unresolved end of day finishes only through an explicit override', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.goLive();
+    });
+    await act(async () => {
+      await rendered.result.current.finishTournament();
+    });
+    // Entered pairings leave rooms active, so the close is dirty and waits.
+    expect(rendered.result.current.phase).toBe('live');
+    expect(rendered.result.current.reconciliation?.safeToClose).toBe(false);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('finish-dirty');
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    expect(rendered.result.current.phase).toBe('finished');
+    rendered.unmount();
   });
 });

@@ -505,6 +505,48 @@ export async function relayFetchResults(connection: RelayConnection): Promise<Re
  */
 export const relayUnackedWindow = 128;
 
+export interface RelayRetainedFinal extends RelayResult {
+  /** True once the relay recorded an acknowledgment; retained for the seven-day window. */
+  acked: boolean;
+}
+
+/**
+ * Every final the relay retains, acknowledged or not, oldest first.
+ *
+ * Same page bound as the unacked poll and likewise no cursor, so a full page means the
+ * caller must treat the counts as lower bounds. Used only by end-of-day reconciliation:
+ * ordinary polling stays on the unacked window so a result beyond it keeps its
+ * never-acknowledged-before-save guarantee.
+ */
+export async function relayFetchRetainedFinals(
+  connection: RelayConnection,
+): Promise<{ finals: RelayRetainedFinal[]; truncated: boolean }> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/results?state=all&limit=${relayUnackedWindow}`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with results.');
+  const body = parseBody(response);
+  const rows = Array.isArray(body.results) ? body.results : [];
+  const finals: RelayRetainedFinal[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (typeof entry.result_id !== 'string' || entry.qbj === undefined || entry.qbj === null) continue;
+    finals.push({
+      resultId: entry.result_id,
+      roomId: typeof entry.room_id === 'string' ? entry.room_id : '',
+      matchId: typeof entry.match_id === 'string' ? entry.match_id : null,
+      fingerprint: typeof entry.fingerprint === 'string' ? entry.fingerprint : '',
+      receivedAt: typeof entry.received_at === 'string' ? entry.received_at : '',
+      qbj: entry.qbj,
+      acked: typeof entry.director_ack_at === 'string',
+    });
+  }
+  return { finals, truncated: finals.length >= relayUnackedWindow };
+}
+
 /**
  * Acknowledge results whose bytes are on disk.
  *

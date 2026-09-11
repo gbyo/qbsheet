@@ -37,10 +37,25 @@ import {
   type PublishOutcome,
   type PublishPlan,
 } from './publish';
+import { appendAuditEntry, loadAuditLog, type AuditAction, type AuditEntry } from './audit';
+import {
+  canFinish,
+  canGoLive,
+  canReopen,
+  describeGuard,
+  loadTournamentPhase,
+  requiresOverride,
+  saveTournamentPhase,
+  type GuardedAction,
+  type GuardedActionId,
+  type TournamentPhase,
+} from './lifecycle';
+import { buildTournamentReconciliation, type TournamentReconciliation } from './reconcile';
 import {
   relayAcknowledgeResults,
   relayClaim,
   relayCheckScorerReadiness,
+  relayFetchRetainedFinals,
   relayFetchResults,
   relayHealth,
   relayProvisionBackup,
@@ -96,6 +111,7 @@ import {
   type StoredResult,
 } from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
+import packageJson from '../../package.json';
 import {
   decryptRecoveryPackage,
   encryptRecoveryPackage,
@@ -203,6 +219,25 @@ export interface BridgeApi {
   changingRelay: boolean;
   /** Delete the stored management credential. Deliberate, confirmed, and not undoable. */
   forgetRelayCredential(): void;
+
+  /**
+   * Tournament lifecycle and final reconciliation (#1016). Setup plans freely; live guards
+   * high-impact actions behind explicit audited overrides; finished is terminal until reopened.
+   */
+  phase: TournamentPhase;
+  auditLog: AuditEntry[];
+  /** A guarded action waiting for its explicit override confirmation, if any. */
+  pendingLiveOverride: { action: GuardedAction; proceed: () => void } | null;
+  confirmLiveOverride(): void;
+  cancelLiveOverride(): void;
+  goLive(): void;
+  reopenTournament(): void;
+  /** Latest end-of-day reconciliation, or null before the first run. */
+  reconciliation: TournamentReconciliation | null;
+  reconciliationRunning: boolean;
+  refreshReconciliation(): Promise<TournamentReconciliation | null>;
+  /** Finish live play: clean reconciliations close directly, dirty ones need an override. */
+  finishTournament(): Promise<void>;
 
   addRoom(): void;
   renameRoom(roomId: string, name: string): void;
@@ -389,6 +424,35 @@ export function useBridge(): BridgeApi {
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
+
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>(loadAuditLog);
+
+  const recordAudit = useCallback(
+    (action: AuditAction, fields: Record<string, string | number | boolean | null>): void => {
+      setAuditLog((current) => appendAuditEntry(current, action, fields));
+    },
+    [],
+  );
+
+  const relayReachableRef = useRef<boolean | null>(null);
+  /**
+   * Set reachability and audit transitions both ways. Same-value sets neither re-render
+   * nor audit, so hot paths like the results poll stay quiet while degradation and
+   * recovery are both recorded.
+   */
+  const reportReachability = useCallback(
+    (next: boolean | null): void => {
+      setRelayReachable(next);
+      if (next === null) {
+        relayReachableRef.current = null;
+        return;
+      }
+      if (relayReachableRef.current === next) return;
+      relayReachableRef.current = next;
+      recordAudit('relay-reachability', { reachable: next });
+    },
+    [recordAudit],
+  );
   const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
     state.relay
       ? {
@@ -491,7 +555,7 @@ export function useBridge(): BridgeApi {
       .then((token) => {
         const current = stateRef.current;
         if (!token || !sameRelay(current) || !current.relay) {
-          setRelayReachable(false);
+          reportReachability(false);
           setNotice({
             kind: 'bad',
             message:
@@ -502,13 +566,13 @@ export function useBridge(): BridgeApi {
         activateState({ ...current, relay: { ...current.relay, managementToken: token } });
       })
       .catch((error) => {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `QBBridge could not read the relay credential from secure storage. ${(error as Error).message}`,
         });
       });
-  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId]);
+  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId, reportReachability]);
 
   const commit = useCallback(
     (
@@ -531,6 +595,163 @@ export function useBridge(): BridgeApi {
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  const [phase, setPhase] = useState<TournamentPhase>(loadTournamentPhase);
+  const phaseRef = useRef<TournamentPhase>(phase);
+  const [pendingLiveOverride, setPendingLiveOverride] = useState<{
+    action: GuardedAction;
+    proceed: () => void;
+  } | null>(null);
+  const [reconciliation, setReconciliation] = useState<TournamentReconciliation | null>(null);
+  const [reconciliationRunning, setReconciliationRunning] = useState(false);
+  const reconciliationRunningRef = useRef(false);
+
+  const setPhaseState = (next: TournamentPhase): void => {
+    phaseRef.current = next;
+    saveTournamentPhase(next);
+    setPhase(next);
+  };
+
+  const appStartAuditedRef = useRef(false);
+  useEffect(() => {
+    if (appStartAuditedRef.current) return;
+    appStartAuditedRef.current = true;
+    recordAudit('app-start', {
+      version: typeof packageJson.version === 'string' ? packageJson.version : 'unknown',
+    });
+  }, [recordAudit]);
+
+  /**
+   * Route a high-impact action through the lifecycle. In setup it runs at once; once live
+   * (or finished) it waits for an explicit override that names its consequences, and the
+   * override itself is audited on confirm.
+   */
+  const requestGuarded = useCallback(
+    (id: GuardedActionId, subject: string | null, proceed: () => void): void => {
+      if (!requiresOverride(phaseRef.current, id)) {
+        proceed();
+        return;
+      }
+      setPendingLiveOverride({ action: describeGuard(id, subject), proceed });
+    },
+    [],
+  );
+
+  const confirmLiveOverride = useCallback((): void => {
+    if (!pendingLiveOverride) return;
+    const { action, proceed } = pendingLiveOverride;
+    setPendingLiveOverride(null);
+    recordAudit('live-override', { action: action.id, label: action.label });
+    proceed();
+  }, [pendingLiveOverride, recordAudit]);
+
+  const cancelLiveOverride = useCallback((): void => setPendingLiveOverride(null), []);
+
+  const goLive = useCallback((): void => {
+    if (!canGoLive(phaseRef.current)) return;
+    setPhaseState('live');
+    recordAudit('lifecycle', { phase: 'live' });
+    setNotice({
+      kind: 'good',
+      message: 'Tournament is live. High-impact setup actions now need an explicit override.',
+    });
+  }, [recordAudit]);
+
+  const reopenTournament = useCallback((): void => {
+    if (!canReopen(phaseRef.current)) return;
+    requestGuarded('reopen-tournament', null, () => {
+      setPhaseState('setup');
+      recordAudit('lifecycle', { phase: 'setup', reopened: true });
+      setNotice({ kind: 'warn', message: 'Tournament reopened to setup. Live guards are off.' });
+    });
+  }, [requestGuarded, recordAudit]);
+
+  const refreshReconciliation = useCallback(async (): Promise<TournamentReconciliation | null> => {
+    if (reconciliationRunningRef.current) return null;
+    const connection = connectionOf(stateRef.current);
+    if (!connection) {
+      setNotice({ kind: 'bad', message: 'Connect a relay before reconciling the tournament.' });
+      return null;
+    }
+    reconciliationRunningRef.current = true;
+    setReconciliationRunning(true);
+    try {
+      const { finals, truncated } = await relayFetchRetainedFinals(connection);
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return null;
+      const live = stateRef.current;
+      const report = buildTournamentReconciliation({
+        relayFinals: finals.map((entry) => ({
+          resultId: entry.resultId,
+          roomId: entry.roomId,
+          matchId: entry.matchId,
+          receivedAt: entry.receivedAt,
+          acked: entry.acked,
+        })),
+        relayTruncated: truncated,
+        local: live.results.map((entry) => ({
+          resultId: entry.resultId,
+          matchId: resultMatchId(entry.qbj),
+          receivedAt: entry.receivedAt,
+          saved: entry.savedPath !== undefined,
+          ackPending: entry.ackPending === true,
+          importStatus: entry.importStatus ?? 'new',
+        })),
+        rooms: live.rooms.map((room) => ({
+          roomId: room.id,
+          name: room.name,
+          active:
+            room.relayPublished ||
+            room.pendingPairingCode !== null ||
+            live.roundPlans.some((plan) => plan.pairings.some((pairing) => pairing.roomId === room.id)),
+        })),
+        pendingPublication: (pendingPublicationReviewRef.current ? 1 : 0) + live.pendingRoomRemovals.length,
+        pendingRecovery: relayCredentialSavePending || persistenceSavePending ? 1 : 0,
+      });
+      setReconciliation(report);
+      return report;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `Tournament reconciliation failed: ${(error as Error).message}`,
+      });
+      return null;
+    } finally {
+      reconciliationRunningRef.current = false;
+      setReconciliationRunning(false);
+    }
+  }, [relayCredentialSavePending, persistenceSavePending]);
+
+  const finishTournament = useCallback(async (): Promise<void> => {
+    if (!canFinish(phaseRef.current)) return;
+    const report = await refreshReconciliation();
+    if (!report) return;
+    if (report.safeToClose) {
+      setPhaseState('finished');
+      recordAudit('lifecycle', { phase: 'finished', safeToClose: true });
+      setNotice({
+        kind: 'good',
+        message:
+          `${report.relayCount} relay finals = ${report.localSavedCount} durable local QBJs = ` +
+          `${report.importedCount} verified YellowFruit games. Safe to close the tournament relay.`,
+      });
+      return;
+    }
+    const action = describeGuard('finish-dirty');
+    setPendingLiveOverride({
+      action: {
+        ...action,
+        consequences: `${report.blockers.join(' ')} ${action.consequences}`,
+      },
+      proceed: () => {
+        setPhaseState('finished');
+        recordAudit('lifecycle', {
+          phase: 'finished',
+          safeToClose: false,
+          blockers: report.blockers.length,
+        });
+      },
+    });
+  }, [refreshReconciliation, recordAudit]);
 
   const setResultSaving = useCallback((resultId: string, saving: boolean) => {
     const next = new Set(savingResultIdsRef.current);
@@ -559,7 +780,7 @@ export function useBridge(): BridgeApi {
         const next = readinessState(result);
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(true);
+          reportReachability(true);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -576,7 +797,7 @@ export function useBridge(): BridgeApi {
         };
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(false);
+          reportReachability(false);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -587,7 +808,7 @@ export function useBridge(): BridgeApi {
         return next;
       }
     },
-    [commit],
+    [commit, reportReachability],
   );
 
   const applyLoadedFile = useCallback(
@@ -622,7 +843,7 @@ export function useBridge(): BridgeApi {
         setRelayCredentialSavePending(false);
         setPersistenceSavePending(false);
         setScorerReadiness(null);
-        setRelayReachable(null);
+        reportReachability(null);
         setChangingRelay(false);
         invalidateRoundArtifacts();
         activateState(next);
@@ -653,6 +874,14 @@ export function useBridge(): BridgeApi {
       }
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
+      recordAudit('yft-loaded', {
+        file: path === null ? '(pasted contents)' : (path.split('/').pop() ?? path),
+        tournament: report.tournament.name,
+        teams: report.tournament.teams.length,
+        rounds: report.tournament.rounds.length,
+        warnings: report.warnings.length,
+        startNew,
+      });
       invalidateRoundArtifacts();
       const reconciliationNote =
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
@@ -664,7 +893,7 @@ export function useBridge(): BridgeApi {
       });
       return true;
     },
-    [activateState, commit, invalidateRoundArtifacts],
+    [activateState, commit, invalidateRoundArtifacts, recordAudit, reportReachability],
   );
 
   const loadFileContents = useCallback(
@@ -699,7 +928,7 @@ export function useBridge(): BridgeApi {
     [applyLoadedFile],
   );
 
-  const confirmFileSwitch = useCallback(() => {
+  const confirmFileSwitchNow = useCallback(() => {
     const pending = pendingFileRef.current;
     if (!pending) return;
     if (
@@ -713,6 +942,11 @@ export function useBridge(): BridgeApi {
     pendingFileRef.current = null;
     setPendingFileSwitch(null);
   }, [applyLoadedFile]);
+
+  const confirmFileSwitch = useCallback(() => {
+    const pending = pendingFileRef.current;
+    requestGuarded('switch-tournament', pending?.tournament.name ?? null, () => confirmFileSwitchNow());
+  }, [requestGuarded, confirmFileSwitchNow]);
 
   const cancelFileSwitch = useCallback(() => {
     pendingFileRef.current = null;
@@ -749,7 +983,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        reportReachability(null);
         setNotice({
           kind: 'bad',
           message: `The relay claim succeeded, but QBBridge could not save the returned management credential in secure storage. Repair secure storage and retry. ${(error as Error).message}`,
@@ -764,7 +998,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        reportReachability(null);
         setNotice({
           kind: 'bad',
           message:
@@ -780,7 +1014,7 @@ export function useBridge(): BridgeApi {
       readinessKeyRef.current = null;
       activateState(next);
       setChangingRelay(false);
-      setRelayReachable(true);
+      reportReachability(true);
       const readiness = await refreshScorerReadiness(connection);
       if (readinessKeyRef.current === connectionKey(connection)) {
         const nextNotice = readinessNotice(readiness);
@@ -795,7 +1029,7 @@ export function useBridge(): BridgeApi {
       }
       return true;
     },
-    [activateState, refreshScorerReadiness],
+    [reportReachability, activateState, refreshScorerReadiness],
   );
 
   /**
@@ -832,7 +1066,7 @@ export function useBridge(): BridgeApi {
         };
         return await activateClaimedRelay(connection);
       } catch (error) {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `${(error as Error).message} The relay already set up here is unchanged.`,
@@ -842,7 +1076,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateClaimedRelay],
+    [reportReachability, activateClaimedRelay],
   );
 
   const retryRelayCredentialSave = useCallback(async (): Promise<boolean> => {
@@ -939,6 +1173,7 @@ export function useBridge(): BridgeApi {
         const payload = recoveryPackageState(current, provisioned);
         const contents = await encryptRecoveryPackage(payload, passphrase);
         const path = await writeRecoveryPackage('', recoveryPackageFileName, contents);
+        recordAudit('recovery-package-created', {});
         setNotice({
           kind: 'good',
           message: `Encrypted backup control package saved to ${path}. Keep the file and passphrase separate; the package contains no primary credential.`,
@@ -966,7 +1201,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [],
+    [recordAudit],
   );
 
   const importRecoveryPackage = useCallback(
@@ -1012,16 +1247,17 @@ export function useBridge(): BridgeApi {
         setTournament(null);
         setLoadWarnings([]);
         setChangingRelay(false);
-        setRelayReachable(true);
+        reportReachability(true);
         activateState(next);
         const readiness = await refreshScorerReadiness(connection);
+        recordAudit('recovery-package-imported', { tournament: connection.tournamentId });
         setNotice({
           kind: 'good',
           message: `Encrypted recovery package imported for ${connection.tournamentId}. Reload the authoritative .yft, then take over explicitly before publishing. ${readiness.message}`,
         });
         return true;
       } catch (error) {
-        setRelayReachable(false);
+        reportReachability(false);
         setNotice({
           kind: 'bad',
           message: `The recovery package was not imported. ${(error as Error).message}`,
@@ -1031,7 +1267,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateState, refreshScorerReadiness],
+    [reportReachability, activateState, refreshScorerReadiness, recordAudit],
   );
 
   const takeOverRelay = useCallback(async (): Promise<boolean> => {
@@ -1064,7 +1300,8 @@ export function useBridge(): BridgeApi {
         });
         return false;
       }
-      setRelayReachable(true);
+      reportReachability(true);
+      recordAudit('relay-takeover', { epoch: outcome.directorEpoch });
       setNotice({
         kind: 'warn',
         message:
@@ -1072,13 +1309,13 @@ export function useBridge(): BridgeApi {
       });
       return true;
     } catch (error) {
-      setRelayReachable(false);
+      reportReachability(false);
       setNotice({ kind: 'bad', message: `Relay takeover was not completed. ${(error as Error).message}` });
       return false;
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
   const transferRelayToPrimary = useCallback(async (): Promise<boolean> => {
     const connection = connectionOf(stateRef.current);
@@ -1094,7 +1331,8 @@ export function useBridge(): BridgeApi {
             }
           : current,
       );
-      setRelayReachable(false);
+      reportReachability(false);
+      recordAudit('relay-transfer', { epoch: outcome.directorEpoch });
       setNotice({
         kind: 'warn',
         message:
@@ -1107,9 +1345,12 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
-  const beginRelayChange = useCallback(() => setChangingRelay(true), []);
+  const beginRelayChange = useCallback(
+    () => requestGuarded('change-relay', null, () => setChangingRelay(true)),
+    [requestGuarded],
+  );
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
 
   const checkScorerReadiness = useCallback(async () => {
@@ -1137,7 +1378,7 @@ export function useBridge(): BridgeApi {
    * no way back: the relay's setup token was consumed by the claim that produced this
    * credential, so the same relay cannot be claimed again.
    */
-  const forgetRelayCredential = useCallback(async () => {
+  const forgetRelayCredentialNow = useCallback(async () => {
     const existing = stateRef.current.relay;
     if (existing) {
       try {
@@ -1160,14 +1401,19 @@ export function useBridge(): BridgeApi {
     pollGenerationRef.current += 1;
     const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
-    setRelayReachable(null);
+    reportReachability(null);
     setNotice({
       kind: persisted.ok ? 'warn' : 'bad',
       message: persisted.ok
         ? 'The relay credential was deleted from this machine. Set up a relay to publish again.'
         : 'The relay credential was removed from the active session but could not be saved locally. Retry saving local state before restarting.',
     });
-  }, [commit]);
+  }, [reportReachability, commit]);
+
+  const forgetRelayCredential = useCallback(
+    () => requestGuarded('forget-credential', null, () => void forgetRelayCredentialNow()),
+    [requestGuarded, forgetRelayCredentialNow],
+  );
 
   const retryStatePersistence = useCallback((): boolean => {
     const persisted = saveState(stateRef.current, { secureCredential: true });
@@ -1185,7 +1431,7 @@ export function useBridge(): BridgeApi {
   }, []);
 
   const addRoom = useCallback(() => {
-    commit((current) => {
+    const created = commit((current) => {
       const id = nextRoomId([
         ...current.rooms,
         ...current.pendingRoomRemovals,
@@ -1194,7 +1440,9 @@ export function useBridge(): BridgeApi {
       const name = `Room ${current.rooms.length + 1}`;
       return { ...current, rooms: [...current.rooms, newRoom(id, name, generatePairingCode())] };
     });
-  }, [commit]);
+    const room = created.state.rooms.at(-1);
+    if (room) recordAudit('room-created', { room: room.name, roomId: room.id });
+  }, [commit, recordAudit]);
 
   const updateRoom = useCallback(
     (roomId: string, change: (room: Room) => Room) => {
@@ -1207,14 +1455,22 @@ export function useBridge(): BridgeApi {
   );
 
   const renameRoom = useCallback(
-    (roomId: string, name: string) => updateRoom(roomId, (room) => ({ ...room, name })),
-    [updateRoom],
+    (roomId: string, name: string) => {
+      recordAudit('room-renamed', { room: name, roomId });
+      updateRoom(roomId, (room) => ({ ...room, name }));
+    },
+    [updateRoom, recordAudit],
   );
 
-  const removeRoom = useCallback(
+  const removeRoomNow = useCallback(
     (roomId: string) => {
       const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
       if (!room) return;
+      recordAudit('room-removed', {
+        room: room.name,
+        roomId,
+        tombstone: room.relayPublished,
+      });
       const tombstone = room.relayPublished ? roomTombstone(room) : null;
       commit((current) => ({
         ...current,
@@ -1240,7 +1496,15 @@ export function useBridge(): BridgeApi {
           : { kind: 'good', message: `${room.name} was removed.` },
       );
     },
-    [commit],
+    [commit, recordAudit],
+  );
+
+  const removeRoom = useCallback(
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      requestGuarded('remove-room', room?.name ?? roomId, () => removeRoomNow(roomId));
+    },
+    [requestGuarded, removeRoomNow],
   );
 
   /**
@@ -1262,10 +1526,21 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  const regeneratePairingCodeNow = useCallback(
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      recordAudit('pairing-code-regenerated', { room: room?.name ?? roomId, roomId });
+      updateRoom(roomId, (target) => ({ ...target, pendingPairingCode: generatePairingCode() }));
+    },
+    [updateRoom, recordAudit],
+  );
+
   const regeneratePairingCode = useCallback(
-    (roomId: string) =>
-      updateRoom(roomId, (room) => ({ ...room, pendingPairingCode: generatePairingCode() })),
-    [updateRoom],
+    (roomId: string) => {
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      requestGuarded('regenerate-code', room?.name ?? roomId, () => regeneratePairingCodeNow(roomId));
+    },
+    [requestGuarded, regeneratePairingCodeNow],
   );
 
   /**
@@ -1406,7 +1681,12 @@ export function useBridge(): BridgeApi {
         }
         const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
         if (input.assignmentFallback) rememberAssignmentFallback(null);
-        setRelayReachable(true);
+        recordAudit('publication-confirmed', {
+          revision: outcome.revision,
+          rooms: outcome.assignments.length,
+          cleared: outcome.clearedRoomIds.length,
+        });
+        reportReachability(true);
         setNotice(
           persisted.ok
             ? { kind: input.successKind, message: input.successMessage(outcome) }
@@ -1417,7 +1697,7 @@ export function useBridge(): BridgeApi {
         );
         return outcome;
       } catch (error) {
-        if (error instanceof RelayError) setRelayReachable(false);
+        if (error instanceof RelayError) reportReachability(false);
         const fallbackAvailable = input.assignmentFallback && relayUnavailable(error);
         if (fallbackAvailable) rememberAssignmentFallback(input.assignmentFallback!);
         setNotice({
@@ -1433,7 +1713,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, rememberAssignmentFallback],
+    [reportReachability, applyPublication, rememberAssignmentFallback, recordAudit],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
@@ -1609,7 +1889,7 @@ export function useBridge(): BridgeApi {
             .map((entry) => entry.resultId),
         ),
       ];
-      setRelayReachable(true);
+      reportReachability(true);
       commit((current) => {
         if (!sameRelayConnection(connection, connectionOf(current))) return current;
         const fresh: StoredResult[] = fetched
@@ -1631,6 +1911,7 @@ export function useBridge(): BridgeApi {
       }
       if (!isCurrentPoll()) return;
       const acknowledged = new Set(pendingAckIds);
+      recordAudit('result-acknowledged', { results: pendingAckIds.length });
       commit((current) => {
         if (!sameRelayConnection(connection, connectionOf(current))) return current;
         return {
@@ -1641,9 +1922,9 @@ export function useBridge(): BridgeApi {
         };
       });
     } catch {
-      if (isCurrentPoll()) setRelayReachable(false);
+      if (isCurrentPoll()) reportReachability(false);
     }
-  }, [commit]);
+  }, [reportReachability, commit, recordAudit]);
 
   useEffect(() => {
     // Changing the active relay invalidates every in-flight request, even if a replacement happens
@@ -1727,6 +2008,7 @@ export function useBridge(): BridgeApi {
         kind: 'good',
         message: `Exported ${fallback.plan.assignments.length} assignment file(s) to ${folder}. Open each QBJ in its room's QBSheet Scorer by local handoff or USB. Do not also publish this round to the relay after a scorer opens a fallback file.`,
       });
+      recordAudit('fallback-exported', { rooms: fallback.plan.assignments.length });
       return true;
     } catch (error) {
       setNotice({
@@ -1737,7 +2019,7 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [recordAudit]);
 
   /**
    * Write one result and record where it went.
@@ -1827,6 +2109,7 @@ export function useBridge(): BridgeApi {
       try {
         await writeOne(entry, folder);
         await acknowledgeSaved(connection, [entry.resultId]);
+        recordAudit('result-saved', { resultId });
         setNotice({ kind: 'good', message: 'Result saved.' });
       } catch (error) {
         setNotice({ kind: 'bad', message: `That result was not saved. ${(error as Error).message}` });
@@ -1834,7 +2117,7 @@ export function useBridge(): BridgeApi {
         setResultSaving(resultId, false);
       }
     },
-    [acknowledgeSaved, setResultSaving, writeOne],
+    [acknowledgeSaved, setResultSaving, writeOne, recordAudit],
   );
 
   const saveNewResults = useCallback(async () => {
@@ -1868,6 +2151,8 @@ export function useBridge(): BridgeApi {
         }
       }
       await acknowledgeSaved(connection, written);
+      if (written.length > 0)
+        recordAudit('result-saved', { results: written.length, failed: failures.length });
       setNotice(
         failures.length === 0
           ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
@@ -1881,7 +2166,7 @@ export function useBridge(): BridgeApi {
       setSavingBatch(false);
       setBusy(false);
     }
-  }, [acknowledgeSaved, writeOne]);
+  }, [acknowledgeSaved, writeOne, recordAudit]);
 
   const markResultImported = useCallback(
     (resultId: string): void => {
@@ -1896,6 +2181,7 @@ export function useBridge(): BridgeApi {
           row.resultId === resultId ? { ...row, importStatus: 'imported' as const } : row,
         ),
       })).persisted;
+      recordAudit('result-import-marked', { resultId, imported: true });
       setNotice({
         kind: persisted.ok ? 'good' : 'bad',
         message: persisted.ok
@@ -1903,7 +2189,7 @@ export function useBridge(): BridgeApi {
           : 'Marked imported for this session, but QBBridge could not save that marker locally. Retry local persistence before restarting.',
       });
     },
-    [commit],
+    [commit, recordAudit],
   );
 
   const unmarkResultImported = useCallback(
@@ -1916,6 +2202,7 @@ export function useBridge(): BridgeApi {
           row.resultId === resultId ? { ...row, importStatus: 'needs-import' as const } : row,
         ),
       })).persisted;
+      recordAudit('result-import-marked', { resultId, imported: false });
       setNotice({
         kind: persisted.ok ? 'good' : 'bad',
         message: persisted.ok
@@ -1923,7 +2210,7 @@ export function useBridge(): BridgeApi {
           : 'Import marker removed for this session, but QBBridge could not save that change locally. Retry local persistence before restarting.',
       });
     },
-    [commit],
+    [commit, recordAudit],
   );
 
   const resultMatchIds = useMemo(
@@ -2087,6 +2374,17 @@ export function useBridge(): BridgeApi {
     cancelRelayChange,
     changingRelay,
     forgetRelayCredential,
+    phase,
+    auditLog,
+    pendingLiveOverride,
+    confirmLiveOverride,
+    cancelLiveOverride,
+    goLive,
+    reopenTournament,
+    reconciliation,
+    reconciliationRunning,
+    refreshReconciliation,
+    finishTournament,
     addRoom,
     renameRoom,
     removeRoom,

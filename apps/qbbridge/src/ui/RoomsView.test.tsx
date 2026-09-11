@@ -132,6 +132,17 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     savingResults: false,
     pollResults: vi.fn(async () => undefined),
     unsavedResultWarning: null,
+    phase: 'setup' as const,
+    auditLog: [],
+    pendingLiveOverride: null,
+    confirmLiveOverride: () => {},
+    cancelLiveOverride: () => {},
+    goLive: () => {},
+    reopenTournament: () => {},
+    reconciliation: null,
+    reconciliationRunning: false,
+    refreshReconciliation: async () => null,
+    finishTournament: async () => {},
   };
 }
 
