@@ -310,7 +310,7 @@ jobs:
             return $value
           }
           function Assert-Equal($actual, $expected, $what) {
-            if ($actual -cne $expected) { throw "$what: expected [$expected], got [$actual]." }
+            if ($actual -cne $expected) { throw "${what}: expected [$expected], got [$actual]." }
           }
           # Single-package defaults: Standard (all users) unless the scope dialog selects
           # Current user.
