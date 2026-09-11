@@ -256,7 +256,7 @@
       }
     },
     {
-      "name": "naqt-timed",
+      "name": "naqt-timed-ms",
       "exercises": [
         "timed",
         "tossupCount"
@@ -284,6 +284,174 @@
         "maximumTossupCount": null,
         "maximumActivePlayers": 4,
         "regulationMinutes": 18,
+        "tiebreakers": [
+          "head-to-head",
+          "record",
+          "points",
+          "margin",
+          "powers",
+          "gets",
+          "playoff"
+        ]
+      },
+      "expected": {
+        "type": "ScoringRules",
+        "id": "scoring-rules-parity",
+        "name": "Director scoring rules",
+        "teams_per_match": 2,
+        "maximum_players_per_team": 4,
+        "regulation_tossup_count": 24,
+        "maximum_regulation_tossup_count": 24,
+        "minimum_overtime_question_count": 3,
+        "overtime_includes_bonuses": false,
+        "total_divisor": 5,
+        "answer_types": [
+          {
+            "type": "AnswerType",
+            "id": "answer-power",
+            "value": 15,
+            "label": "Power",
+            "short_label": "P",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-correct",
+            "value": 10,
+            "label": "Correct",
+            "short_label": "C",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-neg",
+            "value": -5,
+            "label": "Neg",
+            "short_label": "N",
+            "awards_bonus": false
+          }
+        ],
+        "maximum_bonus_score": 30,
+        "bonus_divisor": 10,
+        "minimum_parts_per_bonus": 3,
+        "maximum_parts_per_bonus": 3,
+        "points_per_bonus_part": 10,
+        "bonuses_bounce_back": false
+      }
+    },
+    {
+      "name": "naqt-timed-hs",
+      "exercises": [
+        "timed",
+        "tossupCount"
+      ],
+      "rules": {
+        "tossupValue": 10,
+        "superpowerValue": null,
+        "powerValue": 15,
+        "negValue": -5,
+        "useBonuses": true,
+        "bonusValue": 10,
+        "tossupCount": 24,
+        "bonusParts": 3,
+        "minimumBonusParts": null,
+        "maximumBonusScore": null,
+        "bonusDivisor": null,
+        "bouncebacks": false,
+        "overtime": true,
+        "overtimeTossupCount": 3,
+        "overtimeBonuses": false,
+        "timed": true,
+        "lightning": false,
+        "lightningCountPerTeam": 1,
+        "lightningDivisor": 10,
+        "maximumTossupCount": null,
+        "maximumActivePlayers": 4,
+        "regulationMinutes": 20,
+        "tiebreakers": [
+          "head-to-head",
+          "record",
+          "points",
+          "margin",
+          "powers",
+          "gets",
+          "playoff"
+        ]
+      },
+      "expected": {
+        "type": "ScoringRules",
+        "id": "scoring-rules-parity",
+        "name": "Director scoring rules",
+        "teams_per_match": 2,
+        "maximum_players_per_team": 4,
+        "regulation_tossup_count": 24,
+        "maximum_regulation_tossup_count": 24,
+        "minimum_overtime_question_count": 3,
+        "overtime_includes_bonuses": false,
+        "total_divisor": 5,
+        "answer_types": [
+          {
+            "type": "AnswerType",
+            "id": "answer-power",
+            "value": 15,
+            "label": "Power",
+            "short_label": "P",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-correct",
+            "value": 10,
+            "label": "Correct",
+            "short_label": "C",
+            "awards_bonus": true
+          },
+          {
+            "type": "AnswerType",
+            "id": "answer-neg",
+            "value": -5,
+            "label": "Neg",
+            "short_label": "N",
+            "awards_bonus": false
+          }
+        ],
+        "maximum_bonus_score": 30,
+        "bonus_divisor": 10,
+        "minimum_parts_per_bonus": 3,
+        "maximum_parts_per_bonus": 3,
+        "points_per_bonus_part": 10,
+        "bonuses_bounce_back": false
+      }
+    },
+    {
+      "name": "naqt-timed-collegiate",
+      "exercises": [
+        "timed",
+        "tossupCount"
+      ],
+      "rules": {
+        "tossupValue": 10,
+        "superpowerValue": null,
+        "powerValue": 15,
+        "negValue": -5,
+        "useBonuses": true,
+        "bonusValue": 10,
+        "tossupCount": 24,
+        "bonusParts": 3,
+        "minimumBonusParts": null,
+        "maximumBonusScore": null,
+        "bonusDivisor": null,
+        "bouncebacks": false,
+        "overtime": true,
+        "overtimeTossupCount": 3,
+        "overtimeBonuses": false,
+        "timed": true,
+        "lightning": false,
+        "lightningCountPerTeam": 1,
+        "lightningDivisor": 10,
+        "maximumTossupCount": null,
+        "maximumActivePlayers": 4,
+        "regulationMinutes": 22,
         "tiebreakers": [
           "head-to-head",
           "record",
