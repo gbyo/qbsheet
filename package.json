@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/director",
     "apps/live-web",
+    "apps/qbbridge",
     "packages/*"
   ],
   "repository": {
@@ -49,8 +50,15 @@
     "director:tauri:dev": "npm run tauri:dev --workspace=@qbsheet/director",
     "director:tauri:build": "npm run tauri:build --workspace=@qbsheet/director",
     "director:core:test": "npm run test --workspace=@qbsheet/tournament-core",
+    "ui:test": "npm run test --workspace=@qbsheet/ui",
+    "ui:typecheck": "npm run typecheck --workspace=@qbsheet/ui",
     "director:formats:test": "npm run test --workspace=@qbsheet/tournament-formats",
     "test:browser:yellowfruit": "playwright test e2e/YellowFruitInterop.spec.ts",
+    "qbbridge:dev": "npm run dev --workspace=@qbsheet/qbbridge",
+    "qbbridge:build": "npm run build --workspace=@qbsheet/qbbridge",
+    "qbbridge:test": "npm run test --workspace=@qbsheet/qbbridge",
+    "qbbridge:tauri:dev": "npm run tauri:dev --workspace=@qbsheet/qbbridge",
+    "qbbridge:tauri:build": "npm run tauri:build --workspace=@qbsheet/qbbridge",
     "test:mutation": "stryker run",
     "test:mutation:dry": "stryker run --dryRunOnly",
     "prepare": "npm run build --workspace=@qbsheet/tournament-domain && npm run build --workspace=@qbsheet/qblive-protocol && npm run build --workspace=@qbsheet/qblive-projection && npm run build --workspace=@qbsheet/qblive-activity && npm run build --workspace=@qbsheet/qblive-conformance && npm run build --workspace=@qbsheet/qbtcp-relay-conformance && npm run build:core && npm run build --workspace=@qbsheet/tournament-core && npm run build --workspace=@qbsheet/tournament-formats",

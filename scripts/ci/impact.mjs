@@ -58,9 +58,11 @@ export const DOMAINS = [
   'scorer',
   'scorer-browser',
   'director-ui',
+  'qbbridge',
   'tournament-js',
   'qblive-js',
   'rust-director',
+  'rust-qbbridge',
   'rust-tournament-store',
   'rust-qbtcp',
 ];
@@ -71,9 +73,11 @@ export const DOMAIN_LABELS = {
   scorer: 'Scorer unit and integration tests, and the project-path build',
   'scorer-browser': 'Playwright scorer torture test',
   'director-ui': 'Director application build, unit tests, and browser UI tests',
+  qbbridge: 'QBSheet Bridge application build and tests',
   'tournament-js': 'Tournament core, formats, and domain packages',
   'qblive-js': 'QBSheet Live protocol, projection, activity, conformance, and Live Web',
   'rust-director': 'Director native crate (apps/director/src-tauri)',
+  'rust-qbbridge': 'QBSheet Bridge native crate (apps/qbbridge/src-tauri)',
   'rust-tournament-store': 'tournament-store crate',
   'rust-qbtcp': 'qbtcp-server crate',
 };
@@ -82,7 +86,15 @@ export const DOMAIN_LABELS = {
 const ALL = DOMAINS;
 
 /** Every JavaScript domain. What a change to the root manifest or the root TypeScript config means. */
-const ALL_JS = ['quality', 'scorer', 'scorer-browser', 'director-ui', 'tournament-js', 'qblive-js'];
+const ALL_JS = [
+  'quality',
+  'scorer',
+  'scorer-browser',
+  'director-ui',
+  'qbbridge',
+  'tournament-js',
+  'qblive-js',
+];
 
 const SCORER = ['scorer', 'scorer-browser'];
 
@@ -130,6 +142,11 @@ export const RULES = [
     glob: 'apps/director/src-tauri/**',
     domains: ['rust-director'],
     why: 'the Director native crate',
+  },
+  {
+    glob: 'apps/qbbridge/src-tauri/**',
+    domains: ['rust-qbbridge'],
+    why: 'the QBSheet Bridge native crate; four commands, no path dependencies',
   },
 
   // ---------------------------------------------------------------------------------------------
@@ -187,6 +204,15 @@ export const RULES = [
   // Tournament packages. Consumed by `src/director/` and `apps/director/`, and by nothing in the
   // scorer. `tournament-domain` is also a QBLive dependency, and qblive.yml lists it in its filter.
   // ---------------------------------------------------------------------------------------------
+  // --------------------------------------------------------------------------------------------
+  // The shared design system. Director and QBBridge both render from it, so a token or a
+  // primitive changing has to be checked by both.
+  // --------------------------------------------------------------------------------------------
+  {
+    glob: 'packages/ui/**',
+    domains: ['director-ui', 'qbbridge'],
+    why: 'QBSheet tokens and primitives; Director and QBBridge both build against them',
+  },
   {
     glob: 'packages/tournament-core/**',
     domains: ['tournament-js', 'director-ui'],
@@ -194,8 +220,8 @@ export const RULES = [
   },
   {
     glob: 'packages/tournament-formats/**',
-    domains: ['tournament-js', 'director-ui'],
-    why: 'consumed by src/director and apps/director',
+    domains: ['tournament-js', 'director-ui', 'qbbridge'],
+    why: 'consumed by src/director, apps/director, and apps/qbbridge',
   },
   {
     glob: 'packages/tournament-domain/**',
@@ -218,15 +244,43 @@ export const RULES = [
     domains: ['director-ui'],
     why: 'the Director Vite/Tauri shell and its frontend sources',
   },
+
+  // --------------------------------------------------------------------------------------------
+  // QBSheet Bridge. It reads a few pure modules out of `src/` — the QBJ parser, the canonical
+  // digest helpers, the QBTCP pairing-link builder, the QR encoder — so a scorer change reaches
+  // it, which the `src/**` rules below account for.
+  // --------------------------------------------------------------------------------------------
+  { glob: 'apps/qbbridge/README.md', domains: [], why: 'prose' },
+  {
+    glob: 'apps/qbbridge/**',
+    domains: ['qbbridge'],
+    why: 'the QBSheet Bridge Vite/Tauri shell and its frontend sources',
+  },
+  {
+    glob: 'src/director/relay/**',
+    domains: ['director-ui', 'qbbridge'],
+    why: 'apps/qbbridge reuses the pairing-link builder and the mirror projection from here',
+  },
+  {
+    glob: 'src/director/transfers/canonical.ts',
+    domains: ['director-ui', 'qbbridge'],
+    why: 'apps/qbbridge reuses the secret strip and the content digests',
+  },
   {
     glob: 'src/director/**',
     domains: ['director-ui'],
-    why: 'nothing outside src/director imports src/director, so the scorer cannot be affected',
+    why: 'nothing else imports the rest of src/director, so the scorer cannot be affected',
   },
   // ---------------------------------------------------------------------------------------------
   // Scorer.
   // ---------------------------------------------------------------------------------------------
-  { glob: 'src/**', domains: SCORER, why: 'scorer runtime source' },
+  {
+    // The QBJ parser, the result writer, the scoring engine, and the QR encoder are all read by
+    // QBBridge's tests, which is how they prove a room can start the game it is sent.
+    glob: 'src/**',
+    domains: [...SCORER, 'qbbridge'],
+    why: 'scorer runtime source; apps/qbbridge reads the QBJ and scoring modules',
+  },
   { glob: 'index.html', domains: SCORER, why: 'the scorer entry document' },
   {
     glob: 'game-package-creator/**',
@@ -628,10 +682,12 @@ export function lockfileProjects(base, head) {
 export const LOCKFILE_PROJECT_DOMAINS = {
   '': ALL_JS,
   'apps/director': ['director-ui'],
+  'apps/qbbridge': ['qbbridge'],
+  'packages/ui': ['director-ui', 'qbbridge'],
   'apps/live-web': ['qblive-js'],
   'packages/tournament-core': ['tournament-js', 'director-ui'],
   'packages/tournament-domain': ['tournament-js', 'director-ui'],
-  'packages/tournament-formats': ['tournament-js', 'director-ui'],
+  'packages/tournament-formats': ['tournament-js', 'director-ui', 'qbbridge'],
   'packages/qblive-protocol': ['qblive-js', 'director-ui'],
   'packages/qblive-projection': ['qblive-js', 'director-ui'],
   'packages/qblive-activity': ['qblive-js'],

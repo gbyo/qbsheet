@@ -1,0 +1,390 @@
+/*
+ * QBSheet Bridge: the layout this one utility needs, and nothing else.
+ *
+ * Every value comes from `@qbsheet/ui` tokens. QBBridge used to declare a six-variable palette of
+ * its own (`--ink`, `--paper`, `--accent`, `--good`…), which meant QBSheet had two visual
+ * vocabularies and a second place to change a grey. Controls, notices, badges, tabs and dialogs
+ * are now the shared components; what is left here is page rhythm — the title bar, the panels,
+ * the room table, the result rows.
+ *
+ * This is a desktop operational utility. No sidebar, no dashboard cards, no gradients, no
+ * glass, no animated anything.
+ */
+
+@import '@qbsheet/ui/tokens.css';
+@import '@qbsheet/ui/components.css';
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--qbs-surface-page);
+  color: var(--qbs-text);
+  font-family: var(--qbs-font-sans);
+  font-size: var(--qbs-text-body);
+  line-height: var(--qbs-leading-normal);
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------------------- Title bar */
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--qbs-space-4);
+  padding: var(--qbs-space-3) var(--qbs-space-4);
+  background: var(--qbs-surface);
+  border-bottom: 1px solid var(--qbs-border);
+}
+
+.titlebar h1 {
+  display: flex;
+  margin: 0;
+}
+
+/* 987 × 133 in the source, so the width follows from the height. */
+.titlebar .wordmark {
+  display: block;
+  height: 22px;
+  width: auto;
+}
+
+.titlebar .subtle {
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
+}
+
+.titlebar .relay-state {
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------------------------------ Page */
+
+main {
+  flex: 1;
+  padding: var(--qbs-space-4);
+}
+
+.page-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-2);
+  max-width: 1100px;
+  margin-bottom: var(--qbs-space-4);
+}
+
+section.panel {
+  background: var(--qbs-surface);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  padding: var(--qbs-space-4) var(--qbs-space-5);
+  margin-bottom: var(--qbs-space-4);
+  max-width: 960px;
+}
+
+section.panel.wide {
+  max-width: 1100px;
+}
+
+section.panel h2 {
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-meta);
+  font-weight: var(--qbs-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--qbs-text-muted);
+}
+
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--qbs-space-1) var(--qbs-space-4);
+  margin: 0;
+}
+
+dl.facts dt {
+  color: var(--qbs-text-muted);
+}
+
+dl.facts dd {
+  margin: 0;
+}
+
+/* ----------------------------------------------------------------------------------- Table */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  padding: var(--qbs-space-2);
+  border-bottom: 1px solid var(--qbs-border-subtle);
+  vertical-align: middle;
+}
+
+th {
+  font-size: var(--qbs-text-meta);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--qbs-text-muted);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+td.team-cell {
+  min-width: 190px;
+}
+
+/* -------------------------------------------------------------------------------- Controls
+   Only the inputs QBBridge still renders natively: a short round list and a room name. Both
+   are genuinely small and fixed, so a native control is the right control. */
+
+select,
+input[type='text'] {
+  font-family: inherit;
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text);
+  height: var(--qbs-control-sm);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface);
+  padding: 0 var(--qbs-space-2);
+}
+
+select:focus-visible,
+input[type='text']:focus-visible {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-color: var(--qbs-accent);
+}
+
+label {
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text-muted);
+}
+
+.row {
+  display: flex;
+  gap: var(--qbs-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.code {
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-body);
+  letter-spacing: 0.08em;
+}
+
+.muted {
+  color: var(--qbs-text-muted);
+}
+
+.faint {
+  color: var(--qbs-text-faint);
+  font-size: var(--qbs-text-meta);
+}
+
+ul.plain {
+  margin: var(--qbs-space-2) 0;
+  padding-left: var(--qbs-space-5);
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
+}
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-3);
+  max-width: 460px;
+}
+
+/* A field and the button that fills it in, aligned on the input rather than the label. */
+.field-with-action {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--qbs-space-2);
+}
+
+.field-with-action > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-with-action > .qbs-button {
+  margin-top: calc(var(--qbs-text-secondary) * var(--qbs-leading-normal) + var(--qbs-space-1));
+}
+
+/* --------------------------------------------------------------------------------------- QR */
+
+.qr {
+  width: 66px;
+  height: 66px;
+}
+
+.qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* ---------------------------------------------------------------------------------- Results */
+
+.result {
+  display: flex;
+  gap: var(--qbs-space-3);
+  align-items: baseline;
+  padding: var(--qbs-space-2) 0;
+  border-bottom: 1px solid var(--qbs-border-subtle);
+}
+
+/* ------------------------------------------------------------------------------------- Help
+   A manual, so it reads like one: a measure narrow enough to follow, headings that carry a
+   hierarchy, and commands that look like something to type. */
+
+section.panel.help {
+  max-width: 760px;
+}
+
+.help-contents ol {
+  margin: 0 0 var(--qbs-space-5);
+  padding-left: var(--qbs-space-5);
+  font-size: var(--qbs-text-secondary);
+}
+
+.help-contents a {
+  color: var(--qbs-accent);
+}
+
+.help-contents a:focus-visible {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-radius: var(--qbs-radius-sm);
+}
+
+.help-section {
+  padding-top: var(--qbs-space-5);
+  border-top: 1px solid var(--qbs-border-subtle);
+}
+
+.help-section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.help-section h3 {
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-section);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-strong);
+  /* Anchored from the contents list; keep the heading clear of the window edge on arrival. */
+  scroll-margin-top: var(--qbs-space-4);
+}
+
+.help-section h4 {
+  margin: var(--qbs-space-5) 0 var(--qbs-space-2);
+  font-size: var(--qbs-text-subhead);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text);
+}
+
+.help-section p {
+  margin: 0 0 var(--qbs-space-3);
+  color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
+}
+
+.help-section strong {
+  color: var(--qbs-text);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.help-section code {
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-secondary);
+  padding: 1px var(--qbs-space-1);
+  border-radius: var(--qbs-radius-sm);
+  background: var(--qbs-surface-sunken);
+  color: var(--qbs-text);
+  /* A long URL must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
+}
+
+.help-steps {
+  margin: 0 0 var(--qbs-space-3);
+  padding-left: var(--qbs-space-5);
+  color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
+}
+
+.help-steps li {
+  margin-bottom: var(--qbs-space-1);
+}
+
+.help-command,
+.help-flow {
+  margin: 0 0 var(--qbs-space-3);
+  padding: var(--qbs-space-3);
+  overflow-x: auto;
+  border: 1px solid var(--qbs-border-subtle);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface-sunken);
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-secondary);
+  line-height: var(--qbs-leading-snug);
+  color: var(--qbs-text);
+  /* Selectable, because the point of a command is that it gets copied. */
+  user-select: text;
+}
+
+.help-flow {
+  color: var(--qbs-text-muted);
+}
+
+/* The generate-and-copy pair on the help page. */
+.secret-generator {
+  margin: 0 0 var(--qbs-space-3);
+}
+
+.secret-generator__value {
+  flex: 1;
+  min-width: 220px;
+  font-family: var(--qbs-font-mono);
+  /* A 43-character token at body size overflows the field; this keeps it all visible. */
+  font-size: var(--qbs-text-meta);
+}
+
+.secret-generator p {
+  /* Present even when empty, so announcing a copy does not move the page under the cursor. */
+  min-height: 1.2em;
+  margin: var(--qbs-space-1) 0 0;
+}
+
+.help-faq {
+  margin: 0;
+}
+
+.help-faq dt {
+  margin-top: var(--qbs-space-3);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text);
+}
+
+.help-faq dt:first-child {
+  margin-top: 0;
+}
+
+.help-faq dd {
+  margin: var(--qbs-space-1) 0 0;
+  color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
+}

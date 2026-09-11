@@ -1,168 +1,139 @@
 /*
- * Director design tokens — the single source of truth for the application's
- * visual system.
+ * Director design tokens — now aliases onto the shared QBSheet layer.
  *
- * # Why tokens and not another set of one-off rules
+ * # What changed, and what deliberately did not
  *
- * Director used to carry dozens of special-case layout classes, each choosing
- * its own padding, its own gray, and its own 10–12px label size. The result read
- * as several admin interfaces sharing a sidebar. Every value a Director surface
- * needs now comes from here, so "what size is a section title" and "what does a
- * warning look like" have exactly one answer.
+ * These values moved to `@qbsheet/ui`'s `tokens.css`, because QBSheet grew a second desktop
+ * application and it immediately invented a six-variable palette of its own. There is now one
+ * source of truth for what QBSheet looks like, and this file points at it.
  *
- * # The `--director-*` names are the public API
+ * The `--director-*` vocabulary stays. Hundreds of rules across `controls.css`, `surfaces.css`,
+ * `tables.css`, `dialogs.css`, `shell.css` and the page files reference these names, and
+ * renaming them would be an enormous diff that changes no pixel and proves nothing. Each name
+ * below means exactly what it meant before and now resolves to the shared value.
  *
- * The older `--director-ink` / `--director-space-3` names are kept, and kept
- * meaning the same *kind* of thing, because hundreds of rules already reference
- * them. Their values changed (contrast up, spacing regularised); the vocabulary
- * did not. New concepts — the type scale, control heights, semantic status
- * triples, elevation, z-index — are added alongside rather than replacing them.
+ * Director's *structural* tokens — sidebar, rail, top bar, page gutter and maximum, panel
+ * inset — are not shared and stay here. They answer "how is Director laid out", which is
+ * Director's question and no other surface's.
  */
 
 :root {
-  /* Director is a deliberately light, high-contrast desktop application. Any
-     native control that survives in the UI must match it, so the scheme is
-     declared rather than inherited from the OS. */
+  /* The shared layer already declares this; restated so Director's own stylesheet is complete
+     when read on its own. */
   color-scheme: light;
 
-  /* ---------------------------------------------------------------- Typography
-     A desktop tournament application should look like it belongs on the
-     operator's desktop. The system UI stack does that on every platform we
-     ship, and it replaces IBM Plex Sans, whose narrow admin-table rendering was
-     a large part of the generic-console feel. */
-  --director-font-sans:
-    -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', system-ui, Roboto,
-    'Helvetica Neue', Arial, 'Noto Sans', sans-serif;
-  --director-font-mono:
-    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  /* --------------------------------------------------------------- Typography */
+  --director-font-sans: var(--qbs-font-sans);
+  --director-font-mono: var(--qbs-font-mono);
 
-  /* One restrained scale. Six levels, each with a job, and nothing
-     operationally important below 13px.
-       display   – the startup screen only
-       title     – page H1
-       section   – panel and section headings
-       subhead   – sub-section headings, dialog section labels
-       body      – body copy, controls, table cells
-       secondary – supporting copy that must still read cleanly
-       meta      – table headers, timestamps, counts, badges
-       micro     – keycaps and dense numeric chrome only */
-  --director-text-display: 28px;
-  --director-text-title: 22px;
-  --director-text-section: 16px;
-  --director-text-subhead: 14px;
-  --director-text-body: 14px;
-  --director-text-secondary: 13px;
-  --director-text-meta: 12px;
-  --director-text-micro: 11px;
+  --director-text-display: var(--qbs-text-display);
+  --director-text-title: var(--qbs-text-title);
+  --director-text-section: var(--qbs-text-section);
+  --director-text-subhead: var(--qbs-text-subhead);
+  --director-text-body: var(--qbs-text-body);
+  --director-text-secondary: var(--qbs-text-secondary);
+  --director-text-meta: var(--qbs-text-meta);
+  --director-text-micro: var(--qbs-text-micro);
 
-  --director-leading-tight: 1.25;
-  --director-leading-snug: 1.4;
-  --director-leading-normal: 1.5;
-  --director-leading-relaxed: 1.6;
+  --director-leading-tight: var(--qbs-leading-tight);
+  --director-leading-snug: var(--qbs-leading-snug);
+  --director-leading-normal: var(--qbs-leading-normal);
+  --director-leading-relaxed: var(--qbs-leading-relaxed);
 
-  --director-weight-regular: 400;
-  --director-weight-medium: 500;
-  --director-weight-semibold: 600;
-  --director-weight-bold: 700;
+  --director-weight-regular: var(--qbs-weight-regular);
+  --director-weight-medium: var(--qbs-weight-medium);
+  --director-weight-semibold: var(--qbs-weight-semibold);
+  --director-weight-bold: var(--qbs-weight-bold);
 
   /* -------------------------------------------------------------------- Colour
-     Ink levels are a hierarchy, not a palette: primary carries the information,
-     secondary supports it, meta timestamps it. `faint` is deliberately only one
-     step below `muted` now — operational information used to disappear into it. */
-  --director-ink: #16212c;
-  --director-ink-strong: #0d1620;
-  --director-muted: #4f5d6a;
-  --director-faint: #667585;
-  --director-on-accent: #ffffff;
+     Director's ink names map onto the shared hierarchy: `ink` carries the
+     information, `muted` supports it, `faint` timestamps it. */
+  --director-ink: var(--qbs-text);
+  --director-ink-strong: var(--qbs-text-strong);
+  --director-muted: var(--qbs-text-muted);
+  --director-faint: var(--qbs-text-faint);
+  --director-on-accent: var(--qbs-text-on-accent);
 
-  --director-page: #f4f6f8;
-  --director-surface: #ffffff;
-  --director-surface-soft: #f7f9fa;
-  --director-surface-sunken: #eef1f4;
-  --director-surface-raised: #ffffff;
-  --director-surface-selected: #e8f1f8;
-  --director-surface-hover: #f0f3f5;
+  --director-page: var(--qbs-surface-page);
+  --director-surface: var(--qbs-surface);
+  --director-surface-soft: var(--qbs-surface-soft);
+  --director-surface-sunken: var(--qbs-surface-sunken);
+  --director-surface-raised: var(--qbs-surface-raised);
+  --director-surface-selected: var(--qbs-surface-selected);
+  --director-surface-hover: var(--qbs-surface-hover);
 
-  --director-border-subtle: #e7eaee;
-  --director-border: #d6dce2;
-  --director-border-strong: #b9c2cb;
+  --director-border-subtle: var(--qbs-border-subtle);
+  --director-border: var(--qbs-border);
+  --director-border-strong: var(--qbs-border-strong);
 
-  --director-accent: #125f95;
-  --director-accent-hover: #0e4d79;
-  --director-accent-active: #0a3d61;
-  --director-accent-soft: #e9f2f9;
-  --director-accent-border: #a8c9de;
+  --director-accent: var(--qbs-accent);
+  --director-accent-hover: var(--qbs-accent-hover);
+  --director-accent-active: var(--qbs-accent-active);
+  --director-accent-soft: var(--qbs-accent-soft);
+  --director-accent-border: var(--qbs-accent-border);
 
-  /* ------------------------------------------------------------ Status colours
-     Five tones, each a complete triple (text / tint / border) plus a solid fill
-     for the rare case that needs one. Every status surface in Director — badge,
-     dot, callout, toned panel, table row — draws from these and nothing else. */
-  --director-neutral-fg: #4f5d6a;
-  --director-neutral-bg: #eef1f4;
-  --director-neutral-border: #d6dce2;
+  /* ------------------------------------------------------------ Status colours */
+  --director-neutral-fg: var(--qbs-neutral-fg);
+  --director-neutral-bg: var(--qbs-neutral-bg);
+  --director-neutral-border: var(--qbs-neutral-border);
 
-  --director-info-fg: #125f95;
-  --director-info-bg: #e9f2f9;
-  --director-info-border: #a8c9de;
-  --director-info-solid: #125f95;
+  --director-info-fg: var(--qbs-info-fg);
+  --director-info-bg: var(--qbs-info-bg);
+  --director-info-border: var(--qbs-info-border);
+  --director-info-solid: var(--qbs-info-solid);
 
-  --director-success-fg: #1f6144;
-  --director-success-bg: #e8f4ed;
-  --director-success-border: #a6ceb8;
-  --director-success-solid: #1f6144;
+  --director-success-fg: var(--qbs-success-fg);
+  --director-success-bg: var(--qbs-success-bg);
+  --director-success-border: var(--qbs-success-border);
+  --director-success-solid: var(--qbs-success-solid);
 
-  --director-warning-fg: #7d4f0c;
-  --director-warning-bg: #fdf3e2;
-  --director-warning-border: #e3c48c;
-  --director-warning-solid: #9a641b;
+  --director-warning-fg: var(--qbs-warning-fg);
+  --director-warning-bg: var(--qbs-warning-bg);
+  --director-warning-border: var(--qbs-warning-border);
+  --director-warning-solid: var(--qbs-warning-solid);
 
-  --director-danger-fg: #8f342a;
-  --director-danger-bg: #fceeec;
-  --director-danger-border: #e0b0aa;
-  --director-danger-solid: #a03a2e;
-  --director-danger-hover: #8a3025;
+  --director-danger-fg: var(--qbs-danger-fg);
+  --director-danger-bg: var(--qbs-danger-bg);
+  --director-danger-border: var(--qbs-danger-border);
+  --director-danger-solid: var(--qbs-danger-solid);
+  --director-danger-hover: var(--qbs-danger-hover);
 
   /* Compatibility aliases for the older colour names. */
-  --director-green: var(--director-success-fg);
-  --director-green-soft: var(--director-success-bg);
-  --director-amber: var(--director-warning-fg);
-  --director-amber-soft: var(--director-warning-bg);
-  --director-red: var(--director-danger-fg);
-  --director-red-soft: var(--director-danger-bg);
+  --director-green: var(--qbs-success-fg);
+  --director-green-soft: var(--qbs-success-bg);
+  --director-amber: var(--qbs-warning-fg);
+  --director-amber-soft: var(--qbs-warning-bg);
+  --director-red: var(--qbs-danger-fg);
+  --director-red-soft: var(--qbs-danger-bg);
 
-  /* ------------------------------------------------------------------- Spacing
-     A 4px rhythm. `--director-space-5` was 18px, which broke the scale and is
-     why so many surfaces needed a bespoke margin; it is 20px now. */
-  --director-space-1: 4px;
-  --director-space-2: 8px;
-  --director-space-3: 12px;
-  --director-space-4: 16px;
-  --director-space-5: 20px;
-  --director-space-6: 24px;
-  --director-space-7: 32px;
-  --director-space-8: 40px;
+  /* ------------------------------------------------------------------- Spacing */
+  --director-space-1: var(--qbs-space-1);
+  --director-space-2: var(--qbs-space-2);
+  --director-space-3: var(--qbs-space-3);
+  --director-space-4: var(--qbs-space-4);
+  --director-space-5: var(--qbs-space-5);
+  --director-space-6: var(--qbs-space-6);
+  --director-space-7: var(--qbs-space-7);
+  --director-space-8: var(--qbs-space-8);
 
   /* -------------------------------------------------------------------- Radii */
-  --director-radius-sm: 4px;
-  --director-radius: 6px;
-  --director-radius-lg: 10px;
-  --director-radius-pill: 999px;
+  --director-radius-sm: var(--qbs-radius-sm);
+  --director-radius: var(--qbs-radius);
+  --director-radius-lg: var(--qbs-radius-lg);
+  --director-radius-pill: var(--qbs-radius-pill);
 
-  /* ----------------------------------------------------------- Control metrics
-     30–34px buttons with 10–12px labels were cramped for an application people
-     drive all day. The default control is 36px tall with 14px text; `sm` is for
-     genuinely dense table rows and is still 32px. */
-  --director-control-sm: 32px;
-  --director-control-md: 36px;
-  --director-control-lg: 42px;
-  --director-control-pad-sm: 0 10px;
-  --director-control-pad-md: 0 14px;
-  --director-control-pad-lg: 0 20px;
-  /* The smallest square an icon-only control may be, so pointer targets stay
-     comfortable even where the visual chrome is quiet. */
-  --director-target-min: 32px;
+  /* ----------------------------------------------------------- Control metrics */
+  --director-control-sm: var(--qbs-control-sm);
+  --director-control-md: var(--qbs-control-md);
+  --director-control-lg: var(--qbs-control-lg);
+  --director-control-pad-sm: var(--qbs-control-pad-sm);
+  --director-control-pad-md: var(--qbs-control-pad-md);
+  --director-control-pad-lg: var(--qbs-control-pad-lg);
+  --director-target-min: var(--qbs-target-min);
 
-  /* ------------------------------------------------------------------- Layout */
+  /* ------------------------------------------------------------------- Layout
+     Director's own. A sidebar width is not a QBSheet-wide value: QBBridge has
+     no sidebar, and the next surface may not either. */
   --director-sidebar: 248px;
   --director-sidebar-rail: 64px;
   --director-topbar-height: 52px;
@@ -171,40 +142,32 @@
   --director-panel-inset: 20px;
 
   /* ---------------------------------------------------------------- Elevation */
-  --director-shadow-sm: 0 1px 2px rgb(16 33 46 / 6%);
-  --director-shadow-menu: 0 6px 20px rgb(16 33 46 / 14%), 0 1px 3px rgb(16 33 46 / 10%);
-  --director-shadow-modal: 0 18px 48px rgb(16 33 46 / 22%);
+  --director-shadow-sm: var(--qbs-shadow-sm);
+  --director-shadow-menu: var(--qbs-shadow-menu);
+  --director-shadow-modal: var(--qbs-shadow-modal);
 
-  /* ----------------------------------------------------------------- Focus
-     One ring, everywhere, including inside custom controls that draw their own
-     chrome. Nothing in Director removes an outline without setting this. */
-  --director-focus-ring: 0 0 0 2px var(--director-surface), 0 0 0 4px rgb(18 95 149 / 45%);
-  --director-focus-outline: 2px solid var(--director-accent);
-  --director-focus-offset: 2px;
+  /* ----------------------------------------------------------------- Focus */
+  --director-focus-ring: var(--qbs-focus-ring);
+  --director-focus-outline: var(--qbs-focus-outline);
+  --director-focus-offset: var(--qbs-focus-offset);
 
-  /* --------------------------------------------------------------- Z-index
-     Named so overlays cannot fight: menus sit above sticky table headers,
-     modals above menus, toasts above everything. */
-  --director-z-sticky: 20;
-  --director-z-dropdown: 60;
-  --director-z-overlay: 100;
-  --director-z-modal: 110;
-  --director-z-toast: 200;
+  /* --------------------------------------------------------------- Z-index */
+  --director-z-sticky: var(--qbs-z-sticky);
+  --director-z-dropdown: var(--qbs-z-dropdown);
+  --director-z-overlay: var(--qbs-z-overlay);
+  --director-z-modal: var(--qbs-z-modal);
+  --director-z-toast: var(--qbs-z-toast);
 
-  /* --------------------------------------------------------------- Motion
-     Short, functional, and switched off wholesale under
-     `prefers-reduced-motion`. */
-  --director-duration-fast: 90ms;
-  --director-duration: 140ms;
-  --director-ease: cubic-bezier(0.2, 0, 0.2, 1);
+  /* --------------------------------------------------------------- Motion */
+  --director-duration-fast: var(--qbs-duration-fast);
+  --director-duration: var(--qbs-duration);
+  --director-ease: var(--qbs-ease);
 }
 
+/* The shared layer zeroes `--qbs-duration*` and stops animations wholesale; these aliases
+   follow it. The element rules are repeated so Director's stylesheet still honours the
+   preference if it is ever loaded without the shared layer. */
 @media (prefers-reduced-motion: reduce) {
-  :root {
-    --director-duration-fast: 0ms;
-    --director-duration: 0ms;
-  }
-
   *,
   *::before,
   *::after {

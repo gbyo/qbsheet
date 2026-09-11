@@ -1,0 +1,486 @@
+/*
+ * QBSheet component styling.
+ *
+ * Every value here is a token from `tokens.css`. No literal colour, no literal spacing, no
+ * imported theme — the React Aria packages supply behaviour and the `data-*` state attributes
+ * below, and nothing else.
+ *
+ * The state hooks are React Aria's: `[data-hovered]`, `[data-pressed]`, `[data-focus-visible]`,
+ * `[data-disabled]`, `[data-selected]`, `[data-entering]`. Styling those rather than `:hover`
+ * and `:focus` is what makes a keyboard press and a pointer press look the same, and what keeps
+ * a focus ring off an element somebody merely clicked.
+ */
+
+/* ---------------------------------------------------------------------------------- Button */
+
+.qbs-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--qbs-space-2);
+  box-sizing: border-box;
+  height: var(--qbs-control-md);
+  min-width: var(--qbs-target-min);
+  padding: var(--qbs-control-pad-md);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface);
+  color: var(--qbs-text);
+  font-family: inherit;
+  font-size: var(--qbs-text-body);
+  font-weight: var(--qbs-weight-medium);
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--qbs-duration-fast) var(--qbs-ease),
+    border-color var(--qbs-duration-fast) var(--qbs-ease);
+}
+
+.qbs-button--sm {
+  height: var(--qbs-control-sm);
+  padding: var(--qbs-control-pad-sm);
+  font-size: var(--qbs-text-secondary);
+}
+
+.qbs-button[data-hovered] {
+  background: var(--qbs-surface-hover);
+  border-color: var(--qbs-border-strong);
+}
+
+.qbs-button[data-pressed] {
+  background: var(--qbs-surface-sunken);
+}
+
+/* One ring, and only for keyboard focus. */
+.qbs-button[data-focus-visible] {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+}
+
+.qbs-button[data-disabled] {
+  background: var(--qbs-surface-sunken);
+  border-color: var(--qbs-border-subtle);
+  color: var(--qbs-text-faint);
+  cursor: not-allowed;
+}
+
+.qbs-button--primary {
+  background: var(--qbs-accent);
+  border-color: var(--qbs-accent);
+  color: var(--qbs-text-on-accent);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.qbs-button--primary[data-hovered] {
+  background: var(--qbs-accent-hover);
+  border-color: var(--qbs-accent-hover);
+}
+
+.qbs-button--primary[data-pressed] {
+  background: var(--qbs-accent-active);
+  border-color: var(--qbs-accent-active);
+}
+
+.qbs-button--primary[data-disabled] {
+  background: var(--qbs-surface-sunken);
+  border-color: var(--qbs-border-subtle);
+  color: var(--qbs-text-faint);
+}
+
+.qbs-button--quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--qbs-text-muted);
+}
+
+.qbs-button--quiet[data-hovered] {
+  background: var(--qbs-surface-hover);
+  border-color: var(--qbs-border-subtle);
+  color: var(--qbs-text);
+}
+
+.qbs-button--danger {
+  background: var(--qbs-danger-solid);
+  border-color: var(--qbs-danger-solid);
+  color: var(--qbs-text-on-accent);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.qbs-button--danger[data-hovered] {
+  background: var(--qbs-danger-hover);
+  border-color: var(--qbs-danger-hover);
+}
+
+.qbs-button--danger[data-disabled] {
+  background: var(--qbs-surface-sunken);
+  border-color: var(--qbs-border-subtle);
+  color: var(--qbs-text-faint);
+}
+
+/* ---------------------------------------------------------------------------------- Notice */
+
+.qbs-notice {
+  display: flex;
+  gap: var(--qbs-space-2);
+  padding: var(--qbs-space-2) var(--qbs-space-3);
+  border: 1px solid var(--qbs-neutral-border);
+  border-left-width: 3px;
+  border-radius: var(--qbs-radius-sm);
+  background: var(--qbs-neutral-bg);
+  color: var(--qbs-text);
+  font-size: var(--qbs-text-secondary);
+  line-height: var(--qbs-leading-snug);
+}
+
+.qbs-notice__label {
+  flex: none;
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.qbs-notice--info {
+  border-color: var(--qbs-info-border);
+  background: var(--qbs-info-bg);
+}
+
+.qbs-notice--info .qbs-notice__label {
+  color: var(--qbs-info-fg);
+}
+
+.qbs-notice--success {
+  border-color: var(--qbs-success-border);
+  background: var(--qbs-success-bg);
+}
+
+.qbs-notice--success .qbs-notice__label {
+  color: var(--qbs-success-fg);
+}
+
+.qbs-notice--warning {
+  border-color: var(--qbs-warning-border);
+  background: var(--qbs-warning-bg);
+}
+
+.qbs-notice--warning .qbs-notice__label {
+  color: var(--qbs-warning-fg);
+}
+
+.qbs-notice--danger {
+  border-color: var(--qbs-danger-border);
+  background: var(--qbs-danger-bg);
+}
+
+.qbs-notice--danger .qbs-notice__label {
+  color: var(--qbs-danger-fg);
+}
+
+/* ----------------------------------------------------------------------------- StatusBadge */
+
+.qbs-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--qbs-space-2);
+  font-size: var(--qbs-text-meta);
+  font-weight: var(--qbs-weight-medium);
+  color: var(--qbs-neutral-fg);
+  white-space: nowrap;
+}
+
+.qbs-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--qbs-radius-pill);
+  background: currentcolor;
+  flex: none;
+}
+
+.qbs-badge--info {
+  color: var(--qbs-info-fg);
+}
+
+.qbs-badge--success {
+  color: var(--qbs-success-fg);
+}
+
+.qbs-badge--warning {
+  color: var(--qbs-warning-fg);
+}
+
+.qbs-badge--danger {
+  color: var(--qbs-danger-fg);
+}
+
+/* ------------------------------------------------------------------------------------ Tabs */
+
+.qbs-tabs__list {
+  display: flex;
+  gap: var(--qbs-space-1);
+  padding: 0 var(--qbs-space-3);
+  background: var(--qbs-surface);
+  border-bottom: 1px solid var(--qbs-border);
+}
+
+.qbs-tabs__tab {
+  padding: var(--qbs-space-2) var(--qbs-space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-body);
+  cursor: pointer;
+  /* React Aria puts the tab in the tab order itself; this only removes the UA outline in
+     favour of the shared one below. */
+  outline: none;
+}
+
+.qbs-tabs__tab[data-hovered] {
+  color: var(--qbs-text);
+}
+
+.qbs-tabs__tab[data-selected] {
+  color: var(--qbs-text);
+  border-bottom-color: var(--qbs-accent);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.qbs-tabs__tab[data-focus-visible] {
+  outline: var(--qbs-focus-outline);
+  outline-offset: calc(var(--qbs-focus-offset) * -1);
+  border-radius: var(--qbs-radius-sm);
+}
+
+.qbs-tabs__tab[data-disabled] {
+  color: var(--qbs-text-faint);
+  cursor: not-allowed;
+}
+
+.qbs-tabs__panel {
+  outline: none;
+}
+
+.qbs-tabs__panel[data-focus-visible] {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+}
+
+/* ---------------------------------------------------------------------------------- Dialog */
+
+.qbs-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--qbs-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--qbs-space-6);
+  background: rgb(16 33 46 / 38%);
+}
+
+.qbs-modal {
+  width: 100%;
+  max-width: 460px;
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius-lg);
+  background: var(--qbs-surface-raised);
+  box-shadow: var(--qbs-shadow-modal);
+}
+
+.qbs-dialog {
+  padding: var(--qbs-space-5);
+  outline: none;
+}
+
+.qbs-dialog__title {
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-section);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-strong);
+}
+
+.qbs-dialog__body {
+  margin-bottom: var(--qbs-space-5);
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-body);
+  line-height: var(--qbs-leading-normal);
+}
+
+.qbs-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--qbs-space-2);
+}
+
+/* ------------------------------------------------------------------------------- TextField */
+
+.qbs-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-1);
+}
+
+.qbs-field__label {
+  font-size: var(--qbs-text-secondary);
+  font-weight: var(--qbs-weight-medium);
+  color: var(--qbs-text-muted);
+}
+
+.qbs-field__input {
+  box-sizing: border-box;
+  height: var(--qbs-control-md);
+  padding: 0 var(--qbs-space-3);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface);
+  color: var(--qbs-text);
+  font-family: inherit;
+  font-size: var(--qbs-text-body);
+}
+
+.qbs-field__input[data-focused] {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-color: var(--qbs-accent);
+}
+
+.qbs-field__input[data-invalid] {
+  border-color: var(--qbs-danger-border);
+}
+
+.qbs-field__input[data-disabled] {
+  background: var(--qbs-surface-sunken);
+  color: var(--qbs-text-faint);
+}
+
+.qbs-field__hint {
+  font-size: var(--qbs-text-meta);
+  color: var(--qbs-text-faint);
+}
+
+.qbs-field__error {
+  font-size: var(--qbs-text-meta);
+  color: var(--qbs-danger-fg);
+}
+
+/* -------------------------------------------------------------------------------- ComboBox */
+
+.qbs-combobox {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qbs-combobox__control {
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  height: var(--qbs-control-sm);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface);
+}
+
+.qbs-combobox__control:focus-within {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-color: var(--qbs-accent);
+}
+
+.qbs-combobox__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--qbs-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--qbs-text);
+  font-family: inherit;
+  font-size: var(--qbs-text-secondary);
+  outline: none;
+}
+
+.qbs-combobox__clear,
+.qbs-combobox__trigger {
+  flex: none;
+  width: 22px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--qbs-text-faint);
+  font-size: var(--qbs-text-secondary);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.qbs-combobox__clear[data-hovered],
+.qbs-combobox__trigger[data-hovered] {
+  color: var(--qbs-text);
+}
+
+.qbs-combobox__clear[data-focus-visible],
+.qbs-combobox__trigger[data-focus-visible] {
+  outline: var(--qbs-focus-outline);
+  outline-offset: calc(var(--qbs-focus-offset) * -1);
+}
+
+.qbs-combobox__popover {
+  width: var(--trigger-width);
+  min-width: 200px;
+  max-height: 320px;
+  overflow: auto;
+  z-index: var(--qbs-z-dropdown);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface-raised);
+  box-shadow: var(--qbs-shadow-menu);
+}
+
+.qbs-listbox {
+  padding: var(--qbs-space-1);
+  outline: none;
+}
+
+.qbs-listbox__item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--qbs-space-3);
+  padding: var(--qbs-space-2) var(--qbs-space-2);
+  border-radius: var(--qbs-radius-sm);
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text);
+  cursor: pointer;
+  outline: none;
+}
+
+.qbs-listbox__item[data-focused],
+.qbs-listbox__item[data-hovered] {
+  background: var(--qbs-surface-hover);
+}
+
+.qbs-listbox__item[data-selected] {
+  background: var(--qbs-surface-selected);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.qbs-listbox__detail {
+  color: var(--qbs-text-faint);
+  font-size: var(--qbs-text-meta);
+}
+
+.qbs-listbox__empty {
+  padding: var(--qbs-space-2);
+  color: var(--qbs-text-faint);
+  font-size: var(--qbs-text-secondary);
+}
+
+/* --------------------------------------------------------------------------------- Utility */
+
+.qbs-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

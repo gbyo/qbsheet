@@ -1,0 +1,712 @@
+/**
+ * A morning, end to end, with the Tauri bridge faked at the boundary.
+ *
+ * Faking `__TAURI_INTERNALS__.invoke` rather than the four wrapper functions is deliberate: it
+ * exercises the command names and argument shapes the Rust side actually declares, so a rename on
+ * one side of that boundary fails here instead of on a laptop at a tournament.
+ */
+
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { resetNativeHost } from './native';
+import { loadState, storageKey } from './persistence';
+import { resultFileSuffix } from './results';
+import { scoredResultDocument } from '../tests/scoredResult';
+import { yftFixtureText } from '../tests/fixture';
+import { useBridge } from './useBridge';
+
+interface InvokeCall {
+  command: string;
+  args: Record<string, unknown>;
+}
+
+const relayBase = 'https://qbtcp-relay-test.workers.dev';
+const relayTournament = 'bcdfghjkmnpqrstvwxyz2345';
+
+let calls: InvokeCall[] = [];
+let relayResults: { result_id: string; room_id: string; received_at: string; qbj: unknown }[] = [];
+let writtenFiles: { directory: string; fileName: string; contents: string; overwrite: boolean }[] = [];
+/** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
+let existingPaths = new Set<string>();
+/** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
+let claimFails = false;
+
+function installFakeTauri(): void {
+  calls = [];
+  writtenFiles = [];
+  const invoke = async (command: string, args: Record<string, unknown> = {}) => {
+    calls.push({ command, args });
+    switch (command) {
+      case 'open_yellowfruit_file':
+        return { path: '/tournaments/spring.yft', contents: yftFixtureText() };
+      case 'choose_result_folder':
+        return '/tournaments/results';
+      case 'write_result_file': {
+        const path = `${String(args.directory)}/${String(args.fileName)}`;
+        // The real command opens with `create_new` unless told to overwrite.
+        if (existingPaths.has(path) && args.overwrite !== true) {
+          throw new Error(`${String(args.fileName)} already exists in that folder`);
+        }
+        existingPaths.add(path);
+        writtenFiles.push(args as unknown as (typeof writtenFiles)[number]);
+        return path;
+      }
+      case 'relay_request': {
+        const url = String(args.url);
+        if (url.endsWith('/manage/claim')) {
+          if (claimFails) {
+            return {
+              status: 403,
+              body: JSON.stringify({
+                code: 'forbidden',
+                message: 'This relay has already been claimed.',
+              }),
+            };
+          }
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              managementToken: 'management-secret',
+            }),
+          };
+        }
+        if (url.endsWith('/acks')) {
+          return { status: 200, body: JSON.stringify({ acked_results: 1 }) };
+        }
+        if (url.endsWith('/mirror')) return { status: 200, body: '{}' };
+        if (url.includes('/results')) {
+          return { status: 200, body: JSON.stringify({ results: relayResults }) };
+        }
+        return { status: 404, body: '{}' };
+      }
+      default:
+        throw new Error(`unexpected command ${command}`);
+    }
+  };
+  Object.defineProperty(globalThis, '__TAURI_INTERNALS__', { value: { invoke }, configurable: true });
+  resetNativeHost();
+}
+
+beforeEach(() => {
+  relayResults = [];
+  existingPaths = new Set();
+  claimFails = false;
+  installFakeTauri();
+});
+
+afterEach(() => {
+  Reflect.deleteProperty(globalThis as Record<string, unknown>, '__TAURI_INTERNALS__');
+  resetNativeHost();
+  vi.restoreAllMocks();
+});
+
+async function setUpTournament() {
+  const rendered = renderHook(() => useBridge());
+  await act(async () => {
+    await rendered.result.current.loadFile();
+  });
+  await act(async () => {
+    await rendered.result.current.connectRelay({
+      baseUrl: relayBase,
+      tournamentId: relayTournament,
+      setupToken: 'one-time',
+    });
+  });
+  act(() => {
+    rendered.result.current.addRoom();
+    rendered.result.current.addRoom();
+  });
+  const [first, second] = rendered.result.current.state.rooms;
+  act(() => {
+    rendered.result.current.renameRoom(first.id, 'Room 101');
+    rendered.result.current.renameRoom(second.id, 'Room 102');
+  });
+  await setUpRound(rendered, 3);
+  return rendered;
+}
+
+/** Choose the round first: selecting one clears every room's teams, deliberately. */
+async function setUpRound(rendered: Awaited<ReturnType<typeof setUpTournament>>, index: number) {
+  const round = rendered.result.current.tournament?.rounds[index];
+  act(() => {
+    rendered.result.current.selectRound(round!.id);
+  });
+  const [first, second] = rendered.result.current.state.rooms;
+  act(() => {
+    rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Cony');
+    rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
+    rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Wells');
+    rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
+  });
+}
+
+describe('a round, published and returned', () => {
+  test('the native commands are called with the arguments the Rust side declares', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    expect(calls.map((call) => call.command)).toContain('open_yellowfruit_file');
+    const mirror = calls.find(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+    expect(mirror).toBeTruthy();
+    expect(mirror?.args).toMatchObject({ method: 'PUT', bearer: 'management-secret' });
+    // The body crosses the bridge as a JSON string, which is what `relay_request` takes.
+    expect(typeof mirror?.args.body).toBe('string');
+    const body = JSON.parse(String(mirror?.args.body)) as { revision: number; rooms: unknown[] };
+    expect(body.revision).toBe(1);
+    expect(body.rooms).toHaveLength(2);
+
+    expect(rendered.result.current.notice?.kind).toBe('good');
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+    expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId !== null)).toBe(true);
+    expect(rendered.result.current.state.rooms.map((room) => bridgeStatus(rendered, room.id))).toEqual([
+      'waiting',
+      'waiting',
+    ]);
+  });
+
+  test('the next round keeps each room, its code and its identity, and advances the revision', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const afterFirst = rendered.result.current.state.rooms.map((room) => ({
+      id: room.id,
+      code: room.pairingCode,
+      matchId: room.publishedMatchId,
+    }));
+
+    await setUpRound(rendered, 4);
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    const afterSecond = rendered.result.current.state.rooms;
+    expect(afterSecond.map((room) => room.id)).toEqual(afterFirst.map((entry) => entry.id));
+    expect(afterSecond.map((room) => room.pairingCode)).toEqual(afterFirst.map((entry) => entry.code));
+    expect(afterSecond.map((room) => room.publishedMatchId)).not.toEqual(
+      afterFirst.map((entry) => entry.matchId),
+    );
+    expect(afterSecond.map((room) => room.assignmentRevision)).toEqual([2, 2]);
+    expect(rendered.result.current.state.relay?.revision).toBe(2);
+  });
+
+  test('a failed publish says the rooms were not updated and moves nothing', async () => {
+    const rendered = await setUpTournament();
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      value: {
+        invoke: async (command: string) => {
+          if (command === 'relay_request') throw new Error('relay_unreachable');
+          throw new Error(command);
+        },
+      },
+      configurable: true,
+    });
+    resetNativeHost();
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/still have whatever they had before/);
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+    expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId === null)).toBe(true);
+  });
+});
+
+describe('results', () => {
+  test('the same result on many polls is one result; two results are two', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.pollResults();
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+
+    relayResults = [
+      ...relayResults,
+      { result_id: 'res-2', room_id: 'room-2', received_at: '2026-09-10T15:10:00Z', qbj: document },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1', 'res-2']);
+  });
+
+  test('a room shows its result once the matching game comes back', async () => {
+    const { result: document, matchId } = scoredResultDocument();
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    // The scorer's document carries the match id QBBridge published for Room 101.
+    expect(rendered.result.current.state.rooms[0].publishedMatchId).toBe(matchId);
+
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(bridgeStatus(rendered, rendered.result.current.state.rooms[0].id)).toBe('result-received');
+    expect(bridgeStatus(rendered, rendered.result.current.state.rooms[1].id)).toBe('waiting');
+  });
+
+  test('saving writes one untouched file per result and marks only what was written', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    expect(writtenFiles).toHaveLength(1);
+    expect(writtenFiles[0].directory).toBe('/tournaments/results');
+    expect(writtenFiles[0].fileName).toBe('R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj');
+    // A first save must not be allowed to land on a file that is already in the folder.
+    expect(writtenFiles[0].overwrite).toBe(false);
+    expect(JSON.parse(writtenFiles[0].contents)).toEqual(JSON.parse(JSON.stringify(document)));
+    expect(rendered.result.current.state.results[0].savedPath).toBe(
+      '/tournaments/results/R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj',
+    );
+
+    // Already saved: a second pass writes nothing rather than duplicating the file.
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(writtenFiles).toHaveLength(1);
+  });
+
+  test('a write that fails leaves that result unsaved and says so', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
+      value: {
+        invoke: async (command: string) => {
+          if (command === 'write_result_file') throw new Error('That results folder no longer exists.');
+          return { status: 200, body: JSON.stringify({ results: relayResults }) };
+        },
+      },
+      configurable: true,
+    });
+    resetNativeHost();
+
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/no longer exists/);
+  });
+});
+
+describe('persistence', () => {
+  test('a restart keeps the relay, the rooms, the codes, the round and the results', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    const before = rendered.result.current.state;
+    rendered.unmount();
+
+    // A new window over the same storage: this is what reopening the application does.
+    const restarted = renderHook(() => useBridge());
+    const after = restarted.result.current.state;
+
+    expect(after.relay).toEqual(before.relay);
+    expect(after.relay?.revision).toBe(1);
+    expect(after.rooms).toEqual(before.rooms);
+    expect(after.rooms.map((room) => room.pairingCode)).toEqual(before.rooms.map((room) => room.pairingCode));
+    expect(after.selectedRoundId).toBe(before.selectedRoundId);
+    expect(after.resultFolder).toBe('/tournaments/results');
+    expect(after.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+    expect(after.results[0].savedPath).toBeTruthy();
+    expect(after.yftPath).toBe('/tournaments/spring.yft');
+
+    // The next publish continues from the accepted revision rather than restarting at one, which
+    // is what a stale-mirror refusal would otherwise be made of.
+    await act(async () => {
+      await restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      await restarted.result.current.publish();
+    });
+    await waitFor(() => expect(restarted.result.current.state.relay?.revision).toBe(2));
+  });
+
+  test('unreadable stored state starts clean rather than half-understood', () => {
+    globalThis.localStorage.setItem(storageKey, '{ not json');
+    expect(loadState()).toEqual({
+      version: 1,
+      relay: null,
+      yftPath: null,
+      tournamentName: null,
+      rooms: [],
+      selectedRoundId: null,
+      resultFolder: null,
+      results: [],
+    });
+  });
+});
+
+function bridgeStatus(
+  rendered: { result: { current: ReturnType<typeof useBridge> } },
+  roomId: string,
+): string {
+  const room = rendered.result.current.state.rooms.find((entry) => entry.id === roomId);
+  if (!room) throw new Error(`no room ${roomId}`);
+  return rendered.result.current.roomStatus(room);
+}
+
+/**
+ * Changing rounds.
+ *
+ * The mistake this prevents is the cheapest one on the screen to make: choose round 5, leave
+ * round 4's dropdowns as they are, and press Publish. The rooms would receive real, correctly
+ * formatted round 5 assignments for round 4's matchups, score them, and YellowFruit would import
+ * them without a word of complaint.
+ */
+describe('changing the round', () => {
+  test('clears the team selections and keeps everything else about the room', async () => {
+    const rendered = await setUpTournament();
+    const before = rendered.result.current.state.rooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      code: room.pairingCode,
+    }));
+    expect(rendered.result.current.state.rooms[0].leftTeamId).toBe('Team_Cony');
+    expect(rendered.result.current.roundChangeDiscardsSelections).toBe(true);
+
+    const nextRound = rendered.result.current.tournament!.rounds[4];
+    act(() => {
+      rendered.result.current.selectRound(nextRound.id);
+    });
+
+    const after = rendered.result.current.state.rooms;
+    expect(rendered.result.current.state.selectedRoundId).toBe(nextRound.id);
+    // Rooms, names and codes are the tournament's physical setup and survive.
+    expect(after.map((room) => ({ id: room.id, name: room.name, code: room.pairingCode }))).toEqual(before);
+    // The pairings do not.
+    expect(after.every((room) => room.leftTeamId === null && room.rightTeamId === null)).toBe(true);
+    expect(rendered.result.current.roundChangeDiscardsSelections).toBe(false);
+  });
+
+  test('the cleared pairings cannot be published as the new round', async () => {
+    const rendered = await setUpTournament();
+    const nextRound = rendered.result.current.tournament!.rounds[4];
+    act(() => {
+      rendered.result.current.selectRound(nextRound.id);
+    });
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    // Nothing reached the relay, and the operator was told why rather than left to discover it.
+    expect(calls.some((call) => String(call.args.url ?? '').endsWith('/mirror'))).toBe(false);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/two teams chosen/i);
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+  });
+
+  test('reselecting the round already chosen changes nothing', async () => {
+    const rendered = await setUpTournament();
+    const current = rendered.result.current.state.selectedRoundId!;
+    act(() => {
+      rendered.result.current.selectRound(current);
+    });
+    expect(rendered.result.current.state.rooms[0].leftTeamId).toBe('Team_Cony');
+  });
+});
+
+/**
+ * Replacing the relay.
+ *
+ * A relay's setup token is consumed by the claim that produced its management credential. A
+ * credential deleted before a replacement exists is a tournament that cannot publish and cannot
+ * get its results back, so "Change Relay" must not be a delete with a friendly name.
+ */
+describe('changing the relay', () => {
+  test('opening the form keeps the current credential', async () => {
+    const rendered = await setUpTournament();
+    const before = rendered.result.current.state.relay;
+    expect(before?.managementToken).toBe('management-secret');
+
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    expect(rendered.result.current.changingRelay).toBe(true);
+    expect(rendered.result.current.state.relay).toEqual(before);
+  });
+
+  test('cancelling leaves the original relay in place and usable', async () => {
+    const rendered = await setUpTournament();
+    const before = rendered.result.current.state.relay;
+
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    act(() => {
+      rendered.result.current.cancelRelayChange();
+    });
+
+    expect(rendered.result.current.changingRelay).toBe(false);
+    expect(rendered.result.current.state.relay).toEqual(before);
+
+    // Still usable: a publish goes out under the original credential.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
+    expect(mirror?.args.bearer).toBe('management-secret');
+  });
+
+  test('a failed claim leaves the working credential untouched', async () => {
+    const rendered = await setUpTournament();
+    const before = rendered.result.current.state.relay;
+    claimFails = true;
+
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev',
+        tournamentId: relayTournament,
+        setupToken: 'already-used',
+      });
+    });
+
+    expect(accepted).toBe(false);
+    expect(rendered.result.current.state.relay).toEqual(before);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/already been claimed/);
+    expect(rendered.result.current.notice?.message).toMatch(/unchanged/);
+    // The form stays open so the operator can correct the address and try again.
+    expect(rendered.result.current.changingRelay).toBe(true);
+
+    // And the original still works.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
+    expect(mirror?.args.bearer).toBe('management-secret');
+  });
+
+  test('the replacement is stored only after the new claim succeeds', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev/',
+        tournamentId: relayTournament,
+        setupToken: 'fresh',
+      });
+    });
+
+    expect(rendered.result.current.state.relay?.baseUrl).toBe('https://qbtcp-relay-other.workers.dev');
+    // A different relay is a different object with its own revision counter.
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+    expect(rendered.result.current.changingRelay).toBe(false);
+  });
+
+  test('forgetting the credential is a separate, explicit action', async () => {
+    const rendered = await setUpTournament();
+    act(() => {
+      rendered.result.current.forgetRelayCredential();
+    });
+    expect(rendered.result.current.state.relay).toBeNull();
+    // It says what happened rather than looking like a successful change.
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.notice?.message).toMatch(/deleted from this machine/);
+  });
+});
+
+/**
+ * Two legitimate results for one game.
+ *
+ * A room that submitted a correction leaves the relay holding two finals with the same match, the
+ * same room and the same two teams. Their descriptive filenames are identical; only the suffix
+ * differs, and the native writer refuses to open an existing file besides.
+ */
+describe('a corrected result', () => {
+  test('gets its own file and never lands on top of the first', async () => {
+    const { result: original } = scoredResultDocument();
+    const corrected = JSON.parse(JSON.stringify(original)) as {
+      objects: Record<string, unknown>[];
+    };
+    const match = corrected.objects.find((entry) => entry.type === 'Match') as Record<string, unknown>;
+    (match.match_teams as Record<string, unknown>[])[0].points = 35;
+
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: original },
+      {
+        result_id: 'result-bbb',
+        room_id: 'room-1',
+        received_at: '2026-09-11T15:20:00Z',
+        qbj: corrected,
+      },
+    ];
+
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    // Same match, same teams, same room — two files.
+    expect(writtenFiles).toHaveLength(2);
+    const names = writtenFiles.map((file) => file.fileName);
+    expect(new Set(names).size).toBe(2);
+    for (const name of names) {
+      expect(name).toMatch(/^R04_Room-101_Cony_vs_Deering_[0-9a-f]{6}\.result\.qbj$/);
+    }
+
+    // Each result records its own path, and the first file still holds the first result.
+    const [first, second] = rendered.result.current.state.results;
+    expect(first.savedPath).toBeTruthy();
+    expect(second.savedPath).toBeTruthy();
+    expect(first.savedPath).not.toBe(second.savedPath);
+    expect(JSON.parse(writtenFiles[0].contents)).toEqual(JSON.parse(JSON.stringify(original)));
+    expect(JSON.parse(writtenFiles[1].contents)).toEqual(JSON.parse(JSON.stringify(corrected)));
+  });
+
+  test('a name that is somehow already taken is refused rather than overwritten', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    // Something else is already at that path — a file restored from a backup, say.
+    existingPaths.add(
+      `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`,
+    );
+
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    expect(writtenFiles).toHaveLength(0);
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/already exists/);
+  });
+});
+
+/**
+ * The relay's unacknowledged window.
+ *
+ * `GET results?state=unacked` serves the oldest 128 and has no page behind it, so a build that
+ * never acknowledged would lose access to result 129. Acknowledging exactly what is on disk turns
+ * that endpoint into an unsaved-results queue.
+ */
+describe('acknowledging saved results', () => {
+  test('a result is acknowledged after it is written, and not before', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    // Received and displayed is not saved. Nothing has been acknowledged.
+    expect(calls.some((call) => String(call.args.url ?? '').endsWith('/acks'))).toBe(false);
+
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    const ack = calls.find((call) => String(call.args.url ?? '').endsWith('/acks'));
+    expect(ack).toBeTruthy();
+    expect(ack?.args.method).toBe('POST');
+    expect(JSON.parse(String(ack?.args.body))).toEqual({ results: ['result-aaa'] });
+  });
+
+  test('a result that failed to save is not acknowledged', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    existingPaths.add(
+      `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`,
+    );
+
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    // The bytes are not on disk, so the relay keeps holding it.
+    const ackCalls = calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'));
+    expect(ackCalls).toEqual([]);
+  });
+
+  test('the operator is warned before unsaved results reach the relay’s window', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = Array.from({ length: 100 }, (_, index) => ({
+      result_id: `result-${index}`,
+      room_id: 'room-1',
+      received_at: `2026-09-11T15:${String(index % 60).padStart(2, '0')}:00Z`,
+      qbj: document,
+    }));
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+
+    expect(rendered.result.current.state.results).toHaveLength(100);
+    expect(rendered.result.current.unsavedResultWarning).toMatch(/100 results are still unsaved/);
+    expect(rendered.result.current.unsavedResultWarning).toMatch(/oldest 128/);
+  });
+});

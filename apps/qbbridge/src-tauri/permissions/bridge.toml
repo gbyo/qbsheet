@@ -1,0 +1,9 @@
+[[permission]]
+identifier = "bridge-operations"
+description = "Allow the QBSheet Bridge window to use its four native operations."
+commands.allow = [
+  "open_yellowfruit_file",
+  "choose_result_folder",
+  "write_result_file",
+  "relay_request",
+]

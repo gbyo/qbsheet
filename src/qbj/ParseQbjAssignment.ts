@@ -601,6 +601,12 @@ export function defineGame(
       ...(stringField(sides[0].registration?.id) ? { left: stringField(sides[0].registration?.id) } : {}),
       ...(stringField(sides[1].registration?.id) ? { right: stringField(sides[1].registration?.id) } : {}),
     },
+    registrationNames: {
+      ...(stringField(sides[0].registration?.name) ? { left: stringField(sides[0].registration?.name) } : {}),
+      ...(stringField(sides[1].registration?.name)
+        ? { right: stringField(sides[1].registration?.name) }
+        : {}),
+    },
     ...(Object.keys(playerIds).length > 0 ? { playerIds } : {}),
   };
 
