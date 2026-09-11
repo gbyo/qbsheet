@@ -747,7 +747,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(waiting.status).toBe(200);
-    expect(await waiting.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await waiting.json()).toMatchObject({ room_id: roomId, state: 'none' });
 
     // A later assignment appears through the same token; no new code exchange is involved.
     await mirror(management, tournamentId, {
@@ -771,7 +771,7 @@ describe('sessions and writers', () => {
     expect(assigned.status).toBe(200);
     expect(await assigned.json()).toMatchObject({
       room_id: roomId,
-      assigned: true,
+      state: 'assigned',
       match_id: 'round-1-match',
     });
 
@@ -785,7 +785,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(cleared.status).toBe(200);
-    expect(await cleared.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await cleared.json()).toMatchObject({ room_id: roomId, state: 'none' });
     const pairedAgain = await pair(tournamentId, code, roomId, `prepair-again-${tournamentId.slice(0, 8)}`);
     expect(pairedAgain.status).toBe(200);
 
@@ -800,7 +800,7 @@ describe('sessions and writers', () => {
       headers: { 'x-yf-room-token': roomToken },
     });
     expect(tokenAfterCodeChange.status).toBe(200);
-    expect(await tokenAfterCodeChange.json()).toMatchObject({ room_id: roomId, assigned: false });
+    expect(await tokenAfterCodeChange.json()).toMatchObject({ room_id: roomId, state: 'none' });
     const pairedReplacement = await pair(
       tournamentId,
       replacementCode,
