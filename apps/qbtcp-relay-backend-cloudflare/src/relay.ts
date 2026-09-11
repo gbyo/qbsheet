@@ -84,6 +84,8 @@ export type Env = Cloudflare.Env;
 const PROTOCOL_VERSION = 1;
 /** The QBJ serialization version named in discovery. */
 const QBJ_VERSION = '2.1.1';
+/** The media type used when the scorer receives an assignment QBJ document. */
+const QBJ_MEDIA_TYPE = 'application/vnd.quizbowl.qbj+json';
 /** Frame envelope version served. The only value defined by the contract. */
 const FRAME_VERSION = 1;
 
@@ -852,6 +854,16 @@ export class QbtcpRelay extends DurableObject<Env> {
   }
 
   private assignmentView(room: RoomRow): { qbj: unknown; status: Record<string, unknown> } {
+    const session =
+      room.assignment_body !== null && room.match_id !== null
+        ? this.sql
+            .exec<SessionRow>(
+              'SELECT * FROM session WHERE room_id = ? AND match_id = ? ORDER BY updated_sequence DESC LIMIT 1',
+              room.room_id,
+              room.match_id,
+            )
+            .toArray()[0]
+        : undefined;
     return {
       qbj: room.assignment_body ? (JSON.parse(room.assignment_body) as unknown) : null,
       status: {
@@ -859,16 +871,28 @@ export class QbtcpRelay extends DurableObject<Env> {
         ...(room.match_id ? { match_id: room.match_id } : {}),
         ...(room.round_revision !== null ? { round_revision: room.round_revision } : {}),
         ...(room.assignment_revision !== null ? { assignment_revision: room.assignment_revision } : {}),
-        assigned: room.assignment_body !== null,
+        state: room.assignment_body !== null ? 'assigned' : 'none',
+        session:
+          session === undefined
+            ? null
+            : {
+                session_id: session.session_id,
+                status: session.status,
+                resumable: session.status !== 'final-received',
+                final_received: session.final_result_id !== null,
+              },
       },
     };
   }
 
   private async getAssignment(request: Request): Promise<Response> {
     const { room, cors } = await this.authorizeRoom(request);
-    const view = this.assignmentView(room);
-    if (!view.qbj) throw new RelayError(404, 'not_found', 'This room has no assignment yet.');
-    return json({ assignment: view.qbj }, 200, { ...cors, 'cache-control': 'no-cache' });
+    const headers = { ...cors, 'cache-control': 'no-cache' };
+    if (room.assignment_body === null) return new Response(null, { status: 204, headers });
+    return new Response(room.assignment_body, {
+      status: 200,
+      headers: { ...headers, 'content-type': QBJ_MEDIA_TYPE },
+    });
   }
 
   private async getAssignmentStatus(request: Request): Promise<Response> {
