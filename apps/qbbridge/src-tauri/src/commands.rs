@@ -364,6 +364,160 @@ pub async fn write_result_file(
     write_bridge_file(directory, file_name, contents, overwrite, "result").await
 }
 
+/// Counter that keeps temporary result names unique within this process.
+static RESULT_TEMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Write one completed result durably, and report the full path.
+///
+/// The bytes go to a temporary file in the same folder first, are flushed and fsynced, and only
+/// then are atomically renamed onto the final name; the folder itself is synced afterwards where
+/// the platform allows. Crash ordering is the point: a crash before the rename leaves only a
+/// leftover temporary file beside the final name, and a crash after it leaves the complete
+/// final file. There is no window in which the final name holds a partial result.
+///
+/// Exclusivity matches `write_result_file`: an existing final file is refused unless `overwrite`
+/// says otherwise, so a corrected final still cannot quietly replace the original.
+#[tauri::command]
+pub async fn write_result_file_durable(
+    directory: String,
+    file_name: String,
+    contents: String,
+    overwrite: bool,
+) -> CommandResult<String> {
+    if contents.len() > MAX_RESULT_BYTES {
+        return Err(CommandError::new(
+            "result_too_large",
+            "That result document is implausibly large.",
+        ));
+    }
+    let directory = PathBuf::from(directory);
+    if !directory.is_dir() {
+        return Err(CommandError::new(
+            "no_such_folder",
+            "That result output folder no longer exists. Choose it again.",
+        ));
+    }
+    let safe_name = safe_file_name(&file_name)?;
+    let final_path = directory.join(&safe_name);
+    if !overwrite && final_path.exists() {
+        return Err(CommandError::new(
+            "result_file_exists",
+            format!(
+                "{} already exists in that folder and was not replaced. \
+                 Move or rename it, or choose another output folder.",
+                final_path.file_name().unwrap_or_default().to_string_lossy()
+            ),
+        ));
+    }
+    // Same folder, so the rename below is atomic: no copy across filesystems, no partial final.
+    // The suffix keeps the temporary name a plain file name that can never collide with a real
+    // result, and the counter plus process id keep concurrent saves from sharing one.
+    let temporary_name = format!(
+        "{}.qbbridge-tmp-{}-{}",
+        safe_name.to_string_lossy(),
+        std::process::id(),
+        RESULT_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let temporary_path = directory.join(temporary_name);
+    let outcome = (|| -> CommandResult<()> {
+        let mut temporary = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+            .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+        std::io::Write::write_all(&mut temporary, contents.as_bytes())
+            .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+        temporary
+            .sync_all()
+            .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+        drop(temporary);
+        #[cfg(windows)]
+        if overwrite {
+            // Windows has no atomic replace-by-rename; removing first keeps the rename itself
+            // from failing. Overwrite only ever re-saves one result over its own path, whose
+            // bytes the caller already holds, so a crash here loses no game.
+            let _ = std::fs::remove_file(&final_path);
+        }
+        std::fs::rename(&temporary_path, &final_path)
+            .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+        sync_directory(&directory);
+        Ok(())
+    })();
+    if outcome.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    outcome?;
+    Ok(final_path.to_string_lossy().into_owned())
+}
+
+/// Best-effort directory sync after a durable rename. The file fsync above already orders the
+/// bytes; this only shortens the window in which the name itself could go missing. Failures are
+/// ignored on purpose: a rename the OS has accepted is durable enough to report success for.
+fn sync_directory(directory: &Path) {
+    #[cfg(unix)]
+    {
+        if let Ok(handle) = std::fs::File::open(directory) {
+            let _ = handle.sync_all();
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = directory;
+    }
+}
+
+/// Read one result file back, bounded like every other bridge read.
+///
+/// The caller compares the bytes against what it meant to write. A missing or unreadable file
+/// is an error, never an empty document: silence here would turn a lost game into a saved one.
+#[tauri::command]
+pub async fn read_result_file(path: String) -> CommandResult<String> {
+    let bytes = std::fs::read(&path).map_err(|_| {
+        CommandError::new(
+            "result_unreadable",
+            "That result file could not be read back. It was left unsaved.",
+        )
+    })?;
+    if bytes.len() > MAX_RESULT_BYTES {
+        return Err(CommandError::new(
+            "result_unreadable",
+            "That result file is larger than any result QBBridge writes. It was left unsaved.",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        CommandError::new(
+            "result_unreadable",
+            "That result file is not valid text. It was left unsaved.",
+        )
+    })
+}
+
+/// Remove one result file, so a proven-bad write never wedges its own retry.
+///
+/// This only ever runs against paths the ledger already attributes to a result — our own
+/// residue from a write whose readback failed, or a ledger slot whose bytes no longer match.
+/// A foreign file that merely collides with a result name is refused by the exclusive write
+/// and is never removed here: deleting what QBBridge did not write would destroy evidence.
+/// Missing files are fine; cleanup is idempotent by design.
+#[tauri::command]
+pub async fn remove_result_file(path: String) -> CommandResult<()> {
+    let file_name = Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !file_name.ends_with(".result.qbj") {
+        return Err(CommandError::new(
+            "refused",
+            "Only result files can be removed this way.",
+        ));
+    }
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(CommandError::new("write_failed", error.to_string())),
+    }
+}
+
 /// Write one unplayed QBJ assignment for the relay-outage fallback. Assignment exports are always
 /// exclusive: exporting again must not replace a file a scorekeeper may already have opened.
 #[tauri::command]
@@ -583,6 +737,166 @@ mod tests {
             std::fs::read_to_string(&first).unwrap(),
             "{\"second\":true}"
         );
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    fn durable_test_dir(name: &str) -> (std::path::PathBuf, tokio::runtime::Runtime) {
+        let directory = std::env::temp_dir().join(format!(
+            "qbbridge-durable-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        (directory, runtime)
+    }
+
+    #[test]
+    fn a_durable_write_reads_back_exactly_what_was_sent() {
+        use super::{read_result_file, write_result_file_durable};
+        let (directory, runtime) = durable_test_dir("roundtrip");
+        let folder = directory.to_string_lossy().into_owned();
+        let name = "R04_Room-101_A_vs_B_a81f3c.result.qbj".to_owned();
+        let contents = "{\"final\":true,\"points\":[10,20]}".to_owned();
+
+        let path = runtime
+            .block_on(write_result_file_durable(
+                folder,
+                name,
+                contents.clone(),
+                false,
+            ))
+            .expect("the durable write should succeed");
+        assert_eq!(
+            runtime.block_on(read_result_file(path)).unwrap(),
+            contents,
+            "readback must be byte-identical to what was sent"
+        );
+        // No temporary file survives a successful write.
+        let leftovers: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains(".qbbridge-tmp-")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "temporary files must be renamed away");
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_durable_write_keeps_exclusivity_and_overwrite_semantics() {
+        use super::write_result_file_durable;
+        let (directory, runtime) = durable_test_dir("exclusive");
+        let folder = directory.to_string_lossy().into_owned();
+        let name = "R04_Room-101_A_vs_B_a81f3c.result.qbj".to_owned();
+
+        runtime
+            .block_on(write_result_file_durable(
+                folder.clone(),
+                name.clone(),
+                "{\"first\":true}".to_owned(),
+                false,
+            ))
+            .expect("the first durable write should succeed");
+        let refused = runtime
+            .block_on(write_result_file_durable(
+                folder.clone(),
+                name.clone(),
+                "{\"second\":true}".to_owned(),
+                false,
+            ))
+            .expect_err("a colliding durable write should be refused");
+        assert_eq!(refused.code, "result_file_exists");
+        runtime
+            .block_on(write_result_file_durable(
+                folder,
+                name,
+                "{\"second\":true}".to_owned(),
+                true,
+            ))
+            .expect("an explicit durable overwrite should succeed");
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_durable_write_to_a_missing_folder_fails_before_touching_anything() {
+        use super::write_result_file_durable;
+        let (_directory, runtime) = durable_test_dir("missing");
+        let missing = std::env::temp_dir().join(format!(
+            "qbbridge-durable-gone-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let error = runtime
+            .block_on(write_result_file_durable(
+                missing.to_string_lossy().into_owned(),
+                "R04_A_vs_B.result.qbj".to_owned(),
+                "{}".to_owned(),
+                false,
+            ))
+            .expect_err("a write without a folder should fail");
+        assert_eq!(error.code, "no_such_folder");
+    }
+
+    #[test]
+    fn reading_a_missing_result_is_an_error_never_an_empty_document() {
+        use super::read_result_file;
+        let (directory, runtime) = durable_test_dir("readback");
+        let missing = directory.join("never-written.result.qbj");
+        let error = runtime
+            .block_on(read_result_file(missing.to_string_lossy().into_owned()))
+            .expect_err("a missing file should be an error");
+        assert_eq!(error.code, "result_unreadable");
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn removing_a_result_clears_proven_bad_bytes_but_never_foreign_files() {
+        use super::{remove_result_file, write_result_file_durable};
+        let (directory, runtime) = durable_test_dir("remove");
+        let folder = directory.to_string_lossy().into_owned();
+        let name = "R04_Room-101_A_vs_B_a81f3c.result.qbj".to_owned();
+
+        let path = runtime
+            .block_on(write_result_file_durable(
+                folder,
+                name,
+                "{\"final\":true}".to_owned(),
+                false,
+            ))
+            .expect("the durable write should succeed");
+        runtime
+            .block_on(remove_result_file(path.clone()))
+            .expect("removing our own residue should succeed");
+        assert!(
+            !std::path::Path::new(&path).exists(),
+            "the proven-bad file must be gone so a retry starts clean"
+        );
+        // Cleanup is idempotent: a second remove is fine, not an error.
+        runtime
+            .block_on(remove_result_file(path))
+            .expect("removing a missing result should succeed");
+
+        let error = runtime
+            .block_on(remove_result_file(
+                directory.join("notes.txt").to_string_lossy().into_owned(),
+            ))
+            .expect_err("a non-result file must be refused");
+        assert_eq!(error.code, "refused");
 
         std::fs::remove_dir_all(&directory).ok();
     }

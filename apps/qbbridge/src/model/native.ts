@@ -133,6 +133,56 @@ export async function writeResultFile(
   return invoke<string>('write_result_file', { directory, fileName, contents, overwrite });
 }
 
+/**
+ * Write one result file durably: temporary file, flush, fsync, atomic rename, folder sync.
+ *
+ * A crash before the rename leaves only a leftover temporary file; a crash after it leaves
+ * the complete final file. The final name never holds a partial result.
+ */
+export async function writeResultFileDurable(
+  directory: string,
+  fileName: string,
+  contents: string,
+  overwrite = false,
+): Promise<string> {
+  requireNative('Saving a result file');
+  return invoke<string>('write_result_file_durable', { directory, fileName, contents, overwrite });
+}
+
+/** Read one result file back for verification. Missing or unreadable files are errors. */
+export async function readResultFile(path: string): Promise<string> {
+  requireNative('Verifying a result file');
+  return invoke<string>('read_result_file', { path });
+}
+
+/**
+ * Remove one result file. Only for paths the ledger already attributes to a result — our own
+ * residue from a failed readback, or a ledger slot being repaired. Never for a foreign file
+ * that merely collides with a result name; the native side additionally refuses anything
+ * that is not a `.result.qbj` file. Missing files succeed: cleanup is idempotent.
+ */
+export async function removeResultFile(path: string): Promise<void> {
+  requireNative('Cleaning up a result file');
+  await invoke<void>('remove_result_file', { path });
+}
+
+/**
+ * Whether a failed write means the final file already exists.
+ *
+ * Matches the native `result_file_exists` code, falling back to the message the fake and
+ * real backends share, so crash-recovery adoption works against either.
+ */
+export function isResultFileExistsError(error: unknown): boolean {
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    if (record.code === 'result_file_exists') return true;
+    if (typeof record.message === 'string' && record.message.includes('already exists')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Write one unplayed QBJ assignment for the offline round fallback. */
 export async function writeAssignmentFile(
   directory: string,

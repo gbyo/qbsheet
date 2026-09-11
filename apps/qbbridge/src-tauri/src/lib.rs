@@ -1,6 +1,6 @@
 //! The native shell for QBSheet Bridge.
 //!
-//! Six commands, no state, no background tasks, no server. Everything that decides anything —
+//! Thirteen commands, no state, no background tasks, no server. Everything that decides anything —
 //! what a pairing is, what an assignment says, which results are new — is TypeScript. Rust is
 //! here for the things a web page cannot do on a tournament morning: a real open dialog, a real
 //! folder picker, writing a dozen files without a download prompt each, and an HTTP client with
@@ -29,6 +29,9 @@ pub fn run() {
             commands::load_relay_credential,
             commands::delete_relay_credential,
             commands::write_result_file,
+            commands::write_result_file_durable,
+            commands::read_result_file,
+            commands::remove_result_file,
             commands::write_assignment_file,
             commands::relay_request,
         ])

@@ -59,6 +59,11 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
           Save New Results{unsaved.length > 0 ? ` (${unsaved.length})` : ''}
         </Button>
       </div>
+      <p className="muted">
+        New results save themselves as soon as a folder is chosen — each file is written durably and read back
+        before the relay is told it is safe. Save stays for retrying a failed folder and for writing a result
+        out again.
+      </p>
 
       <div className="row" style={{ marginBottom: 'var(--qbs-space-3)' }}>
         <label htmlFor="result-filter">Show</label>

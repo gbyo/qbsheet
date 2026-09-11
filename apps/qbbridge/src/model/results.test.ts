@@ -17,6 +17,7 @@ import {
   resultFileSuffix,
   resultSummary,
   sameQbjDocument,
+  sha256Hex,
 } from './results';
 
 describe('reading a result for the list', () => {
@@ -216,5 +217,10 @@ describe('the result written to disk is the result the relay returned', () => {
     // copies describe the same game.
     const withoutExtension = { version: '2.1.1', objects: [{ type: 'Match', id: 'm' }] };
     expect(sameQbjDocument(document, withoutExtension)).toBe(false);
+  });
+
+  test('the ledger hash matches the known SHA-256 vector', async () => {
+    // If this vector ever changes, the hashes recorded in every result ledger change meaning.
+    expect(await sha256Hex('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   });
 });

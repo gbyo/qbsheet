@@ -44,6 +44,10 @@ export interface StoredResult {
   receivedAt: string;
   /** The path written, once a save succeeded. Absent means unsaved. */
   savedPath?: string;
+  /** SHA-256 of the exact bytes written, recorded after a successful readback. */
+  contentSha256?: string;
+  /** When the durable save completed. Together with the hash, the result ledger. */
+  savedAt?: string;
   /** True after the file is on disk, until the relay confirms the result was acknowledged. */
   ackPending?: boolean;
   /** An operator's local handoff marker; this is never inferred from relay state. */
