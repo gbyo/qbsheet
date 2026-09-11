@@ -243,6 +243,9 @@ export interface NewPlayerInput {
   name: string;
   captain?: boolean;
   rosterNumber?: string | number;
+  schoolYear?: number | null;
+  undergraduateEligible?: boolean | null;
+  divisionTwoEligible?: boolean | null;
   notes?: string;
 }
 
@@ -529,11 +532,22 @@ export interface DirectorController {
     captain?: boolean,
     rosterNumber?: string | number,
     notes?: string,
+    extra?: Pick<NewPlayerInput, 'schoolYear' | 'undergraduateEligible' | 'divisionTwoEligible'>,
   ): boolean;
   updatePlayer(
     playerId: DirectorId,
     changes: Partial<
-      Pick<DirectorState['players'][number], 'name' | 'captain' | 'active' | 'rosterNumber' | 'notes'>
+      Pick<
+        DirectorState['players'][number],
+        | 'name'
+        | 'captain'
+        | 'active'
+        | 'rosterNumber'
+        | 'schoolYear'
+        | 'undergraduateEligible'
+        | 'divisionTwoEligible'
+        | 'notes'
+      >
     >,
   ): boolean;
   removePlayer(playerId: DirectorId): boolean;
@@ -2700,8 +2714,25 @@ export function useDirectorController(repository = createDirectorRepository()): 
       captain = false,
       rosterNumber?: string | number,
       notes?: string,
+      extra?: Pick<NewPlayerInput, 'schoolYear' | 'undergraduateEligible' | 'divisionTwoEligible'>,
     ): boolean => {
-      const normalizedPlayer = normalizePlayerInput({ name, captain, rosterNumber, notes });
+      if (
+        extra?.schoolYear !== undefined &&
+        extra.schoolYear !== null &&
+        !Number.isFinite(extra.schoolYear)
+      ) {
+        setError('School year must be a number.');
+        return false;
+      }
+      const normalizedPlayer = normalizePlayerInput({
+        name,
+        captain,
+        rosterNumber,
+        notes,
+        schoolYear: extra?.schoolYear,
+        undergraduateEligible: extra?.undergraduateEligible,
+        divisionTwoEligible: extra?.divisionTwoEligible,
+      });
       const normalizedName = normalizedPlayer.name;
       const snapshot = stateRef.current;
       if (!normalizedName) {
@@ -2738,6 +2769,13 @@ export function useDirectorController(repository = createDirectorRepository()): 
           ...(normalizedPlayer.rosterNumber === undefined
             ? {}
             : { rosterNumber: normalizedPlayer.rosterNumber }),
+          ...(normalizedPlayer.schoolYear === undefined ? {} : { schoolYear: normalizedPlayer.schoolYear }),
+          ...(normalizedPlayer.undergraduateEligible === undefined
+            ? {}
+            : { undergraduateEligible: normalizedPlayer.undergraduateEligible }),
+          ...(normalizedPlayer.divisionTwoEligible === undefined
+            ? {}
+            : { divisionTwoEligible: normalizedPlayer.divisionTwoEligible }),
           ...(normalizedPlayer.notes ? { notes: normalizedPlayer.notes } : {}),
         });
         draft.audit.push({
@@ -2757,7 +2795,17 @@ export function useDirectorController(repository = createDirectorRepository()): 
     (
       playerId: DirectorId,
       changes: Partial<
-        Pick<DirectorState['players'][number], 'name' | 'captain' | 'active' | 'rosterNumber' | 'notes'>
+        Pick<
+          DirectorState['players'][number],
+          | 'name'
+          | 'captain'
+          | 'active'
+          | 'rosterNumber'
+          | 'schoolYear'
+          | 'undergraduateEligible'
+          | 'divisionTwoEligible'
+          | 'notes'
+        >
       >,
     ): boolean => {
       const snapshot = stateRef.current;
@@ -2769,6 +2817,14 @@ export function useDirectorController(repository = createDirectorRepository()): 
       const name = changes.name === undefined ? current.name : changes.name.trim();
       if (!name) {
         setError('A player name is required.');
+        return false;
+      }
+      if (
+        changes.schoolYear !== undefined &&
+        changes.schoolYear !== null &&
+        !Number.isFinite(changes.schoolYear)
+      ) {
+        setError('School year must be a number.');
         return false;
       }
       const active = changes.active ?? current.active;
@@ -2807,6 +2863,18 @@ export function useDirectorController(repository = createDirectorRepository()): 
           const normalizedRosterNumber = normalizeRosterNumber(changes.rosterNumber);
           if (normalizedRosterNumber === undefined) delete player.rosterNumber;
           else player.rosterNumber = normalizedRosterNumber;
+        }
+        if (changes.schoolYear !== undefined) {
+          const normalizedYear = normalizeSchoolYear(changes.schoolYear);
+          if (normalizedYear === undefined || normalizedYear === null) delete player.schoolYear;
+          else player.schoolYear = normalizedYear;
+        }
+        // An explicit Unknown is a real answer, not absence: store null as given.
+        if (changes.undergraduateEligible !== undefined) {
+          player.undergraduateEligible = changes.undergraduateEligible;
+        }
+        if (changes.divisionTwoEligible !== undefined) {
+          player.divisionTwoEligible = changes.divisionTwoEligible;
         }
         if (changes.notes !== undefined) {
           const normalizedNotes = changes.notes.trim();
@@ -7928,13 +7996,30 @@ function normalizeRosterNumber(value: string | number | undefined): string | num
 
 function normalizePlayerInput(
   input: NewPlayerInput,
-): Required<Pick<NewPlayerInput, 'name' | 'captain'>> & Pick<NewPlayerInput, 'rosterNumber' | 'notes'> {
+): Required<Pick<NewPlayerInput, 'name' | 'captain'>> &
+  Pick<
+    NewPlayerInput,
+    'rosterNumber' | 'schoolYear' | 'undergraduateEligible' | 'divisionTwoEligible' | 'notes'
+  > {
   return {
     name: input.name.trim(),
     captain: input.captain ?? false,
     rosterNumber: normalizeRosterNumber(input.rosterNumber),
+    schoolYear: normalizeSchoolYear(input.schoolYear),
+    // Explicit Unknown (null) is a real answer: pass through untouched.
+    undergraduateEligible: input.undergraduateEligible,
+    divisionTwoEligible: input.divisionTwoEligible,
     notes: input.notes?.trim() || undefined,
   };
+}
+
+/**
+ * Structured school year/grade: a finite number passes through (null/undefined stay
+ * unset), anything else is rejected so junk can never masquerade as metadata.
+ */
+function normalizeSchoolYear(value: number | null | undefined): number | null | undefined {
+  if (value === null || value === undefined) return value;
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeNewPlayerInputs(
@@ -7945,7 +8030,14 @@ function normalizeNewPlayerInputs(
   for (const [index, input] of inputs.entries()) {
     const player = normalizePlayerInput(input);
     if (!player.name) {
-      if (player.captain || player.rosterNumber !== undefined || player.notes) {
+      if (
+        player.captain ||
+        player.rosterNumber !== undefined ||
+        player.schoolYear !== undefined ||
+        player.undergraduateEligible !== undefined ||
+        player.divisionTwoEligible !== undefined ||
+        player.notes
+      ) {
         return {
           ok: false,
           message: `Player row ${index + 1} has roster details but no name. Enter a name or clear that row.`,

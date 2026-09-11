@@ -14,7 +14,12 @@
 
 .director-roster-entry-row {
   display: grid;
-  grid-template-columns: 24px minmax(170px, 1.2fr) minmax(64px, 0.35fr) auto minmax(150px, 0.85fr) auto;
+  grid-template-columns:
+    24px minmax(170px, 1.2fr) minmax(64px, 0.35fr) minmax(56px, 0.3fr) auto auto auto auto auto minmax(
+      150px,
+      0.85fr
+    )
+    auto;
   gap: var(--director-space-2);
   align-items: center;
   min-width: 0;
@@ -25,6 +30,14 @@
   font-size: var(--director-text-meta);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+/* Compact tri-state flag tags (UG, D2) beside their segmented controls. */
+.director-roster-entry-flag {
+  color: var(--director-faint);
+  font-size: var(--director-text-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------- Schools & clubs
