@@ -158,6 +158,7 @@ these values.
 | Round sums/denominators included proven-N/A games                                | `applicableGames` scoping + null-when-empty sums; definition flags carry proven applicability                | `roundStats.test.ts` N/A tests, `ParityMatrixSurfaces` mixed-N/A test                        |
 | Unknown overtime splits could smuggle overtime into Pts/X on some surfaces       | every surface consumes `regulationDerivationForTeam`; unknown split declines Pts/X, PPTUH stands             | `parityMatrix.test.ts` 17–18, QBLive fail-closed test, `ParityMatrixSurfaces` overtime tests |
 | Roster UI could not view/edit year/UG/D2                                         | `TeamsView.tsx` year control + tri-state UG/D2 (`Yes`/`No`/`Unknown`), persisted via `useDirectorController` | `TeamsView.test.tsx` (#882)                                                                  |
+| Player/Team Detail omitted UG/D2 markers and fabricated GP for partial appearances | `eligibilitySummary` prose markers under the Individuals predicate; `gamesPlayedKnown` gating via shared `reportGamesPlayedText` | `playerDetailReport.test.ts`, `teamDetailReport.test.ts` (#751) |
 | Parity fixtures missed the above cases                                           | per-PR regression tests above; matrix extended below                                                         | —                                                                                            |
 
 ## Fixture matrix
