@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
+import { Button, ConfirmDialog, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
 import wordmark from '../assets/qbsheet-wordmark.svg';
 import { pairingLink, type PairingLink } from '../model/pairing';
 import { pairingsForRound, type PlanPublicationStatus } from '../model/roundPlans';
@@ -22,7 +22,7 @@ import {
   destinationPoolName,
   formatRanks,
   phaseForRound,
-  phasePoolNames,
+  phaseTeamPoolContext,
   roundGroups,
   schedulePairingWarnings,
 } from '../model/schedule';
@@ -219,16 +219,27 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           selectedIds.has(team.id),
       )
       .sort((left, right) => left.name.localeCompare(right.name))
-      .map((team) => ({
-        id: team.id,
-        name: team.name,
-        // The selected phase is the useful context. Do not show a playoff team as if it still
-        // belonged to its prelim pool when the playoff pool is empty in the reloaded file.
-        detail:
-          (phase ? phasePoolNames(phase, team.id) : team.poolNames).join(' · ') ||
-          (phase ? 'No pool listed for this phase' : undefined),
-      }));
-  }, [activePoolFilter, phase, phasePools, selectedPairings, tournament]);
+      .map((team) => {
+        const context = round ? phaseTeamPoolContext(tournament, round, team.id) : null;
+        const destinationNames = context?.destinationPoolNames ?? team.poolNames;
+        let detail = destinationNames.join(' · ');
+        if (context?.carryover) {
+          detail +=
+            context.sourcePoolNames.length === 1
+              ? ` · from ${context.sourcePhaseName ?? 'previous phase'} · ${context.sourcePoolNames[0]}`
+              : context.sourcePoolNames.length > 1
+                ? ` · source pool ambiguous: ${context.sourcePoolNames.join(' / ')}`
+                : ' · source pool not proven';
+        }
+        return {
+          id: team.id,
+          name: team.name,
+          // The selected phase is the useful context. Do not borrow a prelim pool unless the
+          // destination itself says carryover and the immediately preceding phase supplies it.
+          detail: detail || (phase ? 'No pool listed for this phase' : undefined),
+        };
+      });
+  }, [activePoolFilter, phase, phasePools, round, selectedPairings, tournament]);
 
   if (!tournament) {
     return (
@@ -599,6 +610,32 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           different round&rsquo;s game.
         </p>
       </section>
+      <ConfirmDialog
+        isOpen={bridge.pendingPublicationReview !== null}
+        title={
+          bridge.pendingPublicationReview
+            ? `Review Round ${bridge.pendingPublicationReview.roundName} before publishing`
+            : 'Review round before publishing'
+        }
+        confirmLabel="Publish anyway"
+        cancelLabel="Go back"
+        confirmVariant="danger"
+        onConfirm={() => void bridge.confirmPublicationReview()}
+        onCancel={bridge.cancelPublicationReview}
+      >
+        <p>
+          QBBridge is holding the exact round plan below. Nothing has been sent to the relay yet. Publish
+          anyway only after checking each consequence; going back leaves the selected teams and relay state
+          unchanged.
+        </p>
+        <ul>
+          {bridge.pendingPublicationReview?.items.map((item, index) => (
+            <li key={`${item.roomId}:${item.message}:${index}`}>
+              <strong>{item.roomName}:</strong> {item.message}
+            </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
       {printTarget !== null && typeof document !== 'undefined'
         ? createPortal(
             <div className="room-print-sheets" data-print-target={printTarget}>

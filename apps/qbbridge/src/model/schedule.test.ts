@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { loadedFixture } from '../tests/fixture';
 import { newRoom, publishableRooms } from './rooms';
-import { phasePoolNames, roundGroups, schedulePairingWarnings } from './schedule';
+import { phasePoolNames, phaseTeamPoolContext, roundGroups, schedulePairingWarnings } from './schedule';
 
 describe('manual pairing schedule context', () => {
   const tournament = loadedFixture();
@@ -43,5 +43,89 @@ describe('manual pairing schedule context', () => {
     const emptyPlayoffs = { ...playoffs, pools: playoffs.pools.map((pool) => ({ ...pool, teamIds: [] })) };
     expect(phasePoolNames(emptyPlayoffs, teamId)).toEqual([]);
     expect(phasePoolNames(prelims, teamId)).toHaveLength(1);
+  });
+
+  test('warns on the six already-satisfied same-source carryover matchups in each playoff pool', () => {
+    const round = tournament.rounds.find((entry) => entry.phaseName === 'Playoffs')!;
+    const playoffs = tournament.schedule.phases.find((phase) => phase.name === 'Playoffs')!;
+
+    for (const pool of playoffs.pools) {
+      let conflicts = 0;
+      let newGames = 0;
+      for (let left = 0; left < pool.teamIds.length; left += 1) {
+        for (let right = left + 1; right < pool.teamIds.length; right += 1) {
+          const room = newRoom('room-1', 'Room 101', '11112222');
+          const pairings = [
+            { roomId: room.id, leftTeamId: pool.teamIds[left]!, rightTeamId: pool.teamIds[right]! },
+          ];
+          const warning = schedulePairingWarnings(tournament, round, [room], pairings).some((entry) =>
+            entry.message.includes('already satisfied by carryover'),
+          );
+          if (warning) conflicts += 1;
+          else newGames += 1;
+        }
+      }
+      expect([pool.name, conflicts, newGames]).toEqual([pool.name, 6, 9]);
+    }
+  });
+
+  test('shows proven source provenance and stays silent for missing or ambiguous provenance', () => {
+    const round = tournament.rounds.find((entry) => entry.phaseName === 'Playoffs')!;
+    const context = phaseTeamPoolContext(tournament, round, 'Team_Windham A');
+    expect(context).toMatchObject({
+      destinationPoolNames: ['Championship'],
+      carryover: true,
+      sourcePhaseName: 'Prelims',
+      sourcePoolNames: ['Prelim A'],
+    });
+
+    const baseRoom = newRoom('room-1', 'Room 101', '11112222');
+    const pairings = [
+      { roomId: baseRoom.id, leftTeamId: 'Team_Windham A', rightTeamId: 'Team_Hebron Academy' },
+    ];
+    const phasesWithAmbiguousSource = tournament.schedule.phases.map((phase, index) =>
+      index === 0
+        ? {
+            ...phase,
+            pools: phase.pools.map((pool, poolIndex) =>
+              poolIndex === 1 ? { ...pool, teamIds: [...pool.teamIds, 'Team_Windham A'] } : pool,
+            ),
+          }
+        : phase,
+    );
+    expect(
+      schedulePairingWarnings(
+        { schedule: { phases: phasesWithAmbiguousSource } },
+        round,
+        [baseRoom],
+        pairings,
+      ).some((entry) => entry.message.includes('already satisfied by carryover')),
+    ).toBe(false);
+
+    const phasesWithoutSource = tournament.schedule.phases.map((phase, index) =>
+      index === 0 ? { ...phase, pools: phase.pools.map((pool) => ({ ...pool, teamIds: [] })) } : phase,
+    );
+    expect(
+      schedulePairingWarnings(
+        { schedule: { phases: phasesWithoutSource } },
+        round,
+        [baseRoom],
+        pairings,
+      ).some((entry) => entry.message.includes('already satisfied by carryover')),
+    ).toBe(false);
+
+    const phasesWithoutCarryover = tournament.schedule.phases.map((phase) =>
+      phase.id === round.phaseId
+        ? { ...phase, pools: phase.pools.map((pool) => ({ ...pool, hasCarryover: false })) }
+        : phase,
+    );
+    expect(
+      schedulePairingWarnings(
+        { schedule: { phases: phasesWithoutCarryover } },
+        round,
+        [baseRoom],
+        pairings,
+      ).some((entry) => entry.message.includes('already satisfied by carryover')),
+    ).toBe(false);
   });
 });

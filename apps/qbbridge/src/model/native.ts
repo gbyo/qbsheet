@@ -1,5 +1,5 @@
 /**
- * The whole native surface: four commands.
+ * The whole native surface: six commands.
  *
  * Tauri is here for the desktop capabilities a browser tab cannot do well on a tournament
  * morning — a real open dialog, a real folder picker, writing a dozen files without a download
@@ -65,6 +65,12 @@ export async function chooseResultFolder(): Promise<string | null> {
   return invoke<string | null>('choose_result_folder');
 }
 
+/** Native folder picker for a relay-outage assignment handoff. */
+export async function chooseAssignmentFolder(): Promise<string | null> {
+  requireNative('Choosing an assignment folder');
+  return invoke<string | null>('choose_assignment_folder');
+}
+
 /**
  * Write one result file. Returns the full path written.
  *
@@ -81,6 +87,16 @@ export async function writeResultFile(
 ): Promise<string> {
   requireNative('Saving a result file');
   return invoke<string>('write_result_file', { directory, fileName, contents, overwrite });
+}
+
+/** Write one unplayed QBJ assignment for the offline round fallback. */
+export async function writeAssignmentFile(
+  directory: string,
+  fileName: string,
+  contents: string,
+): Promise<string> {
+  requireNative('Exporting an assignment file');
+  return invoke<string>('write_assignment_file', { directory, fileName, contents });
 }
 
 export interface RelayResponse {
