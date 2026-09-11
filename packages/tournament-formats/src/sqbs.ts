@@ -78,6 +78,15 @@ export interface SqbsTournamentInput {
   games: SqbsTournamentGame[];
   /** Packet name per exported round, in round order. */
   packetNames: string[];
+  /**
+   * SQBS team-sort setting, written verbatim (default 1, the record-then-PPG
+   * line the reference writer emits). QBSheet always orders the file's team
+   * list canonically; SQBS re-sorts its own reports per this code, so the two
+   * orders can disagree — see the settings comment below. There is exactly one
+   * sort line in this layout (writer, parser, and reference writer agree), so
+   * no player-sort setting is mapped.
+   */
+  sortMethod?: number;
 }
 
 export interface SqbsParsedPlayer {
@@ -127,6 +136,8 @@ export interface SqbsParsedTournament {
   bouncebacks: boolean;
   trackPowers: boolean;
   trackLightning: boolean;
+  /** The file's team-sort setting line; null when the line is missing or malformed. */
+  sortMethod: number | null;
   divisions: string[];
   teams: SqbsParsedTeam[];
   games: SqbsParsedGame[];
@@ -331,6 +342,10 @@ export function exportSqbsTournamentFile(input: SqbsTournamentInput): FormatRepo
 
   // Settings section. Values mirror what SQBS itself writes: full reports,
   // all validation warnings, record-then-PPG sort, blank FTP configuration.
+  // The team-sort line is the caller's SQBS code verbatim (default 1, as the
+  // reference writer emits): it only drives SQBS's own report sorting, while
+  // the file's team list always carries QBSheet's canonical order, so the two
+  // can disagree by design — documented, never silently reconciled.
   add(input.useBonuses ? 1 : 0);
   add(input.bouncebacks ? 3 : 1);
   add(input.trackPowers ? 3 : 2);
@@ -347,7 +362,7 @@ export function exportSqbsTournamentFile(input: SqbsTournamentInput): FormatRepo
   add(1);
   add(0);
   add(input.divisions.length > 0 ? 1 : 0);
-  add(1);
+  add(input.sortMethod ?? 1);
   add(input.tournamentName);
   add('');
   add('');
@@ -600,7 +615,7 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
   const reportFlags: Array<number | undefined> = [];
   for (let index = 0; index < 8; index += 1) reportFlags.push(nextInt(`settings.reports[${index}]`));
   const useDivisions = nextInt('settings.useDivisions');
-  nextInt('settings.sortMethod');
+  const sortMethod = nextInt('settings.sortMethod');
   const tournamentName = next('settings.tournamentName');
   for (let index = 0; index < 4; index += 1) next(`settings.ftp[${index}]`);
   nextInt('settings.pathStyle');
@@ -727,6 +742,7 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
       bouncebacks: bonusMode === 3,
       trackPowers: powerStats === 3,
       trackLightning: lightning === 1,
+      sortMethod: sortMethod ?? null,
       divisions,
       teams,
       games,
