@@ -30,6 +30,8 @@ let writtenFiles: { directory: string; fileName: string; contents: string; overw
 let existingPaths = new Set<string>();
 /** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
 let claimFails = false;
+/** Set to make the next mirror fail without changing relay or local publication state. */
+let mirrorFails = false;
 
 function installFakeTauri(): void {
   calls = [];
@@ -74,7 +76,10 @@ function installFakeTauri(): void {
         if (url.endsWith('/acks')) {
           return { status: 200, body: JSON.stringify({ acked_results: 1 }) };
         }
-        if (url.endsWith('/mirror')) return { status: 200, body: '{}' };
+        if (url.endsWith('/mirror')) {
+          if (mirrorFails) return { status: 503, body: JSON.stringify({ message: 'relay unavailable' }) };
+          return { status: 200, body: '{}' };
+        }
         if (url.includes('/results')) {
           return { status: 200, body: JSON.stringify({ results: relayResults }) };
         }
@@ -92,6 +97,7 @@ beforeEach(() => {
   relayResults = [];
   existingPaths = new Set();
   claimFails = false;
+  mirrorFails = false;
   installFakeTauri();
 });
 
@@ -123,6 +129,22 @@ async function setUpTournament() {
     rendered.result.current.renameRoom(second.id, 'Room 102');
   });
   await setUpRound(rendered, 3);
+  return rendered;
+}
+
+async function setUpConnectedRooms() {
+  const rendered = renderHook(() => useBridge());
+  await act(async () => {
+    await rendered.result.current.loadFile();
+  });
+  await act(async () => {
+    await rendered.result.current.connectRelay({
+      baseUrl: relayBase,
+      tournamentId: relayTournament,
+      setupToken: 'one-time',
+    });
+  });
+  act(() => rendered.result.current.addRoom());
   return rendered;
 }
 
@@ -215,6 +237,154 @@ describe('a round, published and returned', () => {
     expect(rendered.result.current.notice?.message).toMatch(/still have whatever they had before/);
     expect(rendered.result.current.state.relay?.revision).toBe(0);
     expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId === null)).toBe(true);
+  });
+});
+
+describe('room setup and removal', () => {
+  test('publishes rooms before round 1, keeps the code across restart, and accepts a later assignment', async () => {
+    const rendered = await setUpConnectedRooms();
+    const room = rendered.result.current.state.rooms[0];
+    const activeCode = room.pairingCode;
+
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+
+    const mirrors = () =>
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'));
+    const setupBody = JSON.parse(String(mirrors()[0].args.body)) as {
+      revision: number;
+      rooms: Record<string, unknown>[];
+      sessions: unknown[];
+    };
+    expect(setupBody.revision).toBe(1);
+    expect(setupBody.rooms).toHaveLength(1);
+    expect(setupBody.rooms[0]).toMatchObject({ room_id: room.id, name: room.name });
+    expect(setupBody.rooms[0].assignment_qbj).toBeUndefined();
+    expect(setupBody.rooms[0].match_id).toBeUndefined();
+    expect(setupBody.rooms[0].pairing_expires_at).toBeUndefined();
+    expect(setupBody.sessions).toEqual([]);
+    expect(rendered.result.current.state.rooms[0]).toMatchObject({
+      pairingCode: activeCode,
+      pendingPairingCode: null,
+      relayPublished: true,
+      publishedMatchId: null,
+    });
+
+    rendered.unmount();
+    const restarted = renderHook(() => useBridge());
+    expect(restarted.result.current.state.rooms[0]).toMatchObject({
+      pairingCode: activeCode,
+      pendingPairingCode: null,
+      relayPublished: true,
+    });
+
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    const restartedRoom = restarted.result.current.state.rooms[0];
+    act(() => {
+      restarted.result.current.setRoomTeams(restartedRoom.id, 'left', 'Team_Cony');
+      restarted.result.current.setRoomTeams(restartedRoom.id, 'right', 'Team_Deering');
+    });
+    await act(async () => {
+      await restarted.result.current.publish();
+    });
+
+    const assignmentBody = JSON.parse(String(mirrors()[1].args.body)) as {
+      revision: number;
+      rooms: Record<string, unknown>[];
+    };
+    expect(assignmentBody.revision).toBe(2);
+    expect(assignmentBody.rooms[0].pairing_code_hash).toBe(setupBody.rooms[0].pairing_code_hash);
+    expect(assignmentBody.rooms[0].assignment_qbj).toBeTruthy();
+    expect(restarted.result.current.state.rooms[0]).toMatchObject({
+      pairingCode: activeCode,
+      pendingPairingCode: null,
+      relayPublished: true,
+    });
+    restarted.unmount();
+  });
+
+  test('keeps the old code active through a failed publish, then activates the pending code', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const room = rendered.result.current.state.rooms[0];
+    const oldCode = room.pairingCode;
+    act(() => rendered.result.current.regeneratePairingCode(room.id));
+    const pendingCode = rendered.result.current.state.rooms[0].pendingPairingCode;
+    expect(pendingCode).toBeTruthy();
+    expect(pendingCode).not.toBe(oldCode);
+    expect(rendered.result.current.state.rooms[0].pairingCode).toBe(oldCode);
+
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.state.rooms[0]).toMatchObject({
+      pairingCode: oldCode,
+      pendingPairingCode: pendingCode,
+    });
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+
+    mirrorFails = false;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.state.rooms[0]).toMatchObject({
+      pairingCode: pendingCode,
+      pendingPairingCode: null,
+    });
+    expect(rendered.result.current.state.relay?.revision).toBe(2);
+  });
+
+  test('persists a published-room tombstone and clears it without touching sessions', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const removed = rendered.result.current.state.rooms[0];
+    const priorMirror = JSON.parse(
+      String(
+        calls.find((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'))
+          ?.args.body,
+      ),
+    ) as { rooms: Record<string, unknown>[] };
+    const prior = priorMirror.rooms.find((entry) => entry.room_id === removed.id)!;
+
+    act(() => rendered.result.current.removeRoom(removed.id));
+    expect(rendered.result.current.state.rooms.some((room) => room.id === removed.id)).toBe(false);
+    expect(loadState().pendingRoomRemovals).toEqual([
+      expect.objectContaining({ id: removed.id, pairingCode: removed.pairingCode, pendingPairingCode: null }),
+    ]);
+    rendered.unmount();
+
+    const restarted = renderHook(() => useBridge());
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+      await restarted.result.current.publishRoomSetup();
+    });
+
+    const mirrorCalls = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+    const clearing = JSON.parse(String(mirrorCalls[1].args.body)) as {
+      revision: number;
+      rooms: Record<string, unknown>[];
+      sessions: unknown[];
+    };
+    const tombstone = clearing.rooms.find((entry) => entry.room_id === removed.id)!;
+    expect(clearing.revision).toBe(2);
+    expect(tombstone).toBeTruthy();
+    expect(tombstone.pairing_code_hash).toBe(prior.pairing_code_hash);
+    expect(tombstone.assignment_qbj).toBeUndefined();
+    expect(tombstone.match_id).toBeUndefined();
+    expect(clearing.sessions).toEqual([]);
+    expect(restarted.result.current.state.pendingRoomRemovals).toEqual([]);
+    expect(restarted.result.current.state.retiredRoomIds).toContain(removed.id);
+    restarted.unmount();
   });
 });
 
@@ -374,6 +544,8 @@ describe('persistence', () => {
       yftPath: null,
       tournamentName: null,
       rooms: [],
+      pendingRoomRemovals: [],
+      retiredRoomIds: [],
       selectedRoundId: null,
       resultFolder: null,
       results: [],

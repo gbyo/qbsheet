@@ -21,15 +21,29 @@ export type RoomStatus =
 export interface Room {
   id: string;
   name: string;
-  /** Plaintext, local only. Only its SHA-256 hash is ever published. */
+  /** The code currently active locally. Only its SHA-256 hash is ever published. */
   pairingCode: string;
+  /** A replacement code is not active until a successful mirror publishes its hash. */
+  pendingPairingCode: string | null;
   leftTeamId: string | null;
   rightTeamId: string | null;
+  /** True once a successful mirror has listed this room on the configured relay. */
+  relayPublished: boolean;
   /** The match id of the assignment last published for this room, if any. */
   publishedMatchId: string | null;
   /** The round last published for this room. */
   publishedRoundId: string | null;
   /** Per-room issue number. Advances on every successful publish; the match id does not. */
+  assignmentRevision: number;
+}
+
+/** The minimum room state needed to clear a room after it has been removed locally. */
+export interface RoomTombstone {
+  id: string;
+  name: string;
+  pairingCode: string;
+  /** Always null: a pending code was never active on the relay and must not revoke old tokens. */
+  pendingPairingCode: null;
   assignmentRevision: number;
 }
 
@@ -43,11 +57,24 @@ export function newRoom(id: string, name: string, pairingCode: string): Room {
     id,
     name,
     pairingCode,
+    pendingPairingCode: null,
     leftTeamId: null,
     rightTeamId: null,
+    relayPublished: false,
     publishedMatchId: null,
     publishedRoundId: null,
     assignmentRevision: 0,
+  };
+}
+
+/** Snapshot only the active relay identity of a removed room. */
+export function roomTombstone(room: Room): RoomTombstone {
+  return {
+    id: room.id,
+    name: room.name,
+    pairingCode: room.pairingCode,
+    pendingPairingCode: null,
+    assignmentRevision: room.assignmentRevision,
   };
 }
 

@@ -583,6 +583,101 @@ describe('sessions and writers', () => {
     expect(response.status).toBe(409);
   });
 
+  it('keeps a pre-paired room token through assignments and clear-only mirrors', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claim(tournamentId);
+    const code = '42424242';
+    const roomId = 'room-a';
+    const pairingHash = await sha256Hex(code);
+
+    // Room setup is enough to pair a scorer before Round 1 exists.
+    await mirror(management, tournamentId, {
+      revision: 1,
+      rooms: [{ room_id: roomId, name: 'Room A', pairing_code_hash: pairingHash }],
+      sessions: [],
+    });
+    const roomRow = await runInDurableObject(
+      env.QBTCP_RELAY.get(env.QBTCP_RELAY.idFromName(tournamentId)),
+      async (_instance, state) =>
+        state.storage.sql
+          .exec<{ pairing_expires_at: string | null }>(
+            'SELECT pairing_expires_at FROM room WHERE room_id = ?',
+            roomId,
+          )
+          .toArray()[0],
+    );
+    expect(roomRow).toEqual({ pairing_expires_at: null });
+
+    const paired = await pair(tournamentId, code, roomId, `prepair-${tournamentId.slice(0, 8)}`);
+    expect(paired.status).toBe(200);
+    const roomToken = paired.body.token!;
+    const waiting = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': roomToken },
+    });
+    expect(waiting.status).toBe(200);
+    expect(await waiting.json()).toMatchObject({ room_id: roomId, assigned: false });
+
+    // A later assignment appears through the same token; no new code exchange is involved.
+    await mirror(management, tournamentId, {
+      revision: 2,
+      rooms: [
+        {
+          room_id: roomId,
+          name: 'Room A',
+          pairing_code_hash: pairingHash,
+          assignment_qbj: assignmentQbj('round-1-match'),
+          match_id: 'round-1-match',
+          round_revision: 1,
+          assignment_revision: 1,
+        },
+      ],
+      sessions: [],
+    });
+    const assigned = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': roomToken },
+    });
+    expect(assigned.status).toBe(200);
+    expect(await assigned.json()).toMatchObject({
+      room_id: roomId,
+      assigned: true,
+      match_id: 'round-1-match',
+    });
+
+    // Clearing the assignment leaves the room and its token alive for the next round.
+    await mirror(management, tournamentId, {
+      revision: 3,
+      rooms: [{ room_id: roomId, name: 'Room A', pairing_code_hash: pairingHash }],
+      sessions: [],
+    });
+    const cleared = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': roomToken },
+    });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({ room_id: roomId, assigned: false });
+    const pairedAgain = await pair(tournamentId, code, roomId, `prepair-again-${tournamentId.slice(0, 8)}`);
+    expect(pairedAgain.status).toBe(200);
+
+    // Regenerating the pairing hash does not revoke a scorer-created room token.
+    const replacementCode = '51515151';
+    await mirror(management, tournamentId, {
+      revision: 4,
+      rooms: [{ room_id: roomId, name: 'Room A', pairing_code_hash: await sha256Hex(replacementCode) }],
+      sessions: [],
+    });
+    const tokenAfterCodeChange = await SELF.fetch(`${tournamentBase(tournamentId)}/assignment/status`, {
+      headers: { 'x-yf-room-token': roomToken },
+    });
+    expect(tokenAfterCodeChange.status).toBe(200);
+    expect(await tokenAfterCodeChange.json()).toMatchObject({ room_id: roomId, assigned: false });
+    const pairedReplacement = await pair(
+      tournamentId,
+      replacementCode,
+      roomId,
+      `prepair-replacement-${tournamentId.slice(0, 8)}`,
+    );
+    expect(pairedReplacement.status).toBe(200);
+  });
+
   it('serves a Director-mirrored session id rather than inventing its own', async () => {
     const tournamentId = freshTournamentId();
     const management = await claim(tournamentId);

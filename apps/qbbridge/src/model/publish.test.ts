@@ -9,9 +9,9 @@
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { pairingCodeHash } from './pairing';
-import { planRound, publishRound } from './publish';
+import { planRoomSetup, planRound, publishRound } from './publish';
 import { relayClaim, relayFetchResults, RelayError, type RelayConnection } from './relay';
-import { newRoom, type Room } from './rooms';
+import { newRoom, roomTombstone, type Room } from './rooms';
 import { loadedFixture } from '../tests/fixture';
 import * as native from './native';
 
@@ -210,20 +210,74 @@ describe('the mirror body', () => {
     ).rejects.toThrow(/revision 12.*Nothing was sent to the rooms/);
   });
 
-  test('a round with no matchups is refused before anything is sent', async () => {
+  test('a round with no matchups can publish a clear-only mirror', async () => {
     const calls = stubRelay(() => ({ status: 200, body: '{}' }));
     const tournament = loadedFixture();
     const rooms = roomsFor().map((room) => ({ ...room, leftTeamId: null, rightTeamId: null }));
-    await expect(
-      publishRound(connection, {
-        epoch: 1,
-        lastRevision: 0,
-        tournamentName: tournament.name,
-        plan: planRound(tournament, tournament.rounds[0], rooms),
-        rooms,
-      }),
-    ).rejects.toThrow(/no room in this round has two teams/i);
-    expect(calls).toEqual([]);
+    const outcome = await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 0,
+      tournamentName: tournament.name,
+      plan: planRound(tournament, tournament.rounds[0], rooms),
+      rooms,
+    });
+    expect(outcome).toMatchObject({
+      revision: 1,
+      assignments: [],
+      clearedRoomIds: ['room-1', 'room-2', 'room-3'],
+    });
+    expect(calls).toHaveLength(1);
+    const body = calls[0].body as { rooms: Record<string, unknown>[]; sessions: unknown[] };
+    expect(body.rooms).toHaveLength(3);
+    expect(body.rooms.every((room) => room.assignment_qbj === undefined && room.match_id === undefined)).toBe(
+      true,
+    );
+    expect(body.rooms.every((room) => room.pairing_expires_at === undefined)).toBe(true);
+    expect(body.sessions).toEqual([]);
+  });
+
+  test('a pending code is hashed only when its mirror is published', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const tournament = loadedFixture();
+    const [room] = roomsFor();
+    const pending = '91374620';
+    const setupRoom = { ...room, pendingPairingCode: pending };
+
+    await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 0,
+      tournamentName: tournament.name,
+      plan: planRoomSetup([setupRoom]),
+      rooms: [setupRoom],
+    });
+
+    const mirrored = (calls[0].body as { rooms: Record<string, unknown>[] }).rooms[0];
+    expect(mirrored.pairing_code_hash).toBe(await pairingCodeHash(pending));
+    expect(mirrored.pairing_code_hash).not.toBe(await pairingCodeHash(room.pairingCode));
+    expect(mirrored.pairing_expires_at).toBeUndefined();
+  });
+
+  test('a removed room is cleared with its active code, never its pending replacement', async () => {
+    const calls = stubRelay(() => ({ status: 200, body: '{}' }));
+    const tournament = loadedFixture();
+    const room = { ...roomsFor()[0], assignmentRevision: 3, pendingPairingCode: '91374620' };
+    const tombstone = roomTombstone(room);
+
+    await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 4,
+      tournamentName: tournament.name,
+      plan: planRoomSetup([], [tombstone]),
+      rooms: [],
+      tombstones: [tombstone],
+    });
+
+    const mirrored = (calls[0].body as { rooms: Record<string, unknown>[] }).rooms[0];
+    expect(mirrored).toMatchObject({ room_id: room.id, name: room.name, assignment_revision: 4 });
+    expect(mirrored.pairing_code_hash).toBe(await pairingCodeHash(room.pairingCode));
+    expect(mirrored.pairing_code_hash).not.toBe(await pairingCodeHash('91374620'));
+    expect(mirrored.assignment_qbj).toBeUndefined();
+    expect(mirrored.match_id).toBeUndefined();
   });
 
   test('with no rooms at all there is nothing to publish', async () => {

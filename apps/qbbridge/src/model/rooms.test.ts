@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from 'vitest';
 import { nextRoomId } from './identity';
-import { newRoom, pairingWarnings, publishableRooms, type Room } from './rooms';
+import { newRoom, pairingWarnings, publishableRooms, roomTombstone, type Room } from './rooms';
 
 const name = (id: string) => id.replace('Team_', '');
 
@@ -63,5 +63,27 @@ describe('room ids', () => {
     expect(nextRoomId([{ id: 'room-1' }])).toBe('room-2');
     // A removed middle room does not cause a reused id.
     expect(nextRoomId([{ id: 'room-1' }, { id: 'room-3' }])).toBe('room-4');
+  });
+});
+
+describe('room publication identity', () => {
+  test('new rooms are local-only and tombstones preserve the active code', () => {
+    const room = newRoom('room-1', 'Room 101', '48213906');
+    expect(room).toMatchObject({ pendingPairingCode: null, relayPublished: false });
+
+    const tombstone = roomTombstone({
+      ...room,
+      pairingCode: '48213906',
+      pendingPairingCode: '91374620',
+      relayPublished: true,
+      assignmentRevision: 3,
+    });
+    expect(tombstone).toEqual({
+      id: 'room-1',
+      name: 'Room 101',
+      pairingCode: '48213906',
+      pendingPairingCode: null,
+      assignmentRevision: 3,
+    });
   });
 });

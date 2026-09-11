@@ -87,7 +87,12 @@ describe('the shell', () => {
 
     const row = screen.getByRole('row', { name: /Room 1/ });
     expect(within(row).getByText(/^[0-9]{8}$/)).toBeInTheDocument();
+    expect(within(row).getByText('Not published')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Publish Room Setup' })).toBeDisabled();
     expect(within(row).getByText('Ready')).toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: 'New code' }));
+    expect(within(row).getByText(/Pending — publish to activate:/)).toBeInTheDocument();
+    expect(within(row).getAllByText(/^[0-9]{8}$/)).toHaveLength(2);
     // Publishing needs a relay; without one the button does not pretend otherwise.
     expect(screen.getByRole('button', { name: /Publish Round 1/ })).toBeDisabled();
   });

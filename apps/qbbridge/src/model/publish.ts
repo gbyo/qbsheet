@@ -18,7 +18,7 @@
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
 import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
-import type { Room } from './rooms';
+import type { Room, RoomTombstone } from './rooms';
 import type { BridgeRound, BridgeTournament } from './tournament';
 
 /** What one room should be holding after this publish. */
@@ -39,10 +39,36 @@ export interface PublishPlan {
   cleared: { roomId: string; roomName: string; reason: string }[];
 }
 
+function summarize(publications: RoomPublication[]): PublishPlan {
+  return {
+    publications,
+    assignments: publications
+      .map((entry) => entry.assignment)
+      .filter((entry): entry is PreparedAssignment => entry !== null),
+    cleared: publications
+      .filter((entry) => entry.assignment === null)
+      .map((entry) => ({
+        roomId: entry.roomId,
+        roomName: entry.roomName,
+        reason: entry.clearedReason ?? 'No game this round.',
+      })),
+  };
+}
+
+function roomSetupPublication(room: { id: string; name: string }): RoomPublication {
+  return {
+    roomId: room.id,
+    roomName: room.name,
+    assignment: null,
+    clearedReason: 'Room setup only; no assignment is being sent.',
+  };
+}
+
 export function planRound(
   tournament: BridgeTournament,
   round: BridgeRound,
   rooms: readonly Room[],
+  tombstones: readonly RoomTombstone[] = [],
 ): PublishPlan {
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
   const publications: RoomPublication[] = [];
@@ -95,19 +121,16 @@ export function planRound(
     });
   }
 
-  return {
-    publications,
-    assignments: publications
-      .map((entry) => entry.assignment)
-      .filter((entry): entry is PreparedAssignment => entry !== null),
-    cleared: publications
-      .filter((entry) => entry.assignment === null)
-      .map((entry) => ({
-        roomId: entry.roomId,
-        roomName: entry.roomName,
-        reason: entry.clearedReason ?? 'No game this round.',
-      })),
-  };
+  publications.push(...tombstones.map(roomSetupPublication));
+  return summarize(publications);
+}
+
+/** Build the explicit pre-round mirror: rooms and pairing hashes, with every assignment cleared. */
+export function planRoomSetup(
+  rooms: readonly Room[],
+  tombstones: readonly RoomTombstone[] = [],
+): PublishPlan {
+  return summarize([...rooms.map(roomSetupPublication), ...tombstones.map(roomSetupPublication)]);
 }
 
 export interface PublishOutcome {
@@ -134,15 +157,16 @@ export async function publishRound(
     tournamentName: string;
     plan: PublishPlan;
     rooms: readonly Room[];
+    tombstones?: readonly RoomTombstone[];
   },
 ): Promise<PublishOutcome> {
   if (input.plan.publications.length === 0) {
     throw new Error('There are no rooms to publish. Add a room first.');
   }
-  if (input.plan.assignments.length === 0) {
-    throw new Error('No room in this round has two teams chosen.');
-  }
-  const byId = new Map(input.rooms.map((room) => [room.id, room]));
+  // A plan with no assignments is valid for the explicit room-setup action. The relay still gets
+  // every room and clears any old assignment while keeping its pairing hash and tokens intact.
+  const byId = new Map<string, Room | RoomTombstone>(input.rooms.map((room) => [room.id, room]));
+  for (const tombstone of input.tombstones ?? []) byId.set(tombstone.id, tombstone);
   const mirrorRooms: MirrorRoomInput[] = [];
   for (const publication of input.plan.publications) {
     const room = byId.get(publication.roomId);
@@ -150,7 +174,7 @@ export async function publishRound(
     mirrorRooms.push({
       roomId: room.id,
       name: room.name,
-      pairingCodeHash: await pairingCodeHash(room.pairingCode),
+      pairingCodeHash: await pairingCodeHash(room.pendingPairingCode ?? room.pairingCode),
       assignmentQbj: publication.assignment?.document ?? null,
       matchId: publication.assignment?.matchId ?? null,
       // A cleared room's issue number still advances, so a scorer holding the old assignment can
