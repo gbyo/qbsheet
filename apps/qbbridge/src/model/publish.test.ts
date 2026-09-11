@@ -4,7 +4,7 @@
  * The relay-facing facts this pins are the ones that would break a room rather than a screen: a
  * plaintext pairing code must never reach the mirror, its hash must, the assignment must land in
  * the right room, the revision must advance, and a room that is being given a new round must not
- * lose the state that keeps it paired.
+ * lose the room identity that lets a scorer reconnect.
  */
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
@@ -475,7 +475,7 @@ describe('a room that is unused this round', () => {
     expect(unused.match_id).toBeUndefined();
     expect(outcome.clearedRoomIds).toEqual(['room-3']);
 
-    // Everything that keeps the room paired survives.
+    // Everything that keeps the room identity valid survives.
     expect(unused.room_id).toBe('room-3');
     expect(unused.name).toBe('Room 103');
     expect(unused.pairing_code_hash).toBe(await pairingCodeHash('75038112'));

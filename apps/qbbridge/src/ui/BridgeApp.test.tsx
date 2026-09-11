@@ -11,12 +11,13 @@ import userEvent from '@testing-library/user-event';
 import type { UserEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { resetNativeHost } from '../model/native';
-import { unplayedGamesFixtureText, yftFixtureText } from '../tests/fixture';
+import { yftFixtureText } from '../tests/fixture';
 import BridgeApp from './BridgeApp';
 
 let openedFixture = yftFixtureText();
 
 function installFakeTauri(): void {
+  globalThis.localStorage.clear();
   Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
     configurable: true,
     value: {
@@ -106,9 +107,8 @@ describe('the shell', () => {
 
     const row = screen.getByRole('row', { name: /Room 1/ });
     expect(within(row).getByText(/^[0-9]{8}$/)).toBeInTheDocument();
-    expect(within(row).getByText('Not published')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Publish Room Setup' })).toBeDisabled();
-    expect(within(row).getByText('Ready')).toBeInTheDocument();
+    expect(within(row).getAllByText('Not published')).toHaveLength(2);
     await user.click(within(row).getByRole('button', { name: 'New code' }));
     expect(within(row).getByText(/Pending — publish to activate:/)).toBeInTheDocument();
     expect(within(row).getAllByText(/^[0-9]{8}$/)).toHaveLength(2);
@@ -150,47 +150,6 @@ describe('the shell', () => {
 
     expect(screen.getByText(/crosses pools/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Publish Round 1/ })).toBeDisabled();
-  });
-
-  test('offers concrete unplayed games and fills exact or available rooms', async () => {
-    openedFixture = unplayedGamesFixtureText();
-    const user = userEvent.setup();
-    render(<BridgeApp />);
-    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
-    await screen.findByText('12 teams · 48 players');
-    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
-    await user.click(screen.getByRole('button', { name: '+ Room' }));
-    await user.click(screen.getByRole('button', { name: '+ Room' }));
-
-    const suggestions = screen.getByRole('list', { name: 'Concrete unplayed YellowFruit games' });
-    expect(within(suggestions).getAllByRole('listitem')).toHaveLength(2);
-    expect(screen.getByRole('button', { name: 'Fill pairings from file' })).toBeEnabled();
-
-    await user.click(screen.getByRole('button', { name: 'Fill pairings from file' }));
-    expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Hebron Academy');
-    expect(screen.getByRole('combobox', { name: 'Right team in Room 1' })).toHaveValue('Plymouth B');
-    expect(screen.getByRole('combobox', { name: 'Left team in Room 2' })).toHaveValue('');
-    expect(screen.getByRole('combobox', { name: 'Right team in Room 2' })).toHaveValue('');
-    expect(screen.getByText(/Already in Room 1/)).toBeInTheDocument();
-    expect(screen.getByText(/Choose a room manually.*No room location in file/)).toBeInTheDocument();
-  });
-
-  test('requires confirmation before a file suggestion replaces an edited pairing', async () => {
-    openedFixture = unplayedGamesFixtureText();
-    const user = userEvent.setup();
-    render(<BridgeApp />);
-    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
-    await screen.findByText('12 teams · 48 players');
-    await user.click(screen.getByRole('tab', { name: 'Rooms' }));
-    await user.click(screen.getByRole('button', { name: '+ Room' }));
-    await user.click(screen.getByRole('button', { name: '+ Room' }));
-    await pickTeam(user, 'Left team in Room 1', 'Cony');
-
-    await user.click(screen.getByRole('button', { name: 'Fill pairings from file' }));
-    const dialog = await screen.findByRole('alertdialog', { name: 'Replace entered pairings from file?' });
-    expect(within(dialog).getByText(/replace team selections you already entered/)).toBeInTheDocument();
-    await user.click(within(dialog).getByRole('button', { name: 'Fill from file' }));
-    expect(screen.getByRole('combobox', { name: 'Left team in Room 1' })).toHaveValue('Hebron Academy');
   });
 
   test('warns about the things a person mistypes', async () => {

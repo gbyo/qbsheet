@@ -44,7 +44,7 @@ describe('file names', () => {
     expect(resultFileName(resultSummary(result), 'res-1')).toBe(
       `R04_Room-101_Cony_vs_Deering_${resultFileSuffix('res-1')}.result.qbj`,
     );
-    expect(resultFileSuffix('res-1')).toMatch(/^[0-9a-f]{6}$/);
+    expect(resultFileSuffix('res-1')).toMatch(/^[0-9a-f]{12}$/);
   });
 
   test('two results for the same game get different names', () => {

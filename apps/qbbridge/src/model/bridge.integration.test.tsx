@@ -9,7 +9,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { resetNativeHost } from './native';
-import { loadState, storageKey } from './persistence';
+import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
 import { yftFixtureText } from '../tests/fixture';
@@ -329,6 +329,7 @@ describe('room setup and removal', () => {
     const rendered = await setUpConnectedRooms();
     const room = rendered.result.current.state.rooms[0];
     const activeCode = room.pairingCode;
+    expect(bridgeStatus(rendered, room.id)).toBe('not-published');
 
     await act(async () => {
       await rendered.result.current.publishRoomSetup();
@@ -354,6 +355,7 @@ describe('room setup and removal', () => {
       relayPublished: true,
       publishedMatchId: null,
     });
+    expect(bridgeStatus(rendered, room.id)).toBe('ready-to-pair');
 
     rendered.unmount();
     const restarted = renderHook(() => useBridge());
@@ -367,6 +369,7 @@ describe('room setup and removal', () => {
       restarted.result.current.loadFileContents(null, yftFixtureText());
     });
     const restartedRoom = restarted.result.current.state.rooms[0];
+    expect(bridgeStatus(restarted, restartedRoom.id)).toBe('ready-to-pair');
     act(() => {
       restarted.result.current.setRoomTeams(restartedRoom.id, 'left', 'Team_Cony');
       restarted.result.current.setRoomTeams(restartedRoom.id, 'right', 'Team_Deering');
@@ -387,7 +390,32 @@ describe('room setup and removal', () => {
       pendingPairingCode: null,
       relayPublished: true,
     });
+    expect(bridgeStatus(restarted, restartedRoom.id)).toBe('waiting');
     restarted.unmount();
+  });
+
+  test('assignment clearing returns a published room to ready to pair', async () => {
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const [, unused] = rendered.result.current.state.rooms;
+    expect(bridgeStatus(rendered, unused.id)).toBe('waiting');
+
+    act(() => {
+      rendered.result.current.setRoomTeams(unused.id, 'left', null);
+      rendered.result.current.setRoomTeams(unused.id, 'right', null);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    expect(rendered.result.current.state.rooms.find((room) => room.id === unused.id)).toMatchObject({
+      relayPublished: true,
+      publishedMatchId: null,
+      publishedRoundId: null,
+    });
+    expect(bridgeStatus(rendered, unused.id)).toBe('ready-to-pair');
   });
 
   test('keeps the old code active through a failed publish, then activates the pending code', async () => {
@@ -532,12 +560,14 @@ describe('results', () => {
 
     expect(writtenFiles).toHaveLength(1);
     expect(writtenFiles[0].directory).toBe('/tournaments/results');
-    expect(writtenFiles[0].fileName).toBe('R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj');
+    expect(writtenFiles[0].fileName).toBe(
+      `R04_Room-101_Cony_vs_Deering_${resultFileSuffix('res-1')}.result.qbj`,
+    );
     // A first save must not be allowed to land on a file that is already in the folder.
     expect(writtenFiles[0].overwrite).toBe(false);
     expect(JSON.parse(writtenFiles[0].contents)).toEqual(JSON.parse(JSON.stringify(document)));
     expect(rendered.result.current.state.results[0].savedPath).toBe(
-      '/tournaments/results/R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj',
+      `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('res-1')}.result.qbj`,
     );
 
     // Already saved: a second pass writes nothing rather than duplicating the file.
@@ -604,7 +634,7 @@ describe('results', () => {
     expect(writtenFiles[1].directory).toBe('/tournaments/other-results');
     expect(writtenFiles[1].overwrite).toBe(false);
     expect(rendered.result.current.state.results[0].savedPath).toBe(
-      '/tournaments/other-results/R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj',
+      `/tournaments/other-results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('res-1')}.result.qbj`,
     );
   });
 
@@ -769,6 +799,131 @@ describe('persistence', () => {
   });
 });
 
+describe('YellowFruit file boundaries', () => {
+  test('an invalid first file leaves the empty bridge state empty', () => {
+    const rendered = renderHook(() => useBridge());
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/bad.yft', '{ not a YellowFruit file');
+    });
+
+    expect(rendered.result.current.tournament).toBeNull();
+    expect(rendered.result.current.state).toEqual(emptyState());
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+  });
+
+  test('a failed reload preserves the current valid tournament and state', async () => {
+    const rendered = await setUpTournament();
+    const beforeTournament = rendered.result.current.tournament;
+    const beforeState = rendered.result.current.state;
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/corrupt.yft', '{ truncated');
+    });
+
+    expect(rendered.result.current.tournament).toBe(beforeTournament);
+    expect(rendered.result.current.state).toEqual(beforeState);
+    expect(loadState()).toEqual(beforeState);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+
+    // A later valid same-file reload still works after the failed attempt.
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', yftFixtureText());
+    });
+    expect(rendered.result.current.tournament).not.toBeNull();
+    expect(rendered.result.current.state.relay).toEqual(beforeState.relay);
+    expect(rendered.result.current.state.rooms).toEqual(beforeState.rooms);
+  });
+
+  test('a same-path reload refreshes YellowFruit data without resetting bridge state', async () => {
+    const rendered = await setUpTournament();
+    const before = rendered.result.current.state;
+    const refreshed = yftFixtureText().replace(
+      '2025 MEQBA Season Opener - Revised',
+      '2025 MEQBA Season Opener - Updated',
+    );
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', refreshed);
+    });
+
+    expect(rendered.result.current.tournament?.name).toBe('2025 MEQBA Season Opener - Updated');
+    expect(rendered.result.current.state.relay).toEqual(before.relay);
+    expect(rendered.result.current.state.rooms).toEqual(before.rooms);
+    expect(rendered.result.current.state.results).toEqual(before.results);
+    expect(rendered.result.current.state.yftPath).toBe('/tournaments/spring.yft');
+  });
+
+  test('a current-file reload dismisses an older different-file confirmation', async () => {
+    const rendered = await setUpTournament();
+    const otherFile = yftFixtureText().replace(
+      '2025 MEQBA Season Opener - Revised',
+      '2025 Winter Invitational',
+    );
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/winter.yft', otherFile);
+    });
+    expect(rendered.result.current.pendingFileSwitch).not.toBeNull();
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', yftFixtureText());
+    });
+
+    expect(rendered.result.current.pendingFileSwitch).toBeNull();
+    expect(rendered.result.current.state.yftPath).toBe('/tournaments/spring.yft');
+    expect(rendered.result.current.state.relay).not.toBeNull();
+  });
+
+  test('a different valid file requires confirmation and starts clean after confirmation', async () => {
+    const rendered = await setUpTournament();
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'old-result', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    const before = rendered.result.current.state;
+    const otherFile = yftFixtureText().replace(
+      '2025 MEQBA Season Opener - Revised',
+      '2025 Winter Invitational',
+    );
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/winter.yft', otherFile);
+    });
+    expect(rendered.result.current.pendingFileSwitch).toMatchObject({
+      path: '/tournaments/winter.yft',
+      tournamentName: '2025 Winter Invitational',
+    });
+    expect(rendered.result.current.state).toEqual(before);
+    expect(rendered.result.current.tournament?.name).toBe(before.tournamentName);
+
+    act(() => rendered.result.current.cancelFileSwitch());
+    expect(rendered.result.current.pendingFileSwitch).toBeNull();
+    expect(rendered.result.current.state).toEqual(before);
+
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/winter.yft', otherFile);
+    });
+    act(() => rendered.result.current.confirmFileSwitch());
+
+    expect(rendered.result.current.pendingFileSwitch).toBeNull();
+    expect(rendered.result.current.tournament?.name).toBe('2025 Winter Invitational');
+    expect(rendered.result.current.state).toMatchObject({
+      relay: null,
+      rooms: [],
+      pendingRoomRemovals: [],
+      retiredRoomIds: [],
+      selectedRoundId: 'Phase_Prelims__round_1',
+      resultFolder: before.resultFolder,
+      results: [],
+      yftPath: '/tournaments/winter.yft',
+      tournamentName: '2025 Winter Invitational',
+    });
+  });
+});
+
 function bridgeStatus(
   rendered: { result: { current: ReturnType<typeof useBridge> } },
   roomId: string,
@@ -916,6 +1071,16 @@ describe('changing the relay', () => {
 
   test('the replacement is stored only after the new claim succeeds', async () => {
     const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const beforeRooms = rendered.result.current.state.rooms.map((room) => ({
+      id: room.id,
+      name: room.name,
+      pairingCode: room.pairingCode,
+      leftTeamId: room.leftTeamId,
+      rightTeamId: room.rightTeamId,
+    }));
     act(() => {
       rendered.result.current.beginRelayChange();
     });
@@ -931,6 +1096,28 @@ describe('changing the relay', () => {
     // A different relay is a different object with its own revision counter.
     expect(rendered.result.current.state.relay?.revision).toBe(0);
     expect(rendered.result.current.changingRelay).toBe(false);
+    expect(rendered.result.current.notice?.message).toMatch(/Publish Room Setup to activate these rooms/);
+    expect(
+      rendered.result.current.state.rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        pairingCode: room.pairingCode,
+        leftTeamId: room.leftTeamId,
+        rightTeamId: room.rightTeamId,
+        relayPublished: room.relayPublished,
+        publishedMatchId: room.publishedMatchId,
+        publishedRoundId: room.publishedRoundId,
+        assignmentRevision: room.assignmentRevision,
+      })),
+    ).toEqual(
+      beforeRooms.map((room) => ({
+        ...room,
+        relayPublished: false,
+        publishedMatchId: null,
+        publishedRoundId: null,
+        assignmentRevision: 0,
+      })),
+    );
   });
 
   test('forgetting the credential is a separate, explicit action', async () => {
@@ -942,6 +1129,123 @@ describe('changing the relay', () => {
     // It says what happened rather than looking like a successful change.
     expect(rendered.result.current.notice?.kind).toBe('warn');
     expect(rendered.result.current.notice?.message).toMatch(/deleted from this machine/);
+  });
+});
+
+describe('critical relay persistence', () => {
+  test('does not consume a setup token when the storage preflight fails', async () => {
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('storage is unavailable');
+    });
+    const rendered = renderHook(() => useBridge());
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await rendered.result.current.connectRelay({
+        baseUrl: relayBase,
+        tournamentId: relayTournament,
+        setupToken: 'one-time',
+      });
+    });
+
+    expect(accepted).toBe(false);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/manage/claim'))).toEqual([]);
+    expect(rendered.result.current.state).toEqual(emptyState());
+    expect(rendered.result.current.notice?.message).toMatch(/setup token was not sent/);
+    setItem.mockRestore();
+  });
+
+  test('holds a claimed credential for an in-session persistence retry without false success', async () => {
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    let writes = 0;
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      writes += 1;
+      if (writes === 2) throw new Error('storage became unavailable after the claim');
+      originalSetItem(key, value);
+    });
+    const rendered = renderHook(() => useBridge());
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await rendered.result.current.connectRelay({
+        baseUrl: relayBase,
+        tournamentId: relayTournament,
+        setupToken: 'one-time',
+      });
+    });
+
+    expect(accepted).toBe(false);
+    expect(rendered.result.current.state.relay).toBeNull();
+    expect(rendered.result.current.relayCredentialSavePending).toBe(true);
+    expect(rendered.result.current.changingRelay).toBe(true);
+    expect(rendered.result.current.notice?.message).not.toContain('management-secret');
+    expect(JSON.stringify(loadState())).not.toContain('management-secret');
+
+    let retried: boolean | undefined;
+    await act(async () => {
+      retried = await rendered.result.current.retryRelayCredentialSave();
+    });
+
+    expect(retried).toBe(true);
+    expect(rendered.result.current.relayCredentialSavePending).toBe(false);
+    expect(rendered.result.current.state.relay?.managementToken).toBe('management-secret');
+    expect(loadState().relay?.managementToken).toBe('management-secret');
+    setItem.mockRestore();
+  });
+
+  test('a replacement claim cannot silently replace the old durable relay', async () => {
+    const rendered = await setUpTournament();
+    const oldRelay = rendered.result.current.state.relay;
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    let writes = 0;
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      writes += 1;
+      if (writes === 2) throw new Error('storage failed while replacing relay');
+      originalSetItem(key, value);
+    });
+
+    act(() => rendered.result.current.beginRelayChange());
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await rendered.result.current.connectRelay({
+        baseUrl: replacementRelayBase,
+        tournamentId: relayTournament,
+        setupToken: 'replacement',
+      });
+    });
+
+    expect(accepted).toBe(false);
+    expect(rendered.result.current.state.relay).toEqual(oldRelay);
+    expect(loadState().relay).toEqual(oldRelay);
+    expect(rendered.result.current.relayCredentialSavePending).toBe(true);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/manage/claim'))).toHaveLength(2);
+    setItem.mockRestore();
+  });
+
+  test('warns and offers recovery when a relay accepts a publication but its revision is not saved', async () => {
+    const rendered = await setUpTournament();
+    const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('storage failed after remote publication');
+    });
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+    expect(loadState().relay?.revision).toBe(0);
+    expect(rendered.result.current.persistenceSavePending).toBe(true);
+    expect(rendered.result.current.notice?.message).toMatch(/accepted it.*could not save the new revision/i);
+
+    setItem.mockRestore();
+    // Keep the original reference used above alive for the test's explicit recovery boundary.
+    expect(originalSetItem).toBeTypeOf('function');
+    act(() => {
+      expect(rendered.result.current.retryStatePersistence()).toBe(true);
+    });
+    expect(rendered.result.current.persistenceSavePending).toBe(false);
+    expect(loadState().relay?.revision).toBe(1);
   });
 });
 
@@ -1030,7 +1334,7 @@ describe('a corrected result', () => {
     const names = writtenFiles.map((file) => file.fileName);
     expect(new Set(names).size).toBe(2);
     for (const name of names) {
-      expect(name).toMatch(/^R04_Room-101_Cony_vs_Deering_[0-9a-f]{6}\.result\.qbj$/);
+      expect(name).toMatch(/^R04_Room-101_Cony_vs_Deering_[0-9a-f]{12}\.result\.qbj$/);
     }
 
     // Each result records its own path, and the first file still holds the first result.

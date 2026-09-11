@@ -10,7 +10,7 @@
 import { describe, expect, test } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { findSecretKeys } from '../../../../src/director/transfers/canonical';
-import { loadedFixture, timedFixtureText } from '../tests/fixture';
+import { loadedFixture, nonnumericRoundFixtureText, timedFixtureText } from '../tests/fixture';
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 
@@ -146,6 +146,26 @@ describe('a one-game assignment', () => {
       assignmentRevision: 1,
     });
     expect(built.ok).toBe(false);
+  });
+
+  test('uses YellowFruit numeric round identity when the display name is nonnumeric', () => {
+    const report = loadYellowFruitTournament(nonnumericRoundFixtureText());
+    if (!report.ok) throw new Error(`nonnumeric fixture failed: ${report.errors.join(' ')}`);
+    const round = report.tournament.rounds[0];
+    expect(round).toMatchObject({ displayName: 'Finals', number: 9, qbjName: '9' });
+
+    const assignment = prepare(report.tournament, { roundIndex: 0 });
+    expect(assignment.roundQbjName).toBe('9');
+    const objects = objectsOf(assignment);
+    const assignmentRound = (objects.find((entry) => entry.type === 'Tournament') as Record<string, unknown>)
+      .phases as Record<string, unknown>[];
+    const serializedRound = (assignmentRound[0]?.rounds as Record<string, unknown>[])[0];
+    expect(serializedRound).toMatchObject({ name: '9', number: 9 });
+
+    const source = readQbjSource(assignment.document);
+    expect(source.ok).toBe(true);
+    if (!source.ok) return;
+    expect(source.value.candidates[0]).toMatchObject({ roundName: '9', roundNumber: 9 });
   });
 });
 

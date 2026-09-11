@@ -26,6 +26,7 @@ function testRoom(
     ...newRoom(id, name, code),
     leftTeamId: 'Team_Cony',
     rightTeamId: 'Team_Deering',
+    relayPublished: published,
     publishedMatchId: published ? `match-${id}` : null,
     publishedRoundId: published ? tournamentRoundId : null,
   };
@@ -56,7 +57,14 @@ function testBridge(rooms: Room[]): BridgeApi {
     native: true,
     loadFile: vi.fn(async () => undefined),
     loadFileContents: noop,
+    pendingFileSwitch: null,
+    confirmFileSwitch: noop,
+    cancelFileSwitch: noop,
     connectRelay: vi.fn(async () => true),
+    relayCredentialSavePending: false,
+    retryRelayCredentialSave: vi.fn(async () => false),
+    persistenceSavePending: false,
+    retryStatePersistence: vi.fn(() => true),
     checkScorerReadiness: vi.fn(async () => undefined),
     beginRelayChange: noop,
     cancelRelayChange: noop,
@@ -71,7 +79,9 @@ function testBridge(rooms: Room[]): BridgeApi {
     roundChangeDiscardsSelections: false,
     publish: vi.fn(async () => undefined),
     publishRoomSetup: vi.fn(async () => undefined),
-    roomStatus: vi.fn((room: Room): RoomStatus => (room.publishedMatchId ? 'waiting' : 'ready')),
+    roomStatus: vi.fn((room: Room): RoomStatus =>
+      room.publishedMatchId ? 'waiting' : room.relayPublished ? 'ready-to-pair' : 'not-published',
+    ),
     warnings: [],
     chooseFolder: vi.fn(async () => undefined),
     saveNewResults: vi.fn(async () => undefined),
@@ -99,7 +109,7 @@ describe('room pairing sheets', () => {
     expect(screen.getByRole('button', { name: 'Print sheet' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Print all room sheets' })).toBeDisabled();
     expect(
-      screen.getByText('Publish the room setup to the relay before printing pairing sheets.'),
+      screen.getByText(/Publish the room setup to the relay before printing pairing sheets/),
     ).toBeInTheDocument();
   });
 
@@ -129,6 +139,21 @@ describe('room pairing sheets', () => {
     await waitFor(() => expect(document.querySelector('.room-print-sheet')).toBeNull());
   });
 
+  test('prints a room after room-only setup publication', async () => {
+    const user = userEvent.setup();
+    const tournament = loadedFixture();
+    const room = {
+      ...testRoom(tournament.rounds[0].id, 'room-setup', 'Room Setup', '48213906', false),
+      relayPublished: true,
+    };
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    render(<RoomsView bridge={testBridge([room])} />);
+
+    await user.click(screen.getByRole('button', { name: 'Print sheet' }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(document.querySelector('.room-print-sheet')).toHaveAttribute('data-room-id', 'room-setup');
+  });
+
   test('prints all published rooms as one sheet element per room', async () => {
     const user = userEvent.setup();
     const tournament = loadedFixture();
@@ -145,5 +170,17 @@ describe('room pairing sheets', () => {
     expect(
       [...document.querySelectorAll<HTMLElement>('.room-print-sheet')].map((sheet) => sheet.dataset.roomId),
     ).toEqual(['room-1', 'room-2']);
+  });
+
+  test('withholds a sheet while a replacement pairing code is pending', () => {
+    const tournament = loadedFixture();
+    const room = {
+      ...testRoom(tournament.rounds[0].id, 'room-pending', 'Room Pending', '48213906', true),
+      pendingPairingCode: '91374620',
+    };
+    render(<RoomsView bridge={testBridge([room])} />);
+
+    expect(screen.getByRole('button', { name: 'Print sheet' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Print all room sheets' })).toBeDisabled();
   });
 });

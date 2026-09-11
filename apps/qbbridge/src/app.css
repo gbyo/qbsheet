@@ -214,8 +214,7 @@ label {
 
 /* --------------------------------------------------------------------------- Rooms context */
 
-.rooms-schedule-context,
-.rooms-suggestions {
+.rooms-schedule-context {
   margin: 0 0 var(--qbs-space-4);
   padding: var(--qbs-space-3);
   border: 1px solid var(--qbs-border-subtle);
@@ -223,24 +222,21 @@ label {
   background: var(--qbs-surface-sunken);
 }
 
-.rooms-schedule-context__heading,
-.rooms-suggestions__heading {
+.rooms-schedule-context__heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: var(--qbs-space-3);
 }
 
-.rooms-schedule-context h3,
-.rooms-suggestions h3 {
+.rooms-schedule-context h3 {
   margin: 0;
   font-size: var(--qbs-text-section);
   font-weight: var(--qbs-weight-semibold);
   color: var(--qbs-text-strong);
 }
 
-.pool-context,
-.suggestion-list {
+.pool-context {
   margin: var(--qbs-space-3) 0 0;
   padding: 0;
   list-style: none;
@@ -264,19 +260,6 @@ label {
 
 .rooms-schedule-context > p:last-child {
   margin: var(--qbs-space-3) 0 0;
-}
-
-.rooms-suggestions__heading {
-  align-items: center;
-}
-
-.rooms-suggestions__heading p {
-  margin: var(--qbs-space-1) 0 0;
-}
-
-.suggestion-list li {
-  padding: var(--qbs-space-2) 0;
-  border-top: 1px solid var(--qbs-border-subtle);
 }
 
 ul.plain {
@@ -490,22 +473,16 @@ ul.plain {
     background: #fff;
   }
 
-  /* The print document is mounted only for the dialog and is the sole visible document on paper. */
-  body * {
-    visibility: hidden;
-  }
-
-  .room-print-sheets,
-  .room-print-sheets * {
-    visibility: visible;
+  /* The normal app is removed from layout; the print document remains in the ordinary flow. */
+  #app-root {
+    display: none;
   }
 
   .room-print-sheets {
-    position: absolute;
-    top: 0;
-    left: 0;
     display: block;
+    position: static;
     width: 100%;
+    margin: 0;
   }
 
   .room-print-sheet {

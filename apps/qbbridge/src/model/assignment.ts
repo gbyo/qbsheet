@@ -61,6 +61,15 @@ export interface PreparedAssignment {
 
 export type AssignmentResult = { ok: true; assignment: PreparedAssignment } | { ok: false; error: string };
 
+/** Return the Round.name spelling that stock YellowFruit can resolve on import. */
+function stockRoundName(round: BridgeRound): string | null {
+  if (round.number !== undefined) {
+    return Number.isSafeInteger(round.number) && round.number > 0 ? String(round.number) : null;
+  }
+  const parsed = Number.parseInt(round.qbjName, 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? round.qbjName : null;
+}
+
 function teamObject(team: BridgeTeam): Record<string, unknown> {
   return {
     type: 'Team',
@@ -106,6 +115,13 @@ export function buildAssignment(input: AssignmentInput): AssignmentResult {
       error: 'This YellowFruit file does not say whether rounds are timed, so a room cannot score it.',
     };
   }
+  const roundName = stockRoundName(round);
+  if (roundName === null) {
+    return {
+      ok: false,
+      error: `YellowFruit round “${round.displayName}” has no numeric round identity for Import Games Only.`,
+    };
+  }
 
   const matchId = pairingMatchId({
     tournamentId: tournament.id,
@@ -133,9 +149,9 @@ export function buildAssignment(input: AssignmentInput): AssignmentResult {
   const roundObject: Record<string, unknown> = {
     type: 'Round',
     id: round.id,
-    // YellowFruit's own spelling, usually a bare number. Its importer resolves a round by running
-    // `parseInt` over this, so it is carried through untouched.
-    name: round.qbjName,
+    // Stock YellowFruit resolves the target round by running `parseInt` over `name`. `qbjName` has
+    // already been normalized from a supplied numeric round identity when a display label differs.
+    name: roundName,
     ...(round.number !== undefined ? { number: round.number } : {}),
     // Exactly this game. The round holds other matches; naming them here is how a document handed
     // to one room would tell it the rest of the schedule.
@@ -184,7 +200,7 @@ export function buildAssignment(input: AssignmentInput): AssignmentResult {
       roomName: input.roomName,
       matchId,
       roundId: round.id,
-      roundQbjName: round.qbjName,
+      roundQbjName: roundName,
       ...(round.number !== undefined ? { roundNumber: round.number } : {}),
       assignmentRevision: Math.max(1, input.assignmentRevision),
       leftTeamName: left.name,

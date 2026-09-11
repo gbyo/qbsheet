@@ -190,9 +190,9 @@ YellowFruit → Import Games Only`}</pre>
           asking first.
         </p>
         <p>
-          Pairing survives a round change. A device paired in round 1 is still paired in round 8 — you do not
-          re-pair between rounds, and publishing a new round does not disturb a game somebody is in the middle
-          of scoring.
+          The room token survives a round change. A device connected in round 1 can still connect in round 8 —
+          you do not re-pair between rounds, and publishing a new round does not disturb a game somebody is in
+          the middle of scoring.
         </p>
         <p>
           If you use <strong>New code</strong>, the old code and QR remain active until a successful room
@@ -300,10 +300,11 @@ YellowFruit → Import Games Only`}</pre>
           a person choosing files in YellowFruit&rsquo;s own dialog.
         </p>
         <p>
-          It also reports only what it can actually see. A room is <strong>Ready</strong> until its assignment
-          is published, <strong>Waiting</strong> until a result for that game arrives, then{' '}
-          <strong>Result received</strong>. It never claims a result was imported, accepted or applied to
-          standings, because it has no way to know — YellowFruit does.
+          It also reports only what it can actually see. A room is <strong>Not published</strong> until its
+          setup reaches the relay, <strong>Ready to pair</strong> once its room identity is there,{' '}
+          <strong>Waiting</strong> while an assignment is active, then <strong>Result received</strong>. It
+          never claims a result was imported, accepted or applied to standings, because it has no way to know
+          — YellowFruit does.
         </p>
       </>
     ),

@@ -88,19 +88,15 @@ describe('loading a YellowFruit file', () => {
     expect(formatSummary(report.tournament)).toContain('Timed');
   });
 
-  test('offers only concrete unplayed two-team Matches as suggestions', () => {
+  test('does not expose concrete Match objects as pairing instructions', () => {
     const report = loadYellowFruitTournament(unplayedGamesFixtureText());
     expect(report.ok).toBe(true);
     if (!report.ok) return;
 
-    expect(report.tournament.suggestedGames).toHaveLength(2);
-    expect(report.tournament.suggestedGames[0]).toMatchObject({
-      roundId: report.tournament.rounds[0]?.id,
-      phaseId: 'Phase_Prelims',
-      location: 'Room 1',
-    });
-    expect(report.tournament.suggestedGames.every((game) => game.teamIds.every(Boolean))).toBe(true);
-    expect(report.tournament.suggestedGames.some((game) => game.location === undefined)).toBe(true);
+    // A concrete Match carries a room/location that may be stale or belong to another relay. The
+    // bridge therefore keeps the imported schedule as read-only context and makes the operator
+    // choose both sides explicitly.
+    expect('suggestedGames' in report.tournament).toBe(false);
   });
 
   test('surfaces Bridge-relevant identity/scoring warnings, not Director migration noise', () => {
