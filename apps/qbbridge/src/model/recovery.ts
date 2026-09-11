@@ -110,13 +110,9 @@ export function recoveryDigests(state: BridgeState): RecoveryDigests {
         .sort(),
     }))
     .sort((a, b) => (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
-  const results = [...state.results]
-    .map((entry) => [entry.resultId, entry.savedPath ?? null])
-    .sort();
+  const results = [...state.results].map((entry) => [entry.resultId, entry.savedPath ?? null]).sort();
   return {
-    roomIdentity: fnv1a64(
-      JSON.stringify([roomIds.map((id) => [id, byId.get(id)?.name ?? '']), tombstones]),
-    ),
+    roomIdentity: fnv1a64(JSON.stringify([roomIds.map((id) => [id, byId.get(id)?.name ?? '']), tombstones])),
     pairingCodes: fnv1a64(
       JSON.stringify(
         roomIds.map((id) => [id, byId.get(id)?.pairingCode ?? '', byId.get(id)?.pendingPairingCode ?? null]),
@@ -167,8 +163,7 @@ export function describeRecoveryFreshness(
     codes: live.pairingCodes !== baseline.digests.pairingCodes,
     plans: live.plans !== baseline.digests.plans,
     yft: (state.yftFingerprint ?? null) !== baseline.yftFingerprint,
-    relay:
-      !relay || relay.epoch !== baseline.relayEpoch || relay.revision !== baseline.relayRevision,
+    relay: !relay || relay.epoch !== baseline.relayEpoch || relay.revision !== baseline.relayRevision,
     results: live.results !== baseline.digests.results,
   };
   return {
