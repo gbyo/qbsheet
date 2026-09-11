@@ -1800,6 +1800,10 @@ export function useBridge(): BridgeApi {
     // to reuse the same visible URL. The identity check above is the second, explicit fence.
     pollGenerationRef.current += 1;
     if (!state.relay) return;
+    // Baseline the resume-gap clock here in the effect, not during render: the purity rule
+    // forbids Date.now() in render, and a null baseline would mistake sleep-before-first-tick
+    // for an ordinary tick.
+    if (lastPollMsRef.current === null) lastPollMsRef.current = Date.now();
     // The first poll is scheduled rather than run inline: polling ends in a `setState`, and a
     // `setState` in an effect body is a cascading render. A tick's delay costs nothing here.
     const first = setTimeout(() => void pollTick(), 0);
