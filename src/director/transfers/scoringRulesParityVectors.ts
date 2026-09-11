@@ -52,9 +52,19 @@ export const scoringRulesParityVectors: ScoringRulesParityVector[] = [
     rules: presetRules('naqt-untimed'),
   },
   {
-    name: 'naqt-timed',
+    name: 'naqt-timed-ms',
     exercises: ['timed', 'tossupCount'],
-    rules: presetRules('naqt-timed'),
+    rules: presetRules('naqt-timed-ms'),
+  },
+  {
+    name: 'naqt-timed-hs',
+    exercises: ['timed', 'tossupCount'],
+    rules: presetRules('naqt-timed-hs'),
+  },
+  {
+    name: 'naqt-timed-collegiate',
+    exercises: ['timed', 'tossupCount'],
+    rules: presetRules('naqt-timed-collegiate'),
   },
   custom('no-negs', ['negValue'], { negValue: null }),
   custom('tossups-only', ['useBonuses', 'overtimeBonuses'], {

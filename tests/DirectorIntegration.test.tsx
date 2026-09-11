@@ -421,7 +421,9 @@ describe('Director integration hardening', () => {
       'acf',
       'acf-powers',
       'naqt-untimed',
-      'naqt-timed',
+      'naqt-timed-ms',
+      'naqt-timed-hs',
+      'naqt-timed-collegiate',
     ]);
     const byId = new Map(scoringRulePresets.map((preset) => [preset.id, preset]));
     // Plain ACF predates power marks; official ACF events use -5 negs.
@@ -459,7 +461,12 @@ describe('Director integration hardening', () => {
       timed: false,
       maximumActivePlayers: 4,
     });
-    expect(byId.get('naqt-timed')?.rules).toMatchObject({
+    // Timed NAQT clocks are level-specific (verified September 2026): middle
+    // school keeps 9-minute halves while high school moved to 10-minute halves
+    // in 2023–24 and collegiate play uses 11-minute halves. No generic timed
+    // preset may silently imply one clock for every level.
+    expect(byId.get('naqt-timed')).toBeUndefined();
+    expect(byId.get('naqt-timed-ms')?.rules).toMatchObject({
       tossupValue: 10,
       powerValue: 15,
       negValue: -5,
@@ -469,6 +476,35 @@ describe('Director integration hardening', () => {
       overtimeTossupCount: 3,
       overtimeBonuses: false,
     });
+    expect(byId.get('naqt-timed-hs')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      timed: true,
+      tossupCount: 24,
+      regulationMinutes: 20,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    expect(byId.get('naqt-timed-collegiate')?.rules).toMatchObject({
+      tossupValue: 10,
+      powerValue: 15,
+      negValue: -5,
+      timed: true,
+      tossupCount: 24,
+      regulationMinutes: 22,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+    });
+    // The three timed levels share one generic rule shape: only the clock differs.
+    const shapeWithoutClock = (id: string) => {
+      const rules = { ...(byId.get(id)?.rules ?? {}) };
+      delete rules.regulationMinutes;
+      return rules;
+    };
+    const msRest = shapeWithoutClock('naqt-timed-ms');
+    expect(shapeWithoutClock('naqt-timed-hs')).toEqual(msRest);
+    expect(shapeWithoutClock('naqt-timed-collegiate')).toEqual(msRest);
     // Every preset is a complete rule set the scorer accepts exactly as stated.
     for (const preset of scoringRulePresets) {
       const full = { ...structuredClone(defaultRules), ...preset.rules };

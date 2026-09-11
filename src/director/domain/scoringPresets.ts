@@ -17,7 +17,13 @@ import { defaultRules, type TournamentRules } from '@qbsheet/tournament-domain';
  * - Overtime procedures (https://www.qbwiki.com/wiki/Overtime): ACF overtime
  *   is sudden death only; NAQT overtime is three tossups (powers and negs live,
  *   no bonuses) followed by sudden death if still tied.
- * - NAQT timed structure: two nine-minute halves reading about 24 tossups.
+ * - NAQT timed structure (verified September 2026 against the official NAQT
+ *   gameplay rules at https://www.naqt.com/downloads/rules.pdf, the 2023–24
+ *   rules-change notice, and https://www.qbwiki.com/wiki/Clock): middle-school
+ *   games use two 9-minute halves, high-school games (and community college)
+ *   use two 10-minute halves, and collegiate games use two 11-minute halves
+ *   (ICT; four-year SCTs retain untimed halves instead). Every timed game
+ *   reads about 24 tossups; only the clock differs by level.
  */
 export interface ScoringRulePreset {
   id: string;
@@ -108,26 +114,81 @@ export const scoringRulePresets: ScoringRulePreset[] = [
       maximumActivePlayers: 4,
     },
   ),
-  preset('naqt-timed', 'NAQT timed', 'NAQT rules on the clock: two timed halves reading about 24 tossups.', {
-    superpowerValue: null,
-    powerValue: 15,
-    negValue: -5,
-    bonusValue: 10,
-    tossupCount: 24,
-    bonusParts: 3,
-    minimumBonusParts: null,
-    maximumBonusScore: null,
-    bonusDivisor: null,
-    bouncebacks: false,
-    overtime: true,
-    overtimeTossupCount: 3,
-    overtimeBonuses: false,
-    timed: true,
-    regulationMinutes: 18,
-    lightning: false,
-    maximumTossupCount: null,
-    maximumActivePlayers: 4,
-  }),
+  preset(
+    'naqt-timed-ms',
+    'NAQT timed — Middle School',
+    'NAQT middle-school timing: two 9-minute halves (18 total), about 24 tossups.',
+    {
+      superpowerValue: null,
+      powerValue: 15,
+      negValue: -5,
+      bonusValue: 10,
+      tossupCount: 24,
+      bonusParts: 3,
+      minimumBonusParts: null,
+      maximumBonusScore: null,
+      bonusDivisor: null,
+      bouncebacks: false,
+      overtime: true,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+      timed: true,
+      regulationMinutes: 18,
+      lightning: false,
+      maximumTossupCount: null,
+      maximumActivePlayers: 4,
+    },
+  ),
+  preset(
+    'naqt-timed-hs',
+    'NAQT timed — High School',
+    'NAQT high-school timing: two 10-minute halves (20 total), about 24 tossups.',
+    {
+      superpowerValue: null,
+      powerValue: 15,
+      negValue: -5,
+      bonusValue: 10,
+      tossupCount: 24,
+      bonusParts: 3,
+      minimumBonusParts: null,
+      maximumBonusScore: null,
+      bonusDivisor: null,
+      bouncebacks: false,
+      overtime: true,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+      timed: true,
+      regulationMinutes: 20,
+      lightning: false,
+      maximumTossupCount: null,
+      maximumActivePlayers: 4,
+    },
+  ),
+  preset(
+    'naqt-timed-collegiate',
+    'NAQT timed — Collegiate',
+    'NAQT collegiate timing: two 11-minute halves (22 total), about 24 tossups. Four-year SCTs use untimed halves instead.',
+    {
+      superpowerValue: null,
+      powerValue: 15,
+      negValue: -5,
+      bonusValue: 10,
+      tossupCount: 24,
+      bonusParts: 3,
+      minimumBonusParts: null,
+      maximumBonusScore: null,
+      bonusDivisor: null,
+      bouncebacks: false,
+      overtime: true,
+      overtimeTossupCount: 3,
+      overtimeBonuses: false,
+      timed: true,
+      regulationMinutes: 22,
+      lightning: false,
+      maximumTossupCount: null,
+      maximumActivePlayers: 4,
+    },
+  ),
 ];
 
 export function scoringRulePresetById(id: string): ScoringRulePreset | undefined {
