@@ -302,20 +302,30 @@ export function exportSqbsTournamentFile(input: SqbsTournamentInput): FormatRepo
     add(isForfeit ? 1 : 0);
     add(left.lightningPoints ?? 0);
     add(right.lightningPoints ?? 0);
-    for (const side of [left, right]) {
+    // Documented SQBS order interleaves sides by slot: L1,R1,L2,R2,...L8,R8.
+    // A side-major layout (all left then all right) round-trips through a
+    // matching parser but misattributes players in real SQBS.
+    const padSide = (side: typeof left) => {
       const padded = [...side.players];
       while (padded.length < MAX_PLAYERS_PER_GAME_SIDE) {
         padded.push({ playerIndex: -1, gamesPlayed: 0, counts: [0, 0, 0, 0], points: 0 });
       }
-      for (const player of padded.slice(0, MAX_PLAYERS_PER_GAME_SIDE)) {
-        add(player.playerIndex);
-        add(Number(player.gamesPlayed).toFixed(2));
-        add(player.counts[0]);
-        add(player.counts[1]);
-        add(player.counts[2]);
-        add(player.counts[3]);
-        add(player.points);
-      }
+      return padded.slice(0, MAX_PLAYERS_PER_GAME_SIDE);
+    };
+    const leftPadded = padSide(left);
+    const rightPadded = padSide(right);
+    const writePlayer = (player: (typeof leftPadded)[number]) => {
+      add(player.playerIndex);
+      add(Number(player.gamesPlayed).toFixed(2));
+      add(player.counts[0]);
+      add(player.counts[1]);
+      add(player.counts[2]);
+      add(player.counts[3]);
+      add(player.points);
+    };
+    for (let slot = 0; slot < MAX_PLAYERS_PER_GAME_SIDE; slot += 1) {
+      writePlayer(leftPadded[slot]!);
+      writePlayer(rightPadded[slot]!);
     }
   }
 
@@ -507,46 +517,67 @@ export function parseSqbsTournamentFile(text: string): FormatReport<SqbsParsedTo
       ) {
         break;
       }
-      const readSide = (label: string): SqbsParsedSideGame | undefined => {
-        const teamIndex = label === 'left' ? leftTeam : rightTeam;
-        const players: SqbsParsedPlayerGame[] = [];
-        for (let slot = 0; slot < MAX_PLAYERS_PER_GAME_SIDE; slot += 1) {
-          const playerIndex = nextInt(`${path}.${label}[${slot}].player`);
-          const gamesPlayed = nextNumber(`${path}.${label}[${slot}].gamesPlayed`);
-          const c0 = nextInt(`${path}.${label}[${slot}].counts[0]`);
-          const c1 = nextInt(`${path}.${label}[${slot}].counts[1]`);
-          const c2 = nextInt(`${path}.${label}[${slot}].counts[2]`);
-          const c3 = nextInt(`${path}.${label}[${slot}].counts[3]`);
-          const slotPoints = nextInt(`${path}.${label}[${slot}].points`);
-          if (
-            playerIndex === undefined ||
-            gamesPlayed === undefined ||
-            c0 === undefined ||
-            c1 === undefined ||
-            c2 === undefined ||
-            c3 === undefined ||
-            slotPoints === undefined
-          ) {
-            return undefined;
-          }
-          if (playerIndex >= 0)
-            players.push({ playerIndex, gamesPlayed, counts: [c0, c1, c2, c3], points: slotPoints });
+      // Documented wire order is interleaved by slot: L1,R1,L2,R2,...
+      // Reading side-major here would mirror a side-major writer while
+      // misattributing players in genuine SQBS files.
+      const readPlayerBlock = (label: string, slot: number): SqbsParsedPlayerGame | null | undefined => {
+        const playerIndex = nextInt(`${path}.${label}[${slot}].player`);
+        const gamesPlayed = nextNumber(`${path}.${label}[${slot}].gamesPlayed`);
+        const c0 = nextInt(`${path}.${label}[${slot}].counts[0]`);
+        const c1 = nextInt(`${path}.${label}[${slot}].counts[1]`);
+        const c2 = nextInt(`${path}.${label}[${slot}].counts[2]`);
+        const c3 = nextInt(`${path}.${label}[${slot}].counts[3]`);
+        const slotPoints = nextInt(`${path}.${label}[${slot}].points`);
+        if (
+          playerIndex === undefined ||
+          gamesPlayed === undefined ||
+          c0 === undefined ||
+          c1 === undefined ||
+          c2 === undefined ||
+          c3 === undefined ||
+          slotPoints === undefined
+        ) {
+          return undefined;
         }
-        return {
-          teamIndex,
-          score: label === 'left' ? leftScore : rightScore,
-          bonusesHeard: label === 'left' ? heard[0]! : heard[1]!,
-          bonusPoints: label === 'left' ? points[0]! : points[1]!,
-          bouncebacksHeard: label === 'left' ? bouncebacksHeard[0]! : bouncebacksHeard[1]!,
-          bouncebackPoints: label === 'left' ? bouncebackPoints[0]! : bouncebackPoints[1]!,
-          tossupsWithoutBonus: label === 'left' ? leftNoBonus : rightNoBonus,
-          lightningPoints: label === 'left' ? leftLightning : rightLightning,
-          players,
-        };
+        if (playerIndex < 0) return null;
+        return { playerIndex, gamesPlayed, counts: [c0, c1, c2, c3], points: slotPoints };
       };
-      const leftSide = readSide('left');
-      const rightSide = readSide('right');
-      if (!leftSide || !rightSide) break;
+      const leftPlayers: SqbsParsedPlayerGame[] = [];
+      const rightPlayers: SqbsParsedPlayerGame[] = [];
+      let malformed = false;
+      for (let slot = 0; slot < MAX_PLAYERS_PER_GAME_SIDE; slot += 1) {
+        const leftPlayer = readPlayerBlock('left', slot);
+        const rightPlayer = readPlayerBlock('right', slot);
+        if (leftPlayer === undefined || rightPlayer === undefined) {
+          malformed = true;
+          break;
+        }
+        if (leftPlayer !== null) leftPlayers.push(leftPlayer);
+        if (rightPlayer !== null) rightPlayers.push(rightPlayer);
+      }
+      if (malformed) break;
+      const leftSide: SqbsParsedSideGame = {
+        teamIndex: leftTeam,
+        score: leftScore,
+        bonusesHeard: heard[0]!,
+        bonusPoints: points[0]!,
+        bouncebacksHeard: bouncebacksHeard[0]!,
+        bouncebackPoints: bouncebackPoints[0]!,
+        tossupsWithoutBonus: leftNoBonus,
+        lightningPoints: leftLightning,
+        players: leftPlayers,
+      };
+      const rightSide: SqbsParsedSideGame = {
+        teamIndex: rightTeam,
+        score: rightScore,
+        bonusesHeard: heard[1]!,
+        bonusPoints: points[1]!,
+        bouncebacksHeard: bouncebacksHeard[1]!,
+        bouncebackPoints: bouncebackPoints[1]!,
+        tossupsWithoutBonus: rightNoBonus,
+        lightningPoints: rightLightning,
+        players: rightPlayers,
+      };
       games.push({
         id,
         round,
