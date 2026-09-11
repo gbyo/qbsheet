@@ -50,9 +50,22 @@ body {
 }
 
 .titlebar h1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* 987 × 133 in the source, so the width follows from the height. */
+.titlebar .wordmark {
+  height: 15px;
+  width: auto;
+  /* The mark sits on its baseline; the descender-free lockup needs a nudge to line up with text. */
+  position: relative;
+  top: 1px;
 }
 
 .titlebar .subtle {

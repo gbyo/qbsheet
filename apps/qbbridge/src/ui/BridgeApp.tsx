@@ -3,6 +3,7 @@
  */
 
 import { useState } from 'react';
+import wordmark from '../assets/qbsheet-wordmark.svg';
 import { useBridge } from '../model/useBridge';
 import SetupView from './SetupView';
 import RoomsView from './RoomsView';
@@ -19,7 +20,16 @@ export default function BridgeApp() {
   return (
     <div className="shell">
       <header className="titlebar">
-        <h1>QBSheet Bridge</h1>
+        {/*
+         * The designed two-colour wordmark, as an image rather than inline `currentColor` SVG:
+         * the green is the mark, not a theme value, and this window is light in both appearances.
+         * `alt` carries the word so the heading's accessible name is still "QBSheet Bridge" —
+         * a screen reader reads one name, not the mark and the name twice.
+         */}
+        <h1>
+          <img className="wordmark" src={wordmark} alt="QBSheet" />
+          <span>Bridge</span>
+        </h1>
         <span className="subtle">
           {bridge.tournament
             ? bridge.tournament.name

@@ -38,7 +38,11 @@ afterEach(() => {
 describe('the shell', () => {
   test('opens on the tournament panel and says what is missing', () => {
     render(<BridgeApp />);
-    expect(screen.getByRole('heading', { name: 'QBSheet Bridge' })).toBeInTheDocument();
+    // The wordmark is the mark and "Bridge" is text, so the heading still reads as one name
+    // rather than announcing the logo and the product separately.
+    const heading = screen.getByRole('heading', { name: 'QBSheet Bridge' });
+    expect(heading).toBeInTheDocument();
+    expect(within(heading).getByAltText('QBSheet')).toHaveClass('wordmark');
     expect(screen.getByText('No YellowFruit file loaded')).toBeInTheDocument();
     expect(screen.getByText('Relay not connected')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open YellowFruit File' })).toBeInTheDocument();
