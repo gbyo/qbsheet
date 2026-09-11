@@ -323,7 +323,11 @@ describe('the established room', () => {
     };
     answer = async () => ({ ok: false as const, error: 'Network unavailable' });
     lanAnswer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
-    const onStart = vi.fn(() => ({ ok: true as const }));
+    let startedWith: Parameters<RoomProps['onStart']>[0] | undefined;
+    const onStart = vi.fn((start: Parameters<RoomProps['onStart']>[0]) => {
+      startedWith = start;
+      return { ok: true as const };
+    });
     renderRoom({ pairedRoom: lanRoom, onStart });
     await settle();
     await poll();
@@ -335,12 +339,12 @@ describe('the established room', () => {
       await Promise.resolve();
     });
     expect(sessionEndpoints).toEqual([lanRoom.lanBaseUrl]);
-    expect(onStart).toHaveBeenCalledWith(
+    expect(startedWith).toEqual(
       expect.objectContaining({
         lanCredentials: { sessionId: 'session-1', token: 'session-token' },
       }),
     );
-    expect(onStart.mock.calls[0]?.[0]).not.toHaveProperty('credentials');
+    expect(startedWith).not.toHaveProperty('credentials');
 
     answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
     await act(async () => vi.advanceTimersByTimeAsync(PRIMARY_HEALTH_CHECK_INTERVAL_MS));
