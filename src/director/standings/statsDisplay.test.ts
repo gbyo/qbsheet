@@ -148,6 +148,7 @@ describe('shared cell values', () => {
       totalBonusConversion: null,
       lightningPoints: 0,
       lightningKnown: true,
+      lightningGames: 1,
       tossupsHeardRegulation: 40,
       tossupsHeardRegulationKnown: true,
       overtimePoints: 0,
@@ -228,7 +229,7 @@ describe('parity columns (#750)', () => {
       tossupsHeardKnown: true,
       tossupsHeardRegulation: 40,
       tossupsHeardRegulationKnown: true,
-      overtimePoints: 0,
+      overtimePoints: 30,
       overtimePointsKnown: true,
       bonuses: 12,
       bonusPoints: 130,
@@ -240,6 +241,7 @@ describe('parity columns (#750)', () => {
       totalBonusConversion: 16 / 57,
       lightningPoints: 45,
       lightningKnown: true,
+      lightningGames: 1,
       gamesPlayed: 1,
       headToHead: 0,
     };
@@ -320,16 +322,22 @@ describe('parity columns (#750)', () => {
     expect(teamStatCell('lightningpg', standing)).toBe('45.0');
     expect(teamStatCell('lightning', { ...standing, lightningKnown: false })).toBe('—');
     expect(teamStatCell('lightningpg', { ...standing, lightningKnown: false })).toBe('—');
-    expect(teamStatCell('lightningpg', { ...standing, gamesPlayed: 0 })).toBe('—');
+    expect(teamStatCell('lightningpg', { ...standing, lightningGames: 0 })).toBe('—');
+    // A forfeit-inflated games-played count must not dilute the rate (#755).
+    expect(teamStatCell('lightningpg', { ...standing, gamesPlayed: 2 })).toBe('45.0');
   });
 
   test('Pts/X uses the shared normalization and drops out when counts disagree', () => {
     const state = playedTournament();
     const columns = teamColumnsForState(state);
     expect(columns.find((column) => column.id === 'ppx')?.label).toBe('Pts/20');
-    // 300 points over 40 heard is 7.50 PPTUH; a 20-tossup set makes 150.00.
-    expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: 20 })).toBe('150.00');
+    // 300 final points include 30 overtime points, so regulation Pts/20 is
+    // (300 − 30) / 40 × 20 = 135.00 — final-score PPTUH would wrongly give 150.00.
+    expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: 20 })).toBe('135.00');
     expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: null })).toBe('—');
+    expect(
+      teamStatCell('ppx', { ...bouncebackStanding(), overtimePointsKnown: false }, { pointsTossups: 20 }),
+    ).toBe('—');
 
     const rules = state.tournament!.rules;
     state.gameDefinitions = [

@@ -51,6 +51,11 @@ export interface TeamStatsRow {
    * Normalized PPX-style display divides by this denominator, never by summed player exposure.
    */
   tossupsHeardRegulation: number | null;
+  /**
+   * Regulation points (total minus known overtime); null when the overtime split is
+   * unknown. Normalized Pts/X divides this numerator by the regulation denominator.
+   */
+  regulationPoints: number | null;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
   pptuh: number | null;
   bonusPoints: number;
@@ -120,6 +125,8 @@ export interface PlayerStatsRow {
 export interface GameStatsRow {
   gameId: string;
   phaseId?: string;
+  /** Human-readable phase/stage name; renderers must prefer it over phaseId. */
+  phaseName?: string;
   roundId?: string;
   roundName?: string;
   teamOneId: string;
@@ -413,6 +420,10 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       tossupsHeardRegulation: 0,
       tossupsHeardRegulationKnown: true,
+      // The interchange result carries no per-team overtime-points split, so the
+      // regulation numerator stays unknown here; the canonical adapter fills it
+      // from the domain regulation derivation (#755).
+      regulationPoints: null,
       bonusPoints: 0,
       bonusesHeard: 0,
       bouncebackPoints: 0,

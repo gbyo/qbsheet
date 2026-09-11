@@ -1,7 +1,6 @@
 import {
   buildReportPresentation,
   defaultReportOptions,
-  pointsPerX,
   semanticAnswerCounts,
   type CanonicalStandingsReport,
   type ReportOptions,
@@ -15,6 +14,7 @@ import {
   acceptedGameRecords,
   canonicalCompetitionRanks,
   deriveTeamStandings,
+  normalizedPointsPerX,
   orderDayItems,
   phaseCompetitiveField,
   previewAdvancement,
@@ -489,7 +489,7 @@ function presentTeamRow(row: TeamStatsRow, x: number | null): TeamStatsRow {
   return {
     ...row,
     answerCounts: semanticAnswerCounts(row),
-    pointsPerX: pointsPerX(row.pptuh, x),
+    pointsPerX: normalizedPointsPerX(row.regulationPoints, row.tossupsHeardRegulation, x),
   };
 }
 

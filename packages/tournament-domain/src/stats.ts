@@ -92,6 +92,11 @@ export interface TeamStanding {
   lightningPoints: number;
   /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
   lightningKnown: boolean;
+  /**
+   * Applicable non-forfeit games for the Lightning/G denominator: contributing games whose
+   * own historical rules enable lightning, excluding pure-forfeit placeholders (#755).
+   */
+  lightningGames: number;
   gamesPlayed: number;
   headToHead: number;
 }
@@ -306,6 +311,7 @@ export function deriveTeamStandings(
       totalBonusConversion: null,
       lightningPoints: 0,
       lightningKnown: true,
+      lightningGames: 0,
       gamesPlayed: 0,
       headToHead: 0,
     });
@@ -353,6 +359,10 @@ export function deriveTeamStandings(
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
     accumulateBouncebackSide(bouncebackTotalsFor(left.teamId), left, right, game, gameRules, detailKnown);
+    if (gameRules.lightning && !isPureForfeitPlaceholder(game)) {
+      leftStanding.lightningGames += 1;
+      rightStanding.lightningGames += 1;
+    }
     addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
@@ -567,18 +577,18 @@ function accumulateBouncebackSide(
   rules: TournamentRules | null | undefined,
   detailKnown: boolean,
 ): void {
-  if (game.status === 'forfeit' && own.bouncebacks === null) {
-    // A pure-forfeit placeholder carries no signal; a partial forfeit unknowns the
-    // side that kept no breakdown while the entered side aggregates as-entered.
-    if (!isPureForfeitPlaceholder(game)) {
+  if (own.bouncebacks === null) {
+    // An absent breakdown is N/A — not unknown — where the stored historical
+    // definition defines no bouncebacks, or the game is a pure-forfeit placeholder.
+    // Entered detail always aggregates as-entered; any other missing breakdown
+    // unknowns the scope (#755, #844).
+    const noOpportunity: boolean =
+      !!(rules && !rules.bouncebacks && game.definitionDigest) ||
+      (game.status === 'forfeit' && isPureForfeitPlaceholder(game));
+    if (!noOpportunity) {
       totals.pointsKnown = false;
       totals.partsKnown = false;
     }
-    return;
-  }
-  if (own.bouncebacks === null) {
-    totals.pointsKnown = false;
-    totals.partsKnown = false;
     return;
   }
   totals.points += own.bouncebacks ?? 0;
@@ -695,6 +705,68 @@ export function bouncebackDerivationForTeam(
     ),
     ppbWithoutBouncebacks: bonuses > 0 ? bonusPoints / bonuses : null,
   };
+}
+
+/**
+ * Scoring applicability for one reporting scope, derived from the historical scoring
+ * definitions of the accepted games in that scope — never from the tournament's current
+ * rules alone (#868, #755).
+ *
+ * Changing current rules for future games must not rewrite which statistics apply to
+ * already-accepted games. Games without a stored definition resolve through the same
+ * `rulesForGame` fallback the aggregations use, so applicability and arithmetic agree.
+ * An empty scope falls back to the current tournament rules so empty tables keep a
+ * sensible column set.
+ */
+export interface ScopeAnswerTier {
+  id: 'superpowers' | 'powers' | 'gets' | 'negs';
+  /** Distinct configured point values across the scope; several means mixed definitions. */
+  values: number[];
+}
+
+export interface ScopeScoringApplicability {
+  bonuses: boolean;
+  bouncebacks: boolean;
+  lightning: boolean;
+  tiers: ScopeAnswerTier[];
+  /** Single shared regulation tossup count, or null when definitions disagree. */
+  regulationTossups: number | null;
+  /** True when the scope mixes answer values or regulation denominators. */
+  mixed: boolean;
+}
+
+export function scopeScoringApplicability(
+  state: DirectorState,
+  games: readonly GameRecord[],
+): ScopeScoringApplicability {
+  const rulesList =
+    games.length > 0
+      ? games.map((game) => rulesForGame(state, game) ?? defaultRules)
+      : [state.tournament?.rules ?? defaultRules];
+  const bonuses = rulesList.some((rules) => rules.useBonuses);
+  const bouncebacks = bonuses && rulesList.some((rules) => rules.bouncebacks);
+  const lightning = rulesList.some((rules) => rules.lightning);
+  const valuesOf = (pick: (rules: TournamentRules) => number | null): number[] => [
+    ...new Set(rulesList.map(pick).filter((value): value is number => typeof value === 'number')),
+  ];
+  const tiers: ScopeAnswerTier[] = (
+    [
+      { id: 'superpowers', values: valuesOf((rules) => rules.superpowerValue) },
+      { id: 'powers', values: valuesOf((rules) => rules.powerValue) },
+      { id: 'gets', values: valuesOf((rules) => rules.tossupValue) },
+      { id: 'negs', values: valuesOf((rules) => rules.negValue) },
+    ] as ScopeAnswerTier[]
+  ).filter((tier) => tier.id === 'gets' || tier.values.length > 0);
+  const tossupCounts = [
+    ...new Set(
+      rulesList
+        .map((rules) => rules.tossupCount)
+        .filter((count): count is number => typeof count === 'number' && count > 0),
+    ),
+  ];
+  const regulationTossups = tossupCounts.length === 1 ? (tossupCounts[0] as number) : null;
+  const mixed = tiers.some((tier) => tier.values.length > 1) || tossupCounts.length > 1;
+  return { bonuses, bouncebacks, lightning, tiers, regulationTossups, mixed };
 }
 
 function headToHeadValue(
@@ -864,6 +936,14 @@ export function playerPptuh(
 }
 
 /**
+ * Points per bonus through the shared domain helper, so every surface agrees:
+ * PPB is undefined — not zero — when no bonuses were heard.
+ */
+export function bonusPointsPerBonus(bonusPoints: number, bonuses: number): number | null {
+  return bonuses > 0 ? bonusPoints / bonuses : null;
+}
+
+/**
  * Lightning points are known only when the result supplies the breakdown.
  * A missing value marks the aggregate unknown rather than contributing zero.
  */
@@ -962,6 +1042,8 @@ function gameOvertimePointsForTeam(
   if (typeof score?.overtimePoints === 'number' && Number.isFinite(score.overtimePoints)) {
     return score.overtimePoints;
   }
+  // No overtime tossups means no overtime scoring events: a known zero without a split.
+  if (validTuh(game.overtimeTossupsRead) && game.overtimeTossupsRead === 0) return 0;
   if (rulesForGame(state, game)?.overtime === false) return 0;
   return null;
 }
@@ -1005,6 +1087,25 @@ export interface TeamRegulationDerivation {
  * Regulation points are a residual (total minus overtime), so adjustments and other
  * period-less scoring stay in the regulation bucket by construction.
  */
+/**
+ * Regulation-normalized points per X tossups: regulation points over regulation TUH,
+ * scaled to the scope's shared regulation count (#755).
+ *
+ * Overtime points and overtime TUH are excluded — final-score PPTUH scaled by X would
+ * smuggle overtime scoring into a regulation metric. Null unless regulation points,
+ * regulation TUH, and the shared count are all exactly known.
+ */
+export function normalizedPointsPerX(
+  regulationPoints: number | null | undefined,
+  regulationTuh: number | null | undefined,
+  tossups: number | null | undefined,
+): number | null {
+  if (typeof regulationPoints !== 'number' || !Number.isFinite(regulationPoints)) return null;
+  if (typeof regulationTuh !== 'number' || !Number.isFinite(regulationTuh) || regulationTuh <= 0) return null;
+  if (typeof tossups !== 'number' || !Number.isFinite(tossups) || tossups <= 0) return null;
+  return (regulationPoints / regulationTuh) * tossups;
+}
+
 export function regulationDerivationForTeam(
   standing: Pick<
     TeamStanding,

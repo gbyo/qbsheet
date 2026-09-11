@@ -296,6 +296,33 @@ describe('printable game box scores', () => {
     expect(games).toContain('Winner: Aiken &lt;A&gt;');
   });
 
+  test('prefers the stage name over the internal phase id (#853)', () => {
+    const named = (gameId: string, phaseId: string, phaseName?: string): StatsSnapshot['games'][number] => ({
+      gameId,
+      phaseId,
+      ...(phaseName ? { phaseName } : {}),
+      roundId: 'round-1',
+      teamOneId: 'team-a',
+      teamOneName: 'Aiken <A>',
+      teamOnePoints: 300,
+      teamTwoId: 'team-b',
+      teamTwoName: 'Wren',
+      teamTwoPoints: 100,
+      winnerId: 'team-a',
+      status: 'accepted',
+    });
+    const games = gamesHtml(
+      minimalSnapshot([
+        named('game-one', 'phase-1', 'Preliminary'),
+        named('game-two', 'phase-2', 'Playoffs'),
+      ]),
+    );
+    expect(games).toContain('Stage: Preliminary');
+    expect(games).toContain('Stage: Playoffs');
+    expect(games).not.toContain('Stage: phase-1');
+    expect(games).not.toContain('Stage: phase-2');
+  });
+
   test('names the forfeit without fabricating statistics or a winner', () => {
     const games = gamesHtml(
       minimalSnapshot([

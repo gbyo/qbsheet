@@ -16,12 +16,16 @@
 import {
   acceptedGameRecords,
   applyFinalPlacement,
+  bonusPointsPerBonus,
   canonicalCompetitionRanks,
   deriveTeamStandings,
   derivePlayerStandings,
   playerPptuh,
+  scopeScoringApplicability,
   type DirectorState,
   type PlayerStanding,
+  type ScopeAnswerTier,
+  type ScopeScoringApplicability,
   type TeamStanding,
   type TournamentRules,
 } from '@qbsheet/tournament-domain';
@@ -68,9 +72,45 @@ function pptuhFor(
   return playerPptuh({ points, tossupsHeard, tossupsHeardKnown });
 }
 
-/** Points per bonus is undefined — not zero — when no bonuses were heard. */
+/**
+ * Points per bonus through the canonical domain helper, so QBLive cannot drift
+ * from Director and the printable reports; null is unknown, never zero.
+ */
 function ppbFor(bonusPoints: number, bonuses: number): number | null {
-  return bonuses > 0 ? bonusPoints / bonuses : null;
+  return bonusPointsPerBonus(bonusPoints, bonuses);
+}
+
+/**
+ * Applicability for one table scope from the historical scoring definitions of its
+ * accepted games, never from the tournament's current rules alone (#868).
+ */
+function scopeApplicability(state: DirectorState, scope: TableScope): ScopeScoringApplicability {
+  return scopeScoringApplicability(
+    state,
+    acceptedGameRecords(state, {
+      phaseId: scope.phaseId,
+      poolId: scope.poolId,
+      teamIds: scope.teamIds,
+    }),
+  );
+}
+
+/**
+ * Scope-derived answer tiers with the printable mixed-value label contract: one column
+ * per semantic tier, a single value when definitions agree, `15/20` when they differ.
+ */
+function scopeTierColumns(tiers: readonly ScopeAnswerTier[]): AnswerTierColumn[] {
+  const descriptions = {
+    superpowers: 'Superpowers',
+    powers: 'Powers',
+    gets: 'Regular tossups',
+    negs: 'Negs',
+  } as const;
+  return tiers.map((tier): AnswerTierColumn => ({
+    id: tier.id,
+    label: tier.values.map(answerTierLabel).join('/'),
+    description: tier.values.length > 1 ? `${descriptions[tier.id]} (mixed values)` : descriptions[tier.id],
+  }));
 }
 
 function decimalOrUnknown(value: number | null, precision: number): QbliveCell {
@@ -109,7 +149,10 @@ function record(standing: TeamStanding): QbliveCell {
  * omits its column rather than publishing a table of em dashes, while an
  * applicable-but-unknown value renders `—` with a null value in the row.
  */
-function standingsColumns(rules: TournamentRules | null | undefined): QbliveColumn[] {
+function standingsColumns(
+  applicability: Pick<ScopeScoringApplicability, 'bonuses' | 'bouncebacks' | 'lightning'>,
+  tiers: readonly AnswerTierColumn[],
+): QbliveColumn[] {
   const trailing = 'trailing' as const;
   const columns: QbliveColumn[] = [
     { id: 'rank', label: '#', kind: 'rank', alignment: trailing },
@@ -135,7 +178,7 @@ function standingsColumns(rules: TournamentRules | null | undefined): QbliveColu
     },
     { id: 'margin', label: 'Marg', kind: 'integer', alignment: trailing, description: 'Point differential' },
     { id: 'games', label: 'G', kind: 'integer', alignment: trailing, description: 'Games played' },
-    ...answerTierColumnDefs(answerTierColumns(rules)),
+    ...answerTierColumnDefs(tiers),
     { id: 'tuh', label: 'TUH', kind: 'integer', alignment: trailing, description: 'Tossups heard' },
     {
       id: 'pptuh',
@@ -146,7 +189,7 @@ function standingsColumns(rules: TournamentRules | null | undefined): QbliveColu
       description: 'Points per tossup heard',
     },
   ];
-  if (rules?.useBonuses !== false) {
+  if (applicability.bonuses) {
     columns.push(
       { id: 'bonuses', label: 'Bonuses', kind: 'integer', alignment: trailing, description: 'Bonuses heard' },
       {
@@ -166,7 +209,7 @@ function standingsColumns(rules: TournamentRules | null | undefined): QbliveColu
       },
     );
   }
-  if (rules?.bouncebacks) {
+  if (applicability.bouncebacks) {
     columns.push(
       { id: 'bb', label: 'BB', kind: 'integer', alignment: trailing, description: 'Bounceback points' },
       {
@@ -194,7 +237,7 @@ function standingsColumns(rules: TournamentRules | null | undefined): QbliveColu
       },
     );
   }
-  if (rules?.lightning) {
+  if (applicability.lightning) {
     columns.push(
       {
         id: 'lightning',
@@ -209,7 +252,7 @@ function standingsColumns(rules: TournamentRules | null | undefined): QbliveColu
         kind: 'decimal',
         precision: 1,
         alignment: trailing,
-        description: 'Lightning points per game',
+        description: 'Lightning points per lightning-applicable non-forfeit game',
       },
     );
   }
@@ -276,14 +319,14 @@ function answerTierColumnDefs(tiers: readonly AnswerTierColumn[]): QbliveColumn[
  * same way as the standings table.
  */
 function teamStatisticsColumns(
-  rules: TournamentRules | null | undefined,
-  meta: { bouncebacks: boolean; lightning: boolean; bonuses: boolean },
+  meta: { bonuses: boolean; bouncebacks: boolean; lightning: boolean },
+  tiers: readonly AnswerTierColumn[],
 ): QbliveColumn[] {
   const trailing = 'trailing' as const;
   const columns: QbliveColumn[] = [
     { id: 'team', label: 'Team', kind: 'team', alignment: 'leading' },
     { id: 'games', label: 'G', kind: 'integer', alignment: trailing, description: 'Games played' },
-    ...answerTierColumnDefs(answerTierColumns(rules)),
+    ...answerTierColumnDefs(tiers),
     { id: 'tuh', label: 'TUH', kind: 'integer', alignment: trailing, description: 'Tossups heard' },
     {
       id: 'pptuh',
@@ -357,7 +400,7 @@ function teamStatisticsColumns(
         kind: 'decimal',
         precision: 1,
         alignment: trailing,
-        description: 'Lightning points per game',
+        description: 'Lightning points per lightning-applicable non-forfeit game',
       },
     );
   }
@@ -385,7 +428,7 @@ export interface PlayerMeta {
  * metadata; without a `playerMeta` source they stay out entirely.
  */
 function playerStatisticsColumns(
-  rules: TournamentRules | null | undefined,
+  tiers: readonly AnswerTierColumn[],
   meta: { year: boolean; undergraduate: boolean; divisionTwo: boolean; bonuses: boolean },
 ): QbliveColumn[] {
   const trailing = 'trailing' as const;
@@ -431,7 +474,7 @@ function playerStatisticsColumns(
       description: 'Games played',
     },
     { id: 'tuh', label: 'TUH', kind: 'integer', alignment: trailing, description: 'Tossups heard' },
-    ...answerTierColumnDefs(answerTierColumns(rules)),
+    ...answerTierColumnDefs(tiers),
     { id: 'points', label: 'Pts', kind: 'integer', alignment: trailing, description: 'Total points' },
     {
       id: 'ppg',
@@ -537,9 +580,9 @@ export function buildStandingsTable(
   scope: TableScope,
   naming: TableNaming,
 ): QbliveDataTable {
-  const rules = state.tournament?.rules;
-  const tiers = answerTierColumns(rules);
-  const columns = standingsColumns(rules);
+  const applicability = scopeApplicability(state, scope);
+  const tiers = scopeTierColumns(applicability.tiers);
+  const columns = standingsColumns(applicability, tiers);
   const calculated = deriveTeamStandings(state, undefined, {
     phaseId: scope.phaseId,
     poolId: scope.poolId,
@@ -564,14 +607,14 @@ export function buildStandingsTable(
       standing.tossupsHeardKnown ? integer(standing.tossupsHeard) : unknown(),
       decimalOrUnknown(pptuhFor(standing.pointsFor, standing.tossupsHeard, standing.tossupsHeardKnown), 2),
     ];
-    if (rules?.useBonuses !== false) {
+    if (applicability.bonuses) {
       cells.push(
         integer(standing.bonuses),
         integer(standing.bonusPoints),
         decimalOrUnknown(ppbFor(standing.bonusPoints, standing.bonuses), 2),
       );
     }
-    if (rules?.bouncebacks) {
+    if (applicability.bouncebacks) {
       cells.push(
         // Unknown bounceback breakdowns render "—", never a fabricated zero (#748).
         standing.bouncebacksKnown ? integer(standing.bouncebackPoints) : unknown(),
@@ -580,11 +623,11 @@ export function buildStandingsTable(
         percent(standing.totalBonusConversion, 1),
       );
     }
-    if (rules?.lightning) {
+    if (applicability.lightning) {
       cells.push(
         standing.lightningKnown ? integer(standing.lightningPoints) : unknown(),
-        standing.lightningKnown && standing.gamesPlayed > 0
-          ? decimal(standing.lightningPoints / standing.gamesPlayed, 1)
+        standing.lightningKnown && standing.lightningGames > 0
+          ? decimal(standing.lightningPoints / standing.lightningGames, 1)
           : unknown(),
       );
     }
@@ -605,16 +648,19 @@ export function buildTeamStatisticsTable(
   scope: TableScope,
   naming: TableNaming,
 ): QbliveDataTable {
-  const rules = state.tournament?.rules;
-  const tiers = answerTierColumns(rules);
-  const showBonuses = rules?.useBonuses !== false;
-  const showBouncebacks = rules?.bouncebacks === true;
-  const showLightning = rules?.lightning === true;
-  const columns = teamStatisticsColumns(rules, {
-    bonuses: showBonuses,
-    bouncebacks: showBouncebacks,
-    lightning: showLightning,
-  });
+  const applicability = scopeApplicability(state, scope);
+  const tiers = scopeTierColumns(applicability.tiers);
+  const showBonuses = applicability.bonuses;
+  const showBouncebacks = applicability.bouncebacks;
+  const showLightning = applicability.lightning;
+  const columns = teamStatisticsColumns(
+    {
+      bonuses: showBonuses,
+      bouncebacks: showBouncebacks,
+      lightning: showLightning,
+    },
+    tiers,
+  );
   const standings = finalTeamStandings(
     state,
     scope,
@@ -653,8 +699,8 @@ export function buildTeamStatisticsTable(
     if (showLightning) {
       cells.push(
         standing.lightningKnown ? integer(standing.lightningPoints) : unknown(),
-        standing.lightningKnown && standing.gamesPlayed > 0
-          ? decimal(standing.lightningPoints / standing.gamesPlayed, 1)
+        standing.lightningKnown && standing.lightningGames > 0
+          ? decimal(standing.lightningPoints / standing.lightningGames, 1)
           : unknown(),
       );
     }
@@ -704,9 +750,9 @@ export function buildPlayerStatisticsTable(
     teamIds: scope.teamIds,
   });
   const rows: QbliveRow[] = [];
-  const rules = state.tournament?.rules;
-  const tiers = answerTierColumns(rules);
-  const showBonuses = rules?.useBonuses !== false;
+  const applicability = scopeApplicability(state, scope);
+  const tiers = scopeTierColumns(applicability.tiers);
+  const showBonuses = applicability.bonuses;
   // Metadata columns appear only when some published row carries that metadata.
   const published = standings.filter((standing) => naming.playerName(standing.playerId) !== null);
   const metaOf = (playerId: string): PlayerMeta | null => naming.playerMeta?.(playerId) ?? null;
@@ -717,7 +763,7 @@ export function buildPlayerStatisticsTable(
   const showDivisionTwo = published.some(
     (standing) => typeof metaOf(standing.playerId)?.divisionTwoEligible === 'boolean',
   );
-  const columns = playerStatisticsColumns(rules, {
+  const columns = playerStatisticsColumns(tiers, {
     year: showYear,
     undergraduate: showUndergraduate,
     divisionTwo: showDivisionTwo,

@@ -19,6 +19,11 @@ export interface GameTeamStatsRow {
   bonusPoints: number | null;
   ppb: number | null;
   bouncebacks: number | null;
+  /**
+   * Overtime tossup points for this team-game; null when the result lacks the
+   * breakdown, 0 when the game's own definition has no overtime period.
+   */
+  overtimePoints: number | null;
   /** Lightning points for this team-game; null when the result lacks the breakdown. */
   lightningPoints: number | null;
   /**

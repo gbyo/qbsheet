@@ -9,14 +9,15 @@
 import {
   buildReportPresentation,
   defaultReportOptions,
-  pointsPerX,
   reportNumber,
   reportPercent,
   type ReportAnswerKey,
 } from '@qbsheet/tournament-formats';
 import {
   isTeamClassification,
+  normalizedPointsPerX,
   playerPptuh,
+  regulationDerivationForTeam,
   type DirectorState,
   type Player,
   type PlayerStanding,
@@ -380,7 +381,7 @@ export const TEAM_COLUMNS: StatsColumn[] = [
   {
     id: 'lightningpg',
     label: 'Lightning/G',
-    description: 'Lightning points per game played',
+    description: 'Lightning points per lightning-applicable non-forfeit game',
     priority: 3,
     defaultVisible: false,
   },
@@ -580,11 +581,17 @@ export function teamStatCell(
       return formatAverage(standing.pointsFor, standing.gamesPlayed);
     case 'papg':
       return formatAverage(standing.pointsAgainst, standing.gamesPlayed);
-    case 'ppx':
+    case 'ppx': {
+      const regulation = regulationDerivationForTeam(standing);
       return reportNumber(
-        pointsPerX(pptuhValue(standing.pointsFor, standing), context.pointsTossups ?? null),
+        normalizedPointsPerX(
+          regulation.regulationPoints,
+          standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
+          context.pointsTossups ?? null,
+        ),
         2,
       );
+    }
     case 'superpowers':
       return String(standing.superpowers);
     case 'powers':
@@ -614,8 +621,8 @@ export function teamStatCell(
     case 'lightning':
       return standing.lightningKnown ? String(standing.lightningPoints) : UNKNOWN_STAT;
     case 'lightningpg':
-      return standing.lightningKnown && standing.gamesPlayed > 0
-        ? reportNumber(standing.lightningPoints / standing.gamesPlayed, 1)
+      return standing.lightningKnown && standing.lightningGames > 0
+        ? reportNumber(standing.lightningPoints / standing.lightningGames, 1)
         : UNKNOWN_STAT;
     default:
       return UNKNOWN_STAT;
