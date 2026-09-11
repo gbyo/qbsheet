@@ -55,6 +55,7 @@ import {
   type ScorerReadinessResult,
 } from './relay';
 import {
+  describeBridgeResult,
   resultFileContents,
   resultFileName,
   resultFilePath,
@@ -1868,12 +1869,23 @@ export function useBridge(): BridgeApi {
         }
       }
       await acknowledgeSaved(connection, written);
+      const writtenSet = new Set(written);
+      const unidentifiedWritten = unsaved.filter(
+        (entry) => writtenSet.has(entry.resultId) && describeBridgeResult(entry.qbj).kind !== 'identified',
+      ).length;
+      const unidentifiedNote =
+        unidentifiedWritten > 0
+          ? ` ${unidentifiedWritten} saved without a confident matchup — verify before importing.`
+          : '';
       setNotice(
         failures.length === 0
-          ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
+          ? {
+              kind: unidentifiedWritten > 0 ? 'warn' : 'good',
+              message: `Saved ${written.length} result file(s) to ${folder}.${unidentifiedNote}`,
+            }
           : {
               kind: 'bad',
-              message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
+              message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}${unidentifiedNote}`,
             },
       );
     } finally {

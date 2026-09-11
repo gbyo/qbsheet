@@ -793,6 +793,27 @@ describe('results', () => {
     expect(writtenFiles).toHaveLength(1);
   });
 
+  test('a bulk save names unidentified results instead of reporting clean', async () => {
+    relayResults = [
+      { result_id: 'res-odd', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: {} },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    // The bytes are still written untouched — but the notice refuses to read as routine.
+    expect(writtenFiles).toHaveLength(1);
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.notice?.message).toMatch(
+      /Saved 1 result file\(s\).*1 saved without a confident matchup/,
+    );
+  });
+
   test('a write that fails leaves that result unsaved and says so', async () => {
     const { result: document } = scoredResultDocument();
     relayResults = [

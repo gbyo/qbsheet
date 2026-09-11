@@ -298,8 +298,15 @@ function FileSection() {
           </p>
           <p>
             YellowFruit performs its normal import validation on whatever it is given. Bridge reports only
-            what it can see: a result is new until it is written, then saved. It never claims a result was
-            imported, accepted, or applied to standings.
+            what it can see: a result is new until it is written, then saved. After you handle the file in
+            YellowFruit, the Mark imported button records your own local confirmation — Bridge never inspects
+            YellowFruit, so it cannot verify the import itself, and it never claims a result was accepted or
+            applied to standings.
+          </p>
+          <p>
+            The same honesty applies to identification: a result whose matchup Bridge cannot confidently read
+            is shown as unidentified — never as a guessed <code>Team A vs Team B</code> — with its raw file
+            preserved for review.
           </p>
         </div>
       </section>

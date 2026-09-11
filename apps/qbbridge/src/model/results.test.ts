@@ -9,7 +9,9 @@
 import { describe, expect, test } from 'vitest';
 import { scoredResultDocument } from '../tests/scoredResult';
 import {
+  describeBridgeResult,
   maximumResultFileNameBytes,
+  resultActionLabel,
   resultFileContents,
   resultFileName,
   resultImportStatus,
@@ -37,6 +39,34 @@ describe('reading a result for the list', () => {
     expect(resultSummary(null).leftName).toBeNull();
     expect(resultSummary({ version: '2.1.1', objects: [] }).roundName).toBeNull();
     expect(resultSummary({ type: 'Match', id: 'm', match_teams: [] }).roundNumber).toBeNull();
+  });
+
+  test('the summary and the canonical description agree, and labels name exceptions', () => {
+    const { result } = scoredResultDocument();
+    const summary = resultSummary(result);
+    const description = describeBridgeResult(result);
+    expect(description.kind).toBe('identified');
+    expect(summary.leftName).toBe(description.leftName);
+    expect(resultActionLabel(description, 'res-1', false)).toMatch(
+      /^Save result — Round 4, Room 101, Cony vs Deering/,
+    );
+
+    const partial = describeBridgeResult({
+      version: '2.1.1',
+      objects: [
+        {
+          type: 'Match',
+          id: 'm',
+          match_teams: [{ team: { id: 't1', name: 'Cony' }, points: 10 }, { points: 5 }],
+        },
+      ],
+    });
+    expect(partial.kind).toBe('partial');
+    expect(resultActionLabel(partial, 'res-2', false)).toMatch(/^Save partially identified result — Cony/);
+
+    const unknown = describeBridgeResult({});
+    expect(unknown.kind).toBe('unreadable');
+    expect(resultActionLabel(unknown, 'res-3', false)).toBe('Save unidentified result (result res-3)');
   });
 
   test('distinguishes a new save, an explicit import marker, and the game identity', () => {
