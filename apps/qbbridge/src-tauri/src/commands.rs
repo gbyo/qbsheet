@@ -16,6 +16,9 @@ const RELAY_TIMEOUT: Duration = Duration::from_secs(20);
 /// The largest relay response read. `manage/mirror` accepts 8 MiB; a results page can approach it.
 const MAX_RELAY_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_RECOVERY_PACKAGE_BYTES: usize = 2 * 1024 * 1024;
+/// The largest round-plan or prelim CSV this will read. Plans are id lists; anything bigger is
+/// not a plan.
+const MAX_PLAN_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 pub struct CommandError {
@@ -136,6 +139,39 @@ pub async fn open_recovery_package(app: AppHandle) -> CommandResult<Option<Opene
         return Err(CommandError::new(
             "recovery_package_too_large",
             "That recovery package is larger than the 2 MiB limit.",
+        ));
+    }
+    let contents = std::fs::read_to_string(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    Ok(Some(OpenedFile {
+        path: path.to_string_lossy().into_owned(),
+        contents,
+    }))
+}
+
+/// Native open dialog for a portable round plan (`.qbplan.json`) or prelim CSV. Plans carry
+/// only room and pairing ids plus the fingerprint they were prepared against — no relay
+/// credentials — but the size bound still applies before anything is read into memory.
+#[tauri::command]
+pub async fn open_round_plan(app: AppHandle) -> CommandResult<Option<OpenedFile>> {
+    let chosen = app
+        .dialog()
+        .file()
+        .add_filter("QBBridge round plan", &["qbplan.json", "json", "csv"])
+        .set_title("Open QBBridge round plan")
+        .blocking_pick_file();
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let path = chosen
+        .into_path()
+        .map_err(|error| CommandError::new("invalid_path", error.to_string()))?;
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    if metadata.len() > MAX_PLAN_BYTES {
+        return Err(CommandError::new(
+            "plan_too_large",
+            "That plan file is larger than the 2 MiB plan import limit.",
         ));
     }
     let contents = std::fs::read_to_string(&path)
@@ -307,6 +343,8 @@ async fn write_bridge_file(
         return Err(CommandError::new(
             if kind == "result" {
                 "result_too_large"
+            } else if kind == "pack" {
+                "pack_too_large"
             } else {
                 "assignment_too_large"
             },
@@ -335,6 +373,8 @@ async fn write_bridge_file(
             CommandError::new(
                 if kind == "result" {
                     "result_file_exists"
+                } else if kind == "pack" {
+                    "pack_file_exists"
                 } else {
                     "assignment_file_exists"
                 },
@@ -373,6 +413,21 @@ pub async fn write_assignment_file(
     contents: String,
 ) -> CommandResult<String> {
     write_bridge_file(directory, file_name, contents, false, "assignment").await
+}
+
+/// Write one emergency-pack file: a `.qbj` assignment, the pack manifest, or the pack README.
+///
+/// Assignment files are always exclusive — a pack file a scorer may already hold must never be
+/// replaced. The manifest and README are regenerated operator metadata with fixed names, so the
+/// caller passes `overwrite` for exactly those two kinds.
+#[tauri::command]
+pub async fn write_round_pack_file(
+    directory: String,
+    file_name: String,
+    contents: String,
+    overwrite: bool,
+) -> CommandResult<String> {
+    write_bridge_file(directory, file_name, contents, overwrite, "pack").await
 }
 
 #[derive(Debug, Serialize)]

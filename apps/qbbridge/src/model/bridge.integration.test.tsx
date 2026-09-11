@@ -15,6 +15,7 @@ import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
 import { yftFixtureText } from '../tests/fixture';
+import { fnv1a64 } from '../../../../src/director/transfers/canonical';
 import { useBridge } from './useBridge';
 
 interface InvokeCall {
@@ -59,6 +60,9 @@ let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
+let writtenPackFiles: (WrittenFile & { overwrite?: boolean })[] = [];
+/** The plan file the next `open_round_plan` returns. Null means the operator cancels. */
+let roundPlanFile: { path: string; contents: string } | null = null;
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
 let existingPaths = new Set<string>();
 /** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
@@ -112,6 +116,18 @@ function installFakeTauri(): void {
         if (existingPaths.has(path)) throw new Error(`${String(args.fileName)} already exists`);
         existingPaths.add(path);
         writtenAssignmentFiles.push({ ...(args as unknown as WrittenFile), overwrite: false });
+        return path;
+      }
+      case 'open_round_plan':
+        return roundPlanFile;
+      case 'write_round_pack_file': {
+        const path = `${String(args.directory)}/${String(args.fileName)}`;
+        // The real command opens with `create_new` unless told to overwrite.
+        if (existingPaths.has(path) && args.overwrite !== true) {
+          throw new Error(`${String(args.fileName)} already exists in that folder`);
+        }
+        existingPaths.add(path);
+        writtenPackFiles.push(args as unknown as WrittenFile & { overwrite?: boolean });
         return path;
       }
       case 'store_relay_credential':
@@ -264,6 +280,8 @@ function installFakeTauri(): void {
 beforeEach(() => {
   relayResults = [];
   recoveryPackage = null;
+  writtenPackFiles = [];
+  roundPlanFile = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
   claimFails = false;
@@ -397,7 +415,10 @@ describe('a round, published and returned', () => {
     expect(body.revision).toBe(1);
     expect(body.rooms).toHaveLength(2);
 
-    expect(rendered.result.current.notice?.kind).toBe('good');
+    // The fixture has more teams than these two rooms cover, so the publish went through
+    // as a reviewed accountability exception — the gate refuses to let it read as clean.
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.notice?.message).toMatch(/explicit exception/);
     expect(rendered.result.current.state.relay?.revision).toBe(1);
     expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId !== null)).toBe(true);
     expect(rendered.result.current.state.rooms.map((room) => bridgeStatus(rendered, room.id))).toEqual([
@@ -1011,6 +1032,8 @@ describe('persistence', () => {
       retiredRoomIds: [],
       selectedRoundId: null,
       roundPlans: [],
+      roundDispositions: [],
+      yftFingerprint: null,
       resultFolder: null,
       results: [],
     });
@@ -2353,5 +2376,209 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+describe('round accountability and portable plans', () => {
+  const mirrorCalls = (): number =>
+    calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'))
+      .length;
+
+  test('a duplicate assignment blocks publish without touching the relay', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      const [, second] = rendered.result.current.state.rooms;
+      act(() => {
+        rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Cony');
+        rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Wells');
+      });
+      const mirrorsBefore = mirrorCalls();
+      await act(async () => {
+        await rendered.result.current.publish();
+      });
+      expect(mirrorCalls()).toBe(mirrorsBefore);
+      expect(rendered.result.current.pendingPublicationReview).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/cannot publish/);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('stating a bye moves that team out of unaccounted', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      const before = rendered.result.current.roundAccount;
+      expect(before).not.toBeNull();
+      expect(before!.unaccounted.length).toBeGreaterThan(0);
+      const sidelined = before!.unaccounted[0] as string;
+      act(() => {
+        rendered.result.current.setTeamDisposition(sidelined, 'bye');
+      });
+      expect(rendered.result.current.dispositionForTeam(sidelined)).toBe('bye');
+      const after = rendered.result.current.roundAccount;
+      expect(after!.unaccounted).not.toContain(sidelined);
+      expect(after!.byes).toContain(sidelined);
+      expect(after!.unaccounted.length).toBe(before!.unaccounted.length - 1);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('the loaded file fingerprint is stored with state', async () => {
+    const rendered = await setUpTournament();
+    try {
+      expect(rendered.result.current.state.yftFingerprint).toBe(fnv1a64(yftFixtureText()));
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('plan export writes a credential-free file and import round-trips through review', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      let exported = false;
+      await act(async () => {
+        exported = await rendered.result.current.exportRoundPlan();
+      });
+      expect(exported).toBe(true);
+      expect(writtenPackFiles).toHaveLength(1);
+      const planText = String(writtenPackFiles[0].contents);
+      expect(planText).not.toMatch(/management-secret|pairingCode|credential|setupToken/i);
+      expect(JSON.parse(planText)).toMatchObject({ format: 'qbbridge-round-plan' });
+
+      // Drift the local plan, then import the file back and confirm: the file wins, exactly.
+      const [first] = rendered.result.current.state.rooms;
+      act(() => {
+        rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Wells');
+      });
+      roundPlanFile = { path: '/tournaments/prelims.qbplan.json', contents: planText };
+      await act(async () => {
+        await rendered.result.current.importRoundPlan();
+      });
+      expect(rendered.result.current.pendingPlanImport).not.toBeNull();
+      expect(rendered.result.current.pendingPlanImport?.diff.fingerprintMatch).toBe(true);
+      expect(rendered.result.current.notice?.kind).toBe('warn');
+      act(() => {
+        rendered.result.current.confirmPlanImport();
+      });
+      expect(rendered.result.current.pendingPlanImport).toBeNull();
+      const roundId = rendered.result.current.state.selectedRoundId as string;
+      const restored = rendered.result.current.state.roundPlans.find((plan) => plan.roundId === roundId);
+      expect(restored?.pairings.find((pairing) => pairing.roomId === first.id)?.leftTeamId).toBe('Team_Cony');
+      expect(rendered.result.current.notice?.kind).toBe('good');
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('a plan naming unknown teams is refused with the ids and applies nothing', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      let exported = false;
+      await act(async () => {
+        exported = await rendered.result.current.exportRoundPlan();
+      });
+      expect(exported).toBe(true);
+      const parsed = JSON.parse(String(writtenPackFiles[0].contents)) as {
+        rounds: { pairings: { roomId: string; leftTeamId: string; rightTeamId: string }[] }[];
+      };
+      parsed.rounds[0].pairings.push({
+        roomId: 'room-1',
+        leftTeamId: 'Team_Cony',
+        rightTeamId: 'Team_Ghost',
+      });
+      const plansBefore = rendered.result.current.state.roundPlans;
+      roundPlanFile = { path: '/tournaments/bad.qbplan.json', contents: JSON.stringify(parsed) };
+      await act(async () => {
+        await rendered.result.current.importRoundPlan();
+      });
+      expect(rendered.result.current.pendingPlanImport).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/Team_Ghost/);
+      expect(rendered.result.current.state.roundPlans).toEqual(plansBefore);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('CSV import resolves names strictly and warns about missing provenance', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      const tournament = rendered.result.current.tournament;
+      const [first] = rendered.result.current.state.rooms;
+      const roundId = tournament?.rounds[0]?.id;
+      expect(roundId).toBeTruthy();
+      roundPlanFile = {
+        path: '/tournaments/prelims.csv',
+        contents: `round,room,left_team,right_team\n${roundId},${first.id},Cony,Deering\n`,
+      };
+      await act(async () => {
+        await rendered.result.current.importRoundPlan();
+      });
+      const pending = rendered.result.current.pendingPlanImport;
+      expect(pending).not.toBeNull();
+      expect(pending?.diff.fingerprintMatch).toBe(false);
+      expect(pending?.diff.clean).toBe(true);
+      act(() => {
+        rendered.result.current.confirmPlanImport();
+      });
+      expect(rendered.result.current.notice?.message).toMatch(/different YellowFruit bytes/);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  test('emergency pack writes assignments plus manifest, and live rooms fence the write', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      let firstWrite = false;
+      await act(async () => {
+        firstWrite = await rendered.result.current.exportEmergencyPack(1);
+      });
+      expect(firstWrite).toBe(true);
+      const manifestFile = writtenPackFiles.find((file) => String(file.fileName) === 'PACK-MANIFEST.json');
+      expect(manifestFile).toBeTruthy();
+      const manifest = JSON.parse(String(manifestFile?.contents)) as {
+        yftFingerprint: string;
+        totalAssignmentFiles: number;
+        rounds: { files: { matchId: string }[] }[];
+      };
+      expect(manifest.yftFingerprint).toBe(rendered.result.current.state.yftFingerprint);
+      expect(manifest.totalAssignmentFiles).toBeGreaterThan(0);
+      expect(writtenPackFiles.some((file) => String(file.fileName) === 'PACK-README.txt')).toBe(true);
+
+      // Publish the round so the relay holds these games, then pack again: nothing may be
+      // written until the operator reviews the two-writer warnings.
+      await publishReviewed(rendered);
+      writtenAssignmentFiles.length = 0;
+      writtenPackFiles.length = 0;
+      let secondWrite = true;
+      await act(async () => {
+        secondWrite = await rendered.result.current.exportEmergencyPack(1);
+      });
+      expect(secondWrite).toBe(false);
+      expect(writtenAssignmentFiles).toHaveLength(0);
+      expect(writtenPackFiles).toHaveLength(0);
+      expect(rendered.result.current.pendingPackExport?.warnings.length).toBeGreaterThan(0);
+      // The first pack's files already exist: exclusive-create must refuse the same names, so
+      // the operator picks another folder — exactly what the failure notice tells them.
+      assignmentFolder = '/tournaments/pack-take-two';
+      let confirmed = false;
+      await act(async () => {
+        confirmed = await rendered.result.current.confirmPackExport();
+      });
+      expect(confirmed).toBe(true);
+      expect(rendered.result.current.pendingPackExport).toBeNull();
+      expect(writtenPackFiles.length).toBeGreaterThan(0);
+    } finally {
+      rendered.unmount();
+    }
   });
 });

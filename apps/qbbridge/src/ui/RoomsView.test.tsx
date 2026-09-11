@@ -4,6 +4,8 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { loadedFixture } from '../tests/fixture';
 import { emptyState, type BridgeState } from '../model/persistence';
 import { newRoom, type Room, type RoomStatus } from '../model/rooms';
+import { accountRound } from '../model/roundAccountability';
+import { pairingsForRound } from '../model/roundPlans';
 import type { BridgeApi } from '../model/useBridge';
 import RoomsView from './RoomsView';
 
@@ -111,6 +113,19 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     planStatus: () => 'planned' as const,
     roundProgress: { roundId: selectedRoundId, assigned: rooms.length },
     phaseRoundProgress: [],
+    setTeamDisposition: vi.fn(),
+    dispositionForTeam: () => null,
+    roundAccount: null,
+    exportRoundPlan: vi.fn(async () => true),
+    exportPrelimCsvFile: vi.fn(async () => true),
+    importRoundPlan: vi.fn(async () => undefined),
+    pendingPlanImport: null,
+    confirmPlanImport: vi.fn(),
+    cancelPlanImport: vi.fn(),
+    exportEmergencyPack: vi.fn(async () => true),
+    pendingPackExport: null,
+    confirmPackExport: vi.fn(async () => true),
+    cancelPackExport: vi.fn(),
     publish: vi.fn(async () => undefined),
     pendingPublicationReview: null,
     confirmPublicationReview: vi.fn(async () => undefined),
@@ -346,5 +361,43 @@ describe('batch printing the ready subset', () => {
     expect(screen.getByTestId('print-hint')).toHaveTextContent(
       'Confirm Scorer origin readiness before printing pairing sheets.',
     );
+  });
+});
+
+describe('round accountability', () => {
+  test('shows the summary and offers bye/inactive for every unaccounted team', async () => {
+    const user = userEvent.setup();
+    const tournament = loadedFixture();
+    const rooms = [testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true)];
+    const base = testBridge(rooms);
+    const roundId = tournament.rounds[0].id;
+    const account = accountRound({
+      pairings: pairingsForRound(base.state.roundPlans, roundId),
+      dispositions: [],
+      roundId,
+      teamIds: new Set(tournament.teams.map((team) => team.id)),
+      roomIds: new Set(rooms.map((room) => room.id)),
+    });
+    expect(account.unaccounted.length).toBeGreaterThan(0);
+    const setTeamDisposition = vi.fn();
+    render(<RoomsView bridge={{ ...base, roundAccount: account, setTeamDisposition }} />);
+
+    expect(screen.getByTestId('round-account-summary')).toHaveTextContent(/accounted for/);
+    expect(screen.getAllByRole('button', { name: 'Bye' })).toHaveLength(account.unaccounted.length);
+    await user.click(screen.getAllByRole('button', { name: 'Bye' })[0]);
+    expect(setTeamDisposition).toHaveBeenCalledWith(account.unaccounted[0], 'bye');
+    await user.click(screen.getAllByRole('button', { name: 'Inactive' })[0]);
+    expect(setTeamDisposition).toHaveBeenCalledWith(account.unaccounted[0], 'inactive');
+  });
+
+  test('offers plan exchange and pack actions', () => {
+    const tournament = loadedFixture();
+    const rooms = [testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true)];
+    render(<RoomsView bridge={testBridge(rooms)} />);
+
+    expect(screen.getByRole('button', { name: 'Export plan file' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import plan file' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export prelim CSV' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export emergency pack' })).toBeInTheDocument();
   });
 });

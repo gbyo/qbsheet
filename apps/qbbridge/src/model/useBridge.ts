@@ -7,12 +7,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { fnv1a64 } from '../../../../src/director/transfers/canonical';
 import {
   assignmentFileContents,
   assignmentFileName,
   assignmentFingerprint,
   plannedAssignmentFingerprint,
 } from './assignment';
+import { buildEmergencyPack, packAuthorityWarnings, type EmergencyPack } from './emergencyPacks';
 import {
   chooseAssignmentFolder,
   chooseResultFolder,
@@ -20,12 +22,14 @@ import {
   isNativeHost,
   loadRelayCredential,
   openRecoveryPackage,
+  openRoundPlan,
   openYellowFruitFile,
   relayCredentialKey,
   storeRelayCredential,
   writeAssignmentFile,
   writeRecoveryPackage,
   writeResultFile,
+  writeRoundPackFile,
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
@@ -86,6 +90,27 @@ import {
   setPlannedSide,
   type PlanPublicationStatus,
 } from './roundPlans';
+import {
+  accountRound,
+  dispositionFor,
+  normalizeRoundDispositions,
+  reconcileDispositions,
+  roundPublishGate,
+  setTeamDisposition as setDispositionEntry,
+  type DispositionReconciliation,
+  type RoundAccount,
+  type TeamDispositionKind,
+} from './roundAccountability';
+import {
+  applyPortablePlan,
+  diffPortablePlan,
+  exportPortablePlan,
+  exportPrelimCsv,
+  importPrelimCsv,
+  parsePortablePlan,
+  type PlanImportDiff,
+  type PortableRoundPlan,
+} from './planExchange';
 import {
   emptyState,
   loadState,
@@ -151,6 +176,26 @@ export interface PendingPublicationReview {
   plan: PublishPlan;
   items: PublicationReviewItem[];
   snapshot: PublicationSnapshot;
+  /**
+   * Accountability warnings under review. Confirming publishes anyway as an explicit, labeled
+   * exception; the success notice says so.
+   */
+  accountabilityWarningCount: number;
+}
+
+/** A parsed plan file waiting for the operator to review its diff and confirm. */
+export interface PendingPlanImport {
+  sourceName: string;
+  /** The validated plan. Confirm re-resolves it against current state — never trusted blind. */
+  plan: PortableRoundPlan;
+  diff: PlanImportDiff;
+}
+
+/** A built emergency pack waiting on its authority-warning review before anything is written. */
+export interface PendingPackExport {
+  pack: EmergencyPack;
+  roundCount: number;
+  warnings: string[];
 }
 
 export type ScorerReadinessStatus = 'checking' | 'ready' | 'blocked' | 'unknown';
@@ -222,6 +267,30 @@ export interface BridgeApi {
   roundProgress: { roundId: string | null; assigned: number };
   /** Assignment counts for every round in the selected round's phase, for the pre-tournament view. */
   phaseRoundProgress: { roundId: string; displayName: string; assigned: number }[];
+  /**
+   * State (or clear) one team's bye/inactive disposition in the selected round. Assignment stays
+   * derived from the pairings; this records only the explicit decision to sit a team out.
+   */
+  setTeamDisposition(teamId: string, kind: TeamDispositionKind | null): void;
+  /** One team's stated disposition in the selected round. Null means expected to play. */
+  dispositionForTeam(teamId: string): TeamDispositionKind | null;
+  /** The full accountability report for the selected round. Null before a file loads. */
+  roundAccount: RoundAccount | null;
+  /** Write the portable round-plan file (ids plus YFT fingerprint, never credentials). */
+  exportRoundPlan(): Promise<boolean>;
+  /** Write the prelim schedule as spreadsheet CSV. */
+  exportPrelimCsvFile(): Promise<boolean>;
+  /** Open a plan or CSV file, validate it, and hold its diff for explicit review. */
+  importRoundPlan(): Promise<void>;
+  pendingPlanImport: PendingPlanImport | null;
+  /** Apply the reviewed import, replacing exactly the rounds the file covers. */
+  confirmPlanImport(): void;
+  cancelPlanImport(): void;
+  /** Build the next N rounds' emergency pack; writes immediately unless rooms are live. */
+  exportEmergencyPack(roundCount: number): Promise<boolean>;
+  pendingPackExport: PendingPackExport | null;
+  confirmPackExport(): Promise<boolean>;
+  cancelPackExport(): void;
   regeneratePairingCode(roomId: string): void;
   /** Change which round the table is editing. Changes nothing else, and discards nothing. */
   selectRound(roundId: string): void;
@@ -274,6 +343,22 @@ function describeReconciliation(report: PlanReconciliation): string {
     parts.push(`${report.removedPairingCount} planned matchup(s) were emptied as a result`);
   }
   return `Saved round plans were reconciled with the file: ${parts.join('; ')}. Re-enter those selections before publishing.`;
+}
+
+/** One sentence about what a reload cost the stated bye/inactive markings, if anything. */
+function describeDispositionReconciliation(report: DispositionReconciliation): string | null {
+  const parts: string[] = [];
+  if (report.droppedRoundIds.length > 0) {
+    parts.push(
+      `${report.droppedRoundIds.length} round(s) of bye/inactive markings were dropped with their rounds`,
+    );
+  }
+  if (report.droppedTeamCount > 0) {
+    parts.push(`${report.droppedTeamCount} bye/inactive marking(s) were dropped because the team is gone`);
+  }
+  // Dropped markings fail open toward unaccounted, which the publish gate refuses to ignore —
+  // so this is a recount, not a repair.
+  return parts.length === 0 ? null : `Also ${parts.join('; ')}. Those teams now read as unaccounted.`;
 }
 
 function connectionOf(state: BridgeState): RelayConnection | null {
@@ -410,12 +495,17 @@ export function useBridge(): BridgeApi {
   const pendingPublicationReviewRef = useRef<PendingPublicationReview | null>(null);
   const [assignmentFallback, setAssignmentFallback] = useState<AssignmentFallback | null>(null);
   const assignmentFallbackRef = useRef<AssignmentFallback | null>(null);
+  const [pendingPlanImport, setPendingPlanImport] = useState<PendingPlanImport | null>(null);
+  const pendingPlanImportRef = useRef<PendingPlanImport | null>(null);
+  const [pendingPackExport, setPendingPackExport] = useState<PendingPackExport | null>(null);
+  const pendingPackExportRef = useRef<PendingPackExport | null>(null);
   const stateRef = useRef(state);
   const pollGenerationRef = useRef(0);
   const pendingFileRef = useRef<{
     path: string | null;
     tournament: BridgeTournament;
     warnings: string[];
+    yftFingerprint: string | null;
   } | null>(null);
   const pendingRelayClaimRef = useRef<RelayConnection | null>(null);
   const [relayCredentialSavePending, setRelayCredentialSavePending] = useState(false);
@@ -438,10 +528,24 @@ export function useBridge(): BridgeApi {
     setAssignmentFallback(fallback);
   }, []);
 
+  const rememberPlanImport = useCallback((pending: PendingPlanImport | null): void => {
+    pendingPlanImportRef.current = pending;
+    setPendingPlanImport(pending);
+  }, []);
+
+  const rememberPackExport = useCallback((pending: PendingPackExport | null): void => {
+    pendingPackExportRef.current = pending;
+    setPendingPackExport(pending);
+  }, []);
+
   const invalidateRoundArtifacts = useCallback((): void => {
     rememberPublicationReview(null);
     rememberAssignmentFallback(null);
-  }, [rememberAssignmentFallback, rememberPublicationReview]);
+    // A plan diff or a built pack belongs to the file it was validated against. A new file
+    // must not inherit either: the fingerprint check would be theater if stale state survived.
+    rememberPlanImport(null);
+    rememberPackExport(null);
+  }, [rememberAssignmentFallback, rememberPackExport, rememberPlanImport, rememberPublicationReview]);
 
   useEffect(() => {
     if (notice?.kind !== 'good') return;
@@ -595,15 +699,18 @@ export function useBridge(): BridgeApi {
       path: string | null,
       report: { ok: true; tournament: BridgeTournament; warnings: string[] },
       startNew: boolean,
+      yftFingerprint: string | null,
     ): boolean => {
       const current = stateRef.current;
       const firstRoundId = report.tournament.rounds[0]?.id ?? null;
       let reconciliationReport: PlanReconciliation | null = null;
+      let dispositionReport: DispositionReconciliation | null = null;
       if (startNew) {
         const next: BridgeState = {
           ...emptyState(),
           resultFolder: current.resultFolder,
           yftPath: path,
+          yftFingerprint,
           tournamentName: report.tournament.name,
           selectedRoundId: firstRoundId,
         };
@@ -639,11 +746,17 @@ export function useBridge(): BridgeApi {
             teamIds,
             roomIds: new Set(currentState.rooms.map((room) => room.id)),
           });
+          dispositionReport = reconcileDispositions(currentState.roundDispositions, {
+            roundIds,
+            teamIds,
+          });
           return {
             ...currentState,
             yftPath: path,
+            yftFingerprint,
             tournamentName: report.tournament.name,
             roundPlans: reconciliationReport.plans,
+            roundDispositions: dispositionReport.dispositions,
             selectedRoundId:
               currentState.selectedRoundId && roundIds.has(currentState.selectedRoundId)
                 ? currentState.selectedRoundId
@@ -654,10 +767,14 @@ export function useBridge(): BridgeApi {
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
       invalidateRoundArtifacts();
+      const dispositionNote =
+        dispositionReport !== null ? describeDispositionReconciliation(dispositionReport) : null;
       const reconciliationNote =
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
-          ? ` ${describeReconciliation(reconciliationReport)}`
-          : '';
+          ? ` ${describeReconciliation(reconciliationReport)}${dispositionNote ? ` ${dispositionNote}` : ''}`
+          : dispositionNote
+            ? ` ${dispositionNote}`
+            : '';
       setNotice({
         kind: reconciliationNote === '' ? 'good' : 'warn',
         message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.${reconciliationNote}`,
@@ -681,7 +798,12 @@ export function useBridge(): BridgeApi {
       const current = stateRef.current;
       const differentFile = current.yftPath !== null && path !== null && current.yftPath !== path;
       if (differentFile) {
-        pendingFileRef.current = { path, tournament: report.tournament, warnings: report.warnings };
+        pendingFileRef.current = {
+          path,
+          tournament: report.tournament,
+          warnings: report.warnings,
+          yftFingerprint: fnv1a64(contents),
+        };
         setPendingFileSwitch({ path, tournamentName: report.tournament.name });
         setNotice({
           kind: 'warn',
@@ -694,7 +816,7 @@ export function useBridge(): BridgeApi {
       // leave a stale confirmation dialog able to switch away from the file now on screen.
       pendingFileRef.current = null;
       setPendingFileSwitch(null);
-      applyLoadedFile(path, report, false);
+      applyLoadedFile(path, report, false, fnv1a64(contents));
     },
     [applyLoadedFile],
   );
@@ -707,6 +829,7 @@ export function useBridge(): BridgeApi {
         pending.path,
         { ok: true, tournament: pending.tournament, warnings: pending.warnings },
         true,
+        pending.yftFingerprint,
       )
     )
       return;
@@ -1290,6 +1413,37 @@ export function useBridge(): BridgeApi {
   );
 
   /**
+   * State (or clear) one team's bye/inactive disposition in the selected round.
+   *
+   * The edit lands in that round's disposition entry and nowhere else, mirroring `setRoomTeams`.
+   * Assignment stays derived from the pairings — stating a bye never moves a team, it only
+   * records that the team is not expected to play.
+   */
+  const setTeamDisposition = useCallback(
+    (teamId: string, kind: TeamDispositionKind | null) =>
+      commit((current) =>
+        current.selectedRoundId === null
+          ? current
+          : {
+              ...current,
+              roundDispositions: setDispositionEntry(
+                current.roundDispositions,
+                current.selectedRoundId,
+                teamId,
+                kind,
+              ),
+            },
+      ),
+    [commit],
+  );
+
+  const dispositionForTeam = useCallback(
+    (teamId: string): TeamDispositionKind | null =>
+      dispositionFor(stateRef.current.roundDispositions, stateRef.current.selectedRoundId, teamId),
+    [],
+  );
+
+  /**
    * Apply a successful mirror without activating a code changed while the request was in flight.
    *
    * Relay truth comes from the outcome — the fingerprint of the assignment that was actually
@@ -1443,13 +1597,17 @@ export function useBridge(): BridgeApi {
     await publishPlan({
       plan: review.plan,
       tournamentName: review.tournamentName,
-      successKind: review.plan.cleared.length > 0 ? 'warn' : 'good',
+      successKind: review.plan.cleared.length > 0 || review.accountabilityWarningCount > 0 ? 'warn' : 'good',
       successMessage: (outcome) => {
         const clearedNote =
           review.plan.cleared.length > 0
             ? ` ${review.plan.cleared.length} room(s) were cleared and can no longer open a game.`
             : '';
-        return `Published round ${review.roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+        const overrideNote =
+          review.accountabilityWarningCount > 0
+            ? ` Published with ${review.accountabilityWarningCount} accountability warning(s) as an explicit exception.`
+            : '';
+        return `Published round ${review.roundName} to ${outcome.assignments.length} room(s).${clearedNote}${overrideNote}`;
       },
       failureMessage: 'Round not published — the rooms still have whatever they had before.',
       missingRelayMessage: 'Connect the relay before publishing a round.',
@@ -1479,10 +1637,27 @@ export function useBridge(): BridgeApi {
       return;
     }
     const pairings = pairingsForRound(current.roundPlans, round.id);
-    const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
-    const snapshot = publicationSnapshot(current);
     const teamNameForReview = (id: string): string =>
       tournament.teams.find((team) => team.id === id)?.name ?? id;
+    // The accountability gate runs before anything is built: a blocked round publishes nothing,
+    // and a warned round publishes only through the explicit review below.
+    const account = accountRound({
+      pairings,
+      dispositions: current.roundDispositions,
+      roundId: round.id,
+      teamIds: new Set(tournament.teams.map((team) => team.id)),
+      roomIds: new Set(current.rooms.map((room) => room.id)),
+    });
+    const gate = roundPublishGate(account, teamNameForReview);
+    if (gate.blocks.length > 0) {
+      setNotice({
+        kind: 'bad',
+        message: `Round ${round.displayName} cannot publish: ${gate.blocks.join(' ')}`,
+      });
+      return;
+    }
+    const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
+    const snapshot = publicationSnapshot(current);
     const reviewItems = publicationReviewItems(
       plan,
       [
@@ -1493,6 +1668,14 @@ export function useBridge(): BridgeApi {
       pairings,
       teamNameForReview,
     );
+    const accountabilityWarningCount = gate.warnings.length;
+    for (const warning of gate.warnings) {
+      reviewItems.push({
+        roomId: round.id,
+        roomName: `Round ${round.displayName}`,
+        message: warning,
+      });
+    }
     // A round with no playable matchup is not a round publication. Keep the explicit room-setup
     // action as the only way to send a clear-only mirror; otherwise a mistaken empty round could
     // silently revoke every room's active assignment.
@@ -1533,6 +1716,7 @@ export function useBridge(): BridgeApi {
         plan,
         items: reviewItems,
         snapshot,
+        accountabilityWarningCount,
       });
       setNotice({
         kind: 'warn',
@@ -1579,6 +1763,378 @@ export function useBridge(): BridgeApi {
       missingRelayMessage: 'Connect the relay before publishing room setup.',
     });
   }, [publishPlan]);
+
+  /** Timestamped file stem so every export is exclusive-create without ever replacing a file. */
+  const exportStamp = (): string => new Date().toISOString().replace(/[:.]/g, '-');
+
+  const exportRoundPlan = useCallback(async (): Promise<boolean> => {
+    const current = stateRef.current;
+    if (!tournament) {
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before exporting a round plan.' });
+      return false;
+    }
+    setBusy(true);
+    try {
+      const folder = await chooseAssignmentFolder();
+      if (!folder) {
+        setNotice({ kind: 'warn', message: 'Choose an output folder for the round plan.' });
+        return false;
+      }
+      const slug =
+        tournament.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 40) || 'tournament';
+      const fileName = `${slug}-round-plans-${exportStamp()}.qbplan.json`;
+      const contents = `${JSON.stringify(
+        exportPortablePlan({
+          tournamentName: tournament.name,
+          yftFingerprint: current.yftFingerprint,
+          exportedAt: new Date().toISOString(),
+          rooms: current.rooms,
+          plans: current.roundPlans,
+          dispositions: current.roundDispositions,
+        }),
+        null,
+        2,
+      )}\n`;
+      // A plan carries ids and a fingerprint — no credentials, no pairing codes, no publication
+      // state — by construction in `exportPortablePlan`, so a plain file write is the export.
+      await writeRoundPackFile(folder, fileName, contents, false);
+      setNotice({ kind: 'good', message: `Exported the round plan to ${fileName}.` });
+      return true;
+    } catch (error) {
+      setNotice({ kind: 'bad', message: `The round plan was not exported. ${(error as Error).message}` });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [tournament]);
+
+  const exportPrelimCsvFile = useCallback(async (): Promise<boolean> => {
+    const current = stateRef.current;
+    if (!tournament) {
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before exporting prelim CSV.' });
+      return false;
+    }
+    setBusy(true);
+    try {
+      const folder = await chooseAssignmentFolder();
+      if (!folder) {
+        setNotice({ kind: 'warn', message: 'Choose an output folder for the prelim CSV.' });
+        return false;
+      }
+      const teamNames = new Map(tournament.teams.map((team) => [team.id, team.name]));
+      const roomNames = new Map(current.rooms.map((room) => [room.id, room.name]));
+      const contents = exportPrelimCsv({
+        rounds: tournament.rounds,
+        plans: current.roundPlans,
+        dispositions: current.roundDispositions,
+        roomName: (roomId) => roomNames.get(roomId) ?? roomId,
+        teamName: (teamId) => teamNames.get(teamId) ?? teamId,
+      });
+      const fileName = `prelim-schedule-${exportStamp()}.csv`;
+      await writeRoundPackFile(folder, fileName, contents, false);
+      setNotice({ kind: 'good', message: `Exported the prelim schedule to ${fileName}.` });
+      return true;
+    } catch (error) {
+      setNotice({ kind: 'bad', message: `The prelim CSV was not exported. ${(error as Error).message}` });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [tournament]);
+
+  const describePlanDiffProblems = (diff: PlanImportDiff): string => {
+    const parts: string[] = [];
+    if (diff.unknownRoundIds.length > 0) {
+      parts.push(`rounds this setup does not have: ${diff.unknownRoundIds.join(', ')}`);
+    }
+    if (diff.unknownRoomIds.length > 0) {
+      parts.push(
+        `rooms this setup does not have: ${diff.unknownRoomIds.map((room) => `${room.name} (${room.id})`).join(', ')}`,
+      );
+    }
+    if (diff.unknownTeamIds.length > 0) {
+      parts.push(`teams the loaded file does not have: ${diff.unknownTeamIds.join(', ')}`);
+    }
+    return `This plan does not fit this setup — ${parts.join('; ')}. Nothing was applied.`;
+  };
+
+  /**
+   * Open a portable plan or prelim CSV, validate it, and hold the diff for explicit review.
+   *
+   * Nothing touches local state here: a dirty or mismatched file ends in a notice, and a clean
+   * one ends in `pendingPlanImport`, which only `confirmPlanImport` applies.
+   */
+  const importRoundPlan = useCallback(async (): Promise<void> => {
+    if (!tournament) {
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before importing a plan.' });
+      return;
+    }
+    setBusy(true);
+    try {
+      const opened = await openRoundPlan();
+      if (!opened) return;
+      const sourceName = opened.path.split(/[\\/]/).pop() ?? opened.path;
+      const firstLine = (opened.contents.split('\n', 1)[0] ?? '').trim().toLowerCase();
+      const knownSets = {
+        yftFingerprint: stateRef.current.yftFingerprint,
+        roundIds: new Set(tournament.rounds.map((round) => round.id)),
+        roomIds: new Set(stateRef.current.rooms.map((room) => room.id)),
+        teamIds: new Set(tournament.teams.map((team) => team.id)),
+      };
+      if (opened.path.toLowerCase().endsWith('.csv') || firstLine === 'round,room,left_team,right_team') {
+        const teamIdsByName = new Map(tournament.teams.map((team) => [team.name, team.id]));
+        const roomIdsByName = new Map(stateRef.current.rooms.map((room) => [room.name, room.id]));
+        const roundIdsByName = new Map<string, string[]>();
+        for (const round of tournament.rounds) {
+          for (const name of [round.displayName, round.qbjName]) {
+            roundIdsByName.set(name, [...(roundIdsByName.get(name) ?? []), round.id]);
+          }
+        }
+        const byExactName = (table: Map<string, string>, name: string): string[] => {
+          const hit = table.get(name);
+          return hit === undefined ? [] : [hit];
+        };
+        const imported = importPrelimCsv(opened.contents, {
+          ...knownSets,
+          roundNameToId: (name) => roundIdsByName.get(name) ?? [],
+          roomNameToId: (name) => byExactName(roomIdsByName, name),
+          teamNameToId: (name) => byExactName(teamIdsByName, name),
+        });
+        if (!imported.ok) {
+          setNotice({ kind: 'bad', message: `${sourceName}: ${imported.error} Nothing was applied.` });
+          return;
+        }
+        const pairingCount = imported.plans.reduce((total, plan) => total + plan.pairings.length, 0);
+        const byeCount = imported.dispositions.reduce(
+          (total, entry) => total + entry.byes.length + entry.inactive.length,
+          0,
+        );
+        // CSV carries no fingerprint and no room catalog: provenance is unverifiable and room
+        // names were resolved strictly at parse time, so the review always says both.
+        const csvPlan: PortableRoundPlan = {
+          format: 'qbbridge-round-plan',
+          formatVersion: 1,
+          exportedAt: '',
+          yftFingerprint: null,
+          tournamentName: '',
+          rooms: [],
+          rounds: imported.plans.map((plan) => {
+            const stated = imported.dispositions.find((entry) => entry.roundId === plan.roundId);
+            return {
+              roundId: plan.roundId,
+              pairings: plan.pairings.map((pairing) => ({
+                roomId: pairing.roomId,
+                leftTeamId: pairing.leftTeamId,
+                rightTeamId: pairing.rightTeamId,
+              })),
+              byes: stated ? [...stated.byes] : [],
+              inactive: stated ? [...stated.inactive] : [],
+            };
+          }),
+        };
+        rememberPlanImport({
+          sourceName,
+          plan: csvPlan,
+          diff: {
+            fingerprintMatch: false,
+            planFingerprint: null,
+            currentFingerprint: knownSets.yftFingerprint,
+            planTournamentName: '',
+            roundCount: imported.plans.length,
+            pairingCount,
+            byeCount,
+            unknownRoundIds: [],
+            unknownRoomIds: [],
+            unknownTeamIds: [],
+            clean: true,
+          },
+        });
+        setNotice({
+          kind: 'warn',
+          message: `${sourceName} parsed as prelim CSV with no YellowFruit fingerprint. Review the diff before applying.`,
+        });
+        return;
+      }
+      const parsed = parsePortablePlan(opened.contents);
+      if (!parsed.ok) {
+        setNotice({ kind: 'bad', message: `${sourceName}: ${parsed.error} Nothing was applied.` });
+        return;
+      }
+      const diff = diffPortablePlan(parsed.plan, knownSets);
+      if (!diff.clean) {
+        setNotice({ kind: 'bad', message: `${sourceName}: ${describePlanDiffProblems(diff)}` });
+        return;
+      }
+      rememberPlanImport({ sourceName, plan: parsed.plan, diff });
+      setNotice({
+        kind: 'warn',
+        message: diff.fingerprintMatch
+          ? `${sourceName} matches the loaded file: ${diff.roundCount} round(s), ${diff.pairingCount} pairing(s). Review before applying.`
+          : `${sourceName} was prepared against DIFFERENT YellowFruit bytes. Review every matchup before applying.`,
+      });
+    } catch (error) {
+      setNotice({ kind: 'bad', message: `The plan was not imported. ${(error as Error).message}` });
+    } finally {
+      setBusy(false);
+    }
+  }, [rememberPlanImport, tournament]);
+
+  /**
+   * Apply the reviewed import, replacing exactly the rounds the file covers.
+   *
+   * The plan is re-resolved against current state at confirm time, not trusted from review
+   * time: a room removed or a file reloaded between review and confirm must refuse rather than
+   * apply against ids that no longer mean what they meant. Whole-round replacement keeps the
+   * import an explicit snapshot — a pairing deleted from the plan file disappears locally
+   * rather than lingering as a ghost — and rounds the file does not mention are untouched.
+   */
+  const confirmPlanImport = useCallback((): void => {
+    const pending = pendingPlanImportRef.current;
+    if (!pending || !tournament) return;
+    const current = stateRef.current;
+    const applied = applyPortablePlan(pending.plan, {
+      yftFingerprint: current.yftFingerprint,
+      roundIds: new Set(tournament.rounds.map((round) => round.id)),
+      roomIds: new Set(current.rooms.map((room) => room.id)),
+      teamIds: new Set(tournament.teams.map((team) => team.id)),
+    });
+    if (!applied.ok) {
+      rememberPlanImport(null);
+      setNotice({
+        kind: 'bad',
+        message: `${pending.sourceName} no longer fits this setup: ${applied.error} Nothing was applied.`,
+      });
+      return;
+    }
+    rememberPlanImport(null);
+    const replaced = new Set(applied.plans.map((plan) => plan.roundId));
+    commit((currentState) => ({
+      ...currentState,
+      roundPlans: [
+        ...currentState.roundPlans.filter((plan) => !replaced.has(plan.roundId)),
+        ...applied.plans.filter((plan) => plan.pairings.length > 0),
+      ],
+      roundDispositions: normalizeRoundDispositions([
+        ...currentState.roundDispositions.filter((entry) => !replaced.has(entry.roundId)),
+        ...applied.dispositions,
+      ]),
+    }));
+    const provenanceNote = pending.diff.fingerprintMatch
+      ? ''
+      : ' It was prepared against different YellowFruit bytes — verify every matchup before publishing.';
+    setNotice({
+      kind: 'good',
+      message: `Applied ${applied.plans.length} planned round(s) from ${pending.sourceName}.${provenanceNote}`,
+    });
+  }, [commit, rememberPlanImport, tournament]);
+
+  const cancelPlanImport = useCallback((): void => {
+    if (!pendingPlanImportRef.current) return;
+    rememberPlanImport(null);
+    setNotice({ kind: 'warn', message: 'Plan import canceled. The saved rounds are unchanged.' });
+  }, [rememberPlanImport]);
+
+  const writePackFiles = useCallback(async (pack: EmergencyPack): Promise<boolean> => {
+    setBusy(true);
+    try {
+      const folder = await chooseAssignmentFolder();
+      if (!folder) {
+        setNotice({ kind: 'warn', message: 'Choose an output folder for the emergency pack.' });
+        return false;
+      }
+      let written = 0;
+      const failures: string[] = [];
+      for (const file of pack.files) {
+        try {
+          if (file.kind === 'assignment') {
+            await writeAssignmentFile(folder, file.fileName, file.contents);
+          } else {
+            await writeRoundPackFile(folder, file.fileName, file.contents, file.overwrite);
+          }
+          written += 1;
+        } catch (error) {
+          failures.push(`${file.fileName}: ${(error as Error).message}`);
+        }
+      }
+      if (failures.length > 0) {
+        setNotice({
+          kind: 'bad',
+          message: `Wrote ${written} of ${pack.files.length} pack files to ${folder}. ${failures[0]} Choose another folder and retry the rest.`,
+        });
+        return false;
+      }
+      setNotice({
+        kind: 'good',
+        message: `Emergency pack written to ${folder}: ${pack.manifest.totalAssignmentFiles} game(s) plus manifest and README. Pack files are a separate delivery path — never hand one out for a room the relay is serving.`,
+      });
+      return true;
+    } catch (error) {
+      setNotice({ kind: 'bad', message: `The emergency pack was not written. ${(error as Error).message}` });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  /**
+   * Build the next N rounds' emergency pack from the selected round on.
+   *
+   * Building is free; writing is fenced. When a pack room is live on the relay, nothing is
+   * written until the operator reviews the authority warnings and confirms explicitly.
+   */
+  const exportEmergencyPack = useCallback(
+    async (roundCount: number): Promise<boolean> => {
+      const current = stateRef.current;
+      if (!tournament) {
+        setNotice({ kind: 'bad', message: 'Load a YellowFruit file before exporting a pack.' });
+        return false;
+      }
+      const built = buildEmergencyPack({
+        tournament,
+        rounds: tournament.rounds,
+        startRoundId: current.selectedRoundId,
+        roundCount,
+        rooms: current.rooms,
+        plans: current.roundPlans,
+        generatedAt: new Date().toISOString(),
+        yftFingerprint: current.yftFingerprint,
+      });
+      if (!built.ok) {
+        setNotice({ kind: 'bad', message: built.errors.join(' ') });
+        return false;
+      }
+      const roundName = (roundId: string): string =>
+        tournament.rounds.find((round) => round.id === roundId)?.displayName ?? roundId;
+      const warnings = packAuthorityWarnings({ pack: built.pack, rooms: current.rooms, roundName });
+      if (warnings.length > 0) {
+        rememberPackExport({ pack: built.pack, roundCount, warnings });
+        setNotice({
+          kind: 'warn',
+          message: `${warnings.length} pack room(s) are live on the relay. Review the authority warnings before anything is written.`,
+        });
+        return false;
+      }
+      return writePackFiles(built.pack);
+    },
+    [rememberPackExport, tournament, writePackFiles],
+  );
+
+  const confirmPackExport = useCallback(async (): Promise<boolean> => {
+    const pending = pendingPackExportRef.current;
+    if (!pending) return false;
+    rememberPackExport(null);
+    return writePackFiles(pending.pack);
+  }, [rememberPackExport, writePackFiles]);
+
+  const cancelPackExport = useCallback((): void => {
+    if (!pendingPackExportRef.current) return;
+    rememberPackExport(null);
+    setNotice({ kind: 'warn', message: 'Emergency pack canceled. Nothing was written.' });
+  }, [rememberPackExport]);
 
   const pollResults = useCallback(async () => {
     const current = stateRef.current;
@@ -2016,6 +2572,21 @@ export function useBridge(): BridgeApi {
   );
 
   /**
+   * The accountability report for the selected round. Null before a file loads — dispositions
+   * without the authoritative team list would be a guess about the denominator.
+   */
+  const roundAccount = useMemo((): RoundAccount | null => {
+    if (!tournament) return null;
+    return accountRound({
+      pairings: pairingsForRound(state.roundPlans, state.selectedRoundId),
+      dispositions: state.roundDispositions,
+      roundId: state.selectedRoundId,
+      teamIds: new Set(tournament.teams.map((team) => team.id)),
+      roomIds: new Set(state.rooms.map((room) => room.id)),
+    });
+  }, [tournament, state.roundPlans, state.roundDispositions, state.selectedRoundId, state.rooms]);
+
+  /**
    * Assignment counts for the rounds beside this one, so setup completeness is visible at a glance.
    *
    * Scoped to the selected round's phase rather than the whole file: eleven prelim rounds is a list
@@ -2097,6 +2668,19 @@ export function useBridge(): BridgeApi {
     phaseRoundProgress,
     regeneratePairingCode,
     selectRound,
+    setTeamDisposition,
+    dispositionForTeam,
+    roundAccount,
+    exportRoundPlan,
+    exportPrelimCsvFile,
+    importRoundPlan,
+    pendingPlanImport,
+    confirmPlanImport,
+    cancelPlanImport,
+    exportEmergencyPack,
+    pendingPackExport,
+    confirmPackExport,
+    cancelPackExport,
     publish,
     pendingPublicationReview,
     confirmPublicationReview,
