@@ -248,6 +248,11 @@ describe('the Rust crates are independent, except where Cargo says otherwise', (
     expect(affected(['apps/director/src-tauri/Cargo.lock'])).toEqual(['rust-director']);
   });
 
+  it('runs the Bridge application and native crate for a Bridge native change', () => {
+    expect(affected(['apps/qbbridge/src-tauri/src/lib.rs'])).toEqual(['qbbridge', 'rust-qbbridge']);
+    expect(affected(['apps/qbbridge/src-tauri/tauri.conf.json'])).toEqual(['qbbridge', 'rust-qbbridge']);
+  });
+
   it('never runs the browser torture test for a Rust-only change', () => {
     for (const path of [
       'crates/tournament-store/src/lib.rs',

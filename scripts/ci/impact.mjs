@@ -145,8 +145,8 @@ export const RULES = [
   },
   {
     glob: 'apps/qbbridge/src-tauri/**',
-    domains: ['rust-qbbridge'],
-    why: 'the QBSheet Bridge native crate; four commands, no path dependencies',
+    domains: ['qbbridge', 'rust-qbbridge'],
+    why: 'the QBSheet Bridge native crate and its bundled application configuration; four commands, no path dependencies',
   },
 
   // ---------------------------------------------------------------------------------------------

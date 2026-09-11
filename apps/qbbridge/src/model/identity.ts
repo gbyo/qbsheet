@@ -30,14 +30,17 @@ export interface PairingIdentityInput {
 /**
  * The stable `Match.id` for one pairing.
  *
- * The parts are joined on an ASCII unit separator, written as an explicit `\u001f` escape: a
- * literal control character is invisible in a diff, and a separator that could occur inside an id
- * would let two different pairings hash alike.
+ * The parts are encoded as a JSON tuple before hashing. JSON's length and quoting rules keep
+ * boundaries unambiguous even when an imported id contains punctuation or control characters.
  */
 export function pairingMatchId(input: PairingIdentityInput): string {
-  const key = [input.tournamentId, input.roundId, input.roomId, input.leftTeamId, input.rightTeamId].join(
-    '\u001f',
-  );
+  const key = JSON.stringify([
+    input.tournamentId,
+    input.roundId,
+    input.roomId,
+    input.leftTeamId,
+    input.rightTeamId,
+  ]);
   return `qbbridge-match-${fnv1a64(key)}`;
 }
 
