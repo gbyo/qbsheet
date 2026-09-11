@@ -99,6 +99,7 @@ Director management surface (`Authorization: Bearer`, never reachable with score
 
 ```
 POST   /qbtcp/v1/manage/claim
+GET    /qbtcp/v1/manage/tournaments/{id}/scorer-readiness
 PUT    /qbtcp/v1/manage/tournaments/{id}/mirror
 GET    /qbtcp/v1/manage/tournaments/{id}/events?after=&limit=&kinds=
 GET    /qbtcp/v1/manage/tournaments/{id}/sessions[?changed_since=]
@@ -113,6 +114,10 @@ POST   /qbtcp/v1/manage/tournaments/{id}/chaos      drills only, never productio
 DELETE /qbtcp/v1/manage/tournaments/{id}
 GET    /qbtcp/v1/manage/tournaments/{id}/health
 ```
+
+`GET .../scorer-readiness` is a narrow, management-authenticated check for the fixed ordinary
+Scorer origin `https://qbsheet.com`. It returns only whether that origin is allowed and a corrective
+message when it is not; it never returns `RELAY_ALLOWED_ORIGINS` or any credential.
 
 Room and session tokens are relay-minted capabilities for Director-mirrored **identities**: the
 room ids, session ids, and match ids are shared with LAN QBTCP so both transports converge on one

@@ -15,7 +15,11 @@
 
 import { useState } from 'react';
 import { Button, ConfirmDialog, Notice, TextField } from '@qbsheet/ui';
-import { isRelayTournamentId, normalizeRelayBaseUrl } from '../../../../src/director/relay/relayConfig';
+import {
+  isRelayTournamentId,
+  normalizeRelayBaseUrl,
+  scoresheetOrigin,
+} from '../../../../src/director/relay/relayConfig';
 import { generateTournamentId } from '../model/relay';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
@@ -42,6 +46,19 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
       ? undefined
       : 'A tournament ID is 24 characters: digits and lowercase consonants.';
   const canClaim = urlCheck?.ok === true && isRelayTournamentId(tournamentId) && setupToken.trim() !== '';
+  const readiness = bridge.scorerReadiness;
+  const readinessStatus = readiness?.status ?? 'unknown';
+  const readinessHeading =
+    readinessStatus === 'ready'
+      ? 'Scorer connection ready'
+      : readinessStatus === 'blocked'
+        ? 'Scorer cannot use this relay yet'
+        : readinessStatus === 'checking'
+          ? 'Checking Scorer connection'
+          : 'Scorer readiness not verified';
+  const readinessMessage =
+    readiness?.message ??
+    `Check whether ${scoresheetOrigin} can pair with this relay before sharing room QR codes.`;
 
   return (
     <>
@@ -119,6 +136,20 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                 </Button>
               </div>
             ) : null}
+
+            <div className="scorer-readiness" aria-live="polite">
+              <h3>{readinessHeading}</h3>
+              <p>{readinessMessage}</p>
+              {readinessStatus !== 'ready' ? (
+                <p className="faint">Pairing QR codes stay hidden until this check succeeds.</p>
+              ) : null}
+              <Button
+                onPress={() => void bridge.checkScorerReadiness()}
+                isDisabled={bridge.busy || readinessStatus === 'checking'}
+              >
+                {readinessStatus === 'checking' ? 'Checking…' : 'Check Scorer Readiness'}
+              </Button>
+            </div>
           </>
         ) : null}
 

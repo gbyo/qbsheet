@@ -10,7 +10,13 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { pairingCodeHash } from './pairing';
 import { planRoomSetup, planRound, publishRound } from './publish';
-import { relayClaim, relayFetchResults, RelayError, type RelayConnection } from './relay';
+import {
+  relayClaim,
+  relayCheckScorerReadiness,
+  relayFetchResults,
+  RelayError,
+  type RelayConnection,
+} from './relay';
 import { newRoom, roomTombstone, type Room } from './rooms';
 import { loadedFixture } from '../tests/fixture';
 import * as native from './native';
@@ -330,6 +336,49 @@ describe('the other two relay calls', () => {
     await expect(
       relayClaim({ baseUrl: 'https://r.example', tournamentId: 't', setupToken: 'x' }),
     ).rejects.toThrow('This relay has already been claimed.');
+  });
+
+  test('checks the fixed Scorer origin with the management credential and no browser-header escape hatch', async () => {
+    const calls = stubRelay(() => ({
+      status: 200,
+      body: JSON.stringify({
+        origin: 'https://qbsheet.com',
+        canPair: true,
+        state: 'ready',
+        message: 'https://qbsheet.com can pair and use this relay.',
+      }),
+    }));
+
+    await expect(relayCheckScorerReadiness(connection)).resolves.toMatchObject({
+      origin: 'https://qbsheet.com',
+      canPair: true,
+      state: 'ready',
+    });
+    expect(calls[0]).toEqual({
+      method: 'GET',
+      url: 'https://qbtcp-relay-test.workers.dev/qbtcp/v1/manage/tournaments/bcdfghjkmnpqrstvwxyz2345/scorer-readiness',
+      bearer: 'management-secret',
+    });
+    expect(JSON.stringify(calls[0])).not.toContain('*');
+  });
+
+  test('keeps a missing Scorer origin as a blocking readiness result', async () => {
+    stubRelay(() => ({
+      status: 200,
+      body: JSON.stringify({
+        origin: 'https://qbsheet.com',
+        canPair: false,
+        state: 'blocked',
+        message: 'Add https://qbsheet.com to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.',
+      }),
+    }));
+
+    await expect(relayCheckScorerReadiness(connection)).resolves.toEqual({
+      origin: 'https://qbsheet.com',
+      canPair: false,
+      state: 'blocked',
+      message: 'Add https://qbsheet.com to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.',
+    });
   });
 
   test('results are read unacknowledged and never acknowledged', async () => {

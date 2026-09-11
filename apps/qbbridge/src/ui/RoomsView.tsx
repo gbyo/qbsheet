@@ -80,6 +80,8 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     }
   };
 
+  const scorerReady = bridge.scorerReadiness?.status === 'ready';
+
   const requestRound = (roundId: string): void => {
     if (roundId === state.selectedRoundId) return;
     // Changing rounds clears every selection, so ask first when there is something to lose.
@@ -194,7 +196,12 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                           </div>
                         ) : null}
                       </div>
-                      {room.relayPublished && link ? <Qr url={link} roomName={room.name} /> : null}
+                      {room.relayPublished && link && scorerReady ? (
+                        <Qr url={link} roomName={room.name} />
+                      ) : null}
+                      {room.relayPublished && link && !scorerReady ? (
+                        <span className="faint">QR withheld until Scorer readiness is confirmed.</span>
+                      ) : null}
                       <Button
                         size="sm"
                         variant="quiet"

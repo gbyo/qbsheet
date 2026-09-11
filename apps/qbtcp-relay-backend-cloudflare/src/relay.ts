@@ -43,6 +43,8 @@
 import { clampPage } from '@qbsheet/cloudflare-runtime-core';
 import { DurableObject } from 'cloudflare:workers';
 
+import { scoresheetOrigin } from '../../../src/director/relay/relayConfig';
+
 import { utf8ByteLength } from './protocol/bytes';
 import {
   credentialedCorsHeaders,
@@ -798,6 +800,8 @@ export class QbtcpRelay extends DurableObject<Env> {
     if (method === 'POST' && action === 'manage/chaos') return credentialed(() => this.postChaos(request));
     if (method === 'DELETE' && action === 'manage') return credentialed(() => this.destroy(request));
     if (method === 'GET' && action === 'manage/health') return credentialed(() => this.getHealth(request));
+    if (method === 'GET' && action === 'manage/scorer-readiness')
+      return credentialed(() => this.getScorerReadiness(request));
 
     const helpResolve = /^manage\/help\/([^/]+)\/resolve$/.exec(action);
     if (helpResolve && method === 'POST')
@@ -2605,6 +2609,31 @@ export class QbtcpRelay extends DurableObject<Env> {
         counters,
         budget: budgetEstimate(counters, storage),
         time: nowIso(),
+      },
+      200,
+      { ...cors, 'cache-control': 'no-cache' },
+    );
+  }
+
+  /**
+   * Report whether the ordinary QBSheet Scorer origin is allowed to use this relay.
+   *
+   * The Director talks to this endpoint natively, so it can inspect the deployment's allowlist
+   * without pretending that a native management request had a browser origin. The response exposes
+   * only the fixed public Scorer origin and the resulting boolean; it never returns the configured
+   * allowlist, setup token, or management credential.
+   */
+  private async getScorerReadiness(request: Request): Promise<Response> {
+    const { cors } = await this.authorizeManagement(request);
+    const canPair = isOriginAllowed(scoresheetOrigin, this.allowedOrigins());
+    return json(
+      {
+        origin: scoresheetOrigin,
+        canPair,
+        state: canPair ? 'ready' : 'blocked',
+        message: canPair
+          ? `${scoresheetOrigin} can pair and use this relay.`
+          : `Add ${scoresheetOrigin} to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.`,
       },
       200,
       { ...cors, 'cache-control': 'no-cache' },

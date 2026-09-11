@@ -67,6 +67,8 @@ let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reas
   [];
 let deferWrites = false;
 let pendingWrites: PendingWrite[] = [];
+let scorerCanPair = true;
+let scorerReadinessFails = false;
 
 function installFakeTauri(): void {
   calls = [];
@@ -114,6 +116,20 @@ function installFakeTauri(): void {
             }),
           };
         }
+        if (url.endsWith('/scorer-readiness')) {
+          if (scorerReadinessFails) return { status: 503, body: '{}' };
+          return {
+            status: 200,
+            body: JSON.stringify({
+              origin: 'https://qbsheet.com',
+              canPair: scorerCanPair,
+              state: scorerCanPair ? 'ready' : 'blocked',
+              message: scorerCanPair
+                ? 'https://qbsheet.com can pair and use this relay.'
+                : 'Add https://qbsheet.com to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.',
+            }),
+          };
+        }
         if (url.endsWith('/acks')) {
           if (ackFailuresRemaining > 0) {
             ackFailuresRemaining -= 1;
@@ -156,6 +172,8 @@ beforeEach(() => {
   pendingResultRequests = [];
   deferWrites = false;
   pendingWrites = [];
+  scorerCanPair = true;
+  scorerReadinessFails = false;
   installFakeTauri();
 });
 
@@ -738,6 +756,7 @@ describe('persistence', () => {
     expect(loadState()).toEqual({
       version: 1,
       relay: null,
+      scorerReadiness: null,
       yftPath: null,
       tournamentName: null,
       rooms: [],
@@ -923,6 +942,51 @@ describe('changing the relay', () => {
     // It says what happened rather than looking like a successful change.
     expect(rendered.result.current.notice?.kind).toBe('warn');
     expect(rendered.result.current.notice?.message).toMatch(/deleted from this machine/);
+  });
+});
+
+describe('Scorer origin readiness', () => {
+  test('persists a blocked readiness result without discarding the claimed credential', async () => {
+    globalThis.localStorage.removeItem(storageKey);
+    scorerCanPair = false;
+    const rendered = renderHook(() => useBridge());
+
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: relayBase,
+        tournamentId: relayTournament,
+        setupToken: 'one-time',
+      });
+    });
+
+    expect(rendered.result.current.state.relay?.managementToken).toBe('management-secret');
+    expect(rendered.result.current.scorerReadiness).toMatchObject({
+      status: 'blocked',
+      origin: 'https://qbsheet.com',
+    });
+    expect(rendered.result.current.notice).toMatchObject({ kind: 'warn' });
+    expect(rendered.result.current.notice?.message).toMatch(/RELAY_ALLOWED_ORIGINS/);
+    expect(loadState().scorerReadiness).toMatchObject({ status: 'blocked' });
+  });
+
+  test('keeps the new management credential when readiness cannot be checked', async () => {
+    globalThis.localStorage.removeItem(storageKey);
+    scorerReadinessFails = true;
+    const rendered = renderHook(() => useBridge());
+
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: relayBase,
+        tournamentId: relayTournament,
+        setupToken: 'one-time',
+      });
+    });
+
+    expect(rendered.result.current.state.relay?.managementToken).toBe('management-secret');
+    expect(rendered.result.current.scorerReadiness).toMatchObject({ status: 'unknown' });
+    expect(rendered.result.current.notice?.message).toMatch(/Do not pair until this check succeeds/);
+    expect(loadState().relay?.managementToken).toBe('management-secret');
+    expect(loadState().scorerReadiness).toMatchObject({ status: 'unknown' });
   });
 });
 
