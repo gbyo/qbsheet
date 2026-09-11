@@ -16,10 +16,17 @@ import { qrSvg } from '../../../../src/qr/QrEncoding';
 
 /** The length and alphabet the native QBTCP server uses (`pairing_code` in `crates/qbtcp-server`). */
 export function generatePairingCode(): string {
-  const bytes = new Uint32Array(2);
-  crypto.getRandomValues(bytes);
-  const value = (bytes[0] * 0x100000000 + bytes[1]) % 100_000_000;
-  return String(value).padStart(8, '0');
+  const codeSpace = 100_000_000;
+  // Reject the short tail of the Uint32 space so every eight-digit code has the same
+  // probability. This stays within the exact-integer range of JavaScript numbers.
+  const acceptedLimit = Math.floor(0x1_0000_0000 / codeSpace) * codeSpace;
+  const sample = new Uint32Array(1);
+
+  do {
+    crypto.getRandomValues(sample);
+  } while (sample[0] >= acceptedLimit);
+
+  return String(sample[0] % codeSpace).padStart(8, '0');
 }
 
 /** The hash the relay stores and compares against. Lowercase hex, as `PUT manage/mirror` requires. */

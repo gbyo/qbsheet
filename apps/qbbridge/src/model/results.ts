@@ -25,6 +25,10 @@ export interface ResultSummary {
   rightPoints: number | null;
 }
 
+/** Keep result names below the common 255-byte filesystem component limit, with some margin. */
+export const maximumResultFileNameBytes = 240;
+const resultFileExtension = '.result.qbj';
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -125,6 +129,19 @@ function safePart(value: string): string {
   );
 }
 
+function truncateUtf8(value: string, maximumBytes: number): string {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  let result = '';
+  for (const character of value) {
+    const characterBytes = encoder.encode(character).byteLength;
+    if (bytes + characterBytes > maximumBytes) break;
+    result += character;
+    bytes += characterBytes;
+  }
+  return result;
+}
+
 /**
  * A descriptive filename, with a suffix that makes it this result's and no other's.
  *
@@ -156,7 +173,10 @@ export function resultFileName(summary: ResultSummary, resultId: string): string
     summary.leftName && summary.rightName
       ? `_${safePart(summary.leftName)}_vs_${safePart(summary.rightName)}`
       : '';
-  return `${round}${room}${matchup}_${resultFileSuffix(resultId)}.result.qbj`;
+  const descriptivePrefix = `${round}${room}${matchup}`;
+  const stableSuffix = `_${resultFileSuffix(resultId)}${resultFileExtension}`;
+  const availablePrefixBytes = maximumResultFileNameBytes - new TextEncoder().encode(stableSuffix).byteLength;
+  return `${truncateUtf8(descriptivePrefix, availablePrefixBytes)}${stableSuffix}`;
 }
 
 /** Six lowercase hex characters that identify one retained relay result. */

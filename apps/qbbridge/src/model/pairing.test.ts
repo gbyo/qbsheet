@@ -2,12 +2,16 @@
  * Pairing: the same protocol, the same code shape, the same link, and the code out of the mirror.
  */
 
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { generatePairingCode, pairingCodeHash, pairingLink, pairingQrSvg } from './pairing';
 
 const relay = { baseUrl: 'https://qbtcp-relay-test.workers.dev', tournamentId: 'bcdfghjkmnpqrstvwxyz2345' };
 
 describe('pairing codes', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   test('match the shape the native QBTCP server mints', () => {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       // Eight digits, zero-padded, which is what the relay's 4-to-64 bound and the LAN server
@@ -15,6 +19,22 @@ describe('pairing codes', () => {
       expect(generatePairingCode()).toMatch(/^[0-9]{8}$/);
     }
     expect(new Set(Array.from({ length: 40 }, generatePairingCode)).size).toBeGreaterThan(30);
+  });
+
+  test('rejects the uneven Uint32 tail before reducing to eight digits', () => {
+    const getRandomValues = vi.spyOn(crypto, 'getRandomValues');
+    getRandomValues
+      .mockImplementationOnce((values) => {
+        (values as Uint32Array)[0] = 4_200_000_000;
+        return values;
+      })
+      .mockImplementationOnce((values) => {
+        (values as Uint32Array)[0] = 123;
+        return values;
+      });
+
+    expect(generatePairingCode()).toBe('00000123');
+    expect(getRandomValues).toHaveBeenCalledTimes(2);
   });
 
   test('hash to the lowercase sha256 hex the relay stores', async () => {
