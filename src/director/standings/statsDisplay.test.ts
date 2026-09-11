@@ -229,7 +229,7 @@ describe('parity columns (#750)', () => {
       tossupsHeardKnown: true,
       tossupsHeardRegulation: 40,
       tossupsHeardRegulationKnown: true,
-      overtimePoints: 0,
+      overtimePoints: 30,
       overtimePointsKnown: true,
       bonuses: 12,
       bonusPoints: 130,
@@ -331,9 +331,13 @@ describe('parity columns (#750)', () => {
     const state = playedTournament();
     const columns = teamColumnsForState(state);
     expect(columns.find((column) => column.id === 'ppx')?.label).toBe('Pts/20');
-    // 300 points over 40 heard is 7.50 PPTUH; a 20-tossup set makes 150.00.
-    expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: 20 })).toBe('150.00');
+    // 300 final points include 30 overtime points, so regulation Pts/20 is
+    // (300 − 30) / 40 × 20 = 135.00 — final-score PPTUH would wrongly give 150.00.
+    expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: 20 })).toBe('135.00');
     expect(teamStatCell('ppx', bouncebackStanding(), { pointsTossups: null })).toBe('—');
+    expect(
+      teamStatCell('ppx', { ...bouncebackStanding(), overtimePointsKnown: false }, { pointsTossups: 20 }),
+    ).toBe('—');
 
     const rules = state.tournament!.rules;
     state.gameDefinitions = [

@@ -187,7 +187,8 @@ describe('overtime points derivation', () => {
       playerStats: [],
       source: 'manual',
       tossupsRead: 20,
-      overtimeTossupsRead: 0,
+      // Overtime scope genuinely unknown: without an overtime-tossups count, the
+      // missing breakdown cannot be proven zero and unknowns the whole split.
     });
     const standings = deriveTeamStandings(state);
     const left = standings.find((entry) => entry.teamId === 'team-1')!;
@@ -202,6 +203,54 @@ describe('overtime points derivation', () => {
     const right = standings.find((entry) => entry.teamId === 'team-2')!;
     expect(right.overtimePointsKnown).toBe(true);
     expect(right.overtimePoints).toBe(10);
+  });
+
+  test('zero overtime tossups make an absent breakdown a known zero (#755)', () => {
+    const state = overtimeGame(40, 10);
+    state.games.push({
+      id: 'game-ot-2',
+      scheduledGameId: 'game-5-2',
+      roundId: 'round-5',
+      packetId: 'packet-5',
+      status: 'accepted',
+      scores: [
+        {
+          teamId: 'team-1',
+          score: 200,
+          superpowers: 0,
+          powers: 0,
+          gets: 0,
+          negs: 0,
+          bonuses: 0,
+          bonusPoints: 0,
+          bouncebacks: 0,
+        },
+        {
+          teamId: 'team-2',
+          score: 100,
+          superpowers: 0,
+          powers: 0,
+          gets: 0,
+          negs: 0,
+          bonuses: 0,
+          bonusPoints: 0,
+          bouncebacks: 0,
+          overtimePoints: 0,
+        },
+      ],
+      playerStats: [],
+      source: 'manual',
+      tossupsRead: 20,
+      overtimeTossupsRead: 0,
+    });
+    const standings = deriveTeamStandings(state);
+    // No overtime tossups means no overtime scoring events: team-1's missing
+    // breakdown is a known zero, so regulation is the full 200.
+    const left = standings.find((entry) => entry.teamId === 'team-1')!;
+    expect(left.overtimePointsKnown).toBe(true);
+    expect(left.overtimePoints).toBe(40);
+    // Game 1 regulation is 260 − 40; game 2 regulation is the full 200.
+    expect(regulationDerivationForTeam(left).regulationPoints).toBe(420);
   });
 
   test('rules without overtime make an absent breakdown a known zero', () => {

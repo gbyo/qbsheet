@@ -155,7 +155,11 @@ function enrichGame(game: GameStatsRow, source: GameRecord | undefined, state: D
     // is only a stronger fallback for older accepted records where those fields
     // are still null in the canonical GameRecord.
     tossupsRead: game.tossupsRead ?? match.tossupsRead,
-    overtimeTossupsRead: game.overtimeTossupsRead ?? match.overtimeTossupsRead,
+    // Absent overtime is a known zero only under definitions with no overtime period.
+    overtimeTossupsRead:
+      game.overtimeTossupsRead ??
+      match.overtimeTossupsRead ??
+      (definition.overtimeEnabled === false ? 0 : undefined),
     roundStatDefinition: definition,
   };
 }

@@ -397,6 +397,69 @@ describe('bounceback parity (#748)', () => {
     });
   });
 
+  test('mixed bounceback-enabled and bounceback-disabled definitions stay known (#755)', () => {
+    const enabled = { ...defaultRules, bouncebacks: true };
+    const disabled = { ...defaultRules, bouncebacks: false };
+    const state = stateWithGames([
+      game(
+        'g1',
+        [
+          teamScore('a', 320, { bonuses: 6, bonusPoints: 90, bouncebacks: 30 }),
+          teamScore('b', 200, { bonuses: 4, bonusPoints: 50, bouncebacks: 10 }),
+        ],
+        { definitionDigest: 'digest-on' },
+      ),
+      game(
+        'g2',
+        [
+          teamScore('a', 250, { bonuses: 5, bonusPoints: 70, bouncebacks: null }),
+          teamScore('c', 210, { bonuses: 5, bonusPoints: 60, bouncebacks: null }),
+        ],
+        { definitionDigest: 'digest-off' },
+      ),
+    ]);
+    state.gameDefinitions = [
+      {
+        id: 'def-on',
+        scheduledGameId: 's-g1',
+        revision: 1,
+        createdAt: at,
+        rules: enabled,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'b',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'digest-on',
+      },
+      {
+        id: 'def-off',
+        scheduledGameId: 's-g2',
+        revision: 1,
+        createdAt: at,
+        rules: disabled,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'c',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'digest-off',
+      },
+    ];
+    // The disabled game contributes no opportunities and no unknowns: only g1 counts.
+    const derivation = bouncebackDerivationForTeam('a', state.games, state);
+    expect(derivation.bouncebackPoints).toBe(30);
+    expect(derivation.bouncebackPartsHeard).toBe(7);
+    expect(derivation.bouncebackConversion).toBeCloseTo(3 / 7);
+    const standing = standingOf(state, 'a');
+    expect(standing.bouncebacksKnown).toBe(true);
+    expect(standing.bouncebackPoints).toBe(30);
+  });
+
   test('bounceback validators accept unknown-or-count and reject impossible values', () => {
     expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: 10 }))).toBeNull();
     expect(invalidTeamGameScoreBouncebacks(teamScore('a', 0, { bouncebacks: null }))).toBeNull();

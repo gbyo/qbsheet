@@ -577,18 +577,18 @@ function accumulateBouncebackSide(
   rules: TournamentRules | null | undefined,
   detailKnown: boolean,
 ): void {
-  if (game.status === 'forfeit' && own.bouncebacks === null) {
-    // A pure-forfeit placeholder carries no signal; a partial forfeit unknowns the
-    // side that kept no breakdown while the entered side aggregates as-entered.
-    if (!isPureForfeitPlaceholder(game)) {
+  if (own.bouncebacks === null) {
+    // An absent breakdown is N/A — not unknown — where the stored historical
+    // definition defines no bouncebacks, or the game is a pure-forfeit placeholder.
+    // Entered detail always aggregates as-entered; any other missing breakdown
+    // unknowns the scope (#755, #844).
+    const noOpportunity: boolean =
+      !!(rules && !rules.bouncebacks && game.definitionDigest) ||
+      (game.status === 'forfeit' && isPureForfeitPlaceholder(game));
+    if (!noOpportunity) {
       totals.pointsKnown = false;
       totals.partsKnown = false;
     }
-    return;
-  }
-  if (own.bouncebacks === null) {
-    totals.pointsKnown = false;
-    totals.partsKnown = false;
     return;
   }
   totals.points += own.bouncebacks ?? 0;
@@ -1042,6 +1042,8 @@ function gameOvertimePointsForTeam(
   if (typeof score?.overtimePoints === 'number' && Number.isFinite(score.overtimePoints)) {
     return score.overtimePoints;
   }
+  // No overtime tossups means no overtime scoring events: a known zero without a split.
+  if (validTuh(game.overtimeTossupsRead) && game.overtimeTossupsRead === 0) return 0;
   if (rulesForGame(state, game)?.overtime === false) return 0;
   return null;
 }
@@ -1085,6 +1087,25 @@ export interface TeamRegulationDerivation {
  * Regulation points are a residual (total minus overtime), so adjustments and other
  * period-less scoring stay in the regulation bucket by construction.
  */
+/**
+ * Regulation-normalized points per X tossups: regulation points over regulation TUH,
+ * scaled to the scope's shared regulation count (#755).
+ *
+ * Overtime points and overtime TUH are excluded — final-score PPTUH scaled by X would
+ * smuggle overtime scoring into a regulation metric. Null unless regulation points,
+ * regulation TUH, and the shared count are all exactly known.
+ */
+export function normalizedPointsPerX(
+  regulationPoints: number | null | undefined,
+  regulationTuh: number | null | undefined,
+  tossups: number | null | undefined,
+): number | null {
+  if (typeof regulationPoints !== 'number' || !Number.isFinite(regulationPoints)) return null;
+  if (typeof regulationTuh !== 'number' || !Number.isFinite(regulationTuh) || regulationTuh <= 0) return null;
+  if (typeof tossups !== 'number' || !Number.isFinite(tossups) || tossups <= 0) return null;
+  return (regulationPoints / regulationTuh) * tossups;
+}
+
 export function regulationDerivationForTeam(
   standing: Pick<
     TeamStanding,

@@ -21,6 +21,7 @@ import {
   orderDayItems,
   playerHasAppearance,
   playerPoints,
+  regulationDerivationForTeam,
   rulesForGame,
   scoringValuesForGameRecord,
   type DirectorState,
@@ -283,6 +284,7 @@ export function buildCanonicalSnapshot(
       tossupsHeard: standing.tossupsHeardKnown ? standing.tossupsHeard : null,
       tossupsHeardKnown: standing.tossupsHeardKnown,
       tossupsHeardRegulation: standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
+      regulationPoints: regulationDerivationForTeam(standing).regulationPoints,
       pptuh:
         standing.tossupsHeardKnown && standing.tossupsHeard > 0
           ? standing.pointsFor / standing.tossupsHeard
@@ -358,10 +360,21 @@ export function buildCanonicalSnapshot(
       const tossupsHeard = teamTossupsHeard(game);
       const opponent = game.scores.find((entry) => entry.teamId !== score.teamId);
       const parts = teamGameParts(state, game, score, opponent);
+      // An absent overtime breakdown is a known zero when the game provably had
+      // no overtime (recorded zero overtime tossups, or rules with no overtime
+      // period); otherwise the game may predate overtime tracking. Matches the
+      // domain regulation derivation and the round-report rule.
+      const overtimePoints =
+        typeof score.overtimePoints === 'number'
+          ? score.overtimePoints
+          : game.overtimeTossupsRead === 0 || rulesForGame(state, game)?.overtime === false
+            ? 0
+            : null;
       return {
         teamId: score.teamId,
         teamName: teamName(score.teamId),
         points: score.score,
+        overtimePoints,
         superpowers: detailedCountsKnown ? score.superpowers : null,
         powers: detailedCountsKnown ? score.powers : null,
         gets: detailedCountsKnown ? score.gets : null,

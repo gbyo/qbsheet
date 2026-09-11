@@ -190,6 +190,61 @@ function contributesScoringStats(game: GameStatsRow): boolean {
  * non-overtime game. We intentionally decline to assume that an overtime-
  * capable game stopped at regulation when the accepted result did not say so.
  */
+/**
+ * Regulation tossups heard for one game: measured total minus measured overtime, or the
+ * definition count when the game provably had no overtime period. Anything else leaves
+ * the regulation denominator unknown rather than smuggling overtime into Pts/team/X.
+ */
+function regulationTuhForGame(game: GameStatsRow): number | null {
+  if (
+    finite(game.tossupsRead) &&
+    game.tossupsRead > 0 &&
+    finite(game.overtimeTossupsRead) &&
+    game.overtimeTossupsRead >= 0
+  ) {
+    const regulation = game.tossupsRead - game.overtimeTossupsRead;
+    return regulation > 0 ? regulation : null;
+  }
+  const definition = game.roundStatDefinition;
+  if (
+    definition?.regulationLengthFixed === true &&
+    definition.overtimeEnabled === false &&
+    nonnegative(definition.regulationTossups) &&
+    definition.regulationTossups > 0
+  ) {
+    return definition.regulationTossups;
+  }
+  return null;
+}
+
+/**
+ * Overtime points for one side: the team breakdown when present, else a known zero
+ * when the game provably had no overtime. Unknown splits fail closed.
+ */
+function overtimePointsForTeam(game: GameStatsRow, side: 0 | 1): number | null {
+  const rows = allKnownTeamStats(game);
+  const row = rows?.[side];
+  if (row && finite(row.overtimePoints)) return row.overtimePoints;
+  if (finite(game.overtimeTossupsRead) && game.overtimeTossupsRead === 0) return 0;
+  if (game.roundStatDefinition?.overtimeEnabled === false) return 0;
+  return null;
+}
+
+/**
+ * Regulation points for one side: final minus overtime, failing closed when the
+ * split is unknown or contradicts the total.
+ */
+function regulationPointsForTeam(
+  game: GameStatsRow,
+  teamPoints: number | null | undefined,
+  side: 0 | 1,
+): number | null {
+  if (!finite(teamPoints)) return null;
+  const overtime = overtimePointsForTeam(game, side);
+  if (overtime === null || overtime < 0 || overtime > teamPoints) return null;
+  return teamPoints - overtime;
+}
+
 function tossupsReadForGame(game: GameStatsRow): number | null {
   if (nonnegative(game.tossupsRead) && game.tossupsRead > 0) return game.tossupsRead;
   const definition = game.roundStatDefinition;
@@ -386,12 +441,14 @@ function aggregate(
   if (normalizedPointsSum !== null && regulationTossups !== null) {
     for (let index = 0; index < played.length; index += 1) {
       const game = played[index]!;
-      const tossups = tossupsByGame[index];
-      if (!finite(tossups) || tossups <= 0 || !finite(game.teamOnePoints) || !finite(game.teamTwoPoints)) {
+      const regulationTuh = regulationTuhForGame(game);
+      const regulationOne = regulationPointsForTeam(game, game.teamOnePoints, 0);
+      const regulationTwo = regulationPointsForTeam(game, game.teamTwoPoints, 1);
+      if (regulationTuh === null || regulationOne === null || regulationTwo === null) {
         normalizedPointsSum = null;
         break;
       }
-      normalizedPointsSum += ((game.teamOnePoints + game.teamTwoPoints) / 2) * (regulationTossups / tossups);
+      normalizedPointsSum += ((regulationOne + regulationTwo) / 2) * (regulationTossups / regulationTuh);
     }
   }
   const pointsPerTeamPerXTuh =
