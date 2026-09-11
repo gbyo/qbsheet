@@ -24,6 +24,8 @@ import {
   reconciliationChangedAnything,
   removeRoomFromPlans,
   setPlannedSide,
+  type PlannedPairing,
+  type PlanPublicationStatus,
   type RoundPlan,
 } from './roundPlans';
 import { newRoom, type Room } from './rooms';
@@ -210,6 +212,24 @@ describe('planned versus live', () => {
     leftTeamId: 'Team_A',
     rightTeamId: 'Team_B',
   });
+  const servedFingerprint = 'fingerprint-served';
+  const plannedFingerprint = 'fingerprint-planned';
+
+  function statusOf(input: {
+    roundId: string | null;
+    room: Room;
+    pairing: PlannedPairing | undefined;
+    matchId: string | null;
+    fingerprint: string | null;
+  }): PlanPublicationStatus {
+    return planPublicationStatus({
+      roundId: input.roundId,
+      room: input.room,
+      pairing: input.pairing,
+      plannedMatchId: input.matchId,
+      plannedFingerprint: input.fingerprint,
+    });
+  }
 
   test('derives the id a planned pairing would publish under', () => {
     expect(plannedMatchId({ tournamentId, roundId: R1, pairing })).toBe(liveMatchId);
@@ -223,33 +243,100 @@ describe('planned versus live', () => {
   });
 
   test('nothing planned and nothing published', () => {
-    expect(planPublicationStatus({ tournamentId, roundId: R1, room: room(), pairing: undefined })).toBe(
-      'no-game',
-    );
+    expect(
+      statusOf({ roundId: R1, room: room(), pairing: undefined, matchId: null, fingerprint: null }),
+    ).toBe('no-game');
   });
 
   test('planned but never sent', () => {
-    expect(planPublicationStatus({ tournamentId, roundId: R1, room: room(), pairing })).toBe('planned');
+    expect(
+      statusOf({
+        roundId: R1,
+        room: room(),
+        pairing,
+        matchId: liveMatchId,
+        fingerprint: plannedFingerprint,
+      }),
+    ).toBe('planned');
   });
 
   test('exactly what the relay is serving', () => {
     expect(
-      planPublicationStatus({
-        tournamentId,
+      statusOf({
         roundId: R1,
-        room: room({ publishedRoundId: R1, publishedMatchId: liveMatchId }),
+        room: room({
+          publishedRoundId: R1,
+          publishedMatchId: liveMatchId,
+          publishedAssignmentFingerprint: servedFingerprint,
+        }),
         pairing,
+        matchId: liveMatchId,
+        fingerprint: servedFingerprint,
       }),
     ).toBe('live');
   });
 
-  test('published, then edited', () => {
+  test('the same game with different content is edited, not live', () => {
+    // The match id is unchanged — same tournament, round, room, and teams — but the served
+    // assignment differs from what the plan would build now: a renamed room, an edited roster,
+    // or changed scoring rules. Identity says which game; content says whether it is current.
     expect(
-      planPublicationStatus({
-        tournamentId,
+      statusOf({
+        roundId: R1,
+        room: room({
+          publishedRoundId: R1,
+          publishedMatchId: liveMatchId,
+          publishedAssignmentFingerprint: servedFingerprint,
+        }),
+        pairing,
+        matchId: liveMatchId,
+        fingerprint: plannedFingerprint,
+      }),
+    ).toBe('edited');
+  });
+
+  test('a stored publication without a fingerprint never claims live', () => {
+    // Publications that predate the fingerprint restore with no content truth. Matching ids are
+    // not enough to claim the relay serves the current document; the next publish records it.
+    expect(
+      statusOf({
         roundId: R1,
         room: room({ publishedRoundId: R1, publishedMatchId: liveMatchId }),
+        pairing,
+        matchId: liveMatchId,
+        fingerprint: plannedFingerprint,
+      }),
+    ).toBe('edited');
+  });
+
+  test('a plan that cannot be built is never live', () => {
+    expect(
+      statusOf({
+        roundId: R1,
+        room: room({
+          publishedRoundId: R1,
+          publishedMatchId: liveMatchId,
+          publishedAssignmentFingerprint: servedFingerprint,
+        }),
+        pairing,
+        matchId: liveMatchId,
+        fingerprint: null,
+      }),
+    ).toBe('edited');
+  });
+
+  test('published, then edited', () => {
+    expect(
+      statusOf({
+        roundId: R1,
+        room: room({
+          publishedRoundId: R1,
+          publishedMatchId: liveMatchId,
+          publishedAssignmentFingerprint: servedFingerprint,
+        }),
         pairing: { roomId: 'room-1', leftTeamId: 'Team_A', rightTeamId: 'Team_C' },
+        matchId: 'qbbridge-match-other',
+        fingerprint: plannedFingerprint,
       }),
     ).toBe('edited');
   });
@@ -258,11 +345,16 @@ describe('planned versus live', () => {
     // The relay is serving a game for this round that the plan no longer wants. Reporting
     // "no game" would hide a live assignment.
     expect(
-      planPublicationStatus({
-        tournamentId,
+      statusOf({
         roundId: R1,
-        room: room({ publishedRoundId: R1, publishedMatchId: liveMatchId }),
+        room: room({
+          publishedRoundId: R1,
+          publishedMatchId: liveMatchId,
+          publishedAssignmentFingerprint: servedFingerprint,
+        }),
         pairing: undefined,
+        matchId: null,
+        fingerprint: null,
       }),
     ).toBe('edited');
   });
@@ -271,21 +363,22 @@ describe('planned versus live', () => {
     // The bug this exists to prevent: while round 1 is live, the room-level status is `waiting`
     // for every room, and the operator entering round 2 would otherwise be told round 2 was
     // already published.
+    const liveRoom = room({
+      publishedRoundId: R1,
+      publishedMatchId: liveMatchId,
+      publishedAssignmentFingerprint: servedFingerprint,
+    });
     expect(
-      planPublicationStatus({
-        tournamentId,
+      statusOf({
         roundId: R2,
-        room: room({ publishedRoundId: R1, publishedMatchId: liveMatchId }),
+        room: liveRoom,
         pairing: { roomId: 'room-1', leftTeamId: 'Team_C', rightTeamId: 'Team_D' },
+        matchId: 'qbbridge-match-other',
+        fingerprint: plannedFingerprint,
       }),
     ).toBe('other-round');
     expect(
-      planPublicationStatus({
-        tournamentId,
-        roundId: R2,
-        room: room({ publishedRoundId: R1, publishedMatchId: liveMatchId }),
-        pairing: undefined,
-      }),
+      statusOf({ roundId: R2, room: liveRoom, pairing: undefined, matchId: null, fingerprint: null }),
     ).toBe('other-round');
   });
 });

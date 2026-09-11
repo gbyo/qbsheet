@@ -27,8 +27,9 @@
  * a result by the absence of scoring content, and a fabricated zero removes that signal.
  */
 
-import { stripSecrets } from '../../../../src/director/transfers/canonical';
+import { fnv1a64, stripSecrets } from '../../../../src/director/transfers/canonical';
 import { pairingMatchId } from './identity';
+import type { PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTeam, BridgeTournament } from './tournament';
 
 /** The QBJ serialization version QBSheet writes and accepts. */
@@ -101,6 +102,69 @@ function registrationObjects(left: BridgeTeam, right: BridgeTeam): Record<string
     name: entry.name,
     teams: entry.teamIds.map((teamId) => ({ $ref: teamId })),
   }));
+}
+
+/**
+ * Stable JSON for comparing two assignment documents.
+ *
+ * Object keys are sorted so that only content differences matter. Unlike the result
+ * canonicalizer this keeps every extension field: the timed flag and the room identity live in
+ * `_qbtcp`, and a fingerprint that dropped them would miss exactly the staleness it exists to
+ * catch. Only the issue number is not content.
+ */
+function stableAssignmentJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map((entry) => stableAssignmentJson(entry)).join(',')}]`;
+  return `{${Object.entries(value as Record<string, unknown>)
+    .filter(([key]) => key !== 'assignment_revision')
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableAssignmentJson(entry)}`)
+    .join(',')}}`;
+}
+
+/**
+ * What the relay is serving for one room, as a comparable identity.
+ *
+ * Computed over the exact assignment payload with the assignment revision normalized away:
+ * republishing the unchanged game moves only the issue number, and must still read as the same
+ * content. Everything else in the document — room location, team and registration names, rosters,
+ * scoring rules, tournament and phase names, the timed flag — moves the fingerprint.
+ */
+export function assignmentFingerprint(document: Record<string, unknown>): string {
+  return fnv1a64(stableAssignmentJson(document));
+}
+
+/**
+ * The fingerprint QBBridge would publish now for one room's planned pairing, if it can build one.
+ *
+ * Null when the pairing is incomplete, names teams the loaded file no longer has, or otherwise
+ * cannot become an assignment. A null here can never compare equal to relay truth, so an
+ * unbuildable plan is never reported as live.
+ */
+export function plannedAssignmentFingerprint(input: {
+  tournament: BridgeTournament;
+  round: BridgeRound;
+  roomId: string;
+  roomName: string;
+  pairing: PlannedPairing | undefined;
+}): string | null {
+  if (!input.pairing?.leftTeamId || !input.pairing.rightTeamId) return null;
+  if (input.pairing.leftTeamId === input.pairing.rightTeamId) return null;
+  const teams = new Map(input.tournament.teams.map((team) => [team.id, team]));
+  const left = teams.get(input.pairing.leftTeamId);
+  const right = teams.get(input.pairing.rightTeamId);
+  if (!left || !right) return null;
+  const built = buildAssignment({
+    tournament: input.tournament,
+    round: input.round,
+    roomId: input.roomId,
+    roomName: input.roomName,
+    left,
+    right,
+    assignmentRevision: 1,
+  });
+  if (!built.ok) return null;
+  return assignmentFingerprint(built.assignment.document);
 }
 
 /** Build the assignment for one room in one round. */

@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { assignmentFingerprint, plannedAssignmentFingerprint } from './assignment';
 import { chooseResultFolder, isNativeHost, openYellowFruitFile, writeResultFile } from './native';
 import { generatePairingCode } from './pairing';
 import { planRoomSetup, planRound, publishRound, type PublishOutcome, type PublishPlan } from './publish';
@@ -35,6 +36,7 @@ import {
   pairingsForRound,
   pairingFor,
   planPublicationStatus,
+  plannedMatchId,
   plannedTeams,
   reconcilePlans,
   reconciliationChangedAnything,
@@ -813,7 +815,13 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
-  /** Apply a successful mirror without activating a code changed while the request was in flight. */
+  /**
+   * Apply a successful mirror without activating a code changed while the request was in flight.
+   *
+   * Relay truth comes from the outcome — the fingerprint of the assignment that was actually
+   * sent — never by rebuilding from the current plan, which an in-flight edit may already have
+   * moved on from. A failed publish never reaches here, so the previous fingerprint stands.
+   */
   const applyPublication = useCallback(
     (
       outcome: PublishOutcome,
@@ -821,6 +829,9 @@ export function useBridge(): BridgeApi {
       tombstoneIds: ReadonlySet<string>,
     ) => {
       const byRoom = new Map(outcome.assignments.map((entry) => [entry.roomId, entry]));
+      const fingerprints = new Map(
+        outcome.assignments.map((entry) => [entry.roomId, assignmentFingerprint(entry.document)]),
+      );
       const cleared = new Set(outcome.clearedRoomIds);
       return commit(
         (current) => ({
@@ -844,6 +855,7 @@ export function useBridge(): BridgeApi {
                 ...published,
                 publishedMatchId: assignment.matchId,
                 publishedRoundId: assignment.roundId,
+                publishedAssignmentFingerprint: fingerprints.get(room.id) ?? null,
                 assignmentRevision: assignment.assignmentRevision,
               };
             }
@@ -854,6 +866,7 @@ export function useBridge(): BridgeApi {
               ...published,
               publishedMatchId: null,
               publishedRoundId: null,
+              publishedAssignmentFingerprint: null,
               assignmentRevision: room.assignmentRevision + 1,
             };
           }),
@@ -1240,23 +1253,47 @@ export function useBridge(): BridgeApi {
   );
 
   /**
-   * Whether this room's planned game for the selected round is the one the relay is serving.
+   * Whether the relay is serving the assignment this room's selected-round plan would build now.
    *
-   * Derived every time from the relay fields plus `pairingMatchId`, never stored. The case that
-   * matters most is `other-round`: while round 1 is live, the room-level status is `waiting` for
-   * every room, and without this the operator entering round 5 would see round 5 reported as
-   * already published.
+   * Derived every time from relay truth plus the current plan, never stored. Match identity and
+   * assignment content are compared separately: a renamed room or an edited roster moves the
+   * fingerprint without moving the match id, and must read as `edited` rather than `live`. The
+   * case that matters most is `other-round`: while round 1 is live, the room-level status is
+   * `waiting` for every room, and without this the operator entering round 5 would see round 5
+   * reported as already published.
    */
   const planStatus = useCallback(
-    (room: Room): PlanPublicationStatus =>
-      tournament === null
-        ? 'no-game'
-        : planPublicationStatus({
-            tournamentId: tournament.id,
-            roundId: state.selectedRoundId,
-            room,
-            pairing: pairingFor(state.roundPlans, state.selectedRoundId, room.id),
-          }),
+    (room: Room): PlanPublicationStatus => {
+      if (tournament === null) return 'no-game';
+      const round =
+        state.selectedRoundId === null
+          ? null
+          : (tournament.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null);
+      const pairing = pairingFor(state.roundPlans, state.selectedRoundId, room.id);
+      return planPublicationStatus({
+        roundId: state.selectedRoundId,
+        room,
+        pairing,
+        plannedMatchId:
+          state.selectedRoundId === null
+            ? null
+            : plannedMatchId({
+                tournamentId: tournament.id,
+                roundId: state.selectedRoundId,
+                pairing,
+              }),
+        plannedFingerprint:
+          round === null
+            ? null
+            : plannedAssignmentFingerprint({
+                tournament,
+                round,
+                roomId: room.id,
+                roomName: room.name,
+                pairing,
+              }),
+      });
+    },
     [state.roundPlans, state.selectedRoundId, tournament],
   );
 

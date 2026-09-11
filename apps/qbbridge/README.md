@@ -117,6 +117,11 @@ room is serving a different round's game). That last one is why the second badge
 1 is live every room reads Waiting, and without it round 7 would look published the moment you
 selected it.
 
+**Live** compares the full assignment content, not just the game identity: renaming a room,
+reloading edited rosters, or changing scoring rules reads as **Edited since publish** until the
+round is republished. Match ids stay stable across republishes, so results still reconcile to the
+game that was published.
+
 ### Reloading the `.yft` after the plans exist
 
 YellowFruit stays authoritative for rounds, teams, and their identities. On a reload, saved plans

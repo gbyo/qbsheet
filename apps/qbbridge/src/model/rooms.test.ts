@@ -127,6 +127,7 @@ describe('room publication identity', () => {
       relayPublished: true,
       publishedMatchId: 'match-1',
       publishedRoundId: 'round-4',
+      publishedAssignmentFingerprint: 'fingerprint-live',
       assignmentRevision: 7,
     };
     expect(resetRelayPublication(room)).toEqual({
@@ -134,6 +135,7 @@ describe('room publication identity', () => {
       relayPublished: false,
       publishedMatchId: null,
       publishedRoundId: null,
+      publishedAssignmentFingerprint: null,
       assignmentRevision: 0,
     });
   });
