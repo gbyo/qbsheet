@@ -3,10 +3,9 @@
  *
  * The room this is written for has no second screen and possibly no internet on the laptop
  * running QBBridge, so everything needed to set the tournament up is here — including the
- * Cloudflare deployment, which is the part with real commands in it and the part a first-time
- * operator gets stuck on.
+ * Cloudflare deployment, which is the part a first-time operator gets stuck on.
  *
- * Every command and endpoint below is checked against the deployment it describes by
+ * Every setting and endpoint below is checked against the deployment it describes by
  * `HelpView.test.tsx`, so a rename in `wrangler.jsonc` or in the relay's environment cannot
  * leave this page confidently wrong.
  */
@@ -20,11 +19,6 @@ interface Section {
   id: string;
   title: string;
   body: ReactNode;
-}
-
-/** A shell command, shown as something to type rather than something to read past. */
-function Command({ children }: { children: string }) {
-  return <pre className="help-command">{children}</pre>;
 }
 
 const sections: Section[] = [
@@ -68,22 +62,12 @@ YellowFruit → Import Games Only`}</pre>
           traffic, and needs no QBSheet account. Do this once, before the tournament.
         </p>
 
-        <h4>1. Deploy the Worker</h4>
-        <p>
-          Open <code>github.com/gbyo/qbsheet/tree/main/apps/qbtcp-relay-backend-cloudflare</code> and use its{' '}
-          <strong>Deploy to Cloudflare</strong> button. Cloudflare clones the repository, reads{' '}
-          <code>wrangler.jsonc</code>, provisions the Durable Object and deploys. A free account is enough for
-          a tournament this size.
-        </p>
-
-        <h4>2. Set the one-time setup token</h4>
-        <p>Run this, and paste the token when Wrangler prompts for it:</p>
-        <Command>wrangler secret put RELAY_SETUP_TOKEN</Command>
+        <h4>1. Generate the one-time setup token</h4>
         <p id="help-setup-token-note">
-          Generate one here if you have nothing better to hand. You will paste the same value twice — once
-          into the prompt above, once into the Tournament screen — and then never again: claiming exchanges it
-          for a durable management credential, after which the setup token is worthless even if it leaks.
-          QBBridge does not store it.
+          Generate a token here and keep this page open. You will paste the same value twice — once into
+          Cloudflare&rsquo;s deployment form, once into the Tournament screen — and then never again. Claiming
+          exchanges it for a durable management credential, after which the setup token is worthless even if
+          it leaks. QBBridge does not store it.
         </p>
         <SecretGenerator
           label="setup token"
@@ -91,27 +75,42 @@ YellowFruit → Import Games Only`}</pre>
           describedBy="help-setup-token-note"
         />
 
-        <h4>3. Allow the scorer&rsquo;s browser origin</h4>
+        <h4>2. Deploy the Worker and enter its secrets</h4>
+        <p>
+          Open <code>github.com/gbyo/qbsheet/tree/main/apps/qbtcp-relay-backend-cloudflare</code> and use its{' '}
+          <strong>Deploy to Cloudflare</strong> button. Cloudflare clones the repository, reads{' '}
+          <code>wrangler.jsonc</code>, and shows a deployment form. In that form, set{' '}
+          <code>RELAY_SETUP_TOKEN</code> to the token above and leave <code>RELAY_ALLOWED_ORIGINS</code> as{' '}
+          <code>https://qbsheet.com</code> unless the scorekeepers use a different browser origin. Then
+          deploy. Cloudflare provisions the Durable Object automatically. A free account is enough for a
+          tournament this size.
+        </p>
         <p>
           Scorekeepers open QBSheet Scorer in a browser, and the relay refuses a credentialed request from a
-          browser origin it has not been told about. Set this or every room will fail to pair with{' '}
-          <code>403 origin_not_allowed</code> — at the preflight, before the real request is even sent.
+          browser origin it has not been told about. Set <code>RELAY_ALLOWED_ORIGINS</code> or every room will
+          fail to pair with <code>403 origin_not_allowed</code> — at the preflight, before the real request is
+          even sent.
         </p>
-        <Command>wrangler secret put RELAY_ALLOWED_ORIGINS</Command>
         <p>
-          Enter <code>https://qbsheet.com</code>, or a comma-separated list if your scorekeepers use more than
-          one address. QBBridge itself is unaffected either way: it talks to the relay natively, with no
-          browser origin attached, which is why its requests need no entry here.
+          Use a comma-separated list if your scorekeepers use more than one address. QBBridge itself is
+          unaffected either way: it talks to the relay natively, with no browser origin attached, which is why
+          its requests need no entry here.
+        </p>
+        <p>
+          If the Worker was already created and the deployment form did not show these fields, open it in the
+          Cloudflare dashboard, then go to <strong>Settings → Variables and Secrets → Add</strong>. Add both
+          names above with type <strong>Secret</strong>, enter their values, and select{' '}
+          <strong>Deploy</strong>. You do not need a Cloudflare terminal.
         </p>
 
-        <h4>4. Copy the address</h4>
+        <h4>3. Copy the address</h4>
         <p>
           The deployed Worker URL looks like{' '}
           <code>https://qbtcp-relay-backend.your-subdomain.workers.dev</code>. No custom domain is needed.
           Paste just the origin into QBBridge — no path, no trailing slash.
         </p>
 
-        <h4>5. Claim it from QBBridge</h4>
+        <h4>4. Claim it from QBBridge</h4>
         <p id="help-tournament-id-note">
           On the Tournament screen, enter the address, a tournament ID and the setup token, then{' '}
           <strong>Connect Relay</strong>. The Tournament screen generates an ID for you; there is one here

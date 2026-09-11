@@ -2,7 +2,7 @@
  * The help page, and the claim it makes about how to deploy the relay.
  *
  * A manual that is confidently wrong is worse than no manual, and this one carries shell
- * commands and an environment variable name that live in another workspace. Those are checked
+ * settings and environment variable names that live in another workspace. Those are checked
  * against the actual relay deployment rather than trusted — a rename in `wrangler.jsonc` or in
  * the Worker's `Env` fails here instead of stranding an operator at 8am.
  */
@@ -52,12 +52,16 @@ describe('the help page', () => {
     render(<HelpView />);
     const page = document.body.textContent ?? '';
 
-    // Both are declared in the Worker's environment and set the same way by its README.
+    // Both are declared in the Worker's environment and exposed by the deploy-button template.
     const env = relayFile('src/env.d.ts');
+    const deploySecrets = relayFile('.dev.vars.example');
     for (const secret of ['RELAY_SETUP_TOKEN', 'RELAY_ALLOWED_ORIGINS']) {
       expect(env, `${secret} is no longer a relay secret`).toContain(secret);
-      expect(page).toContain(`wrangler secret put ${secret}`);
+      expect(deploySecrets, `${secret} is missing from the Cloudflare deployment form`).toContain(secret);
+      expect(page).toContain(secret);
     }
+    expect(page).toContain('Settings → Variables and Secrets → Add');
+    expect(page).toContain('You do not need a Cloudflare terminal');
   });
 
   test('points at the deployment the relay is actually published from', () => {
