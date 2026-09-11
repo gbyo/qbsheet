@@ -5,8 +5,21 @@
  */
 
 import { Button, StatusBadge } from '@qbsheet/ui';
-import { resultFileName, resultSummary } from '../model/results';
+import { resultFileName, resultFileSuffix, resultSummary, type ResultSummary } from '../model/results';
 import type { BridgeApi } from '../model/useBridge';
+
+function resultSaveAccessibleName(summary: ResultSummary, resultId: string, saved: boolean): string {
+  const context = [
+    summary.roundName ? `Round ${summary.roundName}` : null,
+    summary.location,
+    summary.leftName || summary.rightName
+      ? `${summary.leftName ?? 'Unknown team'} vs ${summary.rightName ?? 'Unknown team'}`
+      : null,
+  ].filter((part): part is string => part !== null);
+  const action = saved ? 'Save result again' : 'Save result';
+  const identity = `result ${resultFileSuffix(resultId)}`;
+  return `${action} — ${context.length > 0 ? `${context.join(', ')}, ` : ''}${identity}`;
+}
 
 export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   const { state } = bridge;
@@ -57,6 +70,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
               </StatusBadge>
               <Button
                 size="sm"
+                aria-label={resultSaveAccessibleName(summary, entry.resultId, Boolean(entry.savedPath))}
                 isDisabled={bridge.resultBusy(entry.resultId) || !state.resultFolder}
                 onPress={() => void bridge.saveResult(entry.resultId)}
               >
