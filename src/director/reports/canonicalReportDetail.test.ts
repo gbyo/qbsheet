@@ -211,6 +211,8 @@ describe('canonical per-game report detail', () => {
         teamId: 'team-a',
         teamName: 'Aiken',
         points: 300,
+        // Recorded zero overtime tossups: the absent breakdown is a known zero.
+        overtimePoints: 0,
         superpowers: 0,
         powers: 2,
         gets: 4,
@@ -230,6 +232,7 @@ describe('canonical per-game report detail', () => {
         teamId: 'team-b',
         teamName: 'Dorman',
         points: 200,
+        overtimePoints: 0,
         superpowers: 0,
         powers: 1,
         gets: 3,

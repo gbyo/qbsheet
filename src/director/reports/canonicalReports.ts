@@ -360,10 +360,16 @@ export function buildCanonicalSnapshot(
       const tossupsHeard = teamTossupsHeard(game);
       const opponent = game.scores.find((entry) => entry.teamId !== score.teamId);
       const parts = teamGameParts(state, game, score, opponent);
-      // An absent overtime breakdown is a known zero only under rules with no
-      // overtime period; otherwise the game may predate overtime tracking.
+      // An absent overtime breakdown is a known zero when the game provably had
+      // no overtime (recorded zero overtime tossups, or rules with no overtime
+      // period); otherwise the game may predate overtime tracking. Matches the
+      // domain regulation derivation and the round-report rule.
       const overtimePoints =
-        rulesForGame(state, game)?.overtime === false ? 0 : (score.overtimePoints ?? null);
+        typeof score.overtimePoints === 'number'
+          ? score.overtimePoints
+          : game.overtimeTossupsRead === 0 || rulesForGame(state, game)?.overtime === false
+            ? 0
+            : null;
       return {
         teamId: score.teamId,
         teamName: teamName(score.teamId),
