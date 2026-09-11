@@ -339,16 +339,22 @@ jobs:
       # bundler swallows the tool output, which makes template failures undebuggable.
       # TODO(#986): remove this step once the dual-scope template links cleanly.
       - name: Diagnose MSI link failure
-        if: failure() && matrix.platform == 'windows'
+        if: always() && matrix.platform == 'windows'
         shell: pwsh
         run: |
+          $built = Get-ChildItem 'apps/qbbridge/src-tauri/target/release/bundle/msi/*.msi' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($built) { Write-Host "MSI present ($($built.Name)); nothing to diagnose."; exit 0 }
           $dir = 'apps/qbbridge/src-tauri/target/x86_64-pc-windows-msvc/release/wix/x64'
           $wixbin = "$env:LOCALAPPDATA/tauri/WixTools314"
-          $wxl = Get-ChildItem "$dir/*.wxl" | Select-Object -First 1
-          Write-Host "wixobj files:"
-          Get-ChildItem "$dir/*.wixobj" | ForEach-Object { Write-Host "  $($_.Name)" }
-          Write-Host "locale file: $($wxl.FullName)"
-          & "$wixbin/light.exe" -v -o "$dir/diag.msi" -cultures:en-us -loc $wxl.FullName "$dir/*.wixobj" -ext "$wixbin/WixUIExtension.dll" -ext "$wixbin/WixUtilExtension.dll"
+          $wixobj = @(Get-ChildItem "$dir/*.wixobj" | ForEach-Object { $_.FullName })
+          $wxl = @(Get-ChildItem "$dir/*.wxl" | ForEach-Object { $_.FullName })
+          Write-Host "wixobj files: $($wixobj -join ', ')"
+          Write-Host "locale files: $($wxl -join ', ')"
+          if ($wixobj.Count -eq 0) { throw 'No .wixobj files found; candle produced nothing.' }
+          $lightArgs = @('-v', '-o', "$dir/diag.msi", '-cultures:en-us') + $wixobj
+          if ($wxl.Count -gt 0) { $lightArgs += @('-loc', $wxl[0]) }
+          $lightArgs += @('-ext', "$wixbin/WixUIExtension.dll", '-ext', "$wixbin/WixUtilExtension.dll")
+          & "$wixbin/light.exe" @lightArgs
           exit 0
 
   # -----------------------------------------------------------------------------------------------
