@@ -100,7 +100,7 @@ describe('ResultsView save controls', () => {
     render(<ResultsView bridge={bridgeWhileBatchSaving()} />);
 
     expect(screen.getByRole('button', { name: /Save New Results/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /^Save result/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Save (unidentified )?result/ })).toBeDisabled();
   });
 
   test('gives every Save and Save again action a distinct result identity', async () => {
@@ -122,7 +122,7 @@ describe('ResultsView save controls', () => {
 
     const saveButtons = screen.getAllByRole('button', { name: /^Save result/ });
     const saveAgainButtons = screen.getAllByRole('button', { name: /^Save again result/ });
-    expect(new Set(saveButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(3);
+    expect(new Set(saveButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(2);
     expect(new Set(saveAgainButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(2);
     expect(saveButtons.every((button) => button.textContent === 'Save')).toBe(true);
     expect(saveAgainButtons.every((button) => button.textContent === 'Save again')).toBe(true);
@@ -132,12 +132,57 @@ describe('ResultsView save controls', () => {
     expect(
       screen.getByRole('button', { name: /Save result — Round 4, Room 102, Cony vs Deering/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save result \(result blank\)/ })).toBeInTheDocument();
+    // The blank document is an exception, and its action says so instead of filing quietly.
+    const unidentified = screen.getByRole('button', { name: /Save unidentified result \(result blank\)/ });
+    expect(unidentified.textContent).toBe('Save unidentified');
 
     await user.click(
       screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
     );
     expect(bridge.saveResult).toHaveBeenCalledWith('new-a');
+  });
+
+  test('an unidentified result is an explicit exception, never a mystery matchup', () => {
+    const bridge = bridgeForResults([
+      { resultId: 'blank', qbj: {}, receivedAt: '2026-09-11T15:05:00Z' },
+      {
+        resultId: 'mystery',
+        qbj: {
+          version: '2.1.1',
+          objects: [{ type: 'Match', id: 'Match_mystery' }],
+        },
+        receivedAt: '2026-09-11T15:06:00Z',
+      },
+      {
+        resultId: 'half',
+        qbj: {
+          version: '2.1.1',
+          objects: [
+            {
+              type: 'Match',
+              id: 'Match_half',
+              match_teams: [{ team: { id: 'Team_Cony', name: 'Cony' }, points: 100 }, { points: 50 }],
+            },
+          ],
+        },
+        receivedAt: '2026-09-11T15:07:00Z',
+      },
+    ]);
+    render(<ResultsView bridge={bridge} />);
+
+    // A document without a match cannot even be attempted.
+    expect(
+      screen.getByText('Received result could not be parsed for display; raw QBJ preserved'),
+    ).toBeInTheDocument();
+    // A match nobody can be named for is not a matchup.
+    expect(screen.getByText('Result received — matchup could not be identified')).toBeInTheDocument();
+    // A half-named match shows what survived and names the gap.
+    expect(screen.getByText(/Cony 100–50 \(right side opponent not identified\)/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Not identified — verify before importing/).length).toBe(2);
+    expect(screen.getByText(/Partially identified — verify before importing/)).toBeInTheDocument();
+    // No placeholder posing as a team anywhere on screen.
+    expect(screen.queryByText(/\? vs \?/)).toBeNull();
+    expect(screen.queryByText(/Cony vs \?/)).toBeNull();
   });
 
   test('shows the local import marker and lets the operator filter it', async () => {

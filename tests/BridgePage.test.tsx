@@ -173,9 +173,9 @@ describe('the Bridge page', () => {
     expect(words(container)).toContain('That is a reread, not synchronization');
     expect(words(container)).toContain('one .qbj file per game, written out exactly as the room sent it');
     expect(words(container)).toContain('Planned pairings are never written back');
-    expect(words(container)).toContain(
-      'It never claims a result was imported, accepted, or applied to standings',
-    );
+    expect(words(container)).toContain('records your own local confirmation');
+    expect(words(container)).toContain('never claims a result was accepted or applied to standings');
+    expect(words(container)).toContain('shown as unidentified');
   });
 
   test('separates Bridge from Director in two sentences', () => {

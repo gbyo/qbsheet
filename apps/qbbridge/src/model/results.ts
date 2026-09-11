@@ -14,6 +14,7 @@
  */
 
 import { fnv1a64 } from '../../../../src/director/transfers/canonical';
+import { describeResult, type ResultDescription } from '../../../../src/qbj/resultDescription';
 
 export interface ResultSummary {
   roundName: string | null;
@@ -32,15 +33,27 @@ export interface ResultSummary {
  * retain a corrected final for the same room and matchup, and those two rows must not collapse
  * into indistinguishable buttons.
  */
-export function resultActionLabel(summary: ResultSummary, resultId: string, saved: boolean): string {
-  const matchup = [summary.leftName, summary.rightName].filter((name): name is string => name !== null);
+export function resultActionLabel(description: ResultDescription, resultId: string, saved: boolean): string {
+  const verb = saved ? 'Save again' : 'Save';
   const context = [
-    summary.roundName ? `Round ${summary.roundName}` : null,
-    summary.location,
-    matchup.length > 0 ? matchup.join(' vs ') : null,
+    description.roundName ? `Round ${description.roundName}` : null,
+    description.location,
   ].filter((part): part is string => part !== null && part !== '');
-  const description = context.length > 0 ? ` — ${context.join(', ')}` : '';
-  return `${saved ? 'Save again' : 'Save'} result${description} (result ${resultId})`;
+  const where = context.length > 0 ? ` — ${context.join(', ')}` : '';
+  // An exception result must announce itself in the action: the operator handling it is doing
+  // review work, not routine filing, and the label is where that decision gets made.
+  if (description.kind === 'identified') {
+    const matchup = [description.leftName, description.rightName].filter(
+      (name): name is string => name !== null,
+    );
+    const what = matchup.length > 0 ? ` — ${[...context, matchup.join(' vs ')].join(', ')}` : where;
+    return `${verb} result${what} (result ${resultId})`;
+  }
+  if (description.kind === 'partial') {
+    const known = description.leftName ?? description.rightName ?? 'matchup';
+    return `${verb} partially identified result — ${known}${where} (result ${resultId})`;
+  }
+  return `${verb} unidentified result${where} (result ${resultId})`;
 }
 
 export type ResultImportStatus = 'new' | 'needs-import' | 'imported';
@@ -67,18 +80,6 @@ function objects(qbj: unknown): Record<string, unknown>[] {
   return qbj.objects.filter(isRecord);
 }
 
-function refId(value: unknown): string | null {
-  if (typeof value === 'string') return value;
-  if (isRecord(value) && typeof value.$ref === 'string') return value.$ref;
-  if (isRecord(value) && typeof value.id === 'string') return value.id;
-  return null;
-}
-
-function resolve(value: unknown, byId: Map<string, Record<string, unknown>>): Record<string, unknown> | null {
-  if (isRecord(value) && typeof value.$ref === 'string') return byId.get(value.$ref) ?? null;
-  return isRecord(value) ? value : null;
-}
-
 /** The logical game identity carried by a completed result, when present. */
 export function resultMatchId(qbj: unknown): string | null {
   if (isRecord(qbj) && qbj.type === 'Match' && typeof qbj.id === 'string') return qbj.id;
@@ -89,66 +90,27 @@ export function resultMatchId(qbj: unknown): string | null {
 /**
  * Find the one match in a result document and describe it.
  *
- * Walks the same spine a QBJ consumer walks, and tolerates a bare `Match` for the compatibility
- * export. Every field is optional: a summary that cannot be read produces a row with blanks, not
- * a result that cannot be saved.
+ * A projection over the shared canonical description (`describeResult`): every consumer reads
+ * the same parse, so a shape understood anywhere is understood here. Every field stays
+ * optional — a summary that cannot be read produces blanks, not a result that cannot be saved —
+ * and identification state travels alongside for callers that must not print placeholders.
  */
 export function resultSummary(qbj: unknown): ResultSummary {
-  const empty: ResultSummary = {
-    roundName: null,
-    roundNumber: null,
-    location: null,
-    leftName: null,
-    rightName: null,
-    leftPoints: null,
-    rightPoints: null,
-  };
-  const list = objects(qbj);
-  const byId = new Map<string, Record<string, unknown>>();
-  for (const entry of list) if (typeof entry.id === 'string') byId.set(entry.id, entry);
-
-  const bare = isRecord(qbj) && qbj.type === 'Match' ? qbj : null;
-  const match = bare ?? list.find((entry) => entry.type === 'Match') ?? null;
-  if (!match) return empty;
-
-  let roundName: string | null = null;
-  for (const tournament of list.filter((entry) => entry.type === 'Tournament')) {
-    for (const phaseRef of Array.isArray(tournament.phases) ? tournament.phases : []) {
-      const phase = resolve(phaseRef, byId);
-      for (const roundRef of phase && Array.isArray(phase.rounds) ? phase.rounds : []) {
-        const round = resolve(roundRef, byId);
-        if (!round || !Array.isArray(round.matches)) continue;
-        const holdsMatch = round.matches.some((entry) => {
-          const resolved = resolve(entry, byId);
-          return resolved === match || refId(entry) === match.id;
-        });
-        if (holdsMatch && typeof round.name === 'string') roundName = round.name;
-      }
-    }
-  }
-
-  const sides = (Array.isArray(match.match_teams) ? match.match_teams : []).filter(isRecord);
-  const nameOf = (side: Record<string, unknown> | undefined): string | null => {
-    if (!side) return null;
-    const team = resolve(side.team, byId);
-    if (team && typeof team.name === 'string') return team.name;
-    const id = refId(side.team);
-    return id;
-  };
-  const pointsOf = (side: Record<string, unknown> | undefined): number | null =>
-    side && typeof side.points === 'number' && Number.isFinite(side.points) ? side.points : null;
-
-  const parsedNumber = roundName !== null ? Number.parseInt(roundName, 10) : Number.NaN;
-
+  const described = describeResult(qbj);
   return {
-    roundName,
-    roundNumber: Number.isSafeInteger(parsedNumber) ? parsedNumber : null,
-    location: typeof match.location === 'string' ? match.location : null,
-    leftName: nameOf(sides[0]),
-    rightName: nameOf(sides[1]),
-    leftPoints: pointsOf(sides[0]),
-    rightPoints: pointsOf(sides[1]),
+    roundName: described.roundName,
+    roundNumber: described.roundNumber,
+    location: described.location,
+    leftName: described.leftName,
+    rightName: described.rightName,
+    leftPoints: described.leftPoints,
+    rightPoints: described.rightPoints,
   };
+}
+
+/** The canonical description of one received result, with its identification state. */
+export function describeBridgeResult(qbj: unknown): ResultDescription {
+  return describeResult(qbj);
 }
 
 /** Strip what a filesystem will refuse, without inventing a name. */

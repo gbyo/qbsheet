@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { Button, StatusBadge } from '@qbsheet/ui';
 import {
+  describeBridgeResult,
   resultActionLabel,
   resultFileName,
   resultImportStatus,
@@ -24,6 +25,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   const described = state.results.map((entry) => ({
     entry,
     summary: resultSummary(entry.qbj),
+    description: describeBridgeResult(entry.qbj),
     importState: resultImportStatus(entry),
     matchId: resultMatchId(entry.qbj),
   }));
@@ -100,11 +102,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
                   {saved} saved · {roundNeedsImport} need import · {imported} marked imported
                 </span>
               </div>
-              {results.map(({ entry, summary, importState, matchId }) => {
-                const score =
-                  summary.leftPoints !== null && summary.rightPoints !== null
-                    ? `${summary.leftName ?? '?'} ${summary.leftPoints}–${summary.rightPoints} ${summary.rightName ?? '?'}`
-                    : `${summary.leftName ?? '?'} vs ${summary.rightName ?? '?'}`;
+              {results.map(({ entry, summary, description, importState, matchId }) => {
                 const corrections = matchId ? (correctionsByMatch.get(matchId) ?? []) : [];
                 const correctionIndex = corrections.findIndex(
                   (result) => result.entry.resultId === entry.resultId,
@@ -114,8 +112,15 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
                     <div style={{ flex: 1 }}>
                       <div>
                         {summary.location ? `${summary.location} · ` : ''}
-                        {score}
+                        {description.headline}
                       </div>
+                      {description.kind !== 'identified' ? (
+                        <div className="faint">
+                          {description.kind === 'partial'
+                            ? 'Partially identified — verify before importing.'
+                            : 'Not identified — verify before importing. Raw QBJ preserved.'}
+                        </div>
+                      ) : null}
                       {corrections.length > 1 ? (
                         <div className="faint">
                           {correctionIndex === 0 ? 'Original result' : `Correction ${correctionIndex}`} ·{' '}
@@ -157,11 +162,15 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
                     ) : null}
                     <Button
                       size="sm"
-                      aria-label={resultActionLabel(summary, entry.resultId, Boolean(entry.savedPath))}
+                      aria-label={resultActionLabel(description, entry.resultId, Boolean(entry.savedPath))}
                       isDisabled={bridge.resultBusy(entry.resultId) || !state.resultFolder}
                       onPress={() => void bridge.saveResult(entry.resultId)}
                     >
-                      {entry.savedPath ? 'Save again' : 'Save'}
+                      {entry.savedPath
+                        ? 'Save again'
+                        : description.kind === 'identified'
+                          ? 'Save'
+                          : 'Save unidentified'}
                     </Button>
                   </div>
                 );
