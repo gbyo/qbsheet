@@ -294,7 +294,7 @@ jobs:
       # the job unless the dual-scope markers are present. This runs on dispatch builds as well
       # as tag releases, before anything is published.
       - name: Assert dual-scope MSI markers
-        if: matrix.platform == 'windows'
+        if: matrix.name == 'Windows'
         shell: pwsh
         run: |
           $msi = Get-ChildItem 'apps/qbbridge/src-tauri/target/release/bundle/msi/*.msi' | Select-Object -First 1
@@ -339,7 +339,7 @@ jobs:
       # bundler swallows the tool output, which makes template failures undebuggable.
       # TODO(#986): remove this step once the dual-scope template links cleanly.
       - name: Diagnose MSI link failure
-        if: always() && matrix.platform == 'windows'
+        if: always() && matrix.name == 'Windows'
         shell: pwsh
         run: |
           $built = Get-ChildItem 'apps/qbbridge/src-tauri/target/release/bundle/msi/*.msi' -ErrorAction SilentlyContinue | Select-Object -First 1
