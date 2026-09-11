@@ -339,6 +339,190 @@ ul.plain {
   display: block;
 }
 
+/* --------------------------------------------------------------------------- Room print sheets */
+
+.room-print-sheets {
+  display: none;
+}
+
+.room-print-sheet {
+  color: #000;
+  background: #fff;
+}
+
+.room-print-sheet__brand {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.room-print-sheet__wordmark {
+  display: block;
+  width: 2.45in;
+  height: auto;
+}
+
+.room-print-sheet__tournament {
+  max-width: 4.5in;
+  margin: 0;
+  color: #000;
+  font-size: 12pt;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.room-print-sheet__room {
+  margin: 0.55in 0 0;
+  color: #000;
+  font-size: 42pt;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
+}
+
+.room-print-sheet__kicker {
+  margin: 0.12in 0 0.28in;
+  color: #000;
+  font-size: 18pt;
+  font-weight: var(--qbs-weight-semibold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.room-print-sheet__pairing {
+  display: flex;
+  align-items: center;
+  gap: 0.45in;
+  padding: 0.25in 0;
+  border-top: 2px solid #000;
+  border-bottom: 2px solid #000;
+}
+
+.room-print-sheet__pairing .qr {
+  flex: none;
+  width: 2.8in;
+  height: 2.8in;
+}
+
+.room-print-sheet__code-block {
+  min-width: 0;
+}
+
+.room-print-sheet__label {
+  margin: 0;
+  color: #000;
+  font-size: 15pt;
+  font-weight: var(--qbs-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.room-print-sheet__code {
+  margin: 0.12in 0 0.16in;
+  color: #000;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 36pt;
+  font-weight: var(--qbs-weight-semibold);
+  letter-spacing: 0.12em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.room-print-sheet__scan-help {
+  max-width: 2.5in;
+  margin: 0;
+  color: #000;
+  font-size: 13pt;
+  line-height: 1.35;
+}
+
+.room-print-sheet__manual {
+  margin-top: 0.34in;
+}
+
+.room-print-sheet__manual h2 {
+  margin: 0 0 0.12in;
+  color: #000;
+  font-size: 16pt;
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.room-print-sheet__manual ol {
+  margin: 0;
+  padding-left: 1.35em;
+  color: #000;
+  font-size: 13pt;
+  line-height: 1.45;
+}
+
+.room-print-sheet__manual li {
+  padding-left: 0.08in;
+}
+
+.room-print-sheet__manual code,
+.room-print-sheet__url,
+.room-print-sheet__url a {
+  color: #000;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10pt;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.room-print-sheet__url {
+  margin: auto 0 0;
+  padding-top: 0.28in;
+  line-height: 1.35;
+}
+
+.room-print-sheet__url a {
+  text-decoration: underline;
+}
+
+@media print {
+  @page {
+    size: Letter;
+    margin: 0.5in;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  /* The print document is mounted only for the dialog and is the sole visible document on paper. */
+  body * {
+    visibility: hidden;
+  }
+
+  .room-print-sheets,
+  .room-print-sheets * {
+    visibility: visible;
+  }
+
+  .room-print-sheets {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: block;
+    width: 100%;
+  }
+
+  .room-print-sheet {
+    display: flex;
+    flex-direction: column;
+    min-height: 10in;
+    padding: 0.1in 0.15in;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .room-print-sheet:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+}
+
 /* ---------------------------------------------------------------------------------- Results */
 
 .result {
