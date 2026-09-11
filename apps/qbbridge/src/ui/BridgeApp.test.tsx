@@ -148,11 +148,16 @@ describe('the shell', () => {
     }
   });
 
-  test('the help screen is the tournament-day workflow', async () => {
+  test('the help screen is reachable and carries the setup sections', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
     await user.click(screen.getByRole('tab', { name: 'Help' }));
-    expect(screen.getByText(/Before the tournament/)).toBeInTheDocument();
-    expect(screen.getByText(/Import Games Only/)).toBeInTheDocument();
+    // The page's own contents and claims are checked in `HelpView.test.tsx`; this is the route.
+    expect(
+      screen.getByRole('heading', { level: 3, name: 'Setting up the Cloudflare relay' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 3, name: 'Getting results into YellowFruit' }),
+    ).toBeInTheDocument();
   });
 });

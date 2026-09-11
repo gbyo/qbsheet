@@ -208,6 +208,22 @@ ul.plain {
   max-width: 460px;
 }
 
+/* A field and the button that fills it in, aligned on the input rather than the label. */
+.field-with-action {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--qbs-space-2);
+}
+
+.field-with-action > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-with-action > .qbs-button {
+  margin-top: calc(var(--qbs-text-secondary) * var(--qbs-leading-normal) + var(--qbs-space-1));
+}
+
 /* --------------------------------------------------------------------------------------- QR */
 
 .qr {
@@ -231,11 +247,144 @@ ul.plain {
   border-bottom: 1px solid var(--qbs-border-subtle);
 }
 
-pre.help {
-  white-space: pre-wrap;
-  font-family: inherit;
-  font-size: var(--qbs-text-body);
-  line-height: var(--qbs-leading-relaxed);
-  margin: 0;
+/* ------------------------------------------------------------------------------------- Help
+   A manual, so it reads like one: a measure narrow enough to follow, headings that carry a
+   hierarchy, and commands that look like something to type. */
+
+section.panel.help {
+  max-width: 760px;
+}
+
+.help-contents ol {
+  margin: 0 0 var(--qbs-space-5);
+  padding-left: var(--qbs-space-5);
+  font-size: var(--qbs-text-secondary);
+}
+
+.help-contents a {
+  color: var(--qbs-accent);
+}
+
+.help-contents a:focus-visible {
+  outline: var(--qbs-focus-outline);
+  outline-offset: var(--qbs-focus-offset);
+  border-radius: var(--qbs-radius-sm);
+}
+
+.help-section {
+  padding-top: var(--qbs-space-5);
+  border-top: 1px solid var(--qbs-border-subtle);
+}
+
+.help-section:first-of-type {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.help-section h3 {
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-section);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-strong);
+  /* Anchored from the contents list; keep the heading clear of the window edge on arrival. */
+  scroll-margin-top: var(--qbs-space-4);
+}
+
+.help-section h4 {
+  margin: var(--qbs-space-5) 0 var(--qbs-space-2);
+  font-size: var(--qbs-text-subhead);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text);
+}
+
+.help-section p {
+  margin: 0 0 var(--qbs-space-3);
   color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
+}
+
+.help-section strong {
+  color: var(--qbs-text);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.help-section code {
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-secondary);
+  padding: 1px var(--qbs-space-1);
+  border-radius: var(--qbs-radius-sm);
+  background: var(--qbs-surface-sunken);
+  color: var(--qbs-text);
+  /* A long URL must wrap rather than widen the page. */
+  overflow-wrap: anywhere;
+}
+
+.help-steps {
+  margin: 0 0 var(--qbs-space-3);
+  padding-left: var(--qbs-space-5);
+  color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
+}
+
+.help-steps li {
+  margin-bottom: var(--qbs-space-1);
+}
+
+.help-command,
+.help-flow {
+  margin: 0 0 var(--qbs-space-3);
+  padding: var(--qbs-space-3);
+  overflow-x: auto;
+  border: 1px solid var(--qbs-border-subtle);
+  border-radius: var(--qbs-radius);
+  background: var(--qbs-surface-sunken);
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-secondary);
+  line-height: var(--qbs-leading-snug);
+  color: var(--qbs-text);
+  /* Selectable, because the point of a command is that it gets copied. */
+  user-select: text;
+}
+
+.help-flow {
+  color: var(--qbs-text-muted);
+}
+
+/* The generate-and-copy pair on the help page. */
+.secret-generator {
+  margin: 0 0 var(--qbs-space-3);
+}
+
+.secret-generator__value {
+  flex: 1;
+  min-width: 220px;
+  font-family: var(--qbs-font-mono);
+  /* A 43-character token at body size overflows the field; this keeps it all visible. */
+  font-size: var(--qbs-text-meta);
+}
+
+.secret-generator p {
+  /* Present even when empty, so announcing a copy does not move the page under the cursor. */
+  min-height: 1.2em;
+  margin: var(--qbs-space-1) 0 0;
+}
+
+.help-faq {
+  margin: 0;
+}
+
+.help-faq dt {
+  margin-top: var(--qbs-space-3);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text);
+}
+
+.help-faq dt:first-child {
+  margin-top: 0;
+}
+
+.help-faq dd {
+  margin: var(--qbs-space-1) 0 0;
+  color: var(--qbs-text-muted);
+  line-height: var(--qbs-leading-relaxed);
 }

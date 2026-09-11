@@ -34,6 +34,52 @@
 import { buildRelayMirrorDocument } from '../../../../src/director/relay/relaySync';
 import { relayRequest, type RelayResponse } from './native';
 
+/**
+ * The alphabet a relay tournament id may use.
+ *
+ * Digits and lowercase consonants, 24 characters — the relay's own `isTournamentId`. It is
+ * narrow because the id becomes a Durable Object name that a stranger could construct, and a
+ * fixed alphabet and length is the cheapest bound on how many objects a deployment can be made
+ * to create. The vowels are absent, which also means an id cannot spell anything.
+ */
+const tournamentIdAlphabet = '0123456789bcdfghjklmnpqrstvwxyz';
+
+/**
+ * Mint a tournament id for a fresh relay.
+ *
+ * The operator chooses this value — the relay accepts whatever the claim names, as long as it
+ * fits the rule — and nobody can be expected to type 24 characters from a restricted alphabet
+ * correctly on a tournament morning. It identifies one tournament's Durable Object on the
+ * deployment and is not a secret: it appears in every pairing link.
+ */
+export function generateTournamentId(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  // 31 characters into 256 values leaves a slight bias toward the first nine. That matters for a
+  // secret and not for a name whose only job is to be distinct and well-formed.
+  return [...bytes].map((byte) => tournamentIdAlphabet[byte % tournamentIdAlphabet.length]).join('');
+}
+
+/**
+ * Mint a relay setup token.
+ *
+ * 32 random bytes as base64url: long enough that guessing is not a threat, and in an alphabet
+ * that survives a copy through a terminal, a password manager and a text field without a
+ * character being mangled or a line being wrapped.
+ *
+ * This is a secret, briefly. The operator pastes it into `wrangler secret put` and then into the
+ * claim, after which the relay has exchanged it for a management credential and it is worthless.
+ * QBBridge never stores it: it lives in one component's state until the window is closed.
+ */
+export function generateSetupToken(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 export class RelayError extends Error {
   readonly status: number | null;
   readonly code: string | null;

@@ -15,17 +15,33 @@
 
 import { useState } from 'react';
 import { Button, ConfirmDialog, Notice, TextField } from '@qbsheet/ui';
+import { isRelayTournamentId, normalizeRelayBaseUrl } from '../../../../src/director/relay/relayConfig';
+import { generateTournamentId } from '../model/relay';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
 
 export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
   const [baseUrl, setBaseUrl] = useState('');
-  const [tournamentId, setTournamentId] = useState('');
+  // Generated rather than demanded. The relay accepts whatever the claim names as long as it is
+  // 24 characters from a restricted alphabet, and nobody types that correctly on a tournament
+  // morning. It is not a secret — it appears in every pairing link.
+  const [tournamentId, setTournamentId] = useState(generateTournamentId);
   const [setupToken, setSetupToken] = useState('');
   const [confirmForget, setConfirmForget] = useState(false);
 
   const showForm = state.relay === null || bridge.changingRelay;
+
+  // Checked as it is typed, against the same rules the relay and the pairing-link builder use,
+  // so a bad address is caught here rather than as a refusal after the setup token is spent.
+  const trimmedUrl = baseUrl.trim();
+  const urlCheck = trimmedUrl === '' ? null : normalizeRelayBaseUrl(trimmedUrl);
+  const urlError = urlCheck && !urlCheck.ok ? urlCheck.error : undefined;
+  const idError =
+    tournamentId === '' || isRelayTournamentId(tournamentId)
+      ? undefined
+      : 'A tournament ID is 24 characters: digits and lowercase consonants.';
+  const canClaim = urlCheck?.ok === true && isRelayTournamentId(tournamentId) && setupToken.trim() !== '';
 
   return (
     <>
@@ -123,17 +139,24 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               label="Relay URL"
               value={baseUrl}
               onChange={setBaseUrl}
-              placeholder="https://qbtcp-relay-xyz.workers.dev"
+              placeholder="https://qbtcp-relay-backend.your-subdomain.workers.dev"
+              description="The deployed Worker origin from Cloudflare. No path, no trailing slash."
+              errorMessage={urlError}
               autoComplete="off"
               isRequired
             />
-            <TextField
-              label="Tournament ID"
-              value={tournamentId}
-              onChange={setTournamentId}
-              autoComplete="off"
-              isRequired
-            />
+            <div className="field-with-action">
+              <TextField
+                label="Tournament ID"
+                value={tournamentId}
+                onChange={setTournamentId}
+                description="Names this tournament on your relay. Not a secret; it appears in every pairing link."
+                errorMessage={idError}
+                autoComplete="off"
+                isRequired
+              />
+              <Button onPress={() => setTournamentId(generateTournamentId())}>Generate</Button>
+            </div>
             <TextField
               label="One-time setup token"
               type="password"
@@ -144,7 +167,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               isRequired
             />
             <div className="row">
-              <Button variant="primary" type="submit" isDisabled={bridge.busy}>
+              <Button variant="primary" type="submit" isDisabled={bridge.busy || !canClaim}>
                 {state.relay ? 'Claim New Relay' : 'Connect Relay'}
               </Button>
               {state.relay ? (
@@ -152,7 +175,10 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                   Cancel
                 </Button>
               ) : null}
-              <span className="faint">The relay runs in the tournament&rsquo;s own Cloudflare account.</span>
+              <span className="faint">
+                The relay runs in the tournament&rsquo;s own Cloudflare account. Help &rarr; Setting up the
+                Cloudflare relay has the deployment steps.
+              </span>
             </div>
           </form>
         ) : null}
