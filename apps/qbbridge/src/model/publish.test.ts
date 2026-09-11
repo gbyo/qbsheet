@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { pairingCodeHash } from './pairing';
-import { planRoomSetup, planRound, publishRound } from './publish';
+import { planRoomSetup, planRound, publicationReviewItems, publishRound } from './publish';
 import {
   relayClaim,
   relayCheckScorerReadiness,
@@ -17,7 +17,7 @@ import {
   RelayError,
   type RelayConnection,
 } from './relay';
-import { newRoom, roomTombstone, type Room } from './rooms';
+import { newRoom, pairingWarnings, roomTombstone, type Room } from './rooms';
 import type { PlannedPairing } from './roundPlans';
 import { loadedFixture } from '../tests/fixture';
 import * as native from './native';
@@ -109,6 +109,35 @@ describe('planning a round', () => {
     const plan = planRound(tournament, tournament.rounds[0], rooms, pairings);
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
     expect(plan.cleared.map((entry) => entry.reason)).toContain('Both sides of this room are the same team.');
+  });
+
+  test('reviews clears, duplicate teams, and duplicate room names without duplicate noise', () => {
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    rooms[1] = { ...rooms[1]!, name: rooms[0]!.name };
+    const pairings: PlannedPairing[] = [
+      { roomId: 'room-1', leftTeamId: teamId('Cony'), rightTeamId: teamId('Deering') },
+      { roomId: 'room-2', leftTeamId: teamId('Cony'), rightTeamId: teamId('Wells') },
+      { roomId: 'room-3', leftTeamId: teamId('Wells'), rightTeamId: teamId('Wells') },
+    ];
+    const plan = planRound(tournament, tournament.rounds[0]!, rooms, pairings);
+    const teamName = (id: string) => tournament.teams.find((team) => team.id === id)?.name ?? id;
+    const items = publicationReviewItems(
+      plan,
+      pairingWarnings(rooms, pairings, teamName),
+      rooms,
+      pairings,
+      teamName,
+    );
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringMatching(/name.*used by 2 configured rooms/i) }),
+        expect.objectContaining({ message: expect.stringMatching(/Cony.*multiple rooms/i) }),
+        expect.objectContaining({ message: expect.stringMatching(/same team.*will be cleared/i) }),
+      ]),
+    );
+    expect(items.filter((item) => /same team/i.test(item.message))).toHaveLength(1);
   });
 
   test('a duplicated room row publishes the entry the UI shows', () => {
