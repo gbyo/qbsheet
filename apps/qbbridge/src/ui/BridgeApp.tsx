@@ -9,6 +9,7 @@ import { useBridge } from '../model/useBridge';
 import SetupView from './SetupView';
 import RoomsView from './RoomsView';
 import ResultsView from './ResultsView';
+import OperationsView from './OperationsView';
 import HelpView from './HelpView';
 
 const noticeTone = { good: 'success', warn: 'warning', bad: 'danger' } as const;
@@ -69,6 +70,7 @@ export default function BridgeApp() {
           <Tab id="setup">Tournament</Tab>
           <Tab id="rooms">Rooms</Tab>
           <Tab id="results">{resultAttention ? `Results (${resultAttention})` : 'Results'}</Tab>
+          <Tab id="operations">Operations</Tab>
           <Tab id="help">Help</Tab>
         </TabList>
 
@@ -154,6 +156,9 @@ export default function BridgeApp() {
           </TabPanel>
           <TabPanel id="results">
             <ResultsView bridge={bridge} />
+          </TabPanel>
+          <TabPanel id="operations">
+            <OperationsView bridge={bridge} />
           </TabPanel>
           <TabPanel id="help">
             <HelpView />

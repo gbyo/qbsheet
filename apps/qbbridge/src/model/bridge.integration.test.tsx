@@ -15,7 +15,7 @@ import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
 import { yftFixtureText } from '../tests/fixture';
-import { useBridge } from './useBridge';
+import { operationsRefreshMs, resultPollIntervalMs, useBridge } from './useBridge';
 
 interface InvokeCall {
   command: string;
@@ -57,6 +57,10 @@ let secureCredentials = new Map<string, string>();
 let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
+/** Director sessions view for the operations snapshot; empty unless a test stages presence. */
+let relaySessions: unknown[] = [];
+/** Open help requests for the operations snapshot. */
+let relayHelp: unknown[] = [];
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
@@ -184,6 +188,8 @@ function installFakeTauri(): void {
             status: 200,
             body: JSON.stringify({
               tournamentId: relayTournament,
+              protocolVersion: 1,
+              lifecycle: 'live',
               mirror: { director_epoch: relayEpoch, revision: relayRevision },
               controller: {
                 authenticated_as: authenticatedAs,
@@ -193,6 +199,9 @@ function installFakeTauri(): void {
                 backup_controller_id: backupControllerId,
                 backup_controller_label: 'Backup laptop',
               },
+              storage: { results_unacked: 2, help_open: 1 },
+              counters: { metered_requests_estimate: 4100, rows_written_estimate: 900 },
+              budget: { measured: { metered_requests_estimate: 4100 } },
             }),
           };
         }
@@ -251,6 +260,12 @@ function installFakeTauri(): void {
           const rows = [...relayResultsByBase.entries()].find(([base]) => url.startsWith(base))?.[1];
           return { status: 200, body: JSON.stringify({ results: rows ?? relayResults }) };
         }
+        if (url.endsWith('/sessions')) {
+          return { status: 200, body: JSON.stringify({ sessions: relaySessions }) };
+        }
+        if (url.includes('/help?state=open')) {
+          return { status: 200, body: JSON.stringify({ help: relayHelp }) };
+        }
         return { status: 404, body: '{}' };
       }
       default:
@@ -263,6 +278,8 @@ function installFakeTauri(): void {
 
 beforeEach(() => {
   relayResults = [];
+  relaySessions = [];
+  relayHelp = [];
   recoveryPackage = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
@@ -2353,5 +2370,134 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+describe('operations snapshot', () => {
+  const operationsSessionCalls = (): number =>
+    calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/sessions'))
+      .length;
+
+  it('shows director sessions, open help, and quota without relay operator identity', async () => {
+    relaySessions = [
+      {
+        session_id: 'sess-1',
+        room_id: 'Room 1',
+        match_id: 'match-1',
+        status: 'open',
+        writer_device: 'ipad-1',
+        updated_at: '2026-09-11T17:59:00Z',
+        presence: [
+          {
+            device_id: 'ipad-1',
+            operator_name: 'Should Not Appear',
+            updated_at: '2026-09-11T17:59:00Z',
+            expires_at: '2026-09-11T18:05:00Z',
+          },
+        ],
+      },
+    ];
+    relayHelp = [
+      {
+        id: 'help-1',
+        room_id: 'Room 1',
+        category: 'scoring',
+        message: 'Should Not Appear',
+        device_id: 'ipad-1',
+        operator_name: 'Should Not Appear',
+        created_at: '2026-09-11T17:59:00Z',
+        updated_at: '2026-09-11T17:59:30Z',
+      },
+    ];
+
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.refreshOperations();
+      });
+
+      const operations = rendered.result.current.operations;
+      expect(operations?.error).toBeNull();
+      expect(typeof operations?.fetchedAt).toBe('string');
+      expect(operations?.sessions).toHaveLength(1);
+      expect(operations?.sessions[0]).toEqual({
+        sessionId: 'sess-1',
+        roomId: 'Room 1',
+        matchId: 'match-1',
+        status: 'open',
+        writerDevice: 'ipad-1',
+        updatedAt: '2026-09-11T17:59:00Z',
+        progressSequence: null,
+        progressUpdatedAt: null,
+        results: [],
+        presence: [
+          {
+            deviceId: 'ipad-1',
+            updatedAt: '2026-09-11T17:59:00Z',
+            expiresAt: '2026-09-11T18:05:00Z',
+          },
+        ],
+      });
+      expect(operations?.help).toEqual([
+        {
+          id: 'help-1',
+          roomId: 'Room 1',
+          category: 'scoring',
+          createdAt: '2026-09-11T17:59:00Z',
+          updatedAt: '2026-09-11T17:59:30Z',
+        },
+      ]);
+      expect(operations?.health.protocolVersion).toBe(1);
+      expect(operations?.health.lifecycle).toBe('live');
+      expect(operations?.health.storage).toEqual({ results_unacked: 2, help_open: 1 });
+      expect(operations?.health.counters?.metered_requests_estimate).toBe(4100);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  it('keeps ordinary result polls off the operations snapshot', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.refreshOperations();
+      });
+      const before = operationsSessionCalls();
+
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+
+      expect(operationsSessionCalls()).toBe(before);
+      expect(operationsRefreshMs).toBe(resultPollIntervalMs * 6);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  it('notes a reachability transition once across repeated polls', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+
+      const reachability = rendered.result.current.operationsTimeline.filter(
+        (entry) => entry.kind === 'reachability',
+      );
+      expect(reachability).toHaveLength(1);
+      expect(reachability[0].detail).toBe('relay reachable');
+    } finally {
+      rendered.unmount();
+    }
   });
 });

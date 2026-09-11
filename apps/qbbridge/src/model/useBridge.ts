@@ -37,12 +37,17 @@ import {
   type PublishOutcome,
   type PublishPlan,
 } from './publish';
+import type { OperationsEvent, OperationsEventKind } from './dashboard';
 import {
   relayAcknowledgeResults,
   relayClaim,
   relayCheckScorerReadiness,
+  relayFetchDirectorSessions,
+  relayFetchOpenHelp,
   relayFetchResults,
   relayHealth,
+  type DirectorHelp,
+  type DirectorSession,
   relayProvisionBackup,
   relayRevokeBackup,
   relayRotateBackup,
@@ -52,6 +57,7 @@ import {
   RelayError,
   type BackupProvisionResult,
   type RelayConnection,
+  type RelayHealth,
   type ScorerReadinessResult,
 } from './relay';
 import {
@@ -107,6 +113,13 @@ import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
 export const resultPollIntervalMs = 5000;
+
+/**
+ * How often the operations snapshot (sessions, help, full health) refreshes. Six times
+ * slower than the results poll: three bounded requests per cycle cannot materially move
+ * relay quota itself.
+ */
+export const operationsRefreshMs = 30000;
 
 /** Routine confirmations are useful briefly, while problems need to remain available. */
 export const noticeAutoDismissMs = 4000;
@@ -249,6 +262,22 @@ export interface BridgeApi {
   pollResults(): Promise<void>;
   /** Set when unsaved results are approaching the relay's unacknowledged window. */
   unsavedResultWarning: string | null;
+
+  /**
+   * Live operations dashboard (#1012). Slow-cadence relay sessions/help/health plus a
+   * local timeline and the last durable write — one screen for which room needs attention.
+   */
+  operations: {
+    sessions: DirectorSession[];
+    help: DirectorHelp[];
+    health: RelayHealth;
+    fetchedAt: string;
+    error: string | null;
+  } | null;
+  operationsRunning: boolean;
+  refreshOperations(): Promise<void>;
+  operationsTimeline: OperationsEvent[];
+  lastWriteAt: string | null;
 }
 
 /**
@@ -389,6 +418,110 @@ export function useBridge(): BridgeApi {
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
+
+  const [operations, setOperations] = useState<{
+    sessions: DirectorSession[];
+    help: DirectorHelp[];
+    health: RelayHealth;
+    fetchedAt: string;
+    error: string | null;
+  } | null>(null);
+  const [operationsRunning, setOperationsRunning] = useState(false);
+  const operationsRunningRef = useRef(false);
+  const [operationsTimeline, setOperationsTimeline] = useState<OperationsEvent[]>([]);
+  const [lastWriteAt, setLastWriteAt] = useState<string | null>(null);
+
+  /**
+   * Note a notable event for the operations timeline. Call sites pass pre-redacted
+   * detail — ids, counts, outcomes — never secrets, codes, payloads, or names.
+   */
+  const noteOperation = useCallback((kind: OperationsEventKind, detail: string): void => {
+    const at = new Date().toISOString();
+    setOperationsTimeline((current) => [...current.slice(-19), { at, kind, detail }]);
+  }, []);
+
+  const reachabilityRef = useRef<boolean | null>(null);
+  /**
+   * Set reachability and note transitions both ways. Same-value sets stay quiet, so the
+   * hot results poll does not spam the timeline while degradation and recovery both land.
+   */
+  const setReachability = useCallback(
+    (next: boolean | null): void => {
+      setRelayReachable(next);
+      if (next === null) {
+        reachabilityRef.current = null;
+        return;
+      }
+      if (reachabilityRef.current === next) return;
+      reachabilityRef.current = next;
+      noteOperation('reachability', next ? 'relay reachable' : 'relay unreachable');
+    },
+    [noteOperation],
+  );
+
+  /**
+   * Refresh the slow-cadence operations snapshot: sessions with writer presence, open
+   * help, and full relay health with counters. Three requests every operationsRefreshMs
+   * plus manual refreshes — bounded against the 5s results poll so the dashboard cannot
+   * materially move relay quota itself.
+   */
+  const refreshOperations = useCallback(async (): Promise<void> => {
+    if (operationsRunningRef.current) return;
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return;
+    operationsRunningRef.current = true;
+    setOperationsRunning(true);
+    try {
+      const [health, sessions, help] = await Promise.all([
+        relayHealth(connection),
+        relayFetchDirectorSessions(connection),
+        relayFetchOpenHelp(connection),
+      ]);
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return;
+      setReachability(true);
+      setOperations({
+        sessions,
+        help,
+        health,
+        fetchedAt: new Date().toISOString(),
+        error: null,
+      });
+    } catch (error) {
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return;
+      // An operations failure alone never declares the relay unreachable — the 5s results
+      // poll owns that verdict, so transient blips stay quiet instead of alarming.
+      const relay = stateRef.current.relay;
+      setOperations((current) =>
+        current
+          ? { ...current, error: (error as Error).message }
+          : {
+              sessions: [],
+              help: [],
+              health: {
+                tournamentId: connection.tournamentId,
+                directorEpoch: relay?.epoch ?? 0,
+                revision: relay?.revision ?? 0,
+                activeController: 'primary',
+                authenticatedAs: 'primary',
+                controllerActive: false,
+                backupProvisioned: false,
+                backupControllerId: null,
+                backupControllerLabel: null,
+                protocolVersion: null,
+                lifecycle: null,
+                storage: null,
+                counters: null,
+                budget: null,
+              },
+              fetchedAt: new Date().toISOString(),
+              error: (error as Error).message,
+            },
+      );
+    } finally {
+      operationsRunningRef.current = false;
+      setOperationsRunning(false);
+    }
+  }, [setReachability]);
   const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
     state.relay
       ? {
@@ -491,7 +624,7 @@ export function useBridge(): BridgeApi {
       .then((token) => {
         const current = stateRef.current;
         if (!token || !sameRelay(current) || !current.relay) {
-          setRelayReachable(false);
+          setReachability(false);
           setNotice({
             kind: 'bad',
             message:
@@ -502,13 +635,13 @@ export function useBridge(): BridgeApi {
         activateState({ ...current, relay: { ...current.relay, managementToken: token } });
       })
       .catch((error) => {
-        setRelayReachable(false);
+        setReachability(false);
         setNotice({
           kind: 'bad',
           message: `QBBridge could not read the relay credential from secure storage. ${(error as Error).message}`,
         });
       });
-  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId]);
+  }, [activateState, state.relay?.baseUrl, state.relay?.tournamentId, setReachability]);
 
   const commit = useCallback(
     (
@@ -559,7 +692,7 @@ export function useBridge(): BridgeApi {
         const next = readinessState(result);
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(true);
+          setReachability(true);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -576,7 +709,7 @@ export function useBridge(): BridgeApi {
         };
         const stored = persistedReadiness(next);
         if (readinessKeyRef.current === key) {
-          setRelayReachable(false);
+          setReachability(false);
           setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
           commit((current) =>
             connectionOf(current) && connectionKey(connectionOf(current)!) === key
@@ -587,7 +720,7 @@ export function useBridge(): BridgeApi {
         return next;
       }
     },
-    [commit],
+    [commit, setReachability],
   );
 
   const applyLoadedFile = useCallback(
@@ -622,7 +755,7 @@ export function useBridge(): BridgeApi {
         setRelayCredentialSavePending(false);
         setPersistenceSavePending(false);
         setScorerReadiness(null);
-        setRelayReachable(null);
+        setReachability(null);
         setChangingRelay(false);
         invalidateRoundArtifacts();
         activateState(next);
@@ -664,7 +797,7 @@ export function useBridge(): BridgeApi {
       });
       return true;
     },
-    [activateState, commit, invalidateRoundArtifacts],
+    [activateState, commit, invalidateRoundArtifacts, setReachability],
   );
 
   const loadFileContents = useCallback(
@@ -749,7 +882,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        setReachability(null);
         setNotice({
           kind: 'bad',
           message: `The relay claim succeeded, but QBBridge could not save the returned management credential in secure storage. Repair secure storage and retry. ${(error as Error).message}`,
@@ -764,7 +897,7 @@ export function useBridge(): BridgeApi {
         pendingRelayClaimRef.current = connection;
         setRelayCredentialSavePending(true);
         setChangingRelay(true);
-        setRelayReachable(null);
+        setReachability(null);
         setNotice({
           kind: 'bad',
           message:
@@ -780,7 +913,7 @@ export function useBridge(): BridgeApi {
       readinessKeyRef.current = null;
       activateState(next);
       setChangingRelay(false);
-      setRelayReachable(true);
+      setReachability(true);
       const readiness = await refreshScorerReadiness(connection);
       if (readinessKeyRef.current === connectionKey(connection)) {
         const nextNotice = readinessNotice(readiness);
@@ -795,7 +928,7 @@ export function useBridge(): BridgeApi {
       }
       return true;
     },
-    [activateState, refreshScorerReadiness],
+    [activateState, refreshScorerReadiness, setReachability],
   );
 
   /**
@@ -832,7 +965,7 @@ export function useBridge(): BridgeApi {
         };
         return await activateClaimedRelay(connection);
       } catch (error) {
-        setRelayReachable(false);
+        setReachability(false);
         setNotice({
           kind: 'bad',
           message: `${(error as Error).message} The relay already set up here is unchanged.`,
@@ -842,7 +975,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateClaimedRelay],
+    [activateClaimedRelay, setReachability],
   );
 
   const retryRelayCredentialSave = useCallback(async (): Promise<boolean> => {
@@ -1012,7 +1145,7 @@ export function useBridge(): BridgeApi {
         setTournament(null);
         setLoadWarnings([]);
         setChangingRelay(false);
-        setRelayReachable(true);
+        setReachability(true);
         activateState(next);
         const readiness = await refreshScorerReadiness(connection);
         setNotice({
@@ -1021,7 +1154,7 @@ export function useBridge(): BridgeApi {
         });
         return true;
       } catch (error) {
-        setRelayReachable(false);
+        setReachability(false);
         setNotice({
           kind: 'bad',
           message: `The recovery package was not imported. ${(error as Error).message}`,
@@ -1031,7 +1164,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [activateState, refreshScorerReadiness],
+    [setReachability, activateState, refreshScorerReadiness],
   );
 
   const takeOverRelay = useCallback(async (): Promise<boolean> => {
@@ -1064,7 +1197,8 @@ export function useBridge(): BridgeApi {
         });
         return false;
       }
-      setRelayReachable(true);
+      setReachability(true);
+      noteOperation('takeover', `backup active at epoch ${outcome.directorEpoch}`);
       setNotice({
         kind: 'warn',
         message:
@@ -1072,13 +1206,13 @@ export function useBridge(): BridgeApi {
       });
       return true;
     } catch (error) {
-      setRelayReachable(false);
+      setReachability(false);
       setNotice({ kind: 'bad', message: `Relay takeover was not completed. ${(error as Error).message}` });
       return false;
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [setReachability, noteOperation, commit]);
 
   const transferRelayToPrimary = useCallback(async (): Promise<boolean> => {
     const connection = connectionOf(stateRef.current);
@@ -1094,7 +1228,8 @@ export function useBridge(): BridgeApi {
             }
           : current,
       );
-      setRelayReachable(false);
+      setReachability(false);
+      noteOperation('transfer', `primary active at epoch ${outcome.directorEpoch}`);
       setNotice({
         kind: 'warn',
         message:
@@ -1107,9 +1242,12 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [setReachability, noteOperation, commit]);
 
-  const beginRelayChange = useCallback(() => setChangingRelay(true), []);
+  const beginRelayChange = useCallback(() => {
+    noteOperation('relay-change', 'relay change started');
+    setChangingRelay(true);
+  }, [noteOperation]);
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
 
   const checkScorerReadiness = useCallback(async () => {
@@ -1160,14 +1298,15 @@ export function useBridge(): BridgeApi {
     pollGenerationRef.current += 1;
     const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
     setChangingRelay(true);
-    setRelayReachable(null);
+    noteOperation('forget', 'relay credential forgotten');
+    setReachability(null);
     setNotice({
       kind: persisted.ok ? 'warn' : 'bad',
       message: persisted.ok
         ? 'The relay credential was deleted from this machine. Set up a relay to publish again.'
         : 'The relay credential was removed from the active session but could not be saved locally. Retry saving local state before restarting.',
     });
-  }, [commit]);
+  }, [setReachability, noteOperation, commit]);
 
   const retryStatePersistence = useCallback((): boolean => {
     const persisted = saveState(stateRef.current, { secureCredential: true });
@@ -1406,7 +1545,11 @@ export function useBridge(): BridgeApi {
         }
         const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
         if (input.assignmentFallback) rememberAssignmentFallback(null);
-        setRelayReachable(true);
+        noteOperation(
+          'publish',
+          `revision ${outcome.revision} · ${outcome.assignments.length} rooms published`,
+        );
+        setReachability(true);
         setNotice(
           persisted.ok
             ? { kind: input.successKind, message: input.successMessage(outcome) }
@@ -1417,7 +1560,7 @@ export function useBridge(): BridgeApi {
         );
         return outcome;
       } catch (error) {
-        if (error instanceof RelayError) setRelayReachable(false);
+        if (error instanceof RelayError) setReachability(false);
         const fallbackAvailable = input.assignmentFallback && relayUnavailable(error);
         if (fallbackAvailable) rememberAssignmentFallback(input.assignmentFallback!);
         setNotice({
@@ -1433,7 +1576,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, rememberAssignmentFallback],
+    [setReachability, applyPublication, noteOperation, rememberAssignmentFallback],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
@@ -1609,7 +1752,7 @@ export function useBridge(): BridgeApi {
             .map((entry) => entry.resultId),
         ),
       ];
-      setRelayReachable(true);
+      setReachability(true);
       commit((current) => {
         if (!sameRelayConnection(connection, connectionOf(current))) return current;
         const fresh: StoredResult[] = fetched
@@ -1641,9 +1784,9 @@ export function useBridge(): BridgeApi {
         };
       });
     } catch {
-      if (isCurrentPoll()) setRelayReachable(false);
+      if (isCurrentPoll()) setReachability(false);
     }
-  }, [commit]);
+  }, [setReachability, commit]);
 
   useEffect(() => {
     // Changing the active relay invalidates every in-flight request, even if a replacement happens
@@ -1660,6 +1803,17 @@ export function useBridge(): BridgeApi {
       clearInterval(timer);
     };
   }, [pollResults, state.relay]);
+
+  useEffect(() => {
+    if (!state.relay) return;
+    // The operations snapshot refreshes on its own slow cadence, independent of the 5s
+    // results poll, with an immediate refresh on connect so the dashboard is never empty.
+    void refreshOperations();
+    const slow = setInterval(() => void refreshOperations(), operationsRefreshMs);
+    return () => {
+      clearInterval(slow);
+    };
+  }, [refreshOperations, state.relay]);
 
   const chooseFolder = useCallback(async () => {
     try {
@@ -1827,6 +1981,8 @@ export function useBridge(): BridgeApi {
       try {
         await writeOne(entry, folder);
         await acknowledgeSaved(connection, [entry.resultId]);
+        setLastWriteAt(new Date().toISOString());
+        noteOperation('save', `saved ${entry.resultId}`);
         setNotice({ kind: 'good', message: 'Result saved.' });
       } catch (error) {
         setNotice({ kind: 'bad', message: `That result was not saved. ${(error as Error).message}` });
@@ -1834,7 +1990,7 @@ export function useBridge(): BridgeApi {
         setResultSaving(resultId, false);
       }
     },
-    [acknowledgeSaved, setResultSaving, writeOne],
+    [noteOperation, acknowledgeSaved, setResultSaving, writeOne],
   );
 
   const saveNewResults = useCallback(async () => {
@@ -1868,6 +2024,10 @@ export function useBridge(): BridgeApi {
         }
       }
       await acknowledgeSaved(connection, written);
+      if (written.length > 0) {
+        setLastWriteAt(new Date().toISOString());
+        noteOperation('save', `saved ${written.length} results`);
+      }
       setNotice(
         failures.length === 0
           ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
@@ -1881,7 +2041,7 @@ export function useBridge(): BridgeApi {
       setSavingBatch(false);
       setBusy(false);
     }
-  }, [acknowledgeSaved, writeOne]);
+  }, [noteOperation, acknowledgeSaved, writeOne]);
 
   const markResultImported = useCallback(
     (resultId: string): void => {
@@ -2116,5 +2276,10 @@ export function useBridge(): BridgeApi {
     savingResults: savingBatch || savingResultIds.size > 0,
     pollResults,
     unsavedResultWarning,
+    operations,
+    operationsRunning,
+    refreshOperations,
+    operationsTimeline,
+    lastWriteAt,
   };
 }

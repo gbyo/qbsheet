@@ -148,6 +148,50 @@ export interface RelayHealth {
   backupProvisioned: boolean;
   backupControllerId: string | null;
   backupControllerLabel: string | null;
+  /** Relay protocol version, when the health payload carries it. */
+  protocolVersion: number | null;
+  /** Relay lifecycle (`live` while scoring), when carried. */
+  lifecycle: string | null;
+  /** Row counts per table, when carried. Never player data. */
+  storage: Record<string, number> | null;
+  /** Protocol counters, when carried. The quota instrument panel. */
+  counters: Record<string, number> | null;
+  /** Headroom estimates derived from counters, when carried. */
+  budget: Record<string, unknown> | null;
+}
+
+export interface DirectorSessionPresence {
+  deviceId: string;
+  updatedAt: string;
+  expiresAt: string;
+}
+
+export interface DirectorSessionResult {
+  resultId: string;
+  matchId: string | null;
+  receivedAt: string;
+  acked: boolean;
+}
+
+export interface DirectorSession {
+  sessionId: string;
+  roomId: string;
+  matchId: string;
+  status: 'open' | 'final-received' | 'abandoned';
+  writerDevice: string | null;
+  updatedAt: string;
+  progressSequence: number | null;
+  progressUpdatedAt: string | null;
+  results: DirectorSessionResult[];
+  presence: DirectorSessionPresence[];
+}
+
+export interface DirectorHelp {
+  id: string;
+  roomId: string;
+  category: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ScorerReadinessResult {
@@ -324,7 +368,151 @@ export async function relayHealth(connection: RelayConnection): Promise<RelayHea
       typeof controller.backup_controller_id === 'string' ? controller.backup_controller_id : null,
     backupControllerLabel:
       typeof controller.backup_controller_label === 'string' ? controller.backup_controller_label : null,
+    protocolVersion: typeof body.protocolVersion === 'number' ? body.protocolVersion : null,
+    lifecycle: typeof body.lifecycle === 'string' ? body.lifecycle : null,
+    storage: numberRecord(body.storage),
+    counters: numberRecord(body.counters),
+    budget:
+      body.budget && typeof body.budget === 'object' && !Array.isArray(body.budget)
+        ? (body.budget as Record<string, unknown>)
+        : null,
   };
+}
+
+function numberRecord(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const out: Record<string, number> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === 'number' && Number.isFinite(entry)) out[key] = entry;
+  }
+  return out;
+}
+
+/**
+ * The relay's coalesced session state: one entry per scorer session with writer presence.
+ * Operator names and help messages are dropped at this boundary — the dashboard needs
+ * presence and status, never who typed what.
+ */
+export async function relayFetchDirectorSessions(
+  connection: RelayConnection,
+): Promise<DirectorSession[]> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/sessions`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with sessions.');
+  const body = parseBody(response);
+  return parseDirectorSessions(body.sessions, response.status);
+}
+
+/**
+ * Parse the sessions view. Operator names and help messages never cross this boundary:
+ * presence keeps device ids and timestamps, nothing attributable.
+ */
+export function parseDirectorSessions(sessions: unknown, status: number | null): DirectorSession[] {
+  if (!Array.isArray(sessions)) {
+    throw new RelayError('The relay answered with invalid sessions.', status);
+  }
+  const parsed: DirectorSession[] = [];
+  for (const row of sessions) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (
+      typeof entry.session_id !== 'string' ||
+      typeof entry.room_id !== 'string' ||
+      typeof entry.match_id !== 'string'
+    )
+      continue;
+    const status = entry.status;
+    if (status !== 'open' && status !== 'final-received' && status !== 'abandoned') continue;
+    parsed.push({
+      sessionId: entry.session_id,
+      roomId: entry.room_id,
+      matchId: entry.match_id,
+      status,
+      writerDevice: typeof entry.writer_device === 'string' ? entry.writer_device : null,
+      updatedAt: typeof entry.updated_at === 'string' ? entry.updated_at : '',
+      progressSequence:
+        typeof entry.progress_sequence === 'number' ? entry.progress_sequence : null,
+      progressUpdatedAt:
+        typeof entry.progress_updated_at === 'string' ? entry.progress_updated_at : null,
+      results: Array.isArray(entry.results)
+        ? (entry.results as Record<string, unknown>[])
+            .filter(
+              (result): result is Record<string, unknown> =>
+                !!result &&
+                typeof result === 'object' &&
+                typeof result.result_id === 'string',
+            )
+            .map((result) => ({
+              resultId: result.result_id as string,
+              matchId: typeof result.match_id === 'string' ? result.match_id : null,
+              receivedAt: typeof result.received_at === 'string' ? result.received_at : '',
+              acked: typeof result.director_ack_at === 'string',
+            }))
+        : [],
+      presence: Array.isArray(entry.presence)
+        ? (entry.presence as Record<string, unknown>[])
+            .filter(
+              (item): item is Record<string, unknown> =>
+                !!item &&
+                typeof item === 'object' &&
+                typeof item.device_id === 'string',
+            )
+            .map((item) => ({
+              deviceId: item.device_id as string,
+              updatedAt: typeof item.updated_at === 'string' ? item.updated_at : '',
+              expiresAt: typeof item.expires_at === 'string' ? item.expires_at : '',
+            }))
+        : [],
+    });
+  }
+  return parsed;
+}
+
+/**
+ * Open help requests across rooms. Only the category and age cross this boundary: messages
+ * and operator names stay in the help flow, out of the dashboard.
+ */
+export async function relayFetchOpenHelp(connection: RelayConnection): Promise<DirectorHelp[]> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/help?state=open`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with help.');
+  const body = parseBody(response);
+  return parseOpenHelp(body.help, response.status);
+}
+
+/**
+ * Parse the open-help view. Categories and ages cross; messages and operator names stay
+ * in the help flow.
+ */
+export function parseOpenHelp(help: unknown, status: number | null): DirectorHelp[] {
+  if (!Array.isArray(help)) {
+    throw new RelayError('The relay answered with invalid help.', status);
+  }
+  const open: DirectorHelp[] = [];
+  for (const row of help) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (
+      typeof entry.id !== 'string' ||
+      typeof entry.room_id !== 'string' ||
+      typeof entry.category !== 'string'
+    )
+      continue;
+    open.push({
+      id: entry.id,
+      roomId: entry.room_id,
+      category: entry.category,
+      createdAt: typeof entry.created_at === 'string' ? entry.created_at : '',
+      updatedAt: typeof entry.updated_at === 'string' ? entry.updated_at : '',
+    });
+  }
+  return open;
 }
 
 export async function relayTakeover(
