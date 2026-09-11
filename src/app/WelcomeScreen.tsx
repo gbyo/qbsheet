@@ -192,7 +192,6 @@ export default function WelcomeScreen(
     practiceInProgress,
     onReadiness,
     recovery,
-    onRecovery,
     onPractice,
     onCreateGame,
     onOpenRoom,
@@ -530,9 +529,6 @@ export default function WelcomeScreen(
 
       <footer className="welcome-footer">
         <a href="about/">About QBSheet</a>
-        <button type="button" className="welcome-recovery-link" onClick={onRecovery}>
-          Recovery tools
-        </button>
       </footer>
 
       {onOperatorNameChange && (settingsView !== null || firstRun) && (
