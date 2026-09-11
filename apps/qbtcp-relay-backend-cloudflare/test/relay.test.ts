@@ -14,7 +14,7 @@
 import { env, SELF, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { trimTrailingSlashes } from '../src/protocol/cors';
+import { isOriginAllowed, parseAllowedOrigins, trimTrailingSlashes } from '../src/protocol/cors';
 import { validateStreamFrame } from '../src/protocol/frames';
 import { resultFingerprint } from '../src/protocol/qbj';
 import FruityServerClient from '../../../src/integrations/fruity/FruityServerClient';
@@ -26,6 +26,7 @@ import deriveGame from '../../../src/scoring/deriveGame';
 import type { ScoreEvent } from '../../../src/scoring/ScoreEvents';
 import { event } from '../../../tests/events';
 import { assignmentDocument, greenwood, matchObject, ninetySix } from '../../../tests/qbjDocuments';
+import { scoresheetOrigin } from '../../../src/director/relay/relayConfig';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
 import receiptFixture from '../../../tests/fixtures/qbtcp-stream/receipt.json';
 import helloFixture from '../../../tests/fixtures/qbtcp-stream/hello.json';
@@ -1963,6 +1964,55 @@ describe('origins and budgets', () => {
       headers: { origin: 'https://anything.example' },
     });
     expect(discovery.headers.get('access-control-allow-origin')).toBe('*');
+  });
+
+  it('reports fixed Scorer-origin readiness through management without exposing credentials or a wildcard', async () => {
+    const { tournamentId, management } = await setupRoom('room-readiness', '42424243');
+    const unauthenticated = await SELF.fetch(`${manageBase(tournamentId)}/scorer-readiness`);
+    expect(unauthenticated.status).toBe(401);
+
+    const response = await SELF.fetch(`${manageBase(tournamentId)}/scorer-readiness`, {
+      headers: { ...manageHeaders(management), origin: 'https://director.example' },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('https://director.example');
+    expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({
+      origin: scoresheetOrigin,
+      canPair: true,
+      state: 'ready',
+      message: `${scoresheetOrigin} can pair and use this relay.`,
+    });
+    expect(JSON.stringify(body)).not.toContain(management);
+    expect(JSON.stringify(body)).not.toContain('RELAY_ALLOWED_ORIGINS');
+    expect(JSON.stringify(body)).not.toContain('*');
+  });
+
+  it('reports the exact deployment fix when the fixed Scorer origin is missing', async () => {
+    const previous = env.RELAY_ALLOWED_ORIGINS;
+    env.RELAY_ALLOWED_ORIGINS = 'https://director.example';
+    try {
+      const { tournamentId, management } = await setupRoom('room-blocked-readiness', '42424244');
+      const response = await SELF.fetch(`${manageBase(tournamentId)}/scorer-readiness`, {
+        headers: manageHeaders(management),
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
+      expect(await response.json()).toEqual({
+        origin: scoresheetOrigin,
+        canPair: false,
+        state: 'blocked',
+        message: `Add ${scoresheetOrigin} to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.`,
+      });
+    } finally {
+      env.RELAY_ALLOWED_ORIGINS = previous;
+    }
+  });
+
+  it('does not treat a missing allowlist entry as allowed, including when checked without a browser origin', () => {
+    expect(isOriginAllowed(scoresheetOrigin, parseAllowedOrigins('https://director.example'))).toBe(false);
+    expect(isOriginAllowed(scoresheetOrigin, parseAllowedOrigins('https://qbsheet.com'))).toBe(true);
   });
 
   it('reports counters, storage pressure, and Free-tier headroom honestly', async () => {

@@ -45,6 +45,10 @@ export default function BridgeApp() {
         <span className="relay-state">
           {bridge.state.relay === null ? (
             <StatusBadge tone="neutral">Relay not connected</StatusBadge>
+          ) : bridge.scorerReadiness?.status === 'blocked' ? (
+            <StatusBadge tone="danger">Scorer cannot pair</StatusBadge>
+          ) : bridge.scorerReadiness?.status !== 'ready' ? (
+            <StatusBadge tone="warning">Scorer not verified</StatusBadge>
           ) : bridge.relayReachable === false ? (
             <StatusBadge tone="danger">Relay unavailable</StatusBadge>
           ) : (

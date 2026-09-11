@@ -1,5 +1,5 @@
 /**
- * The four relay calls QBBridge makes.
+ * The relay calls QBBridge makes.
  *
  * `apps/qbtcp-relay-backend-cloudflare` is the relay. QBBridge deploys nothing, forks nothing, and
  * speaks the surface that is already there:
@@ -9,6 +9,7 @@
  * PUT  /qbtcp/v1/manage/tournaments/{id}/mirror
  * GET  /qbtcp/v1/manage/tournaments/{id}/results?state=unacked
  * POST /qbtcp/v1/manage/tournaments/{id}/acks
+ * GET  /qbtcp/v1/manage/tournaments/{id}/scorer-readiness
  * ```
  *
  * # Why acknowledgment is here, and what it is not
@@ -32,6 +33,7 @@
  */
 
 import { buildRelayMirrorDocument } from '../../../../src/director/relay/relaySync';
+import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 import { relayRequest, type RelayResponse } from './native';
 
 /**
@@ -123,6 +125,49 @@ function fail(response: RelayResponse, fallback: string): RelayError {
 export interface ClaimResult {
   tournamentId: string;
   managementToken: string;
+}
+
+export interface ScorerReadinessResult {
+  origin: typeof scoresheetOrigin;
+  canPair: boolean;
+  state: 'ready' | 'blocked';
+  message: string;
+}
+
+/**
+ * Ask the relay whether the fixed browser Scorer origin is in its credentialed allowlist.
+ *
+ * This is intentionally a management-authenticated endpoint rather than an extra native header
+ * escape hatch. The request has no browser `Origin`; the relay compares its own configuration with
+ * the same fixed origin its pairing links launch, and returns only the result and corrective copy.
+ */
+export async function relayCheckScorerReadiness(connection: RelayConnection): Promise<ScorerReadinessResult> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/scorer-readiness`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) {
+    throw fail(response, 'The relay could not verify whether qbsheet.com can pair.');
+  }
+  const body = parseBody(response);
+  if (
+    body.origin !== scoresheetOrigin ||
+    typeof body.canPair !== 'boolean' ||
+    typeof body.message !== 'string'
+  ) {
+    throw new RelayError('The relay answered with an invalid Scorer readiness response.', response.status);
+  }
+  const state: ScorerReadinessResult['state'] = body.canPair ? 'ready' : 'blocked';
+  if (body.state !== state) {
+    throw new RelayError('The relay answered with an invalid Scorer readiness response.', response.status);
+  }
+  return {
+    origin: scoresheetOrigin,
+    canPair: body.canPair,
+    state,
+    message: body.message,
+  };
 }
 
 /**

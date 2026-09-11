@@ -13,16 +13,25 @@ import { planRoomSetup, planRound, publishRound, type PublishOutcome, type Publi
 import {
   relayAcknowledgeResults,
   relayClaim,
+  relayCheckScorerReadiness,
   relayFetchResults,
   relayUnackedWindow,
   RelayError,
   type RelayConnection,
+  type ScorerReadinessResult,
 } from './relay';
 import { resultFileContents, resultFileName, resultFilePath, resultSummary } from './results';
 import { nextRoomId } from './identity';
 import { newRoom, pairingWarnings, roomTombstone, type Room, type RoomStatus } from './rooms';
-import { loadState, saveState, type BridgeState, type StoredResult } from './persistence';
+import {
+  loadState,
+  saveState,
+  type BridgeState,
+  type ScorerReadinessSnapshot,
+  type StoredResult,
+} from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
+import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
 export const resultPollIntervalMs = 5000;
@@ -44,6 +53,15 @@ export interface BridgeNotice {
   message: string;
 }
 
+export type ScorerReadinessStatus = 'checking' | 'ready' | 'blocked' | 'unknown';
+
+export interface ScorerReadinessState {
+  status: ScorerReadinessStatus;
+  origin: typeof scoresheetOrigin;
+  message: string;
+  checkedAt?: string;
+}
+
 export interface BridgeApi {
   state: BridgeState;
   tournament: BridgeTournament | null;
@@ -52,12 +70,16 @@ export interface BridgeApi {
   notice: BridgeNotice | null;
   dismissNotice(): void;
   relayReachable: boolean | null;
+  /** Whether the ordinary browser Scorer origin can use the connected relay. */
+  scorerReadiness: ScorerReadinessState | null;
   busy: boolean;
   native: boolean;
 
   loadFile(): Promise<void>;
   loadFileContents(path: string | null, contents: string): void;
   connectRelay(input: { baseUrl: string; tournamentId: string; setupToken: string }): Promise<boolean>;
+  /** Re-run the management-authenticated check for the fixed qbsheet.com Scorer origin. */
+  checkScorerReadiness(): Promise<void>;
   /** Show the relay setup form without touching the stored relay. */
   beginRelayChange(): void;
   /** Close the setup form and keep whatever relay was already stored. */
@@ -110,12 +132,53 @@ function sameRelayConnection(left: RelayConnection | null, right: RelayConnectio
   );
 }
 
+function connectionKey(connection: RelayConnection): string {
+  return [connection.baseUrl, connection.tournamentId, connection.managementToken].join('\u001f');
+}
+
+function readinessState(result: ScorerReadinessResult): ScorerReadinessState {
+  return {
+    status: result.canPair ? 'ready' : 'blocked',
+    origin: result.origin,
+    message: result.message,
+  };
+}
+
+function persistedReadiness(readiness: ScorerReadinessState): ScorerReadinessSnapshot | null {
+  if (readiness.status === 'checking') return null;
+  return {
+    status: readiness.status,
+    origin: readiness.origin,
+    message: readiness.message,
+    checkedAt: readiness.checkedAt ?? new Date().toISOString(),
+  };
+}
+
+function readinessNotice(readiness: ScorerReadinessState): BridgeNotice {
+  if (readiness.status === 'ready') {
+    return { kind: 'good', message: `Scorer connection ready. ${readiness.message}` };
+  }
+  if (readiness.status === 'blocked') {
+    return { kind: 'warn', message: `Scorer cannot use this relay yet. ${readiness.message}` };
+  }
+  return { kind: 'warn', message: readiness.message };
+}
+
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
+  const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
+    state.relay
+      ? {
+          status: 'checking',
+          origin: scoresheetOrigin,
+          message: `Checking whether ${scoresheetOrigin} can pair with this relay.`,
+        }
+      : null,
+  );
   const [busy, setBusy] = useState(false);
   const [changingRelay, setChangingRelay] = useState(false);
   const stateRef = useRef(state);
@@ -132,6 +195,7 @@ export function useBridge(): BridgeApi {
     const timer = setTimeout(() => setNotice(null), noticeAutoDismissMs);
     return () => clearTimeout(timer);
   }, [notice]);
+  const readinessKeyRef = useRef<string | null>(null);
 
   const commit = useCallback((next: BridgeState | ((current: BridgeState) => BridgeState)) => {
     setState((current) => {
@@ -153,6 +217,56 @@ export function useBridge(): BridgeApi {
     savingResultIdsRef.current = next;
     setSavingResultIds(next);
   }, []);
+  const refreshScorerReadiness = useCallback(
+    async (connection: RelayConnection): Promise<ScorerReadinessState> => {
+      const key = connectionKey(connection);
+      readinessKeyRef.current = key;
+      const checking: ScorerReadinessState = {
+        status: 'checking',
+        origin: scoresheetOrigin,
+        message: `Checking whether ${scoresheetOrigin} can pair with this relay.`,
+      };
+      setScorerReadiness(checking);
+      commit((current) =>
+        connectionOf(current) && connectionKey(connectionOf(current)!) === key
+          ? { ...current, scorerReadiness: null }
+          : current,
+      );
+      try {
+        const result = await relayCheckScorerReadiness(connection);
+        const next = readinessState(result);
+        const stored = persistedReadiness(next);
+        if (readinessKeyRef.current === key) {
+          setRelayReachable(true);
+          setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
+          commit((current) =>
+            connectionOf(current) && connectionKey(connectionOf(current)!) === key
+              ? { ...current, scorerReadiness: stored }
+              : current,
+          );
+        }
+        return next;
+      } catch (error) {
+        const next: ScorerReadinessState = {
+          status: 'unknown',
+          origin: scoresheetOrigin,
+          message: `Scorer readiness could not be verified. Do not pair until this check succeeds. ${(error as Error).message}`,
+        };
+        const stored = persistedReadiness(next);
+        if (readinessKeyRef.current === key) {
+          setRelayReachable(false);
+          setScorerReadiness(stored ? { ...next, checkedAt: stored.checkedAt } : next);
+          commit((current) =>
+            connectionOf(current) && connectionKey(connectionOf(current)!) === key
+              ? { ...current, scorerReadiness: stored }
+              : current,
+          );
+        }
+        return next;
+      }
+    },
+    [commit],
+  );
 
   const loadFileContents = useCallback(
     (path: string | null, contents: string) => {
@@ -213,12 +327,16 @@ export function useBridge(): BridgeApi {
         // Invalidate an in-flight poll before publishing the replacement into state. This also
         // fences a reconnect that happens to reuse the same URL, tournament id, and credential.
         pollGenerationRef.current += 1;
+        const connection: RelayConnection = {
+          baseUrl: input.baseUrl.replace(/\/+$/, ''),
+          tournamentId: claimed.tournamentId,
+          managementToken: claimed.managementToken,
+        };
         commit((current) => ({
           ...current,
+          scorerReadiness: null,
           relay: {
-            baseUrl: input.baseUrl.replace(/\/+$/, ''),
-            tournamentId: claimed.tournamentId,
-            managementToken: claimed.managementToken,
+            ...connection,
             // A different relay is a different tournament object with its own revision counter.
             epoch: 1,
             revision: 0,
@@ -226,7 +344,8 @@ export function useBridge(): BridgeApi {
         }));
         setChangingRelay(false);
         setRelayReachable(true);
-        setNotice({ kind: 'good', message: 'Relay connected.' });
+        const readiness = await refreshScorerReadiness(connection);
+        if (readinessKeyRef.current === connectionKey(connection)) setNotice(readinessNotice(readiness));
         return true;
       } catch (error) {
         setRelayReachable(false);
@@ -239,11 +358,29 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [commit],
+    [commit, refreshScorerReadiness],
   );
 
   const beginRelayChange = useCallback(() => setChangingRelay(true), []);
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
+
+  const checkScorerReadiness = useCallback(async () => {
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return;
+    const readiness = await refreshScorerReadiness(connection);
+    if (readinessKeyRef.current === connectionKey(connection)) setNotice(readinessNotice(readiness));
+  }, [refreshScorerReadiness]);
+
+  useEffect(() => {
+    if (!state.relay) {
+      readinessKeyRef.current = null;
+      return;
+    }
+    const connection = connectionOf(state);
+    if (!connection) return;
+    if (readinessKeyRef.current === connectionKey(connection)) return;
+    void refreshScorerReadiness(connection);
+  }, [refreshScorerReadiness, state]);
 
   /**
    * Delete the stored management credential.
@@ -254,7 +391,7 @@ export function useBridge(): BridgeApi {
    */
   const forgetRelayCredential = useCallback(() => {
     pollGenerationRef.current += 1;
-    commit((current) => ({ ...current, relay: null }));
+    commit((current) => ({ ...current, relay: null, scorerReadiness: null }));
     setChangingRelay(true);
     setRelayReachable(null);
     setNotice({
@@ -789,11 +926,13 @@ export function useBridge(): BridgeApi {
     notice,
     dismissNotice,
     relayReachable,
+    scorerReadiness,
     busy,
     native: isNativeHost(),
     loadFile,
     loadFileContents,
     connectRelay,
+    checkScorerReadiness,
     beginRelayChange,
     cancelRelayChange,
     changingRelay,

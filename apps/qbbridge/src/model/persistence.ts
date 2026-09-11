@@ -20,6 +20,7 @@
  */
 
 import type { Room, RoomTombstone } from './rooms';
+import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 export const storageKey = 'qbbridge.state.v1';
 
@@ -32,6 +33,14 @@ export interface StoredResult {
   savedPath?: string;
   /** True after the file is on disk, until the relay confirms the result was acknowledged. */
   ackPending?: boolean;
+}
+
+/** The last persisted result of the fixed ordinary Scorer-origin check. */
+export interface ScorerReadinessSnapshot {
+  status: 'ready' | 'blocked' | 'unknown';
+  origin: typeof scoresheetOrigin;
+  message: string;
+  checkedAt: string;
 }
 
 export interface BridgeState {
@@ -51,6 +60,8 @@ export interface BridgeState {
     /** The last mirror revision the relay accepted. The next publish is this plus one. */
     revision: number;
   } | null;
+  /** Last Scorer-origin check; a new app session rechecks it before showing pairing as ready. */
+  scorerReadiness: ScorerReadinessSnapshot | null;
   /** Where the `.yft` was last read from, so the panel can name it after a restart. */
   yftPath: string | null;
   tournamentName: string | null;
@@ -69,6 +80,7 @@ export function emptyState(): BridgeState {
   return {
     version: 1,
     relay: null,
+    scorerReadiness: null,
     yftPath: null,
     tournamentName: null,
     rooms: [],
@@ -135,6 +147,25 @@ function normalizeTombstone(value: unknown): RoomTombstone | null {
   };
 }
 
+function readScorerReadiness(value: unknown): ScorerReadinessSnapshot | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    (record.status !== 'ready' && record.status !== 'blocked' && record.status !== 'unknown') ||
+    record.origin !== scoresheetOrigin ||
+    typeof record.message !== 'string' ||
+    typeof record.checkedAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    status: record.status,
+    origin: scoresheetOrigin,
+    message: record.message,
+    checkedAt: record.checkedAt,
+  };
+}
+
 /**
  * Read the saved state.
  *
@@ -181,6 +212,7 @@ export function loadState(): BridgeState {
     return {
       version: 1,
       relay: state.relay ?? null,
+      scorerReadiness: readScorerReadiness(state.scorerReadiness),
       yftPath: state.yftPath ?? null,
       tournamentName: state.tournamentName ?? null,
       rooms,
