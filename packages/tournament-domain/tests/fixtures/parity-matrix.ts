@@ -439,6 +439,180 @@ export function zeroVsUnknownMode(): DirectorState {
   ]);
 }
 
+/** 15. Mixed bounceback history: game-2's pinned definition has no bouncebacks and stores a scorer-exported zero. */
+export function mixedBouncebackMode(): DirectorState {
+  const on = structuredClone({ ...defaultRules, bouncebacks: true });
+  const off = structuredClone(defaultRules);
+  const games = [
+    game(
+      'g1',
+      [
+        teamScore('a', 350, { powers: 2, gets: 8, negs: 1, bonuses: 10, bonusPoints: 200, bouncebacks: 30 }),
+        teamScore('b', 200, { powers: 1, gets: 7, negs: 2, bonuses: 8, bonusPoints: 150, bouncebacks: 0 }),
+      ],
+      { definitionDigest: 'bb-on' },
+    ),
+    game(
+      'g2',
+      [
+        teamScore('a', 300, { powers: 2, gets: 8, negs: 1, bonuses: 10, bonusPoints: 180, bouncebacks: 0 }),
+        teamScore('b', 150, { powers: 1, gets: 4, negs: 2, bonuses: 5, bonusPoints: 60, bouncebacks: 0 }),
+      ],
+      { definitionDigest: 'bb-off' },
+    ),
+  ];
+  return matrixState(games, {
+    rules: { bouncebacks: false },
+    gameDefinitions: [
+      {
+        id: 'def-bb-on',
+        scheduledGameId: 's-g1',
+        revision: 1,
+        createdAt: at,
+        rules: on,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'b',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'bb-on',
+      },
+      {
+        id: 'def-bb-off',
+        scheduledGameId: 's-g2',
+        revision: 1,
+        createdAt: at,
+        rules: off,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'b',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'bb-off',
+      },
+    ],
+  });
+}
+
+/** 16. Mixed lightning history: game-2's pinned definition has no lightning and carries no breakdown. */
+export function mixedLightningMode(): DirectorState {
+  const on = structuredClone({ ...defaultRules, lightning: true });
+  const off = structuredClone(defaultRules);
+  const games = [
+    game(
+      'g1',
+      [
+        teamScore('a', 350, {
+          powers: 2,
+          gets: 8,
+          negs: 1,
+          bonuses: 10,
+          bonusPoints: 200,
+          lightningPoints: 40,
+        }),
+        teamScore('b', 200, {
+          powers: 1,
+          gets: 7,
+          negs: 2,
+          bonuses: 8,
+          bonusPoints: 150,
+          lightningPoints: 30,
+        }),
+      ],
+      { definitionDigest: 'lightning-on' },
+    ),
+    game(
+      'g2',
+      [
+        teamScore('a', 300, { powers: 2, gets: 8, negs: 1, bonuses: 10, bonusPoints: 180 }),
+        teamScore('b', 150, { powers: 1, gets: 4, negs: 2, bonuses: 5, bonusPoints: 60 }),
+      ],
+      { definitionDigest: 'lightning-off' },
+    ),
+  ];
+  return matrixState(games, {
+    rules: { lightning: false },
+    gameDefinitions: [
+      {
+        id: 'def-lightning-on',
+        scheduledGameId: 's-g1',
+        revision: 1,
+        createdAt: at,
+        rules: on,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'b',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'lightning-on',
+      },
+      {
+        id: 'def-lightning-off',
+        scheduledGameId: 's-g2',
+        revision: 1,
+        createdAt: at,
+        rules: off,
+        roundId: 'round-1',
+        packetId: 'packet-1',
+        leftTeamId: 'a',
+        rightTeamId: 'b',
+        leftRoster: [],
+        rightRoster: [],
+        assignmentRevision: 1,
+        digest: 'lightning-off',
+      },
+    ],
+  });
+}
+
+/** 17. Overtime with a known points split: regulation scoring excludes overtime points. */
+export function overtimeKnownPointsMode(): DirectorState {
+  return matrixState([
+    game(
+      'g1',
+      [
+        teamScore('a', 330, {
+          powers: 4,
+          gets: 8,
+          negs: 1,
+          bonuses: 12,
+          bonusPoints: 130,
+          overtimePoints: 30,
+        }),
+        teamScore('b', 120, {
+          powers: 1,
+          gets: 5,
+          negs: 2,
+          bonuses: 6,
+          bonusPoints: 40,
+          overtimePoints: 10,
+        }),
+      ],
+      { tossupsRead: 20, overtimeTossupsRead: 2 },
+    ),
+  ]);
+}
+
+/** 18. Overtime-capable game with an unknown points split: regulation scoring declines. */
+export function overtimeUnknownSplitMode(): DirectorState {
+  return matrixState([
+    game(
+      'g1',
+      [
+        teamScore('a', 330, { powers: 4, gets: 8, negs: 1, bonuses: 12, bonusPoints: 130 }),
+        teamScore('b', 120, { powers: 1, gets: 5, negs: 2, bonuses: 6, bonusPoints: 40 }),
+      ],
+      { tossupsRead: 20, overtimeTossupsRead: 2 },
+    ),
+  ]);
+}
+
 /** 14. Mixed history: game-2 was played under a 20-point power definition. */
 export function mixedDefinitionsMode(): DirectorState {
   const modern = structuredClone(defaultRules);

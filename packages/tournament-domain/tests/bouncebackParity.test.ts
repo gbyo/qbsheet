@@ -340,7 +340,9 @@ describe('bounceback parity (#748)', () => {
   });
 
   test('per-game historical definitions override live rules for that game only', () => {
-    const irregular = { ...defaultRules, minimumBonusParts: 2 };
+    // Bouncebacks stay applicable so this fixture isolates irregularity (not N/A):
+    // a pinned no-bounceback definition would exclude the game entirely (#755).
+    const irregular = { ...defaultRules, minimumBonusParts: 2, bouncebacks: true };
     const state = stateWithGames([
       game('g1', [
         teamScore('a', 320, { bonuses: 6, bonusPoints: 90, bouncebacks: 30 }),

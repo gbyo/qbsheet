@@ -359,11 +359,7 @@ export function deriveTeamStandings(
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
     accumulateBouncebackSide(bouncebackTotalsFor(left.teamId), left, right, game, gameRules, detailKnown);
-    if (gameRules.lightning && !isPureForfeitPlaceholder(game)) {
-      leftStanding.lightningGames += 1;
-      rightStanding.lightningGames += 1;
-    }
-    addTeamLightning(leftStanding, left.lightningPoints);
+    accumulateTeamLightning(leftStanding, left.lightningPoints, game, gameRules);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
     rightStanding.negs += right.negs;
@@ -378,7 +374,7 @@ export function deriveTeamStandings(
     if (rightOutcome === 'win') rightStanding.wins += 1;
     else if (rightOutcome === 'loss') rightStanding.losses += 1;
     else if (rightOutcome === 'tie') rightStanding.ties += 1;
-    addTeamLightning(rightStanding, right.lightningPoints);
+    accumulateTeamLightning(rightStanding, right.lightningPoints, game, gameRules);
   }
 
   for (const standing of byTeam.values()) {
@@ -577,6 +573,13 @@ function accumulateBouncebackSide(
   rules: TournamentRules | null | undefined,
   detailKnown: boolean,
 ): void {
+  if (rules && !rules.bouncebacks && game.definitionDigest) {
+    // The pinned historical definition defines no bouncebacks: this game is N/A
+    // for every bounceback fact, whether the stored breakdown is an omitted null
+    // or a scorer-exported numeric zero (#755). Entered detail under an
+    // applicable definition always aggregates as-entered below.
+    return;
+  }
   if (own.bouncebacks === null) {
     // An absent breakdown is N/A — not unknown — where the stored historical
     // definition defines no bouncebacks, or the game is a pure-forfeit placeholder.
@@ -946,7 +949,29 @@ export function bonusPointsPerBonus(bonusPoints: number, bonuses: number): numbe
 /**
  * Lightning points are known only when the result supplies the breakdown.
  * A missing value marks the aggregate unknown rather than contributing zero.
+ *
+ * Games whose historical definition disables lightning are N/A: they contribute
+ * neither points, knownness, nor denominator (#755). Pure-forfeit placeholders
+ * likewise contribute nothing, while a forfeit that kept entered lightning
+ * detail aggregates as-entered without supplying a per-game denominator.
  */
+function accumulateTeamLightning(
+  standing: TeamStanding,
+  lightningPoints: number | null | undefined,
+  game: GameRecord,
+  gameRules: TournamentRules,
+): void {
+  if (!gameRules.lightning) return;
+  if (game.status === 'forfeit') {
+    if (typeof lightningPoints === 'number' && Number.isFinite(lightningPoints)) {
+      standing.lightningPoints += lightningPoints;
+    }
+    return;
+  }
+  standing.lightningGames += 1;
+  addTeamLightning(standing, lightningPoints);
+}
+
 function addTeamLightning(standing: TeamStanding, lightningPoints: number | null | undefined): void {
   if (lightningPoints === null || lightningPoints === undefined) {
     standing.lightningKnown = false;

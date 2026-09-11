@@ -27,6 +27,7 @@ import {
   type DirectorState,
   type GameRecord,
   type TeamGameScore,
+  type TournamentRules,
 } from '../domain';
 import {
   deriveRoundStats,
@@ -192,16 +193,25 @@ function teamGameParts(
     bonusPartsConverted: null,
     bonusPartsHeard: null,
   };
-  if (!gameDetailedCountsKnown(game) || !opponent || own.bouncebacks === null) return declined;
+  if (!gameDetailedCountsKnown(game) || !opponent) return declined;
   const rules = rulesForGame(state, game) ?? defaultRules;
   if (!bonusPartsAreRegular(rules) || !(rules.bonusValue > 0)) return declined;
+  const ownParts = {
+    bonusPartsConverted: own.bonusPoints / rules.bonusValue,
+    bonusPartsHeard: own.bonuses * rules.bonusParts,
+  };
+  if (rules && !rules.bouncebacks && game.definitionDigest) {
+    // The pinned historical definition defines no bouncebacks: bounceback parts
+    // are N/A (null), while the team's own bonus parts remain known facts (#755).
+    return { ...declined, ...ownParts };
+  }
+  if (own.bouncebacks === null) return declined;
   const heard = bouncebackPartsHeardForTeam(opponent.bonuses, opponent.bonusPoints, rules);
   if (heard === null) return declined;
   return {
     bouncebackPartsHeard: heard,
     bouncebackPartsConverted: (own.bouncebacks ?? 0) / rules.bonusValue,
-    bonusPartsConverted: own.bonusPoints / rules.bonusValue,
-    bonusPartsHeard: own.bonuses * rules.bonusParts,
+    ...ownParts,
   };
 }
 
@@ -212,7 +222,10 @@ function teamGameParts(
  * Provenance is reported as unknown until per-game definition storage (#671)
  * records where each historical definition came from.
  */
-function roundStatDefinitionOf(historical: HistoricalGameDefinition): RoundStatDefinition {
+function roundStatDefinitionOf(
+  historical: HistoricalGameDefinition,
+  rules: TournamentRules | null,
+): RoundStatDefinition {
   return {
     regulationTossups: historical.regulationTossupCount,
     regulationLengthFixed: null,
@@ -220,6 +233,11 @@ function roundStatDefinitionOf(historical: HistoricalGameDefinition): RoundStatD
     powers: historical.powerApplicable,
     superpowers: historical.superpowerApplicable,
     bonuses: historical.bonusApplicable,
+    // Applicability for N/A-scoping comes from the resolved historical rules —
+    // the same source the canonical aggregation uses — never a numeric probe of
+    // the stored breakdowns (#755).
+    bouncebacks: rules ? rules.bouncebacks : null,
+    lightning: rules ? rules.lightning : null,
     maximumBonusScore: historical.maximumBonusScore,
     source: 'unknown',
   };
@@ -407,7 +425,7 @@ export function buildCanonicalSnapshot(
     const phaseNameText = phaseId ? phaseName.get(phaseId) : undefined;
     return {
       gameId: game.id,
-      roundStatDefinition: roundStatDefinitionOf(historical),
+      roundStatDefinition: roundStatDefinitionOf(historical, rulesForGame(state, game) ?? null),
       ...(phaseId ? { phaseId } : {}),
       ...(phaseNameText ? { phaseName: phaseNameText } : {}),
       roundId: game.roundId,

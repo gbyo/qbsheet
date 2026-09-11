@@ -151,14 +151,15 @@ export function deriveRoundStats(
         if (isPureForfeitPlaceholder(game)) continue;
         const rules = rulesForGame(state, game);
         const [left, right] = game.scores;
-        // A side with no breakdown where the stored definition defines no bouncebacks
-        // is N/A rather than unknown; a game excused on both sides contributes
-        // nothing at all (#755).
+        // A side whose stored definition defines no bouncebacks is N/A rather
+        // than unknown — whether the stored breakdown is an omitted null or a
+        // scorer-exported numeric zero; a game excused on both sides contributes
+        // nothing at all (#755, matching accumulateBouncebackSide in stats.ts).
         const sideExcused = (bouncebacks: number | null | undefined): boolean =>
-          // An omitted breakdown is the legacy zero shorthand (aggregates
-          // as-entered below); only explicit null takes the N/A path, matching
-          // accumulateBouncebackSide in stats.ts.
-          bouncebacks === null && !!rules && !rules.bouncebacks && !!game.definitionDigest;
+          (bouncebacks === null || bouncebacks === 0) &&
+          !!rules &&
+          !rules.bouncebacks &&
+          !!game.definitionDigest;
         if (!left || !right) {
           bouncebackPartsKnown = false;
           bouncebackUnknownGames += 1;

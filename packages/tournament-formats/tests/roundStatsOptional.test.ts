@@ -34,6 +34,8 @@ function definition(overrides: Partial<RoundStatDefinition> = {}): RoundStatDefi
     powers: true,
     superpowers: false,
     bonuses: true,
+    bouncebacks: false,
+    lightning: false,
     maximumBonusScore: 30,
     source: 'game',
     ...overrides,
