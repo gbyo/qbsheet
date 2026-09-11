@@ -1,0 +1,359 @@
+/*
+ * The completed game is still a scoresheet until the result is submitted.
+ *
+ * Keep the same ruled, low-decoration visual language as live scoring: one strong score, thin rules,
+ * restrained state text, and only the actual submit action receiving primary emphasis.
+ */
+
+.scorer-review-submit {
+  gap: 18px;
+}
+
+.scorer-review-submit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-review-submit-eyebrow {
+  margin: 0 0 3px;
+  font-size: 0.6875rem;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--room-muted);
+}
+
+.scorer-review-submit-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.scorer-review-submit-state {
+  max-width: 620px;
+  margin: 7px 0 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-review-submit-state strong {
+  color: var(--room-text);
+}
+
+.scorer-review-submit-phase {
+  flex: none;
+  padding-top: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--room-muted);
+}
+
+.scorer-review-score {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 20px;
+  padding: 12px 0 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-review-score-team {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 16px;
+}
+
+.scorer-review-score-team.is-right {
+  justify-content: flex-start;
+}
+
+.scorer-review-score-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: clamp(1rem, 2vw, 1.3rem);
+  font-weight: 600;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-review-score-number {
+  flex: none;
+  font-size: clamp(2.8rem, 7vw, 4.8rem);
+  font-weight: 520;
+  line-height: 0.95;
+  letter-spacing: -0.035em;
+}
+
+.scorer-review-score-separator {
+  color: var(--room-faint);
+  font-size: 1.5rem;
+}
+
+.scorer-review-score-detail {
+  margin: 0;
+  text-align: center;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-review-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.scorer-review-edit {
+  font-weight: 600;
+}
+
+.scorer-review-edit-note {
+  flex-basis: 100%;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-review-attention {
+  border-top: 1px solid var(--room-border-strong);
+  border-bottom: 1px solid var(--room-border-strong);
+}
+
+.scorer-review-attention-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0 10px;
+}
+
+.scorer-review-attention-head h3 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.scorer-review-attention-group {
+  padding: 10px 12px;
+  border-top: 1px solid var(--room-border);
+  border-left: 3px solid var(--room-warning);
+  background: var(--room-surface-sunken);
+  font-size: 0.8125rem;
+}
+
+.scorer-review-attention-group.is-blocking {
+  border-left-color: var(--room-error);
+  background: var(--room-error-bg);
+}
+
+.scorer-review-attention-group + .scorer-review-attention-group {
+  margin-top: 8px;
+}
+
+.scorer-review-attention-label {
+  margin: 0 0 5px;
+  font-weight: 650;
+}
+
+.scorer-review-attention-group ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.scorer-review-attention-group li + li {
+  margin-top: 3px;
+}
+
+.scorer-review-attention-note {
+  margin: 7px 0 0;
+  color: var(--room-muted);
+}
+
+.scorer-review-section {
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-review-section:last-of-type {
+  border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-review-section > summary {
+  position: relative;
+  padding: 13px 24px 13px 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+.scorer-review-section > summary::-webkit-details-marker {
+  display: none;
+}
+
+.scorer-review-section > summary::after {
+  content: '›';
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  color: var(--room-muted);
+  font-size: 1.1rem;
+  transform: translateY(-50%) rotate(90deg);
+  transition: transform 120ms ease-out;
+}
+
+.scorer-review-section[open] > summary::after {
+  transform: translateY(-50%) rotate(-90deg);
+}
+
+.scorer-review-section-note {
+  margin: -3px 0 12px;
+  font-size: 0.75rem;
+  color: var(--room-muted);
+}
+
+.scorer-review-section .scorer-check-teams {
+  margin: 0 0 14px;
+}
+
+.scorer-review-export-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.scorer-review-submit-final {
+  position: sticky;
+  bottom: -32px;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px 18px;
+  margin: 2px -32px -32px;
+  padding: 14px 32px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--room-surface);
+  border-top: 1px solid var(--room-border-strong);
+  box-shadow: 0 -10px 18px -18px rgb(0 0 0 / 45%);
+}
+
+.scorer-review-confirm {
+  margin: 0;
+  font-weight: 600;
+}
+
+.scorer-review-submit-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.scorer-review-submit-buttons .scorer-submit,
+.scorer-review-submit-buttons .scorer-action {
+  min-height: 42px;
+}
+
+.scorer-review-submit-blocked {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--room-error);
+}
+
+@media (max-width: 700px) {
+  .scorer-review-submit {
+    gap: 14px;
+  }
+
+  .scorer-review-submit-head {
+    gap: 12px;
+  }
+
+  .scorer-review-submit-phase {
+    display: none;
+  }
+
+  .scorer-review-score {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .scorer-review-score-team,
+  .scorer-review-score-team.is-right {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+  }
+
+  .scorer-review-score-team {
+    text-align: right;
+  }
+
+  .scorer-review-score-team.is-right {
+    text-align: left;
+  }
+
+  .scorer-review-score-team.is-right .scorer-review-score-number {
+    order: 2;
+  }
+
+  .scorer-review-score-number {
+    font-size: clamp(2.5rem, 15vw, 4rem);
+  }
+
+  .scorer-review-score-name {
+    font-size: 0.9375rem;
+  }
+
+  .scorer-review-score-separator {
+    align-self: end;
+    padding-bottom: 7px;
+  }
+
+  .scorer-review-submit-final {
+    bottom: -16px;
+    grid-template-columns: 1fr;
+    margin: 0 -16px -16px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .scorer-review-submit-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1.25fr;
+  }
+
+  .scorer-review-submit-buttons .scorer-submit,
+  .scorer-review-submit-buttons .scorer-action {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  .scorer-review-attention-head {
+    align-items: center;
+  }
+}
+
+@media (max-width: 460px) {
+  .scorer-review-score-name {
+    white-space: normal;
+  }
+
+  .scorer-review-edit-actions > .scorer-action {
+    flex: 1 1 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scorer-review-section > summary::after {
+    transition: none;
+  }
+}
