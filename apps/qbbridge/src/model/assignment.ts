@@ -27,7 +27,8 @@
  * a result by the absence of scoring content, and a fabricated zero removes that signal.
  */
 
-import { stripSecrets } from '../../../../src/director/transfers/canonical';
+import { fnv1a64, stripSecrets } from '../../../../src/director/transfers/canonical';
+import { assignmentFileName as safeAssignmentFileName } from '../../../../src/director/transfers/filenames';
 import { pairingMatchId } from './identity';
 import type { BridgeRound, BridgeTeam, BridgeTournament } from './tournament';
 
@@ -60,6 +61,28 @@ export interface PreparedAssignment {
 }
 
 export type AssignmentResult = { ok: true; assignment: PreparedAssignment } | { ok: false; error: string };
+
+/** A descriptive, cross-platform filename for an offline assignment export. */
+export function assignmentFileName(
+  assignment: Pick<
+    PreparedAssignment,
+    'matchId' | 'roundQbjName' | 'roomName' | 'leftTeamName' | 'rightTeamName'
+  >,
+): string {
+  const descriptive = safeAssignmentFileName({
+    roundName: `Round ${assignment.roundQbjName}`,
+    roomName: assignment.roomName,
+    leftTeam: assignment.leftTeamName,
+    rightTeam: assignment.rightTeamName,
+  });
+  const stem = descriptive.replace(/\.qbj$/i, '');
+  return `${stem} - ${fnv1a64(assignment.matchId).slice(0, 12)}.qbj`;
+}
+
+/** The exact ordinary QBJ bytes handed to Scorer during an offline fallback. */
+export function assignmentFileContents(assignment: Pick<PreparedAssignment, 'document'>): string {
+  return `${JSON.stringify(assignment.document, null, 2)}\n`;
+}
 
 /** Return the Round.name spelling that stock YellowFruit can resolve on import. */
 function stockRoundName(round: BridgeRound): string | null {

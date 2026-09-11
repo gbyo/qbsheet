@@ -17,6 +17,13 @@ export default function BridgeApp() {
   const bridge = useBridge();
   const [tab, setTab] = useState('setup');
   const unsaved = bridge.state.results.filter((entry) => !entry.savedPath).length;
+  const resultAttention = [
+    ...(unsaved > 0 ? [`${unsaved} new`] : []),
+    ...(bridge.needsImportCount > 0 ? [`${bridge.needsImportCount} need import`] : []),
+  ].join(', ');
+  const fallbackComplete =
+    bridge.assignmentFallback !== null &&
+    bridge.assignmentFallback.exportedRoomIds.length === bridge.assignmentFallback.plan.assignments.length;
 
   return (
     <div id="app-root" className="shell">
@@ -61,7 +68,7 @@ export default function BridgeApp() {
         <TabList aria-label="QBSheet Bridge sections">
           <Tab id="setup">Tournament</Tab>
           <Tab id="rooms">Rooms</Tab>
-          <Tab id="results">{unsaved > 0 ? `Results (${unsaved} new)` : 'Results'}</Tab>
+          <Tab id="results">{resultAttention ? `Results (${resultAttention})` : 'Results'}</Tab>
           <Tab id="help">Help</Tab>
         </TabList>
 
@@ -92,8 +99,8 @@ export default function BridgeApp() {
             ) : null}
             {bridge.persistenceSavePending ? (
               <Notice tone="warning">
-                The relay accepted the last change, but this machine has not saved the new relay revision.
-                Keep QBBridge open and retry before restarting.
+                An important QBBridge change is active in this window but has not been saved locally. Keep
+                QBBridge open and retry before restarting.
                 <Button
                   size="sm"
                   variant="quiet"
@@ -102,6 +109,34 @@ export default function BridgeApp() {
                   isDisabled={bridge.busy}
                 >
                   Retry saving local state
+                </Button>
+              </Notice>
+            ) : null}
+            {bridge.assignmentFallback ? (
+              <Notice tone="warning">
+                {fallbackComplete ? (
+                  <>
+                    Round {bridge.assignmentFallback.roundName} fallback assignments were exported to{' '}
+                    <code>{bridge.assignmentFallback.exportDirectory}</code>. Already-open games are safe. Do
+                    not also publish this round to the relay after a scorer opens a fallback file.
+                  </>
+                ) : (
+                  <>
+                    The Internet relay could not publish Round {bridge.assignmentFallback.roundName};
+                    already-open games are safe. Export{' '}
+                    {bridge.assignmentFallback.plan.assignments.length -
+                      bridge.assignmentFallback.exportedRoomIds.length}{' '}
+                    remaining assignment file(s) for local or USB handoff.
+                  </>
+                )}
+                <Button
+                  size="sm"
+                  variant="primary"
+                  style={{ marginLeft: 'var(--qbs-space-2)' }}
+                  onPress={() => void bridge.exportAssignmentFallback()}
+                  isDisabled={bridge.busy || fallbackComplete}
+                >
+                  {fallbackComplete ? 'Assignments exported' : 'Export round assignments'}
                 </Button>
               </Notice>
             ) : null}

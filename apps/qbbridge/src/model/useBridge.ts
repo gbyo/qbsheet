@@ -7,9 +7,24 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { chooseResultFolder, isNativeHost, openYellowFruitFile, writeResultFile } from './native';
+import {
+  chooseAssignmentFolder,
+  chooseResultFolder,
+  isNativeHost,
+  openYellowFruitFile,
+  writeAssignmentFile,
+  writeResultFile,
+} from './native';
 import { generatePairingCode } from './pairing';
-import { planRoomSetup, planRound, publishRound, type PublishOutcome, type PublishPlan } from './publish';
+import {
+  planRoomSetup,
+  planRound,
+  publicationReviewItems,
+  publishRound,
+  type PublicationReviewItem,
+  type PublishOutcome,
+  type PublishPlan,
+} from './publish';
 import {
   relayAcknowledgeResults,
   relayClaim,
@@ -20,7 +35,15 @@ import {
   type RelayConnection,
   type ScorerReadinessResult,
 } from './relay';
-import { resultFileContents, resultFileName, resultFilePath, resultSummary } from './results';
+import {
+  resultFileContents,
+  resultFileName,
+  resultFilePath,
+  resultImportStatus,
+  resultMatchId,
+  resultSummary,
+} from './results';
+import { assignmentFileContents, assignmentFileName } from './assignment';
 import { nextRoomId } from './identity';
 import {
   newRoom,
@@ -29,6 +52,7 @@ import {
   roomTombstone,
   type Room,
   type RoomStatus,
+  type RoomTombstone,
 } from './rooms';
 import {
   emptyState,
@@ -40,6 +64,7 @@ import {
   type StoredResult,
 } from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
+import { schedulePairingWarnings } from './schedule';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
@@ -60,6 +85,34 @@ export const unsavedResultWarningThreshold = relayUnackedWindow - 28;
 export interface BridgeNotice {
   kind: 'good' | 'warn' | 'bad';
   message: string;
+}
+
+export interface AssignmentFallback {
+  tournamentName: string;
+  roundId: string;
+  roundName: string;
+  plan: PublishPlan;
+  /** Room ids whose assignment files were already written during a partial retry. */
+  exportedRoomIds: string[];
+  /** The one folder chosen for this export attempt; retries finish the same coherent batch. */
+  exportDirectory: string | null;
+}
+
+interface PublicationSnapshot {
+  connection: RelayConnection | null;
+  epoch: number;
+  revision: number;
+  rooms: Room[];
+  tombstones: RoomTombstone[];
+}
+
+export interface PendingPublicationReview {
+  tournamentName: string;
+  roundId: string;
+  roundName: string;
+  plan: PublishPlan;
+  items: PublicationReviewItem[];
+  snapshot: PublicationSnapshot;
 }
 
 export type ScorerReadinessStatus = 'checking' | 'ready' | 'blocked' | 'unknown';
@@ -115,6 +168,11 @@ export interface BridgeApi {
   /** True when changing rounds would discard team selections the operator has entered. */
   roundChangeDiscardsSelections: boolean;
   publish(): Promise<void>;
+  pendingPublicationReview: PendingPublicationReview | null;
+  confirmPublicationReview(): Promise<void>;
+  cancelPublicationReview(): void;
+  assignmentFallback: AssignmentFallback | null;
+  exportAssignmentFallback(): Promise<boolean>;
   /** Publish room identities and pairing hashes without sending any match assignments. */
   publishRoomSetup(): Promise<void>;
   roomStatus(room: Room): RoomStatus;
@@ -123,6 +181,9 @@ export interface BridgeApi {
   chooseFolder(): Promise<void>;
   saveNewResults(): Promise<void>;
   saveResult(resultId: string): Promise<void>;
+  markResultImported(resultId: string): void;
+  unmarkResultImported(resultId: string): void;
+  needsImportCount: number;
   /** True when this row cannot start a save because a save or another bridge action is active. */
   resultBusy(resultId: string): boolean;
   /** True while an individual or batch result save is in progress. */
@@ -152,6 +213,21 @@ function sameRelayConnection(left: RelayConnection | null, right: RelayConnectio
 
 function connectionKey(connection: RelayConnection): string {
   return [connection.baseUrl, connection.tournamentId, connection.managementToken].join('\u001f');
+}
+
+function publicationSnapshot(state: BridgeState): PublicationSnapshot {
+  return {
+    connection: connectionOf(state),
+    epoch: state.relay?.epoch ?? 1,
+    revision: state.relay?.revision ?? 0,
+    rooms: state.rooms.map((room) => ({ ...room })),
+    tombstones: state.pendingRoomRemovals.map((room) => ({ ...room })),
+  };
+}
+
+/** Only transport/server failures justify a local-file fallback; refusals require correction. */
+function relayUnavailable(error: unknown): boolean {
+  return !(error instanceof RelayError) || (error.status !== null && error.status >= 500);
 }
 
 function readinessState(result: ScorerReadinessResult): ScorerReadinessState {
@@ -242,6 +318,12 @@ export function useBridge(): BridgeApi {
     tournamentName: string;
     path: string | null;
   } | null>(null);
+  const [pendingPublicationReview, setPendingPublicationReview] = useState<PendingPublicationReview | null>(
+    null,
+  );
+  const pendingPublicationReviewRef = useRef<PendingPublicationReview | null>(null);
+  const [assignmentFallback, setAssignmentFallback] = useState<AssignmentFallback | null>(null);
+  const assignmentFallbackRef = useRef<AssignmentFallback | null>(null);
   const stateRef = useRef(state);
   const pollGenerationRef = useRef(0);
   const pendingFileRef = useRef<{
@@ -270,6 +352,21 @@ export function useBridge(): BridgeApi {
     stateRef.current = next;
     setState(next);
   }, []);
+
+  const rememberPublicationReview = useCallback((review: PendingPublicationReview | null): void => {
+    pendingPublicationReviewRef.current = review;
+    setPendingPublicationReview(review);
+  }, []);
+
+  const rememberAssignmentFallback = useCallback((fallback: AssignmentFallback | null): void => {
+    assignmentFallbackRef.current = fallback;
+    setAssignmentFallback(fallback);
+  }, []);
+
+  const invalidateRoundArtifacts = useCallback((): void => {
+    rememberPublicationReview(null);
+    rememberAssignmentFallback(null);
+  }, [rememberAssignmentFallback, rememberPublicationReview]);
 
   const commit = useCallback(
     (
@@ -381,6 +478,8 @@ export function useBridge(): BridgeApi {
         setScorerReadiness(null);
         setRelayReachable(null);
         setChangingRelay(false);
+        rememberPublicationReview(null);
+        rememberAssignmentFallback(null);
         activateState(next);
       } else {
         commit((currentState) => {
@@ -398,13 +497,14 @@ export function useBridge(): BridgeApi {
       }
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
+      invalidateRoundArtifacts();
       setNotice({
         kind: 'good',
         message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.`,
       });
       return true;
     },
-    [activateState, commit],
+    [activateState, commit, invalidateRoundArtifacts, rememberAssignmentFallback, rememberPublicationReview],
   );
 
   const loadFileContents = useCallback(
@@ -642,6 +742,7 @@ export function useBridge(): BridgeApi {
   }, []);
 
   const addRoom = useCallback(() => {
+    invalidateRoundArtifacts();
     commit((current) => {
       const id = nextRoomId([
         ...current.rooms,
@@ -651,16 +752,17 @@ export function useBridge(): BridgeApi {
       const name = `Room ${current.rooms.length + 1}`;
       return { ...current, rooms: [...current.rooms, newRoom(id, name, generatePairingCode())] };
     });
-  }, [commit]);
+  }, [commit, invalidateRoundArtifacts]);
 
   const updateRoom = useCallback(
     (roomId: string, change: (room: Room) => Room) => {
+      invalidateRoundArtifacts();
       commit((current) => ({
         ...current,
         rooms: current.rooms.map((room) => (room.id === roomId ? change(room) : room)),
       }));
     },
-    [commit],
+    [commit, invalidateRoundArtifacts],
   );
 
   const renameRoom = useCallback(
@@ -673,6 +775,7 @@ export function useBridge(): BridgeApi {
       const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
       if (!room) return;
       const tombstone = room.relayPublished ? roomTombstone(room) : null;
+      invalidateRoundArtifacts();
       commit((current) => ({
         ...current,
         rooms: current.rooms.filter((entry) => entry.id !== roomId),
@@ -694,7 +797,7 @@ export function useBridge(): BridgeApi {
           : { kind: 'good', message: `${room.name} was removed.` },
       );
     },
-    [commit],
+    [commit, invalidateRoundArtifacts],
   );
 
   const setRoomTeams = useCallback(
@@ -725,7 +828,8 @@ export function useBridge(): BridgeApi {
    * survive. Only the entry state for the current round is cleared.
    */
   const selectRound = useCallback(
-    (roundId: string) =>
+    (roundId: string) => {
+      invalidateRoundArtifacts();
       commit((current) =>
         current.selectedRoundId === roundId
           ? current
@@ -738,8 +842,9 @@ export function useBridge(): BridgeApi {
                 rightTeamId: null,
               })),
             },
-      ),
-    [commit],
+      );
+    },
+    [commit, invalidateRoundArtifacts],
   );
 
   /** Apply a successful mirror without activating a code changed while the request was in flight. */
@@ -803,11 +908,25 @@ export function useBridge(): BridgeApi {
       successMessage: (outcome: PublishOutcome) => string;
       failureMessage: string;
       missingRelayMessage: string;
+      assignmentFallback?: AssignmentFallback;
+      snapshot?: PublicationSnapshot;
     }): Promise<PublishOutcome | null> => {
       const current = stateRef.current;
-      const connection = connectionOf(current);
+      const snapshot = input.snapshot ?? publicationSnapshot(current);
+      const connection = snapshot.connection;
       if (!connection) {
         setNotice({ kind: 'bad', message: input.missingRelayMessage });
+        return null;
+      }
+      if (
+        !sameRelayConnection(connection, connectionOf(current)) ||
+        snapshot.revision !== current.relay?.revision
+      ) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'Round not published because the relay changed after this plan was prepared. Review it again.',
+        });
         return null;
       }
       if (input.plan.publications.length === 0) {
@@ -815,18 +934,19 @@ export function useBridge(): BridgeApi {
         return null;
       }
       setBusy(true);
-      const pendingCodes = new Map(current.rooms.map((room) => [room.id, room.pendingPairingCode]));
-      const tombstoneIds = new Set(current.pendingRoomRemovals.map((room) => room.id));
+      const pendingCodes = new Map(snapshot.rooms.map((room) => [room.id, room.pendingPairingCode]));
+      const tombstoneIds = new Set(snapshot.tombstones.map((room) => room.id));
       try {
         const outcome = await publishRound(connection, {
-          epoch: current.relay?.epoch ?? 1,
-          lastRevision: current.relay?.revision ?? 0,
+          epoch: snapshot.epoch,
+          lastRevision: snapshot.revision,
           tournamentName: input.tournamentName,
           plan: input.plan,
-          rooms: current.rooms,
-          tombstones: current.pendingRoomRemovals,
+          rooms: snapshot.rooms,
+          tombstones: snapshot.tombstones,
         });
         const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
+        if (input.assignmentFallback) rememberAssignmentFallback(null);
         setRelayReachable(true);
         setNotice(
           persisted.ok
@@ -839,14 +959,58 @@ export function useBridge(): BridgeApi {
         return outcome;
       } catch (error) {
         if (error instanceof RelayError) setRelayReachable(false);
-        setNotice({ kind: 'bad', message: `${input.failureMessage} ${(error as Error).message}` });
+        const fallbackAvailable = input.assignmentFallback && relayUnavailable(error);
+        if (fallbackAvailable) rememberAssignmentFallback(input.assignmentFallback!);
+        setNotice({
+          kind: 'bad',
+          message: `${input.failureMessage} ${(error as Error).message}${
+            fallbackAvailable
+              ? ' Already-open games are safe; export the round assignment files below to keep the tournament moving.'
+              : ''
+          }`,
+        });
         return null;
       } finally {
         setBusy(false);
       }
     },
-    [applyPublication],
+    [applyPublication, rememberAssignmentFallback],
   );
+
+  const confirmPublicationReview = useCallback(async (): Promise<void> => {
+    const review = pendingPublicationReviewRef.current;
+    if (!review) return;
+    rememberPublicationReview(null);
+    await publishPlan({
+      plan: review.plan,
+      tournamentName: review.tournamentName,
+      successKind: review.plan.cleared.length > 0 ? 'warn' : 'good',
+      successMessage: (outcome) => {
+        const clearedNote =
+          review.plan.cleared.length > 0
+            ? ` ${review.plan.cleared.length} room(s) were cleared and can no longer open a game.`
+            : '';
+        return `Published round ${review.roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+      },
+      failureMessage: 'Round not published — the rooms still have whatever they had before.',
+      missingRelayMessage: 'Connect the relay before publishing a round.',
+      assignmentFallback: {
+        tournamentName: review.tournamentName,
+        roundId: review.roundId,
+        roundName: review.roundName,
+        plan: review.plan,
+        exportedRoomIds: [],
+        exportDirectory: null,
+      },
+      snapshot: review.snapshot,
+    });
+  }, [publishPlan, rememberPublicationReview]);
+
+  const cancelPublicationReview = useCallback((): void => {
+    if (!pendingPublicationReviewRef.current) return;
+    rememberPublicationReview(null);
+    setNotice({ kind: 'warn', message: 'Round publication canceled. The room selections are unchanged.' });
+  }, [rememberPublicationReview]);
 
   const publish = useCallback(async () => {
     const current = stateRef.current;
@@ -856,6 +1020,54 @@ export function useBridge(): BridgeApi {
       return;
     }
     const plan = planRound(tournament, round, current.rooms, current.pendingRoomRemovals);
+    const snapshot = publicationSnapshot(current);
+    const teamNameForReview = (id: string): string =>
+      tournament.teams.find((team) => team.id === id)?.name ?? id;
+    const reviewItems = publicationReviewItems(
+      plan,
+      [
+        ...pairingWarnings(current.rooms, teamNameForReview),
+        ...schedulePairingWarnings(tournament, round, current.rooms),
+      ],
+      current.rooms,
+      teamNameForReview,
+    );
+    const previousFallback = assignmentFallbackRef.current;
+    if (
+      previousFallback?.roundId === round.id &&
+      previousFallback.exportedRoomIds.length > 0 &&
+      plan.assignments.length > 0
+    ) {
+      reviewItems.unshift({
+        roomId: plan.assignments[0]?.roomId ?? round.id,
+        roomName: plan.assignments[0]?.roomName ?? `Round ${round.displayName}`,
+        message:
+          'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
+      });
+    }
+    const assignmentFallback: AssignmentFallback = {
+      tournamentName: tournament.name,
+      roundId: round.id,
+      roundName: round.displayName,
+      plan,
+      exportedRoomIds: [],
+      exportDirectory: null,
+    };
+    if (reviewItems.length > 0) {
+      rememberPublicationReview({
+        tournamentName: tournament.name,
+        roundId: round.id,
+        roundName: round.displayName,
+        plan,
+        items: reviewItems,
+        snapshot,
+      });
+      setNotice({
+        kind: 'warn',
+        message: `Round ${round.displayName} has ${reviewItems.length} issue(s) to review before publishing.`,
+      });
+      return;
+    }
     if (plan.assignments.length === 0) {
       setNotice({
         kind: 'bad',
@@ -864,6 +1076,7 @@ export function useBridge(): BridgeApi {
       });
       return;
     }
+    rememberPublicationReview(null);
     await publishPlan({
       plan,
       tournamentName: tournament.name,
@@ -877,8 +1090,10 @@ export function useBridge(): BridgeApi {
       },
       failureMessage: 'Round not published — the rooms still have whatever they had before.',
       missingRelayMessage: 'Connect the relay before publishing a round.',
+      assignmentFallback,
+      snapshot,
     });
-  }, [publishPlan, tournament]);
+  }, [publishPlan, rememberPublicationReview, tournament]);
 
   const publishRoomSetup = useCallback(async () => {
     const current = stateRef.current;
@@ -992,6 +1207,73 @@ export function useBridge(): BridgeApi {
   }, [commit]);
 
   /**
+   * Write the exact assignments from the failed round plan for local/USB handoff.
+   *
+   * This is deliberately a file export rather than a second relay: each document is the same
+   * ordinary one-game QBJ that the scorer would have received, with its original match and room
+   * identity intact. A partial export remembers the rooms already written so retrying does not
+   * replace a file a scorekeeper may already have opened.
+   */
+  const exportAssignmentFallback = useCallback(async (): Promise<boolean> => {
+    const fallback = assignmentFallbackRef.current;
+    if (!fallback) return false;
+    setBusy(true);
+    try {
+      let folder = fallback.exportDirectory;
+      if (!folder) {
+        folder = await chooseAssignmentFolder();
+        if (!folder) {
+          setNotice({ kind: 'warn', message: 'Choose an output folder to export the round assignments.' });
+          return false;
+        }
+        const withFolder = { ...fallback, exportDirectory: folder };
+        assignmentFallbackRef.current = withFolder;
+        setAssignmentFallback(withFolder);
+      }
+
+      let written = 0;
+      const failures: string[] = [];
+      const exported = new Set(fallback.exportedRoomIds);
+      for (const assignment of fallback.plan.assignments) {
+        if (exported.has(assignment.roomId)) continue;
+        const fileName = assignmentFileName(assignment);
+        try {
+          await writeAssignmentFile(folder, fileName, assignmentFileContents(assignment));
+          exported.add(assignment.roomId);
+          written += 1;
+          const next = { ...fallback, exportDirectory: folder, exportedRoomIds: [...exported] };
+          assignmentFallbackRef.current = next;
+          setAssignmentFallback(next);
+        } catch (error) {
+          failures.push((error as Error).message);
+        }
+      }
+
+      if (failures.length > 0) {
+        setNotice({
+          kind: 'bad',
+          message: `Exported ${written} of ${fallback.plan.assignments.length} assignment file(s). ${failures[0]} Choose another output folder and retry the remaining files.`,
+        });
+        return false;
+      }
+      rememberAssignmentFallback({ ...fallback, exportDirectory: folder, exportedRoomIds: [...exported] });
+      setNotice({
+        kind: 'good',
+        message: `Exported ${fallback.plan.assignments.length} assignment file(s) to ${folder}. Open each QBJ in its room's QBSheet Scorer by local handoff or USB. Do not also publish this round to the relay after a scorer opens a fallback file.`,
+      });
+      return true;
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `The round assignments were not exported. ${(error as Error).message}`,
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [rememberAssignmentFallback]);
+
+  /**
    * Write one result and record where it went.
    *
    * The native writer refuses an existing file unless the target is exactly the result's previous
@@ -1010,12 +1292,22 @@ export function useBridge(): BridgeApi {
         resultFileContents(entry.qbj),
         entry.savedPath === targetPath,
       );
-      commit((current) => ({
-        ...current,
-        results: current.results.map((row) =>
-          row.resultId === entry.resultId ? { ...row, savedPath: path, ackPending: true } : row,
-        ),
-      }));
+      commit(
+        (current) => ({
+          ...current,
+          results: current.results.map((row) =>
+            row.resultId === entry.resultId
+              ? {
+                  ...row,
+                  savedPath: path,
+                  ackPending: true,
+                  importStatus: row.importStatus === 'imported' ? 'imported' : 'needs-import',
+                }
+              : row,
+          ),
+        }),
+        { critical: true },
+      );
     },
     [commit],
   );
@@ -1128,8 +1420,51 @@ export function useBridge(): BridgeApi {
     }
   }, [acknowledgeSaved, writeOne]);
 
+  const markResultImported = useCallback(
+    (resultId: string): void => {
+      const entry = stateRef.current.results.find((row) => row.resultId === resultId);
+      if (!entry?.savedPath) {
+        setNotice({ kind: 'bad', message: 'Save this result before marking it imported.' });
+        return;
+      }
+      const persisted = commit((current) => ({
+        ...current,
+        results: current.results.map((row) =>
+          row.resultId === resultId ? { ...row, importStatus: 'imported' as const } : row,
+        ),
+      })).persisted;
+      setNotice({
+        kind: persisted.ok ? 'good' : 'bad',
+        message: persisted.ok
+          ? 'Marked imported — this is your local confirmation that YellowFruit handled the file.'
+          : 'Marked imported for this session, but QBBridge could not save that marker locally. Retry local persistence before restarting.',
+      });
+    },
+    [commit],
+  );
+
+  const unmarkResultImported = useCallback(
+    (resultId: string): void => {
+      const entry = stateRef.current.results.find((row) => row.resultId === resultId);
+      if (!entry?.savedPath) return;
+      const persisted = commit((current) => ({
+        ...current,
+        results: current.results.map((row) =>
+          row.resultId === resultId ? { ...row, importStatus: 'needs-import' as const } : row,
+        ),
+      })).persisted;
+      setNotice({
+        kind: persisted.ok ? 'good' : 'bad',
+        message: persisted.ok
+          ? 'Import marker removed; this result needs YellowFruit handling again.'
+          : 'Import marker removed for this session, but QBBridge could not save that change locally. Retry local persistence before restarting.',
+      });
+    },
+    [commit],
+  );
+
   const resultMatchIds = useMemo(
-    () => new Set(state.results.map((entry) => matchIdOf(entry.qbj)).filter(Boolean)),
+    () => new Set(state.results.map((entry) => resultMatchId(entry.qbj)).filter(Boolean)),
     [state.results],
   );
 
@@ -1162,6 +1497,9 @@ export function useBridge(): BridgeApi {
    * silent: the relay would keep accepting finals and stop showing them.
    */
   const unsavedCount = state.results.filter((entry) => !entry.savedPath || entry.ackPending).length;
+  const needsImportCount = state.results.filter(
+    (entry) => resultImportStatus(entry) === 'needs-import',
+  ).length;
   const unsavedResultWarning =
     unsavedCount >= unsavedResultWarningThreshold
       ? `${unsavedCount} results are still unsaved or awaiting relay acknowledgment. The relay shows the oldest ${relayUnackedWindow} unconfirmed results at a time — save these before more games finish.`
@@ -1205,30 +1543,23 @@ export function useBridge(): BridgeApi {
     selectRound,
     roundChangeDiscardsSelections,
     publish,
+    pendingPublicationReview,
+    confirmPublicationReview,
+    cancelPublicationReview,
+    assignmentFallback,
+    exportAssignmentFallback,
     publishRoomSetup,
     roomStatus,
     warnings,
     chooseFolder,
     saveNewResults,
     saveResult,
+    markResultImported,
+    unmarkResultImported,
+    needsImportCount,
     resultBusy,
     savingResults: savingBatch || savingResultIds.size > 0,
     pollResults,
     unsavedResultWarning,
   };
-}
-
-/** The `Match.id` inside a result document, for matching a result back to the room that played it. */
-function matchIdOf(qbj: unknown): string {
-  if (!qbj || typeof qbj !== 'object' || Array.isArray(qbj)) return '';
-  const record = qbj as Record<string, unknown>;
-  if (record.type === 'Match' && typeof record.id === 'string') return record.id;
-  const objects = Array.isArray(record.objects) ? record.objects : [];
-  for (const entry of objects) {
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      const object = entry as Record<string, unknown>;
-      if (object.type === 'Match' && typeof object.id === 'string') return object.id;
-    }
-  }
-  return '';
 }

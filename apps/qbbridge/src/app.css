@@ -502,6 +502,24 @@ ul.plain {
 
 /* ---------------------------------------------------------------------------------- Results */
 
+.result-group + .result-group {
+  margin-top: var(--qbs-space-4);
+}
+
+.result-group__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--qbs-space-3);
+  padding-bottom: var(--qbs-space-1);
+  border-bottom: 1px solid var(--qbs-border);
+}
+
+.result-group__heading h3 {
+  margin: 0;
+  font-size: var(--qbs-text-subhead);
+}
+
 .result {
   display: flex;
   gap: var(--qbs-space-3);

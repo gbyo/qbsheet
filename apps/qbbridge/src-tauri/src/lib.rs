@@ -1,6 +1,6 @@
 //! The native shell for QBSheet Bridge.
 //!
-//! Four commands, no state, no background tasks, no server. Everything that decides anything —
+//! Six commands, no state, no background tasks, no server. Everything that decides anything —
 //! what a pairing is, what an assignment says, which results are new — is TypeScript. Rust is
 //! here for the things a web page cannot do on a tournament morning: a real open dialog, a real
 //! folder picker, writing a dozen files without a download prompt each, and an HTTP client with
@@ -22,7 +22,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::open_yellowfruit_file,
             commands::choose_result_folder,
+            commands::choose_assignment_folder,
             commands::write_result_file,
+            commands::write_assignment_file,
             commands::relay_request,
         ])
         .run(tauri::generate_context!())

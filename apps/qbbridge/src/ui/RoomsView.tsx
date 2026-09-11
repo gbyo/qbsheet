@@ -21,7 +21,7 @@ import {
   destinationPoolName,
   formatRanks,
   phaseForRound,
-  phasePoolNames,
+  phaseTeamPoolContext,
   roundGroups,
   schedulePairingWarnings,
 } from '../model/schedule';
@@ -148,16 +148,32 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           selectedIds.has(team.id),
       )
       .sort((left, right) => left.name.localeCompare(right.name))
-      .map((team) => ({
-        id: team.id,
-        name: team.name,
-        // The selected phase is the useful context. Do not show a playoff team as if it still
-        // belonged to its prelim pool when the playoff pool is empty in the reloaded file.
-        detail:
-          (phase ? phasePoolNames(phase, team.id) : team.poolNames).join(' · ') ||
-          (phase ? 'No pool listed for this phase' : undefined),
-      }));
-  }, [activePoolFilter, phase, phasePools, state.rooms, tournament]);
+      .map((team) => {
+        const context = round ? phaseTeamPoolContext(tournament, round, team.id) : null;
+        const destinationNames = context?.destinationPoolNames ?? team.poolNames;
+        let detail = destinationNames.join(' · ');
+        if (context?.carryover) {
+          detail +=
+            context.sourcePoolNames.length === 1
+              ? ` · from ${context.sourcePhaseName ?? 'previous phase'} · ${context.sourcePoolNames[0]}`
+              : context.sourcePoolNames.length > 1
+                ? ` · source pool ambiguous: ${context.sourcePoolNames.join(' / ')}`
+                : ' · source pool not proven';
+        }
+        return {
+          id: team.id,
+          name: team.name,
+          // The selected phase is the useful context. Do not borrow a prelim pool unless the
+          // destination itself says carryover and the immediately preceding phase supplies it.
+          detail: detail || (phase ? 'No pool listed for this phase' : undefined),
+        };
+      });
+  }, [activePoolFilter, phase, phasePools, round, state.rooms, tournament]);
+
+  const teamDetailById = useMemo(
+    () => new Map(teamOptions.map((team) => [team.id, team.detail])),
+    [teamOptions],
+  );
 
   if (!tournament) {
     return (
@@ -404,6 +420,9 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                         selectedId={room.leftTeamId}
                         onSelect={(id) => bridge.setRoomTeams(room.id, 'left', id)}
                       />
+                      {room.leftTeamId && teamDetailById.get(room.leftTeamId) ? (
+                        <div className="faint">{teamDetailById.get(room.leftTeamId)}</div>
+                      ) : null}
                     </td>
                     <td className="team-cell">
                       <TeamComboBox
@@ -412,6 +431,9 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                         selectedId={room.rightTeamId}
                         onSelect={(id) => bridge.setRoomTeams(room.id, 'right', id)}
                       />
+                      {room.rightTeamId && teamDetailById.get(room.rightTeamId) ? (
+                        <div className="faint">{teamDetailById.get(room.rightTeamId)}</div>
+                      ) : null}
                     </td>
                     <td>
                       <div className="row">
@@ -493,6 +515,37 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           The team selections in every room will be cleared, so this round&rsquo;s pairings have to be entered
           fresh. Rooms, their names and their pairing codes are kept, and nothing is sent to the relay until
           you publish.
+        </ConfirmDialog>
+
+        <ConfirmDialog
+          isOpen={bridge.pendingPublicationReview !== null}
+          title={
+            bridge.pendingPublicationReview
+              ? `Review Round ${bridge.pendingPublicationReview.roundName} before publishing`
+              : 'Review before publishing'
+          }
+          confirmLabel="Publish anyway"
+          cancelLabel="Go back"
+          confirmVariant="danger"
+          onCancel={bridge.cancelPublicationReview}
+          onConfirm={() => void bridge.confirmPublicationReview()}
+        >
+          {bridge.pendingPublicationReview ? (
+            <>
+              <p>QBBridge will send this exact pairing plan if you choose the exceptional override.</p>
+              <ul>
+                {bridge.pendingPublicationReview.items.map((item) => (
+                  <li key={`${item.roomId}:${item.message}`}>
+                    <strong>{item.roomName}</strong> — {item.message}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                Go back to correct the table, or publish anyway only when every listed exception is
+                intentional. Cleared rooms will lose their active assignment on the relay.
+              </p>
+            </>
+          ) : null}
         </ConfirmDialog>
       </section>
       {printTarget !== null && typeof document !== 'undefined'

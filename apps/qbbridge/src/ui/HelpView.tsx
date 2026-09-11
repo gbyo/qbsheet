@@ -217,6 +217,10 @@ YellowFruit → Import Games Only`}</pre>
           </li>
           <li>Select the saved files — the dialog multi-selects.</li>
           <li>Review YellowFruit&rsquo;s normal import validation and import them.</li>
+          <li>
+            Back in QBBridge, mark each handled file <strong>imported</strong>. Undo the marker if you chose
+            the wrong file or YellowFruit rejected it.
+          </li>
         </ol>
         <p>
           Each file is the scorer&rsquo;s own QBJ, written out unchanged. QBBridge recalculates nothing,
@@ -224,14 +228,20 @@ YellowFruit → Import Games Only`}</pre>
           once and a single bad game is easier to set aside.
         </p>
         <p>
-          If a room submits a correction, it arrives as a second result with its own filename. The first file
-          is never replaced.
+          If a room submits a correction, it arrives as a second result with its own filename and its own
+          <strong>Needs import</strong> state. The first file and its import marker are never replaced or
+          inherited.
         </p>
         <p>
           A result is acknowledged by the relay only after its QBJ bytes are safely written to this computer.
           Seeing it on this screen is not an acknowledgement, and an ACK request that fails is retried on a
           later poll. This says only that QBBridge saved a local copy — it does not mean YellowFruit imported,
           reviewed or accepted the game.
+        </p>
+        <p>
+          <strong>Marked imported</strong> is separate local bookkeeping: it records what you say you handled
+          in YellowFruit. QBBridge cannot inspect YellowFruit to verify that assertion, and changing the
+          marker never changes relay acknowledgment.
         </p>
       </>
     ),
@@ -244,8 +254,10 @@ YellowFruit → Import Games Only`}</pre>
         <dt>Relay unavailable</dt>
         <dd>
           Nothing local is lost. Rooms already holding an assignment keep scoring, completed games stay on
-          their devices until a transport accepts them, and QBBridge retries on its next poll. Check the
-          laptop&rsquo;s internet before anything else.
+          their devices until a transport accepts them, and QBBridge retries result polling. If a next-round
+          publish fails because the relay is unreachable, use <strong>Export round assignments</strong> in the
+          warning. Hand one ordinary QBJ file to each room by USB or a local shared folder and open it in
+          QBSheet Scorer. Do not also publish that round to the relay after scorers open fallback files.
         </dd>
 
         <dt>A publish failed</dt>
@@ -303,7 +315,8 @@ YellowFruit → Import Games Only`}</pre>
           It also reports only what it can actually see. A room is <strong>Not published</strong> until its
           setup reaches the relay, <strong>Ready to pair</strong> once its room identity is there,{' '}
           <strong>Waiting</strong> while an assignment is active, then <strong>Result received</strong>. It
-          never claims a result was imported, accepted or applied to standings, because it has no way to know
+          shows <strong>Marked imported</strong> only as the operator&rsquo;s persisted assertion. It never
+          claims YellowFruit verified, accepted, or applied a game to standings, because it has no way to know
           — YellowFruit does.
         </p>
       </>

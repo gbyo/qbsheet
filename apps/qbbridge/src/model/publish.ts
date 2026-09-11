@@ -39,6 +39,100 @@ export interface PublishPlan {
   cleared: { roomId: string; roomName: string; reason: string }[];
 }
 
+export interface PublicationReviewItem {
+  roomId: string;
+  roomName: string;
+  message: string;
+}
+
+/**
+ * Turn the exact plan and its read-only pairing warnings into the review shown before publishing.
+ *
+ * The plan's cleared entries matter as much as the advisory warnings: a room omitted from a
+ * pairing table is deliberately cleared on the relay, so the operator must see that consequence
+ * before choosing the exceptional publish action. Duplicate messages are removed to keep the
+ * review readable when one fact is reported by both layers.
+ */
+export function publicationReviewItems(
+  plan: PublishPlan,
+  warnings: readonly { roomId: string; message: string }[],
+  rooms: readonly Room[] = [],
+  teamName: (teamId: string) => string = (teamId) => teamId,
+): PublicationReviewItem[] {
+  const items: PublicationReviewItem[] = [];
+  const seen = new Set<string>();
+  const add = (roomId: string, roomName: string, message: string): void => {
+    const key = `${roomId}\u001f${message}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({ roomId, roomName, message });
+  };
+
+  const clearedRoomIds = new Set(plan.cleared.map((entry) => entry.roomId));
+  for (const entry of plan.cleared) {
+    add(entry.roomId, entry.roomName, `${entry.reason} This room will be cleared.`);
+  }
+  const roomNames = new Map(plan.publications.map((entry) => [entry.roomId, entry.roomName]));
+
+  const roomsByName = new Map<string, Room[]>();
+  for (const room of rooms) {
+    const normalizedName = room.name.trim().toLocaleLowerCase();
+    if (!normalizedName) {
+      add(room.id, room.name || room.id, 'This room name is blank; result routing would be ambiguous.');
+      continue;
+    }
+    roomsByName.set(normalizedName, [...(roomsByName.get(normalizedName) ?? []), room]);
+  }
+  for (const duplicates of roomsByName.values()) {
+    if (duplicates.length < 2) continue;
+    const first = duplicates[0];
+    if (!first) continue;
+    add(
+      first.id,
+      first.name,
+      `The name “${first.name}” is used by ${duplicates.length} configured rooms (${duplicates
+        .map((room) => room.id)
+        .join(', ')}).`,
+    );
+  }
+
+  const roomsByTeam = new Map<string, Room[]>();
+  for (const room of rooms) {
+    if (!room.leftTeamId || !room.rightTeamId || room.leftTeamId === room.rightTeamId) continue;
+    for (const teamId of [room.leftTeamId, room.rightTeamId]) {
+      roomsByTeam.set(teamId, [...(roomsByTeam.get(teamId) ?? []), room]);
+    }
+  }
+  for (const [teamId, assignments] of roomsByTeam) {
+    const uniqueRooms = [...new Map(assignments.map((room) => [room.id, room])).values()];
+    if (uniqueRooms.length < 2) continue;
+    const first = uniqueRooms[0];
+    if (!first) continue;
+    add(
+      first.id,
+      first.name,
+      `${teamName(teamId)} is also assigned in ${uniqueRooms
+        .slice(1)
+        .map((room) => room.name)
+        .join(', ')}.`,
+    );
+  }
+
+  for (const warning of warnings) {
+    if (
+      (clearedRoomIds.has(warning.roomId) &&
+        (warning.message === 'This room has no matchup yet.' ||
+          warning.message === 'Both sides are the same team.')) ||
+      warning.message.startsWith('Another room is also called') ||
+      warning.message.includes('is also in another room this round')
+    ) {
+      continue;
+    }
+    add(warning.roomId, roomNames.get(warning.roomId) ?? warning.roomId, warning.message);
+  }
+  return items;
+}
+
 function summarize(publications: RoomPublication[]): PublishPlan {
   return {
     publications,

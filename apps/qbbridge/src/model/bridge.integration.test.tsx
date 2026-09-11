@@ -14,6 +14,7 @@ import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
 import { yftFixtureText } from '../tests/fixture';
 import { useBridge } from './useBridge';
+import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 
 interface InvokeCall {
   command: string;
@@ -54,6 +55,7 @@ let calls: InvokeCall[] = [];
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
 let writtenFiles: WrittenFile[] = [];
+let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
 let existingPaths = new Set<string>();
 /** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
@@ -62,6 +64,7 @@ let claimFails = false;
 let mirrorFails = false;
 let ackFailuresRemaining = 0;
 let resultFolder = '/tournaments/results';
+let assignmentFolder = '/tournaments/assignments';
 let deferResultRequests = false;
 let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reason?: unknown) => void }[] =
   [];
@@ -73,6 +76,7 @@ let scorerReadinessFails = false;
 function installFakeTauri(): void {
   calls = [];
   writtenFiles = [];
+  writtenAssignmentFiles = [];
   const invoke = async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     switch (command) {
@@ -80,6 +84,15 @@ function installFakeTauri(): void {
         return { path: '/tournaments/spring.yft', contents: yftFixtureText() };
       case 'choose_result_folder':
         return resultFolder;
+      case 'choose_assignment_folder':
+        return assignmentFolder;
+      case 'write_assignment_file': {
+        const path = `${String(args.directory)}/${String(args.fileName)}`;
+        if (existingPaths.has(path)) throw new Error(`${String(args.fileName)} already exists`);
+        existingPaths.add(path);
+        writtenAssignmentFiles.push({ ...(args as unknown as WrittenFile), overwrite: false });
+        return path;
+      }
       case 'write_result_file': {
         const path = `${String(args.directory)}/${String(args.fileName)}`;
         // The real command opens with `create_new` unless told to overwrite.
@@ -168,6 +181,7 @@ beforeEach(() => {
   mirrorFails = false;
   ackFailuresRemaining = 0;
   resultFolder = '/tournaments/results';
+  assignmentFolder = '/tournaments/assignments';
   deferResultRequests = false;
   pendingResultRequests = [];
   deferWrites = false;
@@ -241,9 +255,9 @@ async function setUpRound(rendered: Awaited<ReturnType<typeof setUpTournament>>,
   const [first, second] = rendered.result.current.state.rooms;
   act(() => {
     rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Cony');
-    rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
-    rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Wells');
-    rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
+    rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Wells');
+    rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Deering');
+    rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Plymouth A');
   });
 }
 
@@ -322,6 +336,103 @@ describe('a round, published and returned', () => {
     expect(rendered.result.current.state.relay?.revision).toBe(0);
     expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId === null)).toBe(true);
   });
+
+  test('exports the failed round as ordinary Scorer assignments with the same result identity', async () => {
+    const rendered = await setUpTournament();
+    const selections = rendered.result.current.state.rooms.map((room) => ({
+      id: room.id,
+      leftTeamId: room.leftTeamId,
+      rightTeamId: room.rightTeamId,
+    }));
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const fallback = rendered.result.current.assignmentFallback;
+    expect(fallback?.plan.assignments).toHaveLength(2);
+    expect(rendered.result.current.state.rooms).toEqual(
+      expect.arrayContaining(selections.map((selection) => expect.objectContaining(selection))),
+    );
+
+    await act(async () => {
+      await rendered.result.current.exportAssignmentFallback();
+    });
+    expect(writtenAssignmentFiles).toHaveLength(2);
+    for (const file of writtenAssignmentFiles) {
+      const source = readQbjSource(JSON.parse(file.contents));
+      expect(source.ok).toBe(true);
+      if (!source.ok) continue;
+      const defined = defineGame(source.value, source.value.candidates[0]!.index);
+      expect(defined.ok).toBe(true);
+    }
+
+    const completed = scoredResultDocument({ right: 'Wells' });
+    expect(completed.matchId).toBe(fallback?.plan.assignments[0]?.matchId);
+    relayResults = [
+      {
+        result_id: 'fallback-result',
+        room_id: 'room-1',
+        received_at: '2026-09-10T15:00:00Z',
+        qbj: completed.result,
+      },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+      await rendered.result.current.saveResult('fallback-result');
+    });
+    expect(rendered.result.current.state.results[0]).toMatchObject({
+      resultId: 'fallback-result',
+      importStatus: 'needs-import',
+    });
+
+    mirrorFails = false;
+    const mirrorsBeforeRecovery = calls.filter((call) =>
+      String(call.args.url ?? '').endsWith('/mirror'),
+    ).length;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.pendingPublicationReview?.items[0]?.message).toMatch(
+      /two active writers/i,
+    );
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(
+      mirrorsBeforeRecovery,
+    );
+  });
+
+  test('reviews a cross-pool exception before sending and publishes the exact reviewed plan', async () => {
+    const rendered = await setUpTournament();
+    const [first, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
+      rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Windham A');
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    const before = rendered.result.current.state.rooms.map((room) => ({ ...room }));
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: expect.stringMatching(/crosses pools/i) })]),
+    );
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(0);
+    act(() => rendered.result.current.cancelPublicationReview());
+    expect(rendered.result.current.state.rooms).toEqual(before);
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const reviewedMatchIds = rendered.result.current.pendingPublicationReview!.plan.assignments.map(
+      (assignment) => assignment.matchId,
+    );
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'))!;
+    const body = JSON.parse(String(mirror.args.body)) as { rooms: { match_id?: string }[] };
+    expect(body.rooms.map((room) => room.match_id).filter(Boolean)).toEqual(reviewedMatchIds);
+  });
 });
 
 describe('room setup and removal', () => {
@@ -372,7 +483,7 @@ describe('room setup and removal', () => {
     expect(bridgeStatus(restarted, restartedRoom.id)).toBe('ready-to-pair');
     act(() => {
       restarted.result.current.setRoomTeams(restartedRoom.id, 'left', 'Team_Cony');
-      restarted.result.current.setRoomTeams(restartedRoom.id, 'right', 'Team_Deering');
+      restarted.result.current.setRoomTeams(restartedRoom.id, 'right', 'Team_Wells');
     });
     await act(async () => {
       await restarted.result.current.publish();
@@ -408,6 +519,14 @@ describe('room setup and removal', () => {
     });
     await act(async () => {
       await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: unused.id, message: expect.stringMatching(/will be cleared/i) }),
+      ]),
+    );
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
     });
 
     expect(rendered.result.current.state.rooms.find((room) => room.id === unused.id)).toMatchObject({
@@ -526,7 +645,7 @@ describe('results', () => {
   });
 
   test('a room shows its result once the matching game comes back', async () => {
-    const { result: document, matchId } = scoredResultDocument();
+    const { result: document, matchId } = scoredResultDocument({ right: 'Wells' });
     const rendered = await setUpTournament();
     await act(async () => {
       await rendered.result.current.publish();
@@ -979,8 +1098,10 @@ describe('changing the round', () => {
 
     // Nothing reached the relay, and the operator was told why rather than left to discover it.
     expect(calls.some((call) => String(call.args.url ?? '').endsWith('/mirror'))).toBe(false);
-    expect(rendered.result.current.notice?.kind).toBe('bad');
-    expect(rendered.result.current.notice?.message).toMatch(/two teams chosen/i);
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.pendingPublicationReview?.items).toHaveLength(2);
+    act(() => rendered.result.current.cancelPublicationReview());
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
     expect(rendered.result.current.state.relay?.revision).toBe(0);
   });
 

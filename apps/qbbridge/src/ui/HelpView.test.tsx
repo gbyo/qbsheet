@@ -91,7 +91,7 @@ describe('the help page', () => {
     expect(page).toContain('Publish Room Setup');
     expect(page).toContain('Publish Round');
     // The honest-status rule, restated where an operator will look for it.
-    expect(page).toMatch(/never claims a result was imported, accepted or applied to standings/);
+    expect(page).toMatch(/never claims YellowFruit verified, accepted, or applied a game to standings/);
   });
 });
 
