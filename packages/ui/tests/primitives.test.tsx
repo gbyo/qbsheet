@@ -272,6 +272,29 @@ describe('TeamComboBox', () => {
     expect(String(onSelect.mock.calls[0][0])).toMatch(/^Team_/);
   });
 
+  test('selection can be cleared from the keyboard and returns focus to the input', async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    render(<Harness onSelect={onSelect} />);
+
+    const input = screen.getByRole('combobox', { name: 'Left team in Room 101' });
+    input.focus();
+    await user.keyboard('{ArrowDown}');
+    await screen.findByRole('listbox');
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    const clear = screen.getByRole('button', { name: 'Clear Left team in Room 101' });
+    await user.tab();
+    expect(clear).toHaveFocus();
+    await user.keyboard('{Enter}');
+
+    expect(onSelect).toHaveBeenCalledTimes(2);
+    expect(String(onSelect.mock.calls[0][0])).toMatch(/^Team_/);
+    expect(onSelect).toHaveBeenNthCalledWith(2, null);
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+  });
+
   test('matching is a plain substring, so a near-miss is never offered as a match', async () => {
     const user = userEvent.setup();
     render(<Harness />);
