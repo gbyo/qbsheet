@@ -133,6 +133,65 @@ describe('Scorer-origin readiness UX', () => {
     expect(token).toHaveValue('still-needed');
   });
 
+  test('clears the backup passphrase after a successful recovery-package creation', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.createRecoveryPackage = vi.fn(async () => true);
+    render(<SetupView bridge={bridge} />);
+
+    const passphrase = screen.getByLabelText('New recovery passphrase');
+    await user.type(passphrase, 'correct horse battery staple');
+    await user.click(screen.getByRole('button', { name: 'Create encrypted backup package…' }));
+
+    await waitFor(() => expect(passphrase).toHaveValue(''));
+    expect(bridge.createRecoveryPackage).toHaveBeenCalledWith(
+      'correct horse battery staple',
+      'Tournament backup controller',
+    );
+  });
+
+  test('keeps the backup passphrase when recovery-package creation fails', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.createRecoveryPackage = vi.fn(async () => false);
+    render(<SetupView bridge={bridge} />);
+
+    const passphrase = screen.getByLabelText('New recovery passphrase');
+    await user.type(passphrase, 'correct horse battery staple');
+    await user.click(screen.getByRole('button', { name: 'Create encrypted backup package…' }));
+
+    await waitFor(() => expect(bridge.createRecoveryPackage).toHaveBeenCalled());
+    expect(passphrase).toHaveValue('correct horse battery staple');
+  });
+
+  test('clears the import passphrase after a successful recovery-package import', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.importRecoveryPackage = vi.fn(async () => true);
+    render(<SetupView bridge={bridge} />);
+
+    const passphrase = screen.getByLabelText('Recovery passphrase');
+    await user.type(passphrase, 'correct horse battery staple');
+    await user.click(screen.getByRole('button', { name: 'Open encrypted recovery package…' }));
+
+    await waitFor(() => expect(passphrase).toHaveValue(''));
+    expect(bridge.importRecoveryPackage).toHaveBeenCalledWith('correct horse battery staple');
+  });
+
+  test('keeps the import passphrase when recovery-package import fails', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.importRecoveryPackage = vi.fn(async () => false);
+    render(<SetupView bridge={bridge} />);
+
+    const passphrase = screen.getByLabelText('Recovery passphrase');
+    await user.type(passphrase, 'correct horse battery staple');
+    await user.click(screen.getByRole('button', { name: 'Open encrypted recovery package…' }));
+
+    await waitFor(() => expect(bridge.importRecoveryPackage).toHaveBeenCalled());
+    expect(passphrase).toHaveValue('correct horse battery staple');
+  });
+
   test('cancelling a relay change discards its draft and preserves the connected relay', async () => {
     const user = userEvent.setup();
     const bridge = bridgeFor('ready');
