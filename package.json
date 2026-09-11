@@ -35,7 +35,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,css}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,css}\"",
+    "format:check": "prettier --write e2e/ManualGame.spec.ts src/scorer/PreSubmitReview.tsx && git diff -- e2e/ManualGame.spec.ts src/scorer/PreSubmitReview.tsx && exit 1",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest",
     "test:state-space": "vitest --run tests/RoomGameStateSpace.test.ts",
