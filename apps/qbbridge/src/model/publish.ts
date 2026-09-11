@@ -13,12 +13,22 @@
  * and never deletes: a room left out of the payload keeps whatever it was last given. Omitting an
  * unused room would leave a scorekeeper in Room 103 able to open last round's game — a real,
  * correctly formatted assignment for a match nobody is playing, with no signal that it is stale.
+ *
+ * # Two inputs, because there are two sources of truth
+ *
+ * `rooms` says what exists physically and what the relay is currently holding: ids, names, pairing
+ * hashes, publication state, assignment revisions. `pairings` says what the operator wants *this
+ * round* to be, and nothing else — see `roundPlans.ts`. Passing the matchups in explicitly rather
+ * than reading them off the rooms is the whole point: it is what makes "publish round 1" mean
+ * round 1 even while round 5 is the round being edited on screen, and it is why a publish is a
+ * snapshot of a plan rather than a read of live UI state.
  */
 
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
 import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
 import type { Room, RoomTombstone } from './rooms';
+import { isCompletePairing, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
 
 /** What one room should be holding after this publish. */
@@ -68,12 +78,15 @@ export function planRound(
   tournament: BridgeTournament,
   round: BridgeRound,
   rooms: readonly Room[],
+  pairings: readonly PlannedPairing[],
   tombstones: readonly RoomTombstone[] = [],
 ): PublishPlan {
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
+  const plannedByRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
   const publications: RoomPublication[] = [];
 
   for (const room of rooms) {
+    const planned = plannedByRoom.get(room.id);
     const clear = (reason: string): void => {
       publications.push({
         roomId: room.id,
@@ -83,16 +96,16 @@ export function planRound(
       });
     };
 
-    if (!room.leftTeamId || !room.rightTeamId) {
+    if (!planned?.leftTeamId || !planned.rightTeamId) {
       clear('No matchup chosen for this round.');
       continue;
     }
-    if (room.leftTeamId === room.rightTeamId) {
+    if (!isCompletePairing(planned)) {
       clear('Both sides of this room are the same team.');
       continue;
     }
-    const left = teams.get(room.leftTeamId);
-    const right = teams.get(room.rightTeamId);
+    const left = teams.get(planned.leftTeamId);
+    const right = teams.get(planned.rightTeamId);
     if (!left || !right) {
       // A team that vanished when the `.yft` was reloaded. Clearing rather than skipping is the
       // point: skipping would leave the room serving whatever it held before.

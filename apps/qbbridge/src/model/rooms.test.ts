@@ -16,22 +16,47 @@ import {
   roomTombstone,
   type Room,
 } from './rooms';
+import type { PlannedPairing } from './roundPlans';
 
 const name = (id: string) => id.replace('Team_', '');
 
-function room(id: string, display: string, left: string | null, right: string | null): Room {
-  return { ...newRoom(id, display, '11112222'), leftTeamId: left, rightTeamId: right };
+/**
+ * One row of the screen: the physical room, plus what the selected round plans for it.
+ *
+ * They are separate arguments now rather than one object, which is the point of the change — the
+ * room outlives the round, and the pairing belongs to the round.
+ */
+function row(
+  id: string,
+  display: string,
+  left: string | null,
+  right: string | null,
+): { room: Room; pairing: PlannedPairing | null } {
+  return {
+    room: newRoom(id, display, '11112222'),
+    pairing: left === null && right === null ? null : { roomId: id, leftTeamId: left, rightTeamId: right },
+  };
+}
+
+function split(rows: { room: Room; pairing: PlannedPairing | null }[]): {
+  rooms: Room[];
+  pairings: PlannedPairing[];
+} {
+  return {
+    rooms: rows.map((entry) => entry.room),
+    pairings: rows.map((entry) => entry.pairing).filter((entry): entry is PlannedPairing => entry !== null),
+  };
 }
 
 describe('pairing warnings', () => {
   test('an empty room, a team against itself, a duplicate room name, a team in two rooms', () => {
-    const rooms = [
-      room('room-1', 'Room 101', 'Team_A', 'Team_B'),
-      room('room-2', 'Room 101', 'Team_C', null),
-      room('room-3', 'Room 103', 'Team_D', 'Team_D'),
-      room('room-4', 'Room 104', 'Team_A', 'Team_E'),
-    ];
-    expect(pairingWarnings(rooms, name)).toEqual([
+    const { rooms, pairings } = split([
+      row('room-1', 'Room 101', 'Team_A', 'Team_B'),
+      row('room-2', 'Room 101', 'Team_C', null),
+      row('room-3', 'Room 103', 'Team_D', 'Team_D'),
+      row('room-4', 'Room 104', 'Team_A', 'Team_E'),
+    ]);
+    expect(pairingWarnings(rooms, pairings, name)).toEqual([
       { roomId: 'room-2', message: 'Another room is also called “Room 101”.' },
       { roomId: 'room-2', message: 'This room has no matchup yet.' },
       { roomId: 'room-3', message: 'Both sides are the same team.' },
@@ -40,27 +65,27 @@ describe('pairing warnings', () => {
   });
 
   test('a complete, ordinary round warns about nothing', () => {
-    const rooms = [
-      room('room-1', 'Room 101', 'Team_A', 'Team_B'),
-      room('room-2', 'Room 102', 'Team_C', 'Team_D'),
-    ];
-    expect(pairingWarnings(rooms, name)).toEqual([]);
+    const { rooms, pairings } = split([
+      row('room-1', 'Room 101', 'Team_A', 'Team_B'),
+      row('room-2', 'Room 102', 'Team_C', 'Team_D'),
+    ]);
+    expect(pairingWarnings(rooms, pairings, name)).toEqual([]);
   });
 
   test('a rematch is not a warning', () => {
     // The same two teams playing again is the operator's call, and YellowFruit validates it at
     // import if it matters.
-    const rooms = [room('room-1', 'Room 101', 'Team_A', 'Team_B')];
-    expect(pairingWarnings(rooms, name)).toEqual([]);
+    const { rooms, pairings } = split([row('room-1', 'Room 101', 'Team_A', 'Team_B')]);
+    expect(pairingWarnings(rooms, pairings, name)).toEqual([]);
   });
 
   test('only rooms with two different teams are publishable', () => {
-    const rooms = [
-      room('room-1', 'Room 101', 'Team_A', 'Team_B'),
-      room('room-2', 'Room 102', 'Team_C', null),
-      room('room-3', 'Room 103', 'Team_D', 'Team_D'),
-    ];
-    expect(publishableRooms(rooms).map((entry) => entry.id)).toEqual(['room-1']);
+    const { rooms, pairings } = split([
+      row('room-1', 'Room 101', 'Team_A', 'Team_B'),
+      row('room-2', 'Room 102', 'Team_C', null),
+      row('room-3', 'Room 103', 'Team_D', 'Team_D'),
+    ]);
+    expect(publishableRooms(rooms, pairings).map((entry) => entry.id)).toEqual(['room-1']);
   });
 });
 

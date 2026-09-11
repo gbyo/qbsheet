@@ -31,6 +31,19 @@ import {
   type RoomStatus,
 } from './rooms';
 import {
+  assignedRoomCount,
+  pairingsForRound,
+  pairingFor,
+  planPublicationStatus,
+  plannedTeams,
+  reconcilePlans,
+  reconciliationChangedAnything,
+  type PlanReconciliation,
+  removeRoomFromPlans,
+  setPlannedSide,
+  type PlanPublicationStatus,
+} from './roundPlans';
+import {
   emptyState,
   loadState,
   saveState,
@@ -109,11 +122,19 @@ export interface BridgeApi {
   addRoom(): void;
   renameRoom(roomId: string, name: string): void;
   removeRoom(roomId: string): void;
+  /** Choose one side of one room's matchup in the selected round. Never touches another round. */
   setRoomTeams(roomId: string, side: 'left' | 'right', teamId: string | null): void;
+  /** The selected round's planned matchup for this room. Both null when nothing is entered. */
+  plannedTeamsFor(roomId: string): { leftTeamId: string | null; rightTeamId: string | null };
+  /** How this room's planned game for the selected round compares with what the relay holds. */
+  planStatus(room: Room): PlanPublicationStatus;
+  /** Rooms with a complete matchup in the selected round, and how many rooms there are. */
+  roundProgress: { roundId: string | null; assigned: number; total: number };
+  /** Assignment counts for every round in the selected round's phase, for the pre-tournament view. */
+  phaseRoundProgress: { roundId: string; displayName: string; assigned: number }[];
   regeneratePairingCode(roomId: string): void;
+  /** Change which round the table is editing. Changes nothing else, and discards nothing. */
   selectRound(roundId: string): void;
-  /** True when changing rounds would discard team selections the operator has entered. */
-  roundChangeDiscardsSelections: boolean;
   publish(): Promise<void>;
   /** Publish room identities and pairing hashes without sending any match assignments. */
   publishRoomSetup(): Promise<void>;
@@ -130,6 +151,31 @@ export interface BridgeApi {
   pollResults(): Promise<void>;
   /** Set when unsaved results are approaching the relay's unacknowledged window. */
   unsavedResultWarning: string | null;
+}
+
+/**
+ * One sentence about what a reload cost the saved plans.
+ *
+ * Deliberately one notice rather than one per casualty: a `.yft` reloaded after a team withdrew can
+ * clear a side in nine rounds, and nine notices is a wall the operator dismisses without reading.
+ */
+function describeReconciliation(report: PlanReconciliation): string {
+  const parts: string[] = [];
+  if (report.removedRoundIds.length > 0) {
+    parts.push(
+      `${report.removedRoundIds.length} planned round(s) no longer exist in the file and were dropped`,
+    );
+  }
+  if (report.removedRoomIds.length > 0) {
+    parts.push(`${report.removedRoomIds.length} removed room(s) were dropped from saved rounds`);
+  }
+  if (report.clearedSideCount > 0) {
+    parts.push(`${report.clearedSideCount} team selection(s) were cleared because the team is gone`);
+  }
+  if (report.removedPairingCount > 0) {
+    parts.push(`${report.removedPairingCount} planned matchup(s) were emptied as a result`);
+  }
+  return `Saved round plans were reconciled with the file: ${parts.join('; ')}. Re-enter those selections before publishing.`;
 }
 
 function connectionOf(state: BridgeState): RelayConnection | null {
@@ -356,6 +402,7 @@ export function useBridge(): BridgeApi {
     ): boolean => {
       const current = stateRef.current;
       const firstRoundId = report.tournament.rounds[0]?.id ?? null;
+      let reconciliationReport: PlanReconciliation | null = null;
       if (startNew) {
         const next: BridgeState = {
           ...emptyState(),
@@ -383,12 +430,23 @@ export function useBridge(): BridgeApi {
         setChangingRelay(false);
         activateState(next);
       } else {
+        const roundIds = new Set(report.tournament.rounds.map((round) => round.id));
+        const teamIds = new Set(report.tournament.teams.map((team) => team.id));
+        // Reconciled by stable id only. YellowFruit owns rounds, teams and their identities; the
+        // plans are local intent that references them. A referenced id that is gone is gone — a
+        // repair by team name, room name, round label, or position would be a guess, and a wrong
+        // guess here sends two teams to play a game nobody scheduled.
         commit((currentState) => {
-          const roundIds = new Set(report.tournament.rounds.map((round) => round.id));
+          reconciliationReport = reconcilePlans(currentState.roundPlans, {
+            roundIds,
+            teamIds,
+            roomIds: new Set(currentState.rooms.map((room) => room.id)),
+          });
           return {
             ...currentState,
             yftPath: path,
             tournamentName: report.tournament.name,
+            roundPlans: reconciliationReport.plans,
             selectedRoundId:
               currentState.selectedRoundId && roundIds.has(currentState.selectedRoundId)
                 ? currentState.selectedRoundId
@@ -398,9 +456,13 @@ export function useBridge(): BridgeApi {
       }
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
+      const reconciliationNote =
+        reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
+          ? ` ${describeReconciliation(reconciliationReport)}`
+          : '';
       setNotice({
-        kind: 'good',
-        message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.`,
+        kind: reconciliationNote === '' ? 'good' : 'warn',
+        message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.${reconciliationNote}`,
       });
       return true;
     },
@@ -676,6 +738,9 @@ export function useBridge(): BridgeApi {
       commit((current) => ({
         ...current,
         rooms: current.rooms.filter((entry) => entry.id !== roomId),
+        // The room is gone, so every round that planned a game in it loses that entry. The relay
+        // side of the removal is the tombstone below, which is a different concern and survives.
+        roundPlans: removeRoomFromPlans(current.roundPlans, roomId),
         pendingRoomRemovals:
           tombstone && !current.pendingRoomRemovals.some((entry) => entry.id === roomId)
             ? [...current.pendingRoomRemovals, tombstone]
@@ -697,13 +762,23 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  /**
+   * Choose a team for one side of one room, in the selected round.
+   *
+   * The edit lands in that round's plan and nowhere else. The room is untouched — it is a physical
+   * room and a relay identity, and neither of those changed because a dropdown did.
+   */
   const setRoomTeams = useCallback(
     (roomId: string, side: 'left' | 'right', teamId: string | null) =>
-      updateRoom(roomId, (room) => ({
-        ...room,
-        [side === 'left' ? 'leftTeamId' : 'rightTeamId']: teamId,
-      })),
-    [updateRoom],
+      commit((current) =>
+        current.selectedRoundId === null
+          ? current
+          : {
+              ...current,
+              roundPlans: setPlannedSide(current.roundPlans, current.selectedRoundId, roomId, side, teamId),
+            },
+      ),
+    [commit],
   );
 
   const regeneratePairingCode = useCallback(
@@ -715,29 +790,20 @@ export function useBridge(): BridgeApi {
   /**
    * Choose the round the pairing table is for.
    *
-   * Selecting a different round clears every room's team selection. The alternative — leaving
-   * last round's pairings in the dropdowns under a new round's heading — makes the single most
-   * damaging operator mistake available in one click: publishing round 4's matchups as real,
-   * correctly formatted round 5 assignments, which the rooms would score and YellowFruit would
-   * import without complaint.
+   * This changes one field and nothing else. It used to clear every room's team selection, because
+   * the selections lived on the rooms and there was nowhere else for a round's matchups to be —
+   * which made entering a tournament's prelims in advance impossible, and made every round change
+   * a destructive action that had to be confirmed.
    *
-   * Rooms, their ids, their names, their pairing codes and their publication history all
-   * survive. Only the entry state for the current round is cleared.
+   * Now each round's matchups are its own persisted plan, so returning to a round shows exactly
+   * what was entered for it. The mistake the old clearing existed to prevent — publishing round
+   * 4's pairings as round 5 — is prevented instead by `publish()` reading the selected round's own
+   * plan, and by the per-room planned-versus-live status in the table.
    */
   const selectRound = useCallback(
     (roundId: string) =>
       commit((current) =>
-        current.selectedRoundId === roundId
-          ? current
-          : {
-              ...current,
-              selectedRoundId: roundId,
-              rooms: current.rooms.map((room) => ({
-                ...room,
-                leftTeamId: null,
-                rightTeamId: null,
-              })),
-            },
+        current.selectedRoundId === roundId ? current : { ...current, selectedRoundId: roundId },
       ),
     [commit],
   );
@@ -855,7 +921,11 @@ export function useBridge(): BridgeApi {
       setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
       return;
     }
-    const plan = planRound(tournament, round, current.rooms, current.pendingRoomRemovals);
+    // Snapshot this round's plan now and build the whole publication from it. Nothing downstream
+    // rereads state, so an edit made while the request is in flight cannot change what is sent —
+    // and cannot be silently overwritten by it either. See `applyPublication`.
+    const pairings = pairingsForRound(current.roundPlans, round.id);
+    const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
     if (plan.assignments.length === 0) {
       setNotice({
         kind: 'bad',
@@ -1148,11 +1218,70 @@ export function useBridge(): BridgeApi {
     [tournament],
   );
 
-  const warnings = useMemo(() => pairingWarnings(state.rooms, teamName), [state.rooms, teamName]);
-
-  const roundChangeDiscardsSelections = state.rooms.some(
-    (room) => room.leftTeamId !== null || room.rightTeamId !== null,
+  /** The selected round's pairings. Every plan-aware derivation below starts here. */
+  const selectedPairings = useMemo(
+    () => pairingsForRound(state.roundPlans, state.selectedRoundId),
+    [state.roundPlans, state.selectedRoundId],
   );
+
+  const warnings = useMemo(
+    () => pairingWarnings(state.rooms, selectedPairings, teamName),
+    [selectedPairings, state.rooms, teamName],
+  );
+
+  const plannedTeamsFor = useCallback(
+    (roomId: string) => plannedTeams(state.roundPlans, state.selectedRoundId, roomId),
+    [state.roundPlans, state.selectedRoundId],
+  );
+
+  /**
+   * Whether this room's planned game for the selected round is the one the relay is serving.
+   *
+   * Derived every time from the relay fields plus `pairingMatchId`, never stored. The case that
+   * matters most is `other-round`: while round 1 is live, the room-level status is `waiting` for
+   * every room, and without this the operator entering round 5 would see round 5 reported as
+   * already published.
+   */
+  const planStatus = useCallback(
+    (room: Room): PlanPublicationStatus =>
+      tournament === null
+        ? 'no-game'
+        : planPublicationStatus({
+            tournamentId: tournament.id,
+            roundId: state.selectedRoundId,
+            room,
+            pairing: pairingFor(state.roundPlans, state.selectedRoundId, room.id),
+          }),
+    [state.roundPlans, state.selectedRoundId, tournament],
+  );
+
+  const roundProgress = useMemo(
+    () => ({
+      roundId: state.selectedRoundId,
+      assigned: assignedRoomCount(state.roundPlans, state.selectedRoundId),
+      total: state.rooms.length,
+    }),
+    [state.roundPlans, state.rooms.length, state.selectedRoundId],
+  );
+
+  /**
+   * Assignment counts for the rounds beside this one, so setup completeness is visible at a glance.
+   *
+   * Scoped to the selected round's phase rather than the whole file: eleven prelim rounds is a list
+   * an operator reads, and every round of a three-phase tournament is not.
+   */
+  const phaseRoundProgress = useMemo(() => {
+    if (!tournament) return [];
+    const selected = tournament.rounds.find((round) => round.id === state.selectedRoundId);
+    if (!selected) return [];
+    return tournament.rounds
+      .filter((round) => round.phaseId === selected.phaseId)
+      .map((round) => ({
+        roundId: round.id,
+        displayName: round.displayName,
+        assigned: assignedRoomCount(state.roundPlans, round.id),
+      }));
+  }, [state.roundPlans, state.selectedRoundId, tournament]);
 
   /**
    * The one place the relay's unacknowledged window is surfaced.
@@ -1201,9 +1330,12 @@ export function useBridge(): BridgeApi {
     renameRoom,
     removeRoom,
     setRoomTeams,
+    plannedTeamsFor,
+    planStatus,
+    roundProgress,
+    phaseRoundProgress,
     regeneratePairingCode,
     selectRound,
-    roundChangeDiscardsSelections,
     publish,
     publishRoomSetup,
     roomStatus,

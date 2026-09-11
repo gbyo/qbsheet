@@ -60,6 +60,17 @@ let existingPaths = new Set<string>();
 let claimFails = false;
 /** Set to make the next mirror fail without changing relay or local publication state. */
 let mirrorFails = false;
+/**
+ * Set to hold the next mirror open until it resolves.
+ *
+ * The point is to reproduce the one interleaving that can silently corrupt a round: a mirror built
+ * from A-vs-B is in flight, the operator changes the plan to A-vs-C, and the response arrives. The
+ * relay really is holding A-vs-B, so the room must record that — and must not roll the newer plan
+ * back to the snapshot that was sent.
+ */
+let deferMirror: Promise<void> | null = null;
+/** True once a deferred mirror has actually been issued, so the test knows when to edit. */
+let deferredMirrorStarted = false;
 let ackFailuresRemaining = 0;
 let resultFolder = '/tournaments/results';
 let deferResultRequests = false;
@@ -139,6 +150,10 @@ function installFakeTauri(): void {
         }
         if (url.endsWith('/mirror')) {
           if (mirrorFails) return { status: 503, body: JSON.stringify({ message: 'relay unavailable' }) };
+          if (deferMirror) {
+            deferredMirrorStarted = true;
+            await deferMirror;
+          }
           return { status: 200, body: '{}' };
         }
         if (url.includes('/results')) {
@@ -166,6 +181,8 @@ beforeEach(() => {
   existingPaths = new Set();
   claimFails = false;
   mirrorFails = false;
+  deferMirror = null;
+  deferredMirrorStarted = false;
   ackFailuresRemaining = 0;
   resultFolder = '/tournaments/results';
   deferResultRequests = false;
@@ -232,7 +249,7 @@ async function setUpConnectedRooms() {
   return rendered;
 }
 
-/** Choose the round first: selecting one clears every room's teams, deliberately. */
+/** Choose the round, then enter its pairings. Each round keeps its own, so order is free. */
 async function setUpRound(rendered: Awaited<ReturnType<typeof setUpTournament>>, index: number) {
   const round = rendered.result.current.tournament?.rounds[index];
   act(() => {
@@ -784,7 +801,7 @@ describe('persistence', () => {
   test('unreadable stored state starts clean rather than half-understood', () => {
     globalThis.localStorage.setItem(storageKey, '{ not json');
     expect(loadState()).toEqual({
-      version: 1,
+      version: 2,
       relay: null,
       scorerReadiness: null,
       yftPath: null,
@@ -793,6 +810,7 @@ describe('persistence', () => {
       pendingRoomRemovals: [],
       retiredRoomIds: [],
       selectedRoundId: null,
+      roundPlans: [],
       resultFolder: null,
       results: [],
     });
@@ -936,37 +954,116 @@ function bridgeStatus(
 /**
  * Changing rounds.
  *
- * The mistake this prevents is the cheapest one on the screen to make: choose round 5, leave
- * round 4's dropdowns as they are, and press Publish. The rooms would receive real, correctly
- * formatted round 5 assignments for round 4's matchups, score them, and YellowFruit would import
- * them without a word of complaint.
+ * This used to wipe every selection, because the selections lived on the rooms and a round change
+ * had nowhere to put the outgoing ones. That made entering a tournament's prelims in advance
+ * impossible: the only round that could hold matchups was the one on screen.
+ *
+ * Each round now owns its own plan, so switching is a read. The mistake the wiping guarded against
+ * — publishing round 4's pairings as round 5 — is prevented where it actually happens instead, in
+ * `publish()`, which reads the selected round's own plan and nothing else.
  */
 describe('changing the round', () => {
-  test('clears the team selections and keeps everything else about the room', async () => {
+  test('keeps every round\u2019s own pairings and changes nothing else', async () => {
     const rendered = await setUpTournament();
     const before = rendered.result.current.state.rooms.map((room) => ({
       id: room.id,
       name: room.name,
       code: room.pairingCode,
     }));
-    expect(rendered.result.current.state.rooms[0].leftTeamId).toBe('Team_Cony');
-    expect(rendered.result.current.roundChangeDiscardsSelections).toBe(true);
+    const roundFour = rendered.result.current.state.selectedRoundId!;
+    const [first] = rendered.result.current.state.rooms;
+    expect(rendered.result.current.plannedTeamsFor(first.id).leftTeamId).toBe('Team_Cony');
 
     const nextRound = rendered.result.current.tournament!.rounds[4];
     act(() => {
       rendered.result.current.selectRound(nextRound.id);
     });
 
-    const after = rendered.result.current.state.rooms;
     expect(rendered.result.current.state.selectedRoundId).toBe(nextRound.id);
-    // Rooms, names and codes are the tournament's physical setup and survive.
-    expect(after.map((room) => ({ id: room.id, name: room.name, code: room.pairingCode }))).toEqual(before);
-    // The pairings do not.
-    expect(after.every((room) => room.leftTeamId === null && room.rightTeamId === null)).toBe(true);
-    expect(rendered.result.current.roundChangeDiscardsSelections).toBe(false);
+    // Rooms, names and codes are the tournament's physical setup and are untouched.
+    expect(
+      rendered.result.current.state.rooms.map((room) => ({
+        id: room.id,
+        name: room.name,
+        code: room.pairingCode,
+      })),
+    ).toEqual(before);
+    // Round 5 has nothing entered yet, and round 4 still has everything.
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: null,
+      rightTeamId: null,
+    });
+    expect(
+      rendered.result.current.state.roundPlans.find((plan) => plan.roundId === roundFour)?.pairings,
+    ).toHaveLength(2);
   });
 
-  test('the cleared pairings cannot be published as the new round', async () => {
+  test('round 1, round 2, then back to round 1 returns the original pairings', async () => {
+    const rendered = await setUpTournament();
+    const rounds = rendered.result.current.tournament!.rounds;
+    const [first, second] = rendered.result.current.state.rooms;
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Cony');
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
+      rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Wells');
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
+    });
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[1].id);
+    });
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Wells');
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Cony');
+    });
+    expect(rendered.result.current.plannedTeamsFor(second.id)).toEqual({
+      leftTeamId: null,
+      rightTeamId: null,
+    });
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Cony',
+      rightTeamId: 'Team_Deering',
+    });
+    expect(rendered.result.current.plannedTeamsFor(second.id)).toEqual({
+      leftTeamId: 'Team_Wells',
+      rightTeamId: 'Team_Windham A',
+    });
+  });
+
+  test('clearing the last side deletes the sparse entry rather than storing two nulls', async () => {
+    const rendered = await setUpTournament();
+    const roundId = rendered.result.current.state.selectedRoundId!;
+    const [first] = rendered.result.current.state.rooms;
+
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'left', null);
+    });
+    // One side left, so the entry stays.
+    expect(
+      rendered.result.current.state.roundPlans
+        .find((plan) => plan.roundId === roundId)
+        ?.pairings.some((pairing) => pairing.roomId === first.id),
+    ).toBe(true);
+
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', null);
+    });
+    expect(
+      rendered.result.current.state.roundPlans
+        .find((plan) => plan.roundId === roundId)
+        ?.pairings.some((pairing) => pairing.roomId === first.id),
+    ).toBe(false);
+  });
+
+  test('a round with nothing entered still cannot be published', async () => {
     const rendered = await setUpTournament();
     const nextRound = rendered.result.current.tournament!.rounds[4];
     act(() => {
@@ -987,10 +1084,11 @@ describe('changing the round', () => {
   test('reselecting the round already chosen changes nothing', async () => {
     const rendered = await setUpTournament();
     const current = rendered.result.current.state.selectedRoundId!;
+    const [first] = rendered.result.current.state.rooms;
     act(() => {
       rendered.result.current.selectRound(current);
     });
-    expect(rendered.result.current.state.rooms[0].leftTeamId).toBe('Team_Cony');
+    expect(rendered.result.current.plannedTeamsFor(first.id).leftTeamId).toBe('Team_Cony');
   });
 });
 
@@ -1078,9 +1176,8 @@ describe('changing the relay', () => {
       id: room.id,
       name: room.name,
       pairingCode: room.pairingCode,
-      leftTeamId: room.leftTeamId,
-      rightTeamId: room.rightTeamId,
     }));
+    const plansBefore = rendered.result.current.state.roundPlans;
     act(() => {
       rendered.result.current.beginRelayChange();
     });
@@ -1102,8 +1199,6 @@ describe('changing the relay', () => {
         id: room.id,
         name: room.name,
         pairingCode: room.pairingCode,
-        leftTeamId: room.leftTeamId,
-        rightTeamId: room.rightTeamId,
         relayPublished: room.relayPublished,
         publishedMatchId: room.publishedMatchId,
         publishedRoundId: room.publishedRoundId,
@@ -1118,6 +1213,9 @@ describe('changing the relay', () => {
         assignmentRevision: 0,
       })),
     );
+    // Replacing the relay resets relay facts. The operator's planning survives it: a new relay
+    // does not mean a new schedule.
+    expect(rendered.result.current.state.roundPlans).toEqual(plansBefore);
   });
 
   test('forgetting the credential is a separate, explicit action', async () => {
@@ -1483,5 +1581,415 @@ describe('acknowledging saved results', () => {
     expect(rendered.result.current.state.results).toHaveLength(100);
     expect(rendered.result.current.unsavedResultWarning).toMatch(/100 results are still unsaved/);
     expect(rendered.result.current.unsavedResultWarning).toMatch(/oldest 128/);
+  });
+});
+
+/**
+ * Planning a tournament before it starts.
+ *
+ * The whole point of separating a room from a round's plan is that an operator can sit down on
+ * Friday night, enter every prelim round, close the application, and find all of it on Saturday
+ * morning — and that publishing round 1 then means round 1 and nothing else.
+ *
+ * Every test below is about one of the two sources of truth not leaking into the other.
+ */
+describe('preplanned rounds', () => {
+  /** Enter a distinct matchup in the first room for each of the first three prelim rounds. */
+  async function planThreeRounds() {
+    const rendered = await setUpTournament();
+    const rounds = rendered.result.current.tournament!.rounds;
+    const [first, second] = rendered.result.current.state.rooms;
+    const entries: [string, string, string][] = [
+      [rounds[0].id, 'Team_Cony', 'Team_Deering'],
+      [rounds[1].id, 'Team_Wells', 'Team_Windham A'],
+      [rounds[2].id, 'Team_Plymouth A', 'Team_Plymouth B'],
+    ];
+    for (const [roundId, left, right] of entries) {
+      act(() => {
+        rendered.result.current.selectRound(roundId);
+      });
+      act(() => {
+        rendered.result.current.setRoomTeams(first.id, 'left', left);
+        rendered.result.current.setRoomTeams(first.id, 'right', right);
+        rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Hebron Academy');
+        rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Gould Academy A');
+      });
+    }
+    return { rendered, rounds, first, second, entries };
+  }
+
+  test('survive a restart, every round of them', async () => {
+    const { rendered, first, entries } = await planThreeRounds();
+    const saved = rendered.result.current.state.roundPlans;
+    // The three entered here, plus the round `setUpTournament` already planned.
+    expect(saved).toHaveLength(4);
+    expect(loadState().roundPlans).toEqual(saved);
+
+    // A new hook is a new application session reading the same local storage.
+    const restarted = renderHook(() => useBridge());
+    expect(restarted.result.current.state.roundPlans).toEqual(saved);
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    for (const [roundId, left, right] of entries) {
+      act(() => {
+        restarted.result.current.selectRound(roundId);
+      });
+      expect(restarted.result.current.plannedTeamsFor(first.id)).toEqual({
+        leftTeamId: left,
+        rightTeamId: right,
+      });
+    }
+  });
+
+  test('a reload of the same file with the same ids changes nothing', async () => {
+    const { rendered } = await planThreeRounds();
+    const before = rendered.result.current.state.roundPlans;
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', yftFixtureText());
+    });
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(rendered.result.current.notice?.kind).toBe('good');
+  });
+
+  test('a reload missing one team clears only that side, and says so once', async () => {
+    const { rendered, rounds, first, second } = await planThreeRounds();
+    // The team keeps its name and loses its id, which is the only thing reconciliation may read.
+    const withoutWells = yftFixtureText().replaceAll('Team_Wells', 'Team_Wells_Withdrawn');
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', withoutWells);
+    });
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[1].id);
+    });
+    // Round 2 had Wells on the left; only that side is gone.
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: null,
+      rightTeamId: 'Team_Windham A',
+    });
+    // The other room in that round, and every other round, is untouched.
+    expect(rendered.result.current.plannedTeamsFor(second.id)).toEqual({
+      leftTeamId: 'Team_Hebron Academy',
+      rightTeamId: 'Team_Gould Academy A',
+    });
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Cony',
+      rightTeamId: 'Team_Deering',
+    });
+
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.notice?.message).toMatch(/team selection\(s\) were cleared/);
+  });
+
+  test('a reload missing one round drops only that round’s plan', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    // Round ids are synthesized by the importer from the phase and the round number, so the round
+    // has to be taken out of the file itself rather than renamed by a string replacement.
+    const withoutRoundThree = (() => {
+      const parsed = JSON.parse(yftFixtureText()) as {
+        objects: { type?: string; phases?: { name?: string; rounds?: { name?: string }[] }[] }[];
+      };
+      const tournament = parsed.objects.find((object) => object.type === 'Tournament')!;
+      const prelims = tournament.phases!.find((phase) => phase.name === 'Prelims')!;
+      prelims.rounds = prelims.rounds!.filter((round) => round.name !== '3');
+      return JSON.stringify(parsed);
+    })();
+    act(() => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', withoutRoundThree);
+    });
+
+    // Round 3's plan is gone; every other planned round — including the one `setUpTournament`
+    // entered — is untouched.
+    expect(rendered.result.current.state.roundPlans.map((plan) => plan.roundId)).not.toContain(rounds[2].id);
+    expect(rendered.result.current.state.roundPlans.map((plan) => plan.roundId)).toEqual(
+      expect.arrayContaining([rounds[0].id, rounds[1].id, rounds[3].id]),
+    );
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Cony',
+      rightTeamId: 'Team_Deering',
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/planned round\(s\) no longer exist/);
+  });
+
+  test('adding a room changes no existing plan', async () => {
+    const { rendered } = await planThreeRounds();
+    const before = rendered.result.current.state.roundPlans;
+    act(() => {
+      rendered.result.current.addRoom();
+    });
+    // Sparse: the new room is in no round until the operator puts it in one.
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(rendered.result.current.state.rooms).toHaveLength(3);
+  });
+
+  test('renaming a room changes no plan, because plans reference the id', async () => {
+    const { rendered, first } = await planThreeRounds();
+    const before = rendered.result.current.state.roundPlans;
+    act(() => {
+      rendered.result.current.renameRoom(first.id, 'Auditorium');
+    });
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(rendered.result.current.state.rooms[0].name).toBe('Auditorium');
+  });
+
+  test('removing a room removes it from every plan and still leaves a relay tombstone', async () => {
+    const { rendered, first, second } = await planThreeRounds();
+    // Publish once so the room exists on the relay and its removal owes the relay a clear.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    act(() => {
+      rendered.result.current.removeRoom(first.id);
+    });
+
+    for (const plan of rendered.result.current.state.roundPlans) {
+      expect(plan.pairings.some((pairing) => pairing.roomId === first.id)).toBe(false);
+      // The other room's entries are untouched in every round.
+      expect(plan.pairings.some((pairing) => pairing.roomId === second.id)).toBe(true);
+    }
+    // The relay half of the removal is unchanged by any of this.
+    expect(rendered.result.current.state.pendingRoomRemovals.map((room) => room.id)).toEqual([first.id]);
+    expect(rendered.result.current.state.retiredRoomIds).toContain(first.id);
+  });
+
+  test('regenerating a pairing code changes no plan', async () => {
+    const { rendered, first } = await planThreeRounds();
+    const before = rendered.result.current.state.roundPlans;
+    act(() => {
+      rendered.result.current.regeneratePairingCode(first.id);
+    });
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(rendered.result.current.state.rooms[0].pendingPairingCode).toBeTruthy();
+  });
+
+  test('Publish Room Setup changes no plan', async () => {
+    const { rendered } = await planThreeRounds();
+    const before = rendered.result.current.state.roundPlans;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(rendered.result.current.state.rooms.every((room) => room.relayPublished)).toBe(true);
+  });
+
+  test('publishing one round leaves every round’s plan exactly as it was', async () => {
+    const { rendered, rounds } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    const before = rendered.result.current.state.roundPlans;
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    expect(rendered.result.current.state.roundPlans).toEqual(before);
+    expect(loadState().roundPlans).toEqual(before);
+  });
+
+  test('publishing round 1 sends round 1’s pairings even while round 2 differs', async () => {
+    const { rendered, rounds } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
+    const body = JSON.parse(String(mirror!.args.body)) as {
+      rooms: { room_id: string; assignment_qbj?: { objects: Record<string, unknown>[] } }[];
+    };
+    const room = body.rooms.find((entry) => entry.room_id === 'room-1')!;
+    const teams = room.assignment_qbj!.objects.filter((object) => object.type === 'Team');
+    // Round 1's matchup, not round 2's or round 3's.
+    expect(teams.map((team) => team.id)).toEqual(['Team_Cony', 'Team_Deering']);
+  });
+
+  test('a room used in round 1 but not round 2 is explicitly cleared by round 2', async () => {
+    const rendered = await setUpTournament();
+    const rounds = rendered.result.current.tournament!.rounds;
+    const [first, second] = rendered.result.current.state.rooms;
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Cony');
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
+      rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Wells');
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    // Round 2 uses only the first room.
+    act(() => {
+      rendered.result.current.selectRound(rounds[1].id);
+    });
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Plymouth A');
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Plymouth B');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    const mirrors = calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'));
+    const body = JSON.parse(String(mirrors[1].args.body)) as {
+      rooms: { room_id: string; assignment_qbj?: unknown; match_id?: string }[];
+    };
+    const unused = body.rooms.find((entry) => entry.room_id === second.id)!;
+    // Present and explicitly holding nothing, because the relay upserts and never deletes.
+    expect(unused).toBeTruthy();
+    expect(unused.assignment_qbj).toBeUndefined();
+    expect(unused.match_id).toBeUndefined();
+    expect(rendered.result.current.state.rooms[1].publishedMatchId).toBeNull();
+  });
+
+  test('a failed publish changes neither the plans nor local publication state', async () => {
+    const { rendered, rounds } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    const beforePlans = rendered.result.current.state.roundPlans;
+    const beforeRooms = rendered.result.current.state.rooms;
+    const beforeRevision = rendered.result.current.state.relay?.revision;
+
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    mirrorFails = false;
+
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.state.roundPlans).toEqual(beforePlans);
+    expect(rendered.result.current.state.rooms).toEqual(beforeRooms);
+    expect(rendered.result.current.state.relay?.revision).toBe(beforeRevision);
+  });
+
+  test('a future round never shows the live round’s assignment as its own', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+
+    const room = () => rendered.result.current.state.rooms[0];
+    // Round 1 is live and says so.
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+    // The room-level status is `waiting` regardless of which round is selected, which is exactly
+    // why the plan needs its own status.
+    expect(rendered.result.current.roomStatus(room())).toBe('waiting');
+
+    act(() => {
+      rendered.result.current.selectRound(rounds[1].id);
+    });
+    expect(rendered.result.current.roomStatus(room())).toBe('waiting');
+    expect(rendered.result.current.planStatus(room())).toBe('other-round');
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Wells',
+      rightTeamId: 'Team_Windham A',
+    });
+  });
+
+  test('editing a published round marks it as differing from what is live', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.planStatus(rendered.result.current.state.rooms[0])).toBe('live');
+
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Windham B');
+    });
+    expect(rendered.result.current.planStatus(rendered.result.current.state.rooms[0])).toBe('edited');
+  });
+
+  test('an edit made while a publish is in flight is not overwritten by the response', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+
+    // Hold the mirror open, change the plan underneath it, then let it succeed.
+    let releaseMirror: (() => void) | null = null;
+    const held = new Promise<void>((resolve) => {
+      releaseMirror = resolve;
+    });
+    deferMirror = held;
+
+    let publishing: Promise<void>;
+    act(() => {
+      publishing = rendered.result.current.publish();
+    });
+    await waitFor(() => expect(deferredMirrorStarted).toBe(true));
+
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Windham C');
+    });
+
+    releaseMirror!();
+    await act(async () => {
+      await publishing!;
+    });
+    deferMirror = null;
+
+    // The relay really is holding A-vs-B, so that is what the room records.
+    const room = rendered.result.current.state.rooms[0];
+    expect(room.publishedRoundId).toBe(rounds[0].id);
+    expect(room.publishedMatchId).toBeTruthy();
+    // The newer plan is intact rather than reverted to the snapshot that was sent.
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Cony',
+      rightTeamId: 'Team_Windham C',
+    });
+    // And the screen can tell the operator the two differ.
+    expect(rendered.result.current.planStatus(room)).toBe('edited');
+  });
+
+  test('a result still matches the match that was published, not the plan on screen', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const publishedMatchId = rendered.result.current.state.rooms[0].publishedMatchId!;
+
+    // Change the plan after publishing. The relay's game is unaffected, and so is its result.
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Windham B');
+    });
+
+    relayResults = [
+      {
+        result_id: 'result-live',
+        room_id: 'room-1',
+        received_at: '2026-09-11T15:00:00Z',
+        qbj: { type: 'Match', id: publishedMatchId },
+      },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+
+    expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
+      'result-received',
+    );
   });
 });

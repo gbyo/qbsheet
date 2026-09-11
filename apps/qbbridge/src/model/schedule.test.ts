@@ -23,11 +23,12 @@ describe('manual pairing schedule context', () => {
     expect(rightTeamId).toBeTruthy();
     if (!leftTeamId || !rightTeamId) return;
 
-    const rooms = [{ ...newRoom('room-1', 'Room 101', '11112222'), leftTeamId, rightTeamId }];
-    const warnings = schedulePairingWarnings(tournament, tournament.rounds[0], rooms);
+    const rooms = [newRoom('room-1', 'Room 101', '11112222')];
+    const pairings = [{ roomId: 'room-1', leftTeamId, rightTeamId }];
+    const warnings = schedulePairingWarnings(tournament, tournament.rounds[0], rooms, pairings);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]?.message).toMatch(/crosses pools/);
-    expect(publishableRooms(rooms)).toHaveLength(1);
+    expect(publishableRooms(rooms, pairings)).toHaveLength(1);
   });
 
   test('keeps phase-specific pool membership honest after a reload', () => {

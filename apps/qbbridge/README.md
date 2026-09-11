@@ -28,11 +28,14 @@ letting the operator or YellowFruit know it, the operator or YellowFruit knows i
 5. Load the `.yft`.
 6. Connect the relay.
 7. Add a room for each room in use.
+8. Optionally, plan the rounds: choose a round, fill in its rooms, choose the next, and so on. Each
+   round keeps its own matchups, so a whole set of prelims can be entered the night before. The
+   count beside the round selector (`Round 1 · 6/6 assigned`) says how much of each round is done.
 
 **Each round**
 
 1. Choose the round.
-2. Pick the two teams for every room.
+2. Pick the two teams for every room, or check the ones already planned.
 3. Click **Publish Round**.
 4. Scorekeepers scan the room's QR or type its pairing code into ordinary QBSheet Scorer.
 5. Games are scored normally. The scorer already has the format; nobody sets one up in a room.
@@ -82,19 +85,58 @@ time.
 ## Pairings
 
 Stock YellowFruit's saved file carries no authoritative list of future room-by-room pairings to
-publish, so QBBridge owns a small manual table. Rooms persist across rounds; the operator picks the
-two teams each round.
+publish, so QBBridge owns a small manual table.
 
 There is no round-robin generation, no automatic pairing, no bracket, no advancement, and no
 schedule-legality engine. There are four cheap warnings — an empty room, a team against itself, a
 duplicate room name, a team in two rooms this round — and none of them blocks a publish.
 
-**Choosing a different round clears every room's team selection**, after a confirmation. Rooms,
-their names, their pairing codes and their publication history all survive; only the entry state
-goes. The alternative — last round's pairings still sitting in the pickers under a new round's
-heading — makes the most damaging mistake on the screen available in one click: publishing round
-4's matchups as real, correctly formatted round 5 assignments, which the rooms would score and
-YellowFruit would import without complaint.
+### Rooms and round plans are different things
+
+A **room** is physical: a room in a building, a pairing code on a sheet taped to its door, and
+whatever assignment the relay is currently serving for it. It persists for the whole tournament.
+
+A **round plan** is intent: which two teams are meant to play in which room, in one round. Each
+round has its own, they are saved on this computer, and switching rounds is a read — go back to
+round 2 and round 2's entries are exactly as they were left. Plans hold room ids and team ids and
+nothing else: no names, no pools, no match ids, no revisions, no publication flags. Everything else
+is owned either by the `.yft`, which is reread and authoritative, or by the room, which is what the
+relay actually accepted.
+
+**Only the round you publish reaches QBTCP.** Publishing round 1 builds its assignments from round
+1's plan, leaves every plan untouched, and clears every room that round 1 does not use. Planning
+round 7 sends nothing anywhere.
+
+Because the two are separate, each room shows two badges. The first is about the room and the relay
+— Not published, Ready to pair, Waiting, Result received. The second compares the round on screen
+with what the relay holds: **Planned** (entered, never sent), **Live** (the relay is serving exactly
+this), **Edited since publish** (it was sent, then changed), and **Relay holds another round** (this
+room is serving a different round's game). That last one is why the second badge exists: while round
+1 is live every room reads Waiting, and without it round 7 would look published the moment you
+selected it.
+
+### Reloading the `.yft` after the plans exist
+
+YellowFruit stays authoritative for rounds, teams, and their identities. On a reload, saved plans
+are reconciled against it **by stable id only**: a plan for a round that no longer exists is
+dropped, an entry for a room that no longer exists is dropped, a team id that no longer exists
+clears that side, and a pairing left with nothing in it is deleted. One notice says what was lost.
+
+Nothing is ever repaired by matching a team name, a room name, a round's display label, an array
+index, a pool seed, or a position. A wrong guess there is not a cosmetic error — it is a real,
+correctly formatted assignment sending two teams to play a game nobody scheduled. Clearing a side
+costs one dropdown; guessing costs a round.
+
+Playoffs use the same mechanism by hand: reload the `.yft` once YellowFruit knows who advanced, then
+enter the playoff rounds. QBBridge does not predict advancement, and it does not generate a schedule
+from YellowFruit's pool metadata.
+
+### Why planned pairings are never written back to YellowFruit
+
+They stay local QBBridge intent, and QBBridge still hands YellowFruit only completed QBJ result
+files. Stock YellowFruit's **Import Games Only** appends what it imports, and it can duplicate an
+unplayed `Match` that is already in the file — so writing preplanned games back would corrupt the
+file QBBridge exists to leave alone. See #959.
 
 ## What reaches a room
 
