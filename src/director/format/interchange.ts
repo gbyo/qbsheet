@@ -1787,6 +1787,70 @@ export function exportSqbsTournament(
         return;
       }
     }
+    // Each game is classified under its own historical rules (#671), so the
+    // preflight and the overtime/bonus reasoning below agree on the definitions
+    // that were actually in force when the game was played.
+    const gameRules = rulesForGame(state, game) ?? rules;
+    // Authoritative-export preflight (#897): completeness is a per-game fact.
+    // 'incomplete' individual stats must fail closed — partial player detail can
+    // never be published as a complete SQBS game. 'unknown' stays exportable
+    // with explicit warnings; only verified-complete detail exports quietly.
+    if (!forfeit && game.detailedStats === 'incomplete') {
+      errors.push(
+        `Game ${game.id} has incomplete individual stats; complete or correct the result before exporting authoritative SQBS. Partial player detail cannot be published as a complete game.`,
+      );
+      return;
+    }
+    if (!forfeit && game.detailedStats === 'unknown' && game.playerStats.length > 0) {
+      warnings.push(
+        `Game ${game.id} carries player lines of unknown completeness; they export as recorded, not as verified-complete detail.`,
+      );
+    }
+    if (!forfeit && game.playerStats.length > 0) {
+      // Reconcile the two recorded representations of the same game: team
+      // aggregates against summed player lines. Counts are definition-
+      // independent, so any disagreement is a data problem worth naming —
+      // never silently picking one side.
+      for (const [score, label] of [
+        [leftScore, 'left'],
+        [rightScore, 'right'],
+      ] as const) {
+        const lines = game.playerStats.filter((entry) => entry.teamId === score.teamId);
+        const totals: Array<[number, number, string]> = [
+          [score.superpowers, lines.reduce((total, entry) => total + entry.superpowers, 0), 'superpowers'],
+          [score.powers, lines.reduce((total, entry) => total + entry.powers, 0), 'powers'],
+          [score.gets, lines.reduce((total, entry) => total + entry.gets, 0), 'gets'],
+          [score.negs, lines.reduce((total, entry) => total + entry.negs, 0), 'negs'],
+        ];
+        for (const [teamTotal, lineTotal, category] of totals) {
+          if (teamTotal !== lineTotal) {
+            warnings.push(
+              `Game ${game.id} ${label} ${category}: the team total (${teamTotal}) does not match the summed player lines (${lineTotal}); both export as recorded.`,
+            );
+          }
+        }
+        // Bonus aggregates against bonus-earning conversions. Every correct
+        // conversion earns exactly one bonus except overtime conversions in
+        // formats that play no overtime bonuses, so an impossible excess always
+        // warns, while the exact equality check only runs where no-bonus
+        // conversions are provably absent.
+        if (gameRules?.useBonuses && game.detailedStats !== 'unknown') {
+          const correct = score.superpowers + score.powers + score.gets;
+          if (score.bonuses > correct) {
+            warnings.push(
+              `Game ${game.id} ${label} reports ${score.bonuses} bonuses heard but only ${correct} correct conversions; both export as recorded.`,
+            );
+          } else if (
+            (game.overtimeTossupsRead === 0 || gameRules?.overtime === false) &&
+            score.bonuses !== correct
+          ) {
+            warnings.push(
+              `Game ${game.id} ${label} reports ${score.bonuses} bonuses heard for ${correct} correct conversions with no overtime; both export as recorded.`,
+            );
+          }
+        }
+      }
+    }
     // Exact match TUH from the accepted record (#746): several players hear the
     // same tossup and substitutions change summed exposure, so player lines can
     // never stand in for the match count. Unknown stays unknown (null) even when
@@ -1795,7 +1859,6 @@ export function exportSqbsTournament(
     // Overtime and per-team no-bonus conversions from the game's own facts (#890),
     // classified under its own historical rules (#671). Unknown detail warns
     // instead of becoming a verified zero.
-    const gameRules = rulesForGame(state, game) ?? rules;
     const overtimeTuh = forfeit ? 0 : (game.overtimeTossupsRead ?? null);
     let overtime: boolean | undefined;
     let leftWithoutBonus: number | undefined;
