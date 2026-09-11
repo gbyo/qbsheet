@@ -418,6 +418,10 @@ export function buildStatsSnapshot(
       tossupsHeardKnown: true,
       tossupsHeardRegulation: 0,
       tossupsHeardRegulationKnown: true,
+      // The interchange result carries no per-team overtime-points split, so the
+      // regulation numerator stays unknown here; the canonical adapter fills it
+      // from the domain regulation derivation (#755).
+      regulationPoints: null,
       bonusPoints: 0,
       bonusesHeard: 0,
       bouncebackPoints: 0,
