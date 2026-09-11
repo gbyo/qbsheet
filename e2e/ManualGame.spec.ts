@@ -110,9 +110,13 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   const preSubmitExports = page.locator('details.scorer-review-export');
   await expect(preSubmitExports.locator('summary')).toHaveText('Backup & export');
   await expect(preSubmitExports).not.toHaveAttribute('open', '');
-  await expect(preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' })).toBeHidden();
+  await expect(
+    preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }),
+  ).toBeHidden();
   await preSubmitExports.locator('summary').click();
-  await expect(preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' })).toBeVisible();
+  await expect(
+    preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }),
+  ).toBeVisible();
   await preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }).click();
   await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('NEW BLANK TAB');
   await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('A1');
