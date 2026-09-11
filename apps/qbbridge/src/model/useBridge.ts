@@ -428,6 +428,28 @@ export function useBridge(): BridgeApi {
   const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
   const savingBatchRef = useRef(false);
   const [savingBatch, setSavingBatch] = useState(false);
+  /**
+   * Tail of the serialized batch-save pipeline.
+   *
+   * The manual batch save and the automatic save join this chain instead of racing each
+   * other behind a boolean busy flag. When a batch save call resolves, every result known
+   * at call time has completed a full durable-write-plus-ACK pass (or recorded its
+   * failure) — pressing Save during an in-flight automatic save waits for it instead of
+   * silently no-op'ing and leaving the caller to assert on work still in flight. Chain
+   * tasks only await leaf operations (native file calls, relay fetches); nothing enqueues
+   * from inside a task, so the chain always drains. Per-result saves stay outside the
+   * chain and keep their pinned behavior: one arriving mid-batch is dropped rather than
+   * writing the same file twice.
+   */
+  const batchSaveTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueBatchSave = useCallback(<T>(task: () => Promise<T>): Promise<T> => {
+    const run = batchSaveTailRef.current.then(task, task);
+    batchSaveTailRef.current = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }, []);
   const credentialMigrationRef = useRef<string | null>(null);
   /** Last automatic-save failure message shown, so a sick folder says so once, not every poll. */
   const autoSaveNoticeRef = useRef<string | null>(null);
@@ -1896,50 +1918,56 @@ export function useBridge(): BridgeApi {
   );
 
   const saveNewResults = useCallback(async () => {
-    if (savingBatchRef.current || savingResultIdsRef.current.size > 0) return;
-    const current = stateRef.current;
-    const folder = current.resultFolder;
-    if (!folder) {
-      setNotice({ kind: 'bad', message: 'Choose a results folder first.' });
-      return;
-    }
-    const unsaved = current.results.filter((entry) => !entry.savedPath);
-    if (unsaved.length === 0) {
-      setNotice({ kind: 'good', message: 'Every result is already saved.' });
-      return;
-    }
-    savingBatchRef.current = true;
-    setSavingBatch(true);
-    setBusy(true);
-    const failures: string[] = [];
-    const written: string[] = [];
-    const connection = connectionOf(current);
-    try {
-      for (const entry of unsaved) {
-        try {
-          await writeOne(entry, folder);
-          written.push(entry.resultId);
-        } catch (error) {
-          // One bad filename or one full disk must not stop the other eleven, and the one that
-          // failed stays unsaved rather than being marked done.
-          failures.push((error as Error).message);
-        }
+    // Joins the pipeline behind any in-flight automatic save instead of no-op'ing against
+    // it: when this resolves, everything known has had a full write-plus-ACK pass.
+    await enqueueBatchSave(async () => {
+      // Per-result saves run outside the pipeline and hold the file they are writing; yield
+      // to one rather than writing the same file twice.
+      if (savingResultIdsRef.current.size > 0) return;
+      const current = stateRef.current;
+      const folder = current.resultFolder;
+      if (!folder) {
+        setNotice({ kind: 'bad', message: 'Choose a results folder first.' });
+        return;
       }
-      await acknowledgeSaved(connection, written);
-      setNotice(
-        failures.length === 0
-          ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
-          : {
-              kind: 'bad',
-              message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
-            },
-      );
-    } finally {
-      savingBatchRef.current = false;
-      setSavingBatch(false);
-      setBusy(false);
-    }
-  }, [acknowledgeSaved, writeOne]);
+      const unsaved = current.results.filter((entry) => !entry.savedPath);
+      if (unsaved.length === 0) {
+        setNotice({ kind: 'good', message: 'Every result is already saved.' });
+        return;
+      }
+      savingBatchRef.current = true;
+      setSavingBatch(true);
+      setBusy(true);
+      const failures: string[] = [];
+      const written: string[] = [];
+      const connection = connectionOf(current);
+      try {
+        for (const entry of unsaved) {
+          try {
+            await writeOne(entry, folder);
+            written.push(entry.resultId);
+          } catch (error) {
+            // One bad filename or one full disk must not stop the other eleven, and the one that
+            // failed stays unsaved rather than being marked done.
+            failures.push((error as Error).message);
+          }
+        }
+        await acknowledgeSaved(connection, written);
+        setNotice(
+          failures.length === 0
+            ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
+            : {
+                kind: 'bad',
+                message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
+              },
+        );
+      } finally {
+        savingBatchRef.current = false;
+        setSavingBatch(false);
+        setBusy(false);
+      }
+    });
+  }, [acknowledgeSaved, enqueueBatchSave, writeOne]);
 
   /**
    * Save newly arrived results without being asked, once a folder is chosen.
@@ -1951,50 +1979,59 @@ export function useBridge(): BridgeApi {
    * nothing is left unsaved, so the caller can schedule a retry while degraded.
    */
   const autoSaveUnsaved = useCallback(async (): Promise<boolean> => {
-    if (!isNativeHost() || savingBatchRef.current || savingResultIdsRef.current.size > 0) {
+    if (!isNativeHost()) {
       return stateRef.current.results.every((entry) => entry.savedPath !== undefined);
     }
-    const current = stateRef.current;
-    const folder = current.resultFolder;
-    if (!folder) return false;
-    const unsaved = current.results.filter((entry) => !entry.savedPath);
-    if (unsaved.length === 0) {
-      autoSaveNoticeRef.current = null;
-      return true;
-    }
-    savingBatchRef.current = true;
-    setSavingBatch(true);
-    const connection = connectionOf(current);
-    const failures: string[] = [];
-    const written: string[] = [];
-    try {
-      for (const entry of unsaved) {
-        try {
-          await writeOne(entry, folder);
-          written.push(entry.resultId);
-        } catch (error) {
-          failures.push((error as Error).message);
+    // Serialized with manual batch saves: overlapping effect runs queue behind in-flight
+    // work instead of bailing out and leaving the retry to a 30s timer.
+    return enqueueBatchSave(async (): Promise<boolean> => {
+      // Per-result saves run outside the pipeline and hold the file they are writing; yield
+      // to one rather than writing the same file twice.
+      if (savingResultIdsRef.current.size > 0) {
+        return stateRef.current.results.every((entry) => entry.savedPath !== undefined);
+      }
+      const current = stateRef.current;
+      const folder = current.resultFolder;
+      if (!folder) return false;
+      const unsaved = current.results.filter((entry) => !entry.savedPath);
+      if (unsaved.length === 0) {
+        autoSaveNoticeRef.current = null;
+        return true;
+      }
+      savingBatchRef.current = true;
+      setSavingBatch(true);
+      const connection = connectionOf(current);
+      const failures: string[] = [];
+      const written: string[] = [];
+      try {
+        for (const entry of unsaved) {
+          try {
+            await writeOne(entry, folder);
+            written.push(entry.resultId);
+          } catch (error) {
+            failures.push((error as Error).message);
+          }
         }
+        await acknowledgeSaved(connection, written);
+      } finally {
+        savingBatchRef.current = false;
+        setSavingBatch(false);
       }
-      await acknowledgeSaved(connection, written);
-    } finally {
-      savingBatchRef.current = false;
-      setSavingBatch(false);
-    }
-    const remaining = stateRef.current.results.filter((entry) => !entry.savedPath).length;
-    if (failures.length > 0) {
-      const message =
-        `Automatic save left ${remaining} of ${unsaved.length} new result(s) unsaved. ` +
-        `${failures[0]} The relay still holds them; they retry on their own.`;
-      if (autoSaveNoticeRef.current !== message) {
-        autoSaveNoticeRef.current = message;
-        setNotice({ kind: 'bad', message });
+      const remaining = stateRef.current.results.filter((entry) => !entry.savedPath).length;
+      if (failures.length > 0) {
+        const message =
+          `Automatic save left ${remaining} of ${unsaved.length} new result(s) unsaved. ` +
+          `${failures[0]} The relay still holds them; they retry on their own.`;
+        if (autoSaveNoticeRef.current !== message) {
+          autoSaveNoticeRef.current = message;
+          setNotice({ kind: 'bad', message });
+        }
+      } else {
+        autoSaveNoticeRef.current = null;
       }
-    } else {
-      autoSaveNoticeRef.current = null;
-    }
-    return remaining === 0;
-  }, [acknowledgeSaved, writeOne]);
+      return remaining === 0;
+    });
+  }, [acknowledgeSaved, enqueueBatchSave, writeOne]);
 
   /**
    * Verify the result ledger against the files on disk, once per session — and repair it.

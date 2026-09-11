@@ -1818,6 +1818,53 @@ describe('acknowledging saved results', () => {
     expect(JSON.parse(String(ack?.args.body))).toEqual({ results: ['result-aaa'] });
   });
 
+  test('a manual save pressed during an automatic save waits for it instead of vanishing', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+
+    // Hold the automatic save's write open, as a slow disk would.
+    deferWrites = true;
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+      await Promise.resolve();
+    });
+    expect(pendingWrites).toHaveLength(1);
+
+    // Pressing Save while the automatic save is in flight joins it: the call must still be
+    // pending — claiming nothing yet — rather than resolving against work still in flight.
+    let settled = false;
+    let savePromise: Promise<void> | undefined;
+    await act(async () => {
+      savePromise = rendered.result.current.saveNewResults();
+      void savePromise.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+    });
+    for (let tick = 0; tick < 10 && !settled; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(settled).toBe(false);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(0);
+
+    await act(async () => {
+      releaseNextWrite();
+      await savePromise;
+    });
+    // Resolving the manual save now means the write and its ACK both happened: exactly one
+    // durable write, exactly one ACK, no second relay delivery needed.
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+    expect(calls.filter((call) => call.command === 'write_result_file_durable')).toHaveLength(1);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(1);
+  });
+
   test('a result that failed to save is not acknowledged', async () => {
     const { result: document } = scoredResultDocument();
     relayResults = [
