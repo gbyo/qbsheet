@@ -24,7 +24,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
         <Button
           variant="primary"
           style={{ marginLeft: 'auto' }}
-          isDisabled={bridge.busy || unsaved.length === 0 || !state.resultFolder}
+          isDisabled={bridge.busy || bridge.savingResults || unsaved.length === 0 || !state.resultFolder}
           onPress={() => void bridge.saveNewResults()}
         >
           Save New Results{unsaved.length > 0 ? ` (${unsaved.length})` : ''}
@@ -57,7 +57,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
               </StatusBadge>
               <Button
                 size="sm"
-                isDisabled={!state.resultFolder}
+                isDisabled={bridge.resultBusy(entry.resultId) || !state.resultFolder}
                 onPress={() => void bridge.saveResult(entry.resultId)}
               >
                 {entry.savedPath ? 'Save again' : 'Save'}

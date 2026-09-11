@@ -20,18 +20,53 @@ interface InvokeCall {
   args: Record<string, unknown>;
 }
 
+interface RelayReply {
+  status: number;
+  body: string;
+}
+
+interface RelayResultRow {
+  result_id: string;
+  room_id: string;
+  received_at: string;
+  qbj: unknown;
+}
+
+interface WrittenFile {
+  directory: string;
+  fileName: string;
+  contents: string;
+  overwrite: boolean;
+}
+
+interface PendingWrite {
+  path: string;
+  file: WrittenFile;
+  resolve(path: string): void;
+  reject(reason?: unknown): void;
+}
+
 const relayBase = 'https://qbtcp-relay-test.workers.dev';
+const replacementRelayBase = 'https://qbtcp-replacement-test.workers.dev';
 const relayTournament = 'bcdfghjkmnpqrstvwxyz2345';
 
 let calls: InvokeCall[] = [];
-let relayResults: { result_id: string; room_id: string; received_at: string; qbj: unknown }[] = [];
-let writtenFiles: { directory: string; fileName: string; contents: string; overwrite: boolean }[] = [];
+let relayResults: RelayResultRow[] = [];
+let relayResultsByBase = new Map<string, RelayResultRow[]>();
+let writtenFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
 let existingPaths = new Set<string>();
 /** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
 let claimFails = false;
 /** Set to make the next mirror fail without changing relay or local publication state. */
 let mirrorFails = false;
+let ackFailuresRemaining = 0;
+let resultFolder = '/tournaments/results';
+let deferResultRequests = false;
+let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reason?: unknown) => void }[] =
+  [];
+let deferWrites = false;
+let pendingWrites: PendingWrite[] = [];
 
 function installFakeTauri(): void {
   calls = [];
@@ -42,7 +77,7 @@ function installFakeTauri(): void {
       case 'open_yellowfruit_file':
         return { path: '/tournaments/spring.yft', contents: yftFixtureText() };
       case 'choose_result_folder':
-        return '/tournaments/results';
+        return resultFolder;
       case 'write_result_file': {
         const path = `${String(args.directory)}/${String(args.fileName)}`;
         // The real command opens with `create_new` unless told to overwrite.
@@ -50,7 +85,13 @@ function installFakeTauri(): void {
           throw new Error(`${String(args.fileName)} already exists in that folder`);
         }
         existingPaths.add(path);
-        writtenFiles.push(args as unknown as (typeof writtenFiles)[number]);
+        const file = args as unknown as WrittenFile;
+        if (deferWrites) {
+          return new Promise<string>((resolve, reject) => {
+            pendingWrites.push({ path, file, resolve, reject });
+          });
+        }
+        writtenFiles.push(file);
         return path;
       }
       case 'relay_request': {
@@ -74,6 +115,10 @@ function installFakeTauri(): void {
           };
         }
         if (url.endsWith('/acks')) {
+          if (ackFailuresRemaining > 0) {
+            ackFailuresRemaining -= 1;
+            return { status: 503, body: JSON.stringify({ message: 'temporary ACK failure' }) };
+          }
           return { status: 200, body: JSON.stringify({ acked_results: 1 }) };
         }
         if (url.endsWith('/mirror')) {
@@ -81,7 +126,13 @@ function installFakeTauri(): void {
           return { status: 200, body: '{}' };
         }
         if (url.includes('/results')) {
-          return { status: 200, body: JSON.stringify({ results: relayResults }) };
+          if (deferResultRequests) {
+            return new Promise<RelayReply>((resolve, reject) => {
+              pendingResultRequests.push({ resolve, reject });
+            });
+          }
+          const rows = [...relayResultsByBase.entries()].find(([base]) => url.startsWith(base))?.[1];
+          return { status: 200, body: JSON.stringify({ results: rows ?? relayResults }) };
         }
         return { status: 404, body: '{}' };
       }
@@ -95,17 +146,32 @@ function installFakeTauri(): void {
 
 beforeEach(() => {
   relayResults = [];
+  relayResultsByBase = new Map();
   existingPaths = new Set();
   claimFails = false;
   mirrorFails = false;
+  ackFailuresRemaining = 0;
+  resultFolder = '/tournaments/results';
+  deferResultRequests = false;
+  pendingResultRequests = [];
+  deferWrites = false;
+  pendingWrites = [];
   installFakeTauri();
 });
 
 afterEach(() => {
   Reflect.deleteProperty(globalThis as Record<string, unknown>, '__TAURI_INTERNALS__');
   resetNativeHost();
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
+
+function releaseNextWrite(): void {
+  const pending = pendingWrites.shift();
+  if (!pending) throw new Error('no deferred write is waiting');
+  writtenFiles.push(pending.file);
+  pending.resolve(pending.path);
+}
 
 async function setUpTournament() {
   const rendered = renderHook(() => useBridge());
@@ -491,6 +557,137 @@ describe('results', () => {
     expect(rendered.result.current.notice?.kind).toBe('bad');
     expect(rendered.result.current.notice?.message).toMatch(/no longer exists/);
   });
+
+  test('a folder change makes Save again an exclusive write', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveResult('res-1');
+    });
+
+    resultFolder = '/tournaments/other-results';
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveResult('res-1');
+    });
+
+    expect(writtenFiles).toHaveLength(2);
+    expect(writtenFiles[0].directory).toBe('/tournaments/results');
+    expect(writtenFiles[0].overwrite).toBe(false);
+    expect(writtenFiles[1].directory).toBe('/tournaments/other-results');
+    expect(writtenFiles[1].overwrite).toBe(false);
+    expect(rendered.result.current.state.results[0].savedPath).toBe(
+      '/tournaments/other-results/R04_Room-101_Cony_vs_Deering_0e1ec4.result.qbj',
+    );
+  });
+
+  test('a batch save prevents a concurrent individual save of the same result', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+
+    deferWrites = true;
+    let batch!: Promise<void>;
+    await act(async () => {
+      batch = rendered.result.current.saveNewResults();
+      await Promise.resolve();
+    });
+    expect(pendingWrites).toHaveLength(1);
+    expect(rendered.result.current.savingResults).toBe(true);
+    expect(rendered.result.current.resultBusy('res-1')).toBe(true);
+
+    await act(async () => {
+      await rendered.result.current.saveResult('res-1');
+    });
+    expect(calls.filter((call) => call.command === 'write_result_file')).toHaveLength(1);
+
+    await act(async () => {
+      releaseNextWrite();
+      await batch;
+    });
+    expect(writtenFiles).toHaveLength(1);
+    expect(rendered.result.current.savingResults).toBe(false);
+  });
+});
+
+describe('stale result polls', () => {
+  test('a success from a replaced relay is discarded', async () => {
+    vi.useFakeTimers();
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'old-result', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    relayResultsByBase.set(replacementRelayBase, []);
+    const rendered = await setUpTournament();
+
+    deferResultRequests = true;
+    const poll = rendered.result.current.pollResults();
+    expect(pendingResultRequests).toHaveLength(1);
+    deferResultRequests = false;
+
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: replacementRelayBase,
+        tournamentId: relayTournament,
+        setupToken: 'replacement',
+      });
+    });
+    expect(rendered.result.current.relayReachable).toBe(true);
+
+    const pending = pendingResultRequests.shift();
+    if (!pending) throw new Error('the old relay poll was not waiting');
+    pending.resolve({ status: 200, body: JSON.stringify({ results: relayResults }) });
+    await act(async () => {
+      await poll;
+    });
+
+    expect(rendered.result.current.state.results).toEqual([]);
+    expect(rendered.result.current.relayReachable).toBe(true);
+  });
+
+  test('a failure from a replaced relay does not mark the replacement unavailable', async () => {
+    vi.useFakeTimers();
+    relayResultsByBase.set(replacementRelayBase, []);
+    const rendered = await setUpTournament();
+
+    deferResultRequests = true;
+    const poll = rendered.result.current.pollResults();
+    expect(pendingResultRequests).toHaveLength(1);
+    deferResultRequests = false;
+
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: replacementRelayBase,
+        tournamentId: relayTournament,
+        setupToken: 'replacement',
+      });
+    });
+    expect(rendered.result.current.relayReachable).toBe(true);
+
+    const pending = pendingResultRequests.shift();
+    if (!pending) throw new Error('the old relay poll was not waiting');
+    pending.reject(new Error('old relay went away'));
+    await act(async () => {
+      await poll;
+    });
+
+    expect(rendered.result.current.relayReachable).toBe(true);
+  });
 });
 
 describe('persistence', () => {
@@ -862,6 +1059,44 @@ describe('acknowledging saved results', () => {
     // The bytes are not on disk, so the relay keeps holding it.
     const ackCalls = calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'));
     expect(ackCalls).toEqual([]);
+  });
+
+  test('a failed ACK is retried after restart while the saved file stays safe', async () => {
+    vi.useFakeTimers();
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    ackFailuresRemaining = 1;
+    const rendered = await setUpTournament();
+
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+
+    expect(rendered.result.current.state.results[0].savedPath).toBeTruthy();
+    expect(rendered.result.current.state.results[0].ackPending).toBe(true);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(1);
+    const persisted = JSON.parse(globalThis.localStorage.getItem(storageKey) ?? '{}') as {
+      results?: { ackPending?: boolean }[];
+    };
+    expect(persisted.results?.[0]?.ackPending).toBe(true);
+
+    rendered.unmount();
+    const restarted = renderHook(() => useBridge());
+    expect(restarted.result.current.state.results[0].savedPath).toBeTruthy();
+    expect(restarted.result.current.state.results[0].ackPending).toBe(true);
+
+    await act(async () => {
+      await restarted.result.current.pollResults();
+    });
+
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(2);
+    expect(restarted.result.current.state.results[0].ackPending).toBe(false);
   });
 
   test('the operator is warned before unsaved results reach the relay’s window', async () => {
