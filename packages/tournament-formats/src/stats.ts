@@ -120,6 +120,8 @@ export interface PlayerStatsRow {
 export interface GameStatsRow {
   gameId: string;
   phaseId?: string;
+  /** Human-readable phase/stage name; renderers must prefer it over phaseId. */
+  phaseName?: string;
   roundId?: string;
   roundName?: string;
   teamOneId: string;
