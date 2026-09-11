@@ -149,7 +149,7 @@ jobs:
           QBSheet Bridge carries stock YellowFruit rounds to QBSheet Scorer over Internet QBTCP and
           brings the result QBJ back. Install the file for your system:
 
-          * **Windows** — the `-setup.exe`, or the `.msi` for deployment by an administrator.
+          * **Windows** — the `-setup.exe`, or the `.msi`, which asks whether to install for everyone on the PC (Standard, needs administrator approval) or only for the current Windows account (no approval needed). A conflicting copy in another context, or an NSIS-installed copy, is refused with a message saying what to remove instead of installing side by side.
           * **macOS** — the `.dmg`. One download for both Apple silicon and Intel.
           * **Linux** — the `.AppImage` to run without installing, or the `.deb` or `.rpm`.
 
@@ -287,6 +287,52 @@ jobs:
           # artifacts instead.
           releaseId: ${{ needs.draft.outputs.release-id }}
           uploadWorkflowArtifacts: ${{ github.ref_type != 'tag' }}
+
+      # The Windows MSI is built from the owned WiX template in apps/qbbridge/src-tauri/wix, so
+      # a bundler upgrade that silently changes the stock template cannot silently change what
+      # the MSI does. Read the built database back through the Windows Installer API and fail
+      # the job unless the dual-scope markers are present. This runs on dispatch builds as well
+      # as tag releases, before anything is published.
+      - name: Assert dual-scope MSI markers
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $msi = Get-ChildItem 'apps/qbbridge/src-tauri/target/release/bundle/msi/*.msi' | Select-Object -First 1
+          if (-not $msi) { throw 'No MSI was built.' }
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $db = $installer.OpenDatabase($msi.FullName, 0)
+          function Get-SingleValue([string] $sql) {
+            $view = $db.OpenView($sql)
+            $view.Execute()
+            $record = $view.Fetch()
+            $value = if ($record) { $record.StringData(1) } else { $null }
+            $view.Close()
+            return $value
+          }
+          function Assert-Equal($actual, $expected, $what) {
+            if ($actual -cne $expected) { throw "$what: expected [$expected], got [$actual]." }
+          }
+          # Single-package defaults: Standard (all users) unless the scope dialog selects
+          # Current user.
+          Assert-Equal (Get-SingleValue 'SELECT `Value` FROM `Property` WHERE `Property` = ''ALLUSERS''') '2' 'ALLUSERS default'
+          $msiPerUser = Get-SingleValue 'SELECT `Value` FROM `Property` WHERE `Property` = ''MSIINSTALLPERUSER'''
+          if ($null -ne $msiPerUser -and $msiPerUser -ne '') { throw "MSIINSTALLPERUSER default must be empty (per-machine), got [$msiPerUser]." }
+          Assert-Equal (Get-SingleValue 'SELECT `Dialog` FROM `Dialog` WHERE `Dialog` = ''InstallScopeDlg''') 'InstallScopeDlg' 'InstallScopeDlg dialog'
+          # Conflicting-copy launch conditions, each with upgrade and maintenance carve-outs.
+          $conditions = @()
+          $view = $db.OpenView('SELECT `Condition` FROM `LaunchCondition`')
+          $view.Execute()
+          while ($record = $view.Fetch()) { $conditions += $record.StringData(1) }
+          $view.Close()
+          foreach ($marker in @('QBB_MACHINE_INSTALL', 'QBB_USER_INSTALL', 'QBB_NSIS_USER_UNINSTALL', 'QBB_NSIS_MACHINE_UNINSTALL')) {
+            if (-not ($conditions -match $marker)) { throw "LaunchCondition for $marker is missing." }
+          }
+          foreach ($condition in $conditions) {
+            if ($condition -notmatch 'UPGRADINGPRODUCTCODE' -or $condition -notmatch 'Installed') { throw "LaunchCondition lacks carve-outs: [$condition]." }
+          }
+          # Same-context major upgrades are still handled.
+          if (-not (Get-SingleValue 'SELECT `VersionMax` FROM `Upgrade`')) { throw 'Upgrade table is empty.' }
+          Write-Host "Dual-scope MSI markers verified in $($msi.Name)."
 
   # -----------------------------------------------------------------------------------------------
   # Dispatch runs upload no release, so without this job nobody looks at what they produced.

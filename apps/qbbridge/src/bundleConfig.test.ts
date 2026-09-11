@@ -60,3 +60,103 @@ describe('QBSheet Bridge bundle configuration', () => {
     expect(raw.bundle?.macOS?.minimumSystemVersion).toBe('11.0');
   });
 });
+
+describe('QBSheet Bridge dual-scope Windows installer', () => {
+  const templatePath = join(srcTauri, 'wix', 'main.wxs');
+  const template = () => readFileSync(templatePath, 'utf8');
+  const baseConfig = () =>
+    JSON.parse(readFileSync(join(srcTauri, 'tauri.conf.json'), 'utf8')) as {
+      bundle?: { windows?: { wix?: { template?: unknown } } };
+    };
+
+  it('points the Windows MSI build at the owned WiX template', () => {
+    expect(baseConfig().bundle?.windows?.wix?.template).toBe('wix/main.wxs');
+    expect(existsSync(templatePath)).toBe(true);
+  });
+
+  it('declares its stock base so Tauri upgrades stay honest', () => {
+    // The header must name the tauri-apps/tauri tag the template was derived from, and the
+    // tag's minor version must match the pinned CLI: a silent bundler change must never desync
+    // the documented divergences. Patch moves are fine; minor moves fail until the template is
+    // re-diffed and the base tag follows.
+    const qbbridgePackage = JSON.parse(readFileSync(join(srcTauri, '..', 'package.json'), 'utf8')) as {
+      devDependencies?: { '@tauri-apps/cli'?: string };
+    };
+    const minor = (qbbridgePackage.devDependencies?.['@tauri-apps/cli'] ?? '')
+      .replace(/^[^\d]*/, '')
+      .split('.')
+      .slice(0, 2)
+      .join('.');
+    expect(minor).toMatch(/^\d+\.\d+$/);
+    expect(template()).toContain(`tag tauri-v${minor}.`);
+  });
+
+  it('stays a dual-scope single package defaulting to Standard', () => {
+    const text = template();
+    // MSI 5.0 is required for the ALLUSERS=2 / MSIINSTALLPERUSER model; the single-package
+    // pattern keeps InstallScope perMachine while the properties select the real context.
+    expect(text).toContain('InstallerVersion="500"');
+    expect(text).toContain('InstallScope="perMachine"');
+    expect(text).not.toContain('InstallScope="perUser"');
+    expect(text).toContain('<Property Id="ALLUSERS" Value="2" />');
+    expect(text).toContain('<Property Id="MSIINSTALLPERUSER" Value="{}" />');
+    expect(text).toContain('<Property Id="QBB_INSTALLSCOPE" Value="perMachine" />');
+    expect(text).toContain('QBB_INSTALLSCOPE = "perUser"');
+  });
+
+  it('wires the scope dialog into the no-license installer chain', () => {
+    const text = template();
+    expect(text).toContain('Id="InstallScopeDlg"');
+    expect(text).toContain('Value="InstallScopeDlg"');
+    expect(text).toContain('Value="perMachine"');
+    expect(text).toContain('Value="perUser"');
+  });
+
+  it('configures no license file, so the scope dialog stays live', () => {
+    // The scope dialog is wired inside the template's no-license chain. Configuring a license
+    // file would silently orphan it and drop scope selection, so that change must update the
+    // template first.
+    expect(readFileSync(join(srcTauri, 'tauri.conf.json'), 'utf8').toLowerCase()).not.toContain('license');
+  });
+
+  it('refuses conflicting copies with upgrade and maintenance carve-outs', () => {
+    const text = template();
+    expect(text).toContain('Id="CMP_PerMachineMarker"');
+    expect(text).toContain('<Condition>NOT MSIINSTALLPERUSER</Condition>');
+    expect(text).toContain('Name="InstalledAllUsers"');
+    expect(text).toContain('<ComponentRef Id="CMP_PerMachineMarker"/>');
+    for (const marker of [
+      'QBB_MACHINE_INSTALL',
+      'QBB_USER_INSTALL',
+      'QBB_NSIS_USER_UNINSTALL',
+      'QBB_NSIS_MACHINE_UNINSTALL',
+    ]) {
+      expect(text).toContain(marker);
+    }
+    // Every launch condition leaves same-context upgrades and maintenance alone, so repair,
+    // uninstall, and version upgrades never trip on their own product.
+    const conditions = text.match(/<Condition Message="[^"]*">([^<]*)<\/Condition>/g) ?? [];
+    expect(conditions.length).toBeGreaterThanOrEqual(4);
+    for (const condition of conditions) {
+      expect(condition).toContain('UPGRADINGPRODUCTCODE');
+      expect(condition).toContain('Installed');
+    }
+  });
+
+  it('keeps per-machine writes to the marker and the unused deep-link block', () => {
+    // Per-user safety rests on every install location and registry write being
+    // context-relative. RegistrySearch rows only read, in any context; the only HKLM writes
+    // allowed are the per-machine marker and the deep-link block, which renders empty while
+    // QBBridge configures no deep-link protocols.
+    const hklmLines = template()
+      .split('\n')
+      .filter((line) => line.includes('Root="HKLM"'));
+    const writes = hklmLines.filter((line) => !line.includes('RegistrySearch'));
+    expect(writes).toHaveLength(2);
+    expect(writes.some((line) => line.includes('InstalledAllUsers'))).toBe(true);
+    expect(writes.some((line) => line.includes('{{protocol}}'))).toBe(true);
+    const config = readFileSync(join(srcTauri, 'tauri.conf.json'), 'utf8').toLowerCase();
+    expect(config).not.toContain('deep-link');
+    expect(config).not.toContain('deeplink');
+  });
+});
