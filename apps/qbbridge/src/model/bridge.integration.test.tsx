@@ -8,6 +8,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
 import { emptyState, loadState, storageKey } from './persistence';
@@ -57,12 +58,14 @@ let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
 let writtenFiles: WrittenFile[] = [];
+let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
 let existingPaths = new Set<string>();
 /** Set to make the next claim fail, as a wrong setup token or an unreachable relay would. */
 let claimFails = false;
 /** Set to make the next mirror fail without changing relay or local publication state. */
 let mirrorFails = false;
+let mirrorFailureStatus = 503;
 /**
  * Set to hold the next mirror open until it resolves.
  *
@@ -76,6 +79,7 @@ let deferMirror: Promise<void> | null = null;
 let deferredMirrorStarted = false;
 let ackFailuresRemaining = 0;
 let resultFolder = '/tournaments/results';
+let assignmentFolder = '/tournaments/assignments';
 let deferResultRequests = false;
 let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reason?: unknown) => void }[] =
   [];
@@ -93,6 +97,7 @@ function installFakeTauri(): void {
   calls = [];
   secureCredentials = new Map();
   writtenFiles = [];
+  writtenAssignmentFiles = [];
   const invoke = async (command: string, args: Record<string, unknown> = {}) => {
     calls.push({ command, args });
     switch (command) {
@@ -100,6 +105,15 @@ function installFakeTauri(): void {
         return { path: '/tournaments/spring.yft', contents: yftFixtureText() };
       case 'choose_result_folder':
         return resultFolder;
+      case 'choose_assignment_folder':
+        return assignmentFolder;
+      case 'write_assignment_file': {
+        const path = `${String(args.directory)}/${String(args.fileName)}`;
+        if (existingPaths.has(path)) throw new Error(`${String(args.fileName)} already exists`);
+        existingPaths.add(path);
+        writtenAssignmentFiles.push({ ...(args as unknown as WrittenFile), overwrite: false });
+        return path;
+      }
       case 'store_relay_credential':
         secureCredentials.set(String(args.key), String(args.token));
         return null;
@@ -220,7 +234,8 @@ function installFakeTauri(): void {
           return { status: 200, body: JSON.stringify({ acked_results: 1 }) };
         }
         if (url.endsWith('/mirror')) {
-          if (mirrorFails) return { status: 503, body: JSON.stringify({ message: 'relay unavailable' }) };
+          if (mirrorFails)
+            return { status: mirrorFailureStatus, body: JSON.stringify({ message: 'relay unavailable' }) };
           if (deferMirror) {
             deferredMirrorStarted = true;
             await deferMirror;
@@ -253,10 +268,12 @@ beforeEach(() => {
   existingPaths = new Set();
   claimFails = false;
   mirrorFails = false;
+  mirrorFailureStatus = 503;
   deferMirror = null;
   deferredMirrorStarted = false;
   ackFailuresRemaining = 0;
   resultFolder = '/tournaments/results';
+  assignmentFolder = '/tournaments/assignments';
   deferResultRequests = false;
   pendingResultRequests = [];
   deferWrites = false;
@@ -339,12 +356,34 @@ async function setUpRound(rendered: Awaited<ReturnType<typeof setUpTournament>>,
   });
 }
 
+/** Existing end-to-end flows intentionally publish their reviewed plan after the new safety gate. */
+async function publishReviewed(rendered: Awaited<ReturnType<typeof setUpTournament>>): Promise<void> {
+  const mirrorsBefore = calls.filter(
+    (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+  ).length;
+  await act(async () => {
+    await rendered.result.current.publish();
+  });
+  await waitFor(() => {
+    if (
+      rendered.result.current.pendingPublicationReview === null &&
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'))
+        .length <= mirrorsBefore
+    ) {
+      throw new Error('publish has not reached the relay or opened its review yet');
+    }
+  });
+  if (rendered.result.current.pendingPublicationReview !== null) {
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+  }
+}
+
 describe('a round, published and returned', () => {
   test('the native commands are called with the arguments the Rust side declares', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     expect(calls.map((call) => call.command)).toContain('open_yellowfruit_file');
     const mirror = calls.find(
@@ -369,9 +408,7 @@ describe('a round, published and returned', () => {
 
   test('the next round keeps each room, its code and its identity, and advances the revision', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const afterFirst = rendered.result.current.state.rooms.map((room) => ({
       id: room.id,
       code: room.pairingCode,
@@ -379,9 +416,7 @@ describe('a round, published and returned', () => {
     }));
 
     await setUpRound(rendered, 4);
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     const afterSecond = rendered.result.current.state.rooms;
     expect(afterSecond.map((room) => room.id)).toEqual(afterFirst.map((entry) => entry.id));
@@ -406,13 +441,113 @@ describe('a round, published and returned', () => {
     });
     resetNativeHost();
 
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(rendered.result.current.notice?.kind).toBe('bad');
     expect(rendered.result.current.notice?.message).toMatch(/still have whatever they had before/);
     expect(rendered.result.current.state.relay?.revision).toBe(0);
     expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId === null)).toBe(true);
+  });
+
+  test('exports a failed round as ordinary Scorer assignments with the same match identities', async () => {
+    const rendered = await setUpTournament();
+    mirrorFails = true;
+    await publishReviewed(rendered);
+
+    const fallback = rendered.result.current.assignmentFallback;
+    expect(fallback?.plan.assignments).toHaveLength(2);
+    expect(rendered.result.current.state.rooms.every((room) => room.publishedMatchId === null)).toBe(true);
+
+    await act(async () => {
+      await rendered.result.current.exportAssignmentFallback();
+    });
+    expect(writtenAssignmentFiles).toHaveLength(2);
+    for (const file of writtenAssignmentFiles) {
+      const source = readQbjSource(JSON.parse(file.contents));
+      expect(source.ok).toBe(true);
+      if (!source.ok) continue;
+      const defined = defineGame(source.value, source.value.candidates[0]!.index);
+      expect(defined.ok).toBe(true);
+    }
+
+    const completed = scoredResultDocument();
+    expect(completed.matchId).toBe(fallback?.plan.assignments[0]?.matchId);
+    relayResults = [
+      {
+        result_id: 'fallback-result',
+        room_id: 'room-1',
+        received_at: '2026-09-10T15:00:00Z',
+        qbj: completed.result,
+      },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+      await rendered.result.current.saveResult('fallback-result');
+    });
+    expect(rendered.result.current.state.results[0]).toMatchObject({
+      resultId: 'fallback-result',
+      importStatus: 'needs-import',
+    });
+
+    mirrorFails = false;
+    const mirrorsBeforeRecovery = calls.filter((call) =>
+      String(call.args.url ?? '').endsWith('/mirror'),
+    ).length;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ message: expect.stringMatching(/two active writers/i) }),
+      ]),
+    );
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(
+      mirrorsBeforeRecovery,
+    );
+  });
+
+  test('does not offer the offline fallback for a relay validation refusal', async () => {
+    const rendered = await setUpTournament();
+    mirrorFails = true;
+    mirrorFailureStatus = 409;
+    await publishReviewed(rendered);
+
+    expect(rendered.result.current.assignmentFallback).toBeNull();
+    expect(rendered.result.current.notice?.message).not.toMatch(/export the round assignment files/i);
+  });
+
+  test('reviews a dangerous plan before sending and then publishes the exact reviewed assignments', async () => {
+    const rendered = await setUpTournament();
+    const [first, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Deering');
+      rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Windham A');
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    const before = rendered.result.current.state.rooms.map((room) => ({ ...room }));
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([expect.objectContaining({ message: expect.stringMatching(/crosses pools/i) })]),
+    );
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'))).toHaveLength(0);
+
+    act(() => rendered.result.current.cancelPublicationReview());
+    expect(rendered.result.current.state.rooms).toEqual(before);
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const reviewedMatchIds = rendered.result.current.pendingPublicationReview!.plan.assignments.map(
+      (assignment) => assignment.matchId,
+    );
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'))!;
+    const body = JSON.parse(String(mirror.args.body)) as { rooms: { match_id?: string }[] };
+    expect(body.rooms.map((room) => room.match_id).filter(Boolean)).toEqual(reviewedMatchIds);
   });
 });
 
@@ -466,9 +601,7 @@ describe('room setup and removal', () => {
       restarted.result.current.setRoomTeams(restartedRoom.id, 'left', 'Team_Cony');
       restarted.result.current.setRoomTeams(restartedRoom.id, 'right', 'Team_Deering');
     });
-    await act(async () => {
-      await restarted.result.current.publish();
-    });
+    await publishReviewed(restarted);
 
     const assignmentBody = JSON.parse(String(mirrors()[1].args.body)) as {
       revision: number;
@@ -488,9 +621,7 @@ describe('room setup and removal', () => {
 
   test('assignment clearing returns a published room to ready to pair', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const [, unused] = rendered.result.current.state.rooms;
     expect(bridgeStatus(rendered, unused.id)).toBe('waiting');
     expect(unused.publishedAssignmentFingerprint).not.toBeNull();
@@ -499,9 +630,7 @@ describe('room setup and removal', () => {
       rendered.result.current.setRoomTeams(unused.id, 'left', null);
       rendered.result.current.setRoomTeams(unused.id, 'right', null);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     expect(rendered.result.current.state.rooms.find((room) => room.id === unused.id)).toMatchObject({
       relayPublished: true,
@@ -514,9 +643,7 @@ describe('room setup and removal', () => {
 
   test('keeps the old code active through a failed publish, then activates the pending code', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const room = rendered.result.current.state.rooms[0];
     const oldCode = room.pairingCode;
     act(() => rendered.result.current.regeneratePairingCode(room.id));
@@ -526,9 +653,7 @@ describe('room setup and removal', () => {
     expect(rendered.result.current.state.rooms[0].pairingCode).toBe(oldCode);
 
     mirrorFails = true;
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(rendered.result.current.state.rooms[0]).toMatchObject({
       pairingCode: oldCode,
       pendingPairingCode: pendingCode,
@@ -536,9 +661,7 @@ describe('room setup and removal', () => {
     expect(rendered.result.current.state.relay?.revision).toBe(1);
 
     mirrorFails = false;
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(rendered.result.current.state.rooms[0]).toMatchObject({
       pairingCode: pendingCode,
       pendingPairingCode: null,
@@ -548,9 +671,7 @@ describe('room setup and removal', () => {
 
   test('persists a published-room tombstone and clears it without touching sessions', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const removed = rendered.result.current.state.rooms[0];
     const priorMirror = JSON.parse(
       String(
@@ -625,9 +746,7 @@ describe('results', () => {
   test('a room shows its result once the matching game comes back', async () => {
     const { result: document, matchId } = scoredResultDocument();
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     // The scorer's document carries the match id QBBridge published for Room 101.
     expect(rendered.result.current.state.rooms[0].publishedMatchId).toBe(matchId);
 
@@ -842,8 +961,8 @@ describe('persistence', () => {
       { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
     ];
     const rendered = await setUpTournament();
+    await publishReviewed(rendered);
     await act(async () => {
-      await rendered.result.current.publish();
       await rendered.result.current.pollResults();
       await rendered.result.current.chooseFolder();
     });
@@ -875,9 +994,7 @@ describe('persistence', () => {
     await act(async () => {
       await restarted.result.current.loadFileContents(null, yftFixtureText());
     });
-    await act(async () => {
-      await restarted.result.current.publish();
-    });
+    await publishReviewed(restarted);
     await waitFor(() => expect(restarted.result.current.state.relay?.revision).toBe(2));
   });
 
@@ -1212,9 +1329,7 @@ describe('changing the relay', () => {
     expect(rendered.result.current.state.relay).toEqual(before);
 
     // Still usable: a publish goes out under the original credential.
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
     expect(mirror?.args.bearer).toBe('management-secret');
   });
@@ -1245,18 +1360,14 @@ describe('changing the relay', () => {
     expect(rendered.result.current.changingRelay).toBe(true);
 
     // And the original still works.
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
     expect(mirror?.args.bearer).toBe('management-secret');
   });
 
   test('the replacement is stored only after the new claim succeeds', async () => {
     const rendered = await setUpTournament();
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(
       rendered.result.current.state.rooms.every((room) => room.publishedAssignmentFingerprint !== null),
     ).toBe(true);
@@ -1424,9 +1535,7 @@ describe('critical relay persistence', () => {
       throw new Error('storage failed after remote publication');
     });
 
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     expect(rendered.result.current.state.relay?.revision).toBe(1);
     expect(loadState().relay?.revision).toBe(0);
@@ -1904,9 +2013,7 @@ describe('preplanned rounds', () => {
   test('removing a room removes it from every plan and still leaves a relay tombstone', async () => {
     const { rendered, first, second } = await planThreeRounds();
     // Publish once so the room exists on the relay and its removal owes the relay a clear.
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     act(() => {
       rendered.result.current.removeRoom(first.id);
     });
@@ -1948,9 +2055,7 @@ describe('preplanned rounds', () => {
     });
     const before = rendered.result.current.state.roundPlans;
 
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     expect(rendered.result.current.state.roundPlans).toEqual(before);
     expect(loadState().roundPlans).toEqual(before);
@@ -1961,9 +2066,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     const mirror = calls.find((call) => String(call.args.url ?? '').endsWith('/mirror'));
     const body = JSON.parse(String(mirror!.args.body)) as {
@@ -1989,9 +2092,7 @@ describe('preplanned rounds', () => {
       rendered.result.current.setRoomTeams(second.id, 'left', 'Team_Wells');
       rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Windham A');
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     // Round 2 uses only the first room.
     act(() => {
@@ -2001,9 +2102,7 @@ describe('preplanned rounds', () => {
       rendered.result.current.setRoomTeams(first.id, 'left', 'Team_Plymouth A');
       rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Plymouth B');
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     const mirrors = calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror'));
     const body = JSON.parse(String(mirrors[1].args.body)) as {
@@ -2027,9 +2126,7 @@ describe('preplanned rounds', () => {
     const beforeRevision = rendered.result.current.state.relay?.revision;
 
     mirrorFails = true;
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     mirrorFails = false;
 
     expect(rendered.result.current.notice?.kind).toBe('bad');
@@ -2043,9 +2140,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
 
     const room = () => rendered.result.current.state.rooms[0];
     // Round 1 is live and says so.
@@ -2070,9 +2165,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(rendered.result.current.planStatus(rendered.result.current.state.rooms[0])).toBe('live');
 
     act(() => {
@@ -2086,9 +2179,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const room = () => rendered.result.current.state.rooms[0];
     expect(rendered.result.current.planStatus(room())).toBe('live');
 
@@ -2099,9 +2190,7 @@ describe('preplanned rounds', () => {
     });
     expect(rendered.result.current.planStatus(room())).toBe('edited');
 
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     expect(rendered.result.current.planStatus(room())).toBe('live');
   });
 
@@ -2110,9 +2199,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const room = () => rendered.result.current.state.rooms[0];
     expect(rendered.result.current.planStatus(room())).toBe('live');
 
@@ -2145,9 +2232,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const room = () => rendered.result.current.state.rooms[0];
     expect(rendered.result.current.planStatus(room())).toBe('live');
 
@@ -2170,18 +2255,14 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const room = () => rendered.result.current.state.rooms[0];
     const before = room().publishedAssignmentFingerprint;
     expect(before).not.toBeNull();
     expect(rendered.result.current.planStatus(room())).toBe('live');
 
     mirrorFails = true;
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     mirrorFails = false;
 
     expect(rendered.result.current.notice?.kind).toBe('bad');
@@ -2202,9 +2283,13 @@ describe('preplanned rounds', () => {
     });
     deferMirror = held;
 
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
     let publishing: Promise<void>;
     act(() => {
-      publishing = rendered.result.current.publish();
+      publishing = rendered.result.current.confirmPublicationReview();
     });
     await waitFor(() => expect(deferredMirrorStarted).toBe(true));
 
@@ -2245,9 +2330,7 @@ describe('preplanned rounds', () => {
     act(() => {
       rendered.result.current.selectRound(rounds[0].id);
     });
-    await act(async () => {
-      await rendered.result.current.publish();
-    });
+    await publishReviewed(rendered);
     const publishedMatchId = rendered.result.current.state.rooms[0].publishedMatchId!;
 
     // Change the plan after publishing. The relay's game is unaffected, and so is its result.

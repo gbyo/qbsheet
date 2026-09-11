@@ -1,4 +1,4 @@
-//! The native operations, including secure relay-credential storage.
+//! Native file, secure relay-credential storage, and HTTP operations.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
@@ -87,6 +87,23 @@ pub async fn choose_result_folder(app: AppHandle) -> CommandResult<Option<String
         .dialog()
         .file()
         .set_title("Choose a folder for saved results")
+        .blocking_pick_folder();
+    let Some(chosen) = chosen else {
+        return Ok(None);
+    };
+    let path = chosen
+        .into_path()
+        .map_err(|error| CommandError::new("invalid_path", error.to_string()))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+/// A native folder picker for per-room fallback assignments.
+#[tauri::command]
+pub async fn choose_assignment_folder(app: AppHandle) -> CommandResult<Option<String>> {
+    let chosen = app
+        .dialog()
+        .file()
+        .set_title("Choose a folder for fallback assignments")
         .blocking_pick_folder();
     let Some(chosen) = chosen else {
         return Ok(None);
@@ -258,14 +275,14 @@ fn safe_file_name(name: &str) -> CommandResult<PathBuf> {
     let (Some(Component::Normal(single)), None) = (components.next(), components.next()) else {
         return Err(CommandError::new(
             "invalid_file_name",
-            "That result file name is not a plain file name.",
+            "That bridge file name is not a plain file name.",
         ));
     };
     let single = Path::new(single);
     if single.to_string_lossy().starts_with('.') {
         return Err(CommandError::new(
             "invalid_file_name",
-            "A result file name may not begin with a dot.",
+            "A bridge file name may not begin with a dot.",
         ));
     }
     Ok(single.to_path_buf())
@@ -279,23 +296,28 @@ fn safe_file_name(name: &str) -> CommandResult<PathBuf> {
 /// names matched would destroy a game with nothing on screen to say so, so the create is
 /// exclusive and a collision comes back as an error the operator can read.
 #[tauri::command]
-pub async fn write_result_file(
+async fn write_bridge_file(
     directory: String,
     file_name: String,
     contents: String,
     overwrite: bool,
+    kind: &'static str,
 ) -> CommandResult<String> {
     if contents.len() > MAX_RESULT_BYTES {
         return Err(CommandError::new(
-            "result_too_large",
-            "That result document is implausibly large.",
+            if kind == "result" {
+                "result_too_large"
+            } else {
+                "assignment_too_large"
+            },
+            format!("That {kind} document is implausibly large."),
         ));
     }
     let directory = PathBuf::from(directory);
     if !directory.is_dir() {
         return Err(CommandError::new(
             "no_such_folder",
-            "That results folder no longer exists. Choose it again.",
+            format!("That {kind} output folder no longer exists. Choose it again."),
         ));
     }
     let path = directory.join(safe_file_name(&file_name)?);
@@ -311,10 +333,14 @@ pub async fn write_result_file(
     let mut file = options.open(&path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             CommandError::new(
-                "result_file_exists",
+                if kind == "result" {
+                    "result_file_exists"
+                } else {
+                    "assignment_file_exists"
+                },
                 format!(
                     "{} already exists in that folder and was not replaced. \
-                     Move or rename it, or save this result on its own to overwrite it.",
+                     Move or rename it, or choose another output folder.",
                     path.file_name().unwrap_or_default().to_string_lossy()
                 ),
             )
@@ -325,6 +351,28 @@ pub async fn write_result_file(
     std::io::Write::write_all(&mut file, contents.as_bytes())
         .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
     Ok(path.to_string_lossy().into_owned())
+}
+
+/// Write one completed result. Re-saving is the only operation allowed to overwrite its own path.
+#[tauri::command]
+pub async fn write_result_file(
+    directory: String,
+    file_name: String,
+    contents: String,
+    overwrite: bool,
+) -> CommandResult<String> {
+    write_bridge_file(directory, file_name, contents, overwrite, "result").await
+}
+
+/// Write one unplayed QBJ assignment for the relay-outage fallback. Assignment exports are always
+/// exclusive: exporting again must not replace a file a scorekeeper may already have opened.
+#[tauri::command]
+pub async fn write_assignment_file(
+    directory: String,
+    file_name: String,
+    contents: String,
+) -> CommandResult<String> {
+    write_bridge_file(directory, file_name, contents, false, "assignment").await
 }
 
 #[derive(Debug, Serialize)]

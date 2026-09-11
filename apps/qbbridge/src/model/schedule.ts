@@ -52,6 +52,93 @@ export function phasePoolNames(phase: YellowFruitPhaseSchedule | undefined, team
   return phase?.pools.filter((pool) => pool.teamIds.includes(teamId)).map((pool) => pool.name) ?? [];
 }
 
+export interface CarryoverSourcePool {
+  phaseName: string;
+  poolId: string;
+  poolName: string;
+}
+
+export interface PhaseTeamPoolContext {
+  destinationPoolNames: string[];
+  /** True only when the selected destination pool explicitly carries prior games. */
+  carryover: boolean;
+  sourcePhaseName: string | null;
+  sourcePoolNames: string[];
+}
+
+function precedingPhase(
+  tournament: Pick<BridgeTournament, 'schedule'>,
+  phase: YellowFruitPhaseSchedule | undefined,
+): YellowFruitPhaseSchedule | undefined {
+  if (!phase) return undefined;
+  const index = tournament.schedule.phases.findIndex((entry) => entry.id === phase.id);
+  return index > 0 ? tournament.schedule.phases[index - 1] : undefined;
+}
+
+/** Describe only source provenance that the loaded file can prove for a selected team. */
+export function phaseTeamPoolContext(
+  tournament: Pick<BridgeTournament, 'schedule'>,
+  round: Pick<BridgeRound, 'phaseId'> | null,
+  teamId: string,
+): PhaseTeamPoolContext {
+  const phase = phaseForRound(tournament, round);
+  const destinationPools = phase?.pools.filter((pool) => pool.teamIds.includes(teamId)) ?? [];
+  const carryover = destinationPools.some((pool) => pool.hasCarryover === true);
+  const sourcePhase = carryover ? precedingPhase(tournament, phase) : undefined;
+  return {
+    destinationPoolNames: destinationPools.map((pool) => pool.name),
+    carryover,
+    sourcePhaseName: sourcePhase?.name ?? null,
+    sourcePoolNames:
+      sourcePhase?.pools.filter((pool) => pool.teamIds.includes(teamId)).map((pool) => pool.name) ?? [],
+  };
+}
+
+/** Return an unambiguous source pool for a carryover destination, or null when provenance is unclear. */
+export function carryoverSourcePool(
+  tournament: Pick<BridgeTournament, 'schedule'>,
+  round: Pick<BridgeRound, 'phaseId'> | null,
+  teamId: string,
+): CarryoverSourcePool | null {
+  const phase = phaseForRound(tournament, round);
+  const sourcePhase = precedingPhase(tournament, phase);
+  if (!phase || !sourcePhase) return null;
+  const destinationPools = phase.pools.filter(
+    (pool) => pool.hasCarryover === true && pool.teamIds.includes(teamId),
+  );
+  if (destinationPools.length !== 1) return null;
+  const sourcePools = sourcePhase.pools.filter((pool) => pool.teamIds.includes(teamId));
+  if (sourcePools.length !== 1) return null;
+  const source = sourcePools[0];
+  return source ? { phaseName: sourcePhase.name, poolId: source.id, poolName: source.name } : null;
+}
+
+function carryoverConflict(
+  tournament: Pick<BridgeTournament, 'schedule'>,
+  round: Pick<BridgeRound, 'phaseId'> | null,
+  leftTeamId: string,
+  rightTeamId: string,
+): { destinationPoolName: string; source: CarryoverSourcePool } | null {
+  const phase = phaseForRound(tournament, round);
+  const sourcePhase = precedingPhase(tournament, phase);
+  if (!phase || !sourcePhase) return null;
+  const destinationPools = phase.pools.filter(
+    (pool) =>
+      pool.hasCarryover === true && pool.teamIds.includes(leftTeamId) && pool.teamIds.includes(rightTeamId),
+  );
+  if (destinationPools.length !== 1) return null;
+  const leftSources = sourcePhase.pools.filter((pool) => pool.teamIds.includes(leftTeamId));
+  const rightSources = sourcePhase.pools.filter((pool) => pool.teamIds.includes(rightTeamId));
+  if (leftSources.length !== 1 || rightSources.length !== 1) return null;
+  const leftSource = leftSources[0];
+  const rightSource = rightSources[0];
+  if (!leftSource || !rightSource || leftSource.id !== rightSource.id) return null;
+  return {
+    destinationPoolName: destinationPools[0]?.name ?? phase.name,
+    source: { phaseName: sourcePhase.name, poolId: leftSource.id, poolName: leftSource.name },
+  };
+}
+
 /**
  * Warn when both teams are known to occupy different pools in the selected phase.
  *
@@ -65,25 +152,39 @@ export function schedulePairingWarnings(
   pairings: readonly PlannedPairing[],
 ): PairingWarning[] {
   const phase = phaseForRound(tournament, round);
-  if (!phase || phase.pools.length < 2) return [];
+  if (!phase) return [];
 
-  const plannedByRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
   const warnings: PairingWarning[] = [];
+  const plannedByRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
+
   for (const room of rooms) {
     const planned = plannedByRoom.get(room.id);
     if (!isCompletePairing(planned)) continue;
     const { leftTeamId, rightTeamId } = planned;
-    const leftPools = phase.pools.filter((pool) => pool.teamIds.includes(leftTeamId));
-    const rightPools = phase.pools.filter((pool) => pool.teamIds.includes(rightTeamId));
-    if (leftPools.length === 0 || rightPools.length === 0) continue;
-    const samePool = leftPools.some((left) => rightPools.some((right) => left.id === right.id));
-    if (samePool) continue;
-    const leftNames = leftPools.map((pool) => pool.name).join(' / ');
-    const rightNames = rightPools.map((pool) => pool.name).join(' / ');
-    warnings.push({
-      roomId: room.id,
-      message: `This matchup crosses pools in ${phase.name}: ${leftNames} versus ${rightNames}. It remains publishable; verify that the exception is intentional.`,
-    });
+
+    if (phase.pools.length >= 2) {
+      const leftPools = phase.pools.filter((pool) => pool.teamIds.includes(leftTeamId));
+      const rightPools = phase.pools.filter((pool) => pool.teamIds.includes(rightTeamId));
+      if (leftPools.length > 0 && rightPools.length > 0) {
+        const samePool = leftPools.some((left) => rightPools.some((right) => left.id === right.id));
+        if (!samePool) {
+          const leftNames = leftPools.map((pool) => pool.name).join(' / ');
+          const rightNames = rightPools.map((pool) => pool.name).join(' / ');
+          warnings.push({
+            roomId: room.id,
+            message: `This matchup crosses pools in ${phase.name}: ${leftNames} versus ${rightNames}. It remains publishable; verify that the exception is intentional.`,
+          });
+        }
+      }
+    }
+
+    const conflict = carryoverConflict(tournament, round, leftTeamId, rightTeamId);
+    if (conflict) {
+      warnings.push({
+        roomId: room.id,
+        message: `This matchup in ${conflict.destinationPoolName} would replay a game already satisfied by carryover from ${conflict.source.poolName} in ${conflict.source.phaseName}. Publish only as an explicit exceptional override.`,
+      });
+    }
   }
   return warnings;
 }

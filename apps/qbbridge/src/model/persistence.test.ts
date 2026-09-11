@@ -184,7 +184,7 @@ describe('migrating a version 1 state', () => {
     storeV1();
     const results = loadState().results;
     expect(results).toHaveLength(2);
-    expect(results[0]).toEqual(v1.results[0]);
+    expect(results[0]).toEqual({ ...v1.results[0], importStatus: 'needs-import' });
     expect(results[0].savedPath).toBe('/Users/operator/Documents/results/room-101.qbj');
     expect(results[0].ackPending).toBe(true);
     expect(results[1].qbj).toEqual({ type: 'Match', id: 'qbbridge-match-def456' });
@@ -260,6 +260,34 @@ describe('reading a version 2 state', () => {
     expect(loadState().roundPlans).toEqual(state.roundPlans);
     // The v1 fields on the rooms are ignored rather than re-migrated over the real plans.
     expect(loadState().roundPlans).toHaveLength(2);
+  });
+
+  test('restores an explicit imported marker and never invents one for an unsaved result', () => {
+    storeV1({
+      version: 2,
+      roundPlans: [],
+      results: [
+        {
+          resultId: 'result-imported',
+          qbj: { type: 'Match', id: 'match-imported' },
+          receivedAt: '2026-09-11T13:00:00.000Z',
+          savedPath: '/results/imported.qbj',
+          importStatus: 'imported',
+        },
+        {
+          resultId: 'result-new',
+          qbj: { type: 'Match', id: 'match-new' },
+          receivedAt: '2026-09-11T13:01:00.000Z',
+          importStatus: 'imported',
+        },
+      ],
+    });
+
+    expect(loadState().results).toEqual([
+      expect.objectContaining({ resultId: 'result-imported', importStatus: 'imported' }),
+      expect.objectContaining({ resultId: 'result-new' }),
+    ]);
+    expect(loadState().results[1]).not.toHaveProperty('importStatus');
   });
 
   test('drops a stored pairing with nothing in it', () => {

@@ -4,6 +4,7 @@ description = "Allow the QBSheet Bridge window to use native file, secure-storag
 commands.allow = [
   "open_yellowfruit_file",
   "choose_result_folder",
+  "choose_assignment_folder",
   "open_recovery_package",
   "write_recovery_package",
   "store_relay_credential",
@@ -11,4 +12,5 @@ commands.allow = [
   "delete_relay_credential",
   "write_result_file",
   "relay_request",
+  "write_assignment_file",
 ]
