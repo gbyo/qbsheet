@@ -442,12 +442,37 @@ export function useBridge(): BridgeApi {
    * writing the same file twice.
    */
   const batchSaveTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * Whether a batch-save task is running or queued. The flag — not the tail promise, whose
+   * settledness is unknowable synchronously — decides synchronous start versus queue, and a
+   * task clears it only when nothing chained behind it, so a save arriving between two
+   * tasks still queues instead of running alongside the next one.
+   */
+  const batchSaveActiveRef = useRef(false);
   const enqueueBatchSave = useCallback(<T>(task: () => Promise<T>): Promise<T> => {
-    const run = batchSaveTailRef.current.then(task, task);
-    batchSaveTailRef.current = run.then(
-      () => undefined,
-      () => undefined,
+    let run: Promise<T>;
+    if (!batchSaveActiveRef.current) {
+      // Nothing running: start in this flush, so an automatic save holds its write before
+      // the caller continues — the same timing the direct call always had.
+      batchSaveActiveRef.current = true;
+      try {
+        run = task();
+      } catch (error) {
+        batchSaveActiveRef.current = false;
+        throw error;
+      }
+    } else {
+      run = batchSaveTailRef.current.then(task, task);
+    }
+    const tail: Promise<unknown> = run.then(
+      () => {
+        if (batchSaveTailRef.current === tail) batchSaveActiveRef.current = false;
+      },
+      () => {
+        if (batchSaveTailRef.current === tail) batchSaveActiveRef.current = false;
+      },
     );
+    batchSaveTailRef.current = tail;
     return run;
   }, []);
   const credentialMigrationRef = useRef<string | null>(null);
