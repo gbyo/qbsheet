@@ -380,7 +380,7 @@ export const TEAM_COLUMNS: StatsColumn[] = [
   {
     id: 'lightningpg',
     label: 'Lightning/G',
-    description: 'Lightning points per game played',
+    description: 'Lightning points per lightning-applicable non-forfeit game',
     priority: 3,
     defaultVisible: false,
   },
@@ -614,8 +614,8 @@ export function teamStatCell(
     case 'lightning':
       return standing.lightningKnown ? String(standing.lightningPoints) : UNKNOWN_STAT;
     case 'lightningpg':
-      return standing.lightningKnown && standing.gamesPlayed > 0
-        ? reportNumber(standing.lightningPoints / standing.gamesPlayed, 1)
+      return standing.lightningKnown && standing.lightningGames > 0
+        ? reportNumber(standing.lightningPoints / standing.lightningGames, 1)
         : UNKNOWN_STAT;
     default:
       return UNKNOWN_STAT;

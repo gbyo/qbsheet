@@ -148,6 +148,7 @@ describe('shared cell values', () => {
       totalBonusConversion: null,
       lightningPoints: 0,
       lightningKnown: true,
+      lightningGames: 1,
       tossupsHeardRegulation: 40,
       tossupsHeardRegulationKnown: true,
       overtimePoints: 0,
@@ -240,6 +241,7 @@ describe('parity columns (#750)', () => {
       totalBonusConversion: 16 / 57,
       lightningPoints: 45,
       lightningKnown: true,
+      lightningGames: 1,
       gamesPlayed: 1,
       headToHead: 0,
     };
@@ -320,7 +322,9 @@ describe('parity columns (#750)', () => {
     expect(teamStatCell('lightningpg', standing)).toBe('45.0');
     expect(teamStatCell('lightning', { ...standing, lightningKnown: false })).toBe('—');
     expect(teamStatCell('lightningpg', { ...standing, lightningKnown: false })).toBe('—');
-    expect(teamStatCell('lightningpg', { ...standing, gamesPlayed: 0 })).toBe('—');
+    expect(teamStatCell('lightningpg', { ...standing, lightningGames: 0 })).toBe('—');
+    // A forfeit-inflated games-played count must not dilute the rate (#755).
+    expect(teamStatCell('lightningpg', { ...standing, gamesPlayed: 2 })).toBe('45.0');
   });
 
   test('Pts/X uses the shared normalization and drops out when counts disagree', () => {

@@ -92,6 +92,11 @@ export interface TeamStanding {
   lightningPoints: number;
   /** False when any contributing game lacked a lightning breakdown (unknown, not zero). */
   lightningKnown: boolean;
+  /**
+   * Applicable non-forfeit games for the Lightning/G denominator: contributing games whose
+   * own historical rules enable lightning, excluding pure-forfeit placeholders (#755).
+   */
+  lightningGames: number;
   gamesPlayed: number;
   headToHead: number;
 }
@@ -306,6 +311,7 @@ export function deriveTeamStandings(
       totalBonusConversion: null,
       lightningPoints: 0,
       lightningKnown: true,
+      lightningGames: 0,
       gamesPlayed: 0,
       headToHead: 0,
     });
@@ -353,6 +359,10 @@ export function deriveTeamStandings(
     leftStanding.bonuses += left.bonuses;
     leftStanding.bonusPoints += left.bonusPoints;
     accumulateBouncebackSide(bouncebackTotalsFor(left.teamId), left, right, game, gameRules, detailKnown);
+    if (gameRules.lightning && !isPureForfeitPlaceholder(game)) {
+      leftStanding.lightningGames += 1;
+      rightStanding.lightningGames += 1;
+    }
     addTeamLightning(leftStanding, left.lightningPoints);
     rightStanding.powers += right.powers;
     rightStanding.gets += right.gets;
@@ -697,6 +707,68 @@ export function bouncebackDerivationForTeam(
   };
 }
 
+/**
+ * Scoring applicability for one reporting scope, derived from the historical scoring
+ * definitions of the accepted games in that scope — never from the tournament's current
+ * rules alone (#868, #755).
+ *
+ * Changing current rules for future games must not rewrite which statistics apply to
+ * already-accepted games. Games without a stored definition resolve through the same
+ * `rulesForGame` fallback the aggregations use, so applicability and arithmetic agree.
+ * An empty scope falls back to the current tournament rules so empty tables keep a
+ * sensible column set.
+ */
+export interface ScopeAnswerTier {
+  id: 'superpowers' | 'powers' | 'gets' | 'negs';
+  /** Distinct configured point values across the scope; several means mixed definitions. */
+  values: number[];
+}
+
+export interface ScopeScoringApplicability {
+  bonuses: boolean;
+  bouncebacks: boolean;
+  lightning: boolean;
+  tiers: ScopeAnswerTier[];
+  /** Single shared regulation tossup count, or null when definitions disagree. */
+  regulationTossups: number | null;
+  /** True when the scope mixes answer values or regulation denominators. */
+  mixed: boolean;
+}
+
+export function scopeScoringApplicability(
+  state: DirectorState,
+  games: readonly GameRecord[],
+): ScopeScoringApplicability {
+  const rulesList =
+    games.length > 0
+      ? games.map((game) => rulesForGame(state, game) ?? defaultRules)
+      : [state.tournament?.rules ?? defaultRules];
+  const bonuses = rulesList.some((rules) => rules.useBonuses);
+  const bouncebacks = bonuses && rulesList.some((rules) => rules.bouncebacks);
+  const lightning = rulesList.some((rules) => rules.lightning);
+  const valuesOf = (pick: (rules: TournamentRules) => number | null): number[] => [
+    ...new Set(rulesList.map(pick).filter((value): value is number => typeof value === 'number')),
+  ];
+  const tiers: ScopeAnswerTier[] = (
+    [
+      { id: 'superpowers', values: valuesOf((rules) => rules.superpowerValue) },
+      { id: 'powers', values: valuesOf((rules) => rules.powerValue) },
+      { id: 'gets', values: valuesOf((rules) => rules.tossupValue) },
+      { id: 'negs', values: valuesOf((rules) => rules.negValue) },
+    ] as ScopeAnswerTier[]
+  ).filter((tier) => tier.id === 'gets' || tier.values.length > 0);
+  const tossupCounts = [
+    ...new Set(
+      rulesList
+        .map((rules) => rules.tossupCount)
+        .filter((count): count is number => typeof count === 'number' && count > 0),
+    ),
+  ];
+  const regulationTossups = tossupCounts.length === 1 ? (tossupCounts[0] as number) : null;
+  const mixed = tiers.some((tier) => tier.values.length > 1) || tossupCounts.length > 1;
+  return { bonuses, bouncebacks, lightning, tiers, regulationTossups, mixed };
+}
+
 function headToHeadValue(
   teamId: DirectorId,
   group: readonly TeamStanding[],
@@ -861,6 +933,14 @@ export function playerPptuh(
 ): number | null {
   if (standing.tossupsHeardKnown === false || standing.tossupsHeard === 0) return null;
   return standing.points / standing.tossupsHeard;
+}
+
+/**
+ * Points per bonus through the shared domain helper, so every surface agrees:
+ * PPB is undefined — not zero — when no bonuses were heard.
+ */
+export function bonusPointsPerBonus(bonusPoints: number, bonuses: number): number | null {
+  return bonuses > 0 ? bonusPoints / bonuses : null;
 }
 
 /**
