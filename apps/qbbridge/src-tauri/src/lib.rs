@@ -30,6 +30,8 @@ pub fn run() {
             commands::delete_relay_credential,
             commands::write_result_file,
             commands::write_assignment_file,
+            commands::open_round_plan,
+            commands::write_round_pack_file,
             commands::relay_request,
         ])
         .run(tauri::generate_context!())

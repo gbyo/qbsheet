@@ -20,6 +20,7 @@
  */
 
 import type { Room, RoomTombstone } from './rooms';
+import { normalizeRoundDispositions, type RoundDisposition } from './roundAccountability';
 import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
@@ -99,6 +100,16 @@ export interface BridgeState {
    * only the rooms with a side chosen. Changing the selected round never touches this.
    */
   roundPlans: RoundPlan[];
+  /**
+   * Stated bye/inactive teams per round. Local planning data like `roundPlans`, reconciled
+   * against the reloaded `.yft` the same way. See `roundAccountability.ts`.
+   */
+  roundDispositions: RoundDisposition[];
+  /**
+   * Fingerprint of the loaded `.yft` bytes. Portable plans and emergency packs record the
+   * fingerprint they were prepared against; null for states saved before this field existed.
+   */
+  yftFingerprint: string | null;
   resultFolder: string | null;
   results: StoredResult[];
 }
@@ -117,6 +128,8 @@ export function emptyState(): BridgeState {
     retiredRoomIds: [],
     selectedRoundId: null,
     roundPlans: [],
+    roundDispositions: [],
+    yftFingerprint: null,
     resultFolder: null,
     results: [],
   };
@@ -334,6 +347,8 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     roundPlans: dedupeRoundPlans(
       selectedRoundId !== null && pairings.length > 0 ? [{ roundId: selectedRoundId, pairings }] : [],
     ),
+    roundDispositions: normalizeRoundDispositions(state.roundDispositions),
+    yftFingerprint: typeof state.yftFingerprint === 'string' ? state.yftFingerprint : null,
     resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
     results: restoreResults(state.results),
   };
@@ -342,7 +357,12 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
 /** Read a version 2 state, normalizing every field the same way the migration does. */
 function readV2(state: Partial<BridgeState> & Record<string, unknown>): BridgeState {
   const migrated = migrateV1(state);
-  return { ...migrated, roundPlans: normalizeRoundPlans(state.roundPlans) };
+  return {
+    ...migrated,
+    roundPlans: normalizeRoundPlans(state.roundPlans),
+    roundDispositions: normalizeRoundDispositions(state.roundDispositions),
+    yftFingerprint: typeof state.yftFingerprint === 'string' ? state.yftFingerprint : null,
+  };
 }
 
 export function loadState(): BridgeState {

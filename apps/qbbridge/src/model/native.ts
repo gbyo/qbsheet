@@ -87,6 +87,12 @@ export async function openRecoveryPackage(): Promise<OpenedFile | null> {
   return invoke<OpenedFile | null>('open_recovery_package');
 }
 
+/** Native open dialog for a portable round plan or prelim CSV. Null when the operator cancels. */
+export async function openRoundPlan(): Promise<OpenedFile | null> {
+  requireNative('Opening a round plan');
+  return invoke<OpenedFile | null>('open_round_plan');
+}
+
 /** Write one encrypted recovery package. The native writer refuses to replace an existing file. */
 export async function writeRecoveryPackage(
   directory: string,
@@ -141,6 +147,21 @@ export async function writeAssignmentFile(
 ): Promise<string> {
   requireNative('Exporting an assignment file');
   return invoke<string>('write_assignment_file', { directory, fileName, contents });
+}
+
+/**
+ * Write one emergency-pack file. Assignment files pass `overwrite: false` — a pack file a
+ * scorer may already hold must never be replaced. Only the regenerated manifest and README
+ * pass `overwrite: true`.
+ */
+export async function writeRoundPackFile(
+  directory: string,
+  fileName: string,
+  contents: string,
+  overwrite: boolean,
+): Promise<string> {
+  requireNative('Exporting an emergency pack file');
+  return invoke<string>('write_round_pack_file', { directory, fileName, contents, overwrite });
 }
 
 export interface RelayResponse {

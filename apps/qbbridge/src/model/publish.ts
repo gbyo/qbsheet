@@ -174,7 +174,15 @@ export function planRound(
     };
 
     if (!planned?.leftTeamId || !planned.rightTeamId) {
-      clear('No matchup chosen for this round.');
+      // A half-filled pairing is an anomaly, not an empty room: name the chosen team so the
+      // review reads as a mistake to fix rather than a bye the operator meant.
+      const chosenId = planned?.leftTeamId ?? planned?.rightTeamId ?? null;
+      const chosenName = chosenId !== null ? teams.get(chosenId)?.name : undefined;
+      clear(
+        chosenId !== null
+          ? `Only ${chosenName ?? 'one side'} is chosen; the room will publish cleared.`
+          : 'No matchup chosen for this round.',
+      );
       continue;
     }
     if (!isCompletePairing(planned)) {

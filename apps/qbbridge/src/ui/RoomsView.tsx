@@ -166,6 +166,173 @@ type PoolFilter = {
   poolId: string;
 };
 
+/**
+ * Explicit team accounting for the selected round.
+ *
+ * The denominator is the loaded file's team list, never the room count: a bye, a playoff
+ * phase using fewer rooms, or an intentionally idle room all make the physical room count a
+ * wrong denominator. Unaccounted teams are a decision to make here, not an implied bye.
+ */
+function AccountabilitySection({ bridge }: { bridge: BridgeApi }) {
+  const { tournament, roundAccount } = bridge;
+  if (!tournament || !roundAccount) return null;
+  const teamName = (teamId: string): string =>
+    tournament.teams.find((team) => team.id === teamId)?.name ?? teamId;
+  const problems: string[] = [];
+  for (const duplicate of roundAccount.duplicates) {
+    problems.push(
+      `${teamName(duplicate.teamId)} is assigned in ${duplicate.roomIds.length} rooms — publishing is blocked until one is removed.`,
+    );
+  }
+  for (const teamId of roundAccount.contradictions) {
+    problems.push(
+      `${teamName(teamId)} is both assigned and marked bye/inactive — publishing is blocked until one is cleared.`,
+    );
+  }
+  for (const teamId of roundAccount.staleTeamIds) {
+    problems.push(
+      `A pairing names a team the loaded file no longer has (${teamId}) — reload the file and re-enter it.`,
+    );
+  }
+  for (const roomId of roundAccount.staleRoomIds) {
+    problems.push(`A pairing plans a game in removed room ${roomId} — re-enter it or drop it.`);
+  }
+  for (const entry of roundAccount.incomplete) {
+    problems.push(
+      `Room ${entry.roomId} has only ${teamName(entry.chosenTeamId)} chosen and will publish cleared.`,
+    );
+  }
+  return (
+    <div className="round-accountability" style={{ marginTop: 'var(--qbs-space-3)' }}>
+      <h3>Round accountability</h3>
+      <p data-testid="round-account-summary">
+        <strong>{roundAccount.summary}</strong>
+      </p>
+      {problems.length > 0 ? (
+        <ul>
+          {problems.map((problem, index) => (
+            <li key={index}>{problem}</li>
+          ))}
+        </ul>
+      ) : null}
+      {roundAccount.unaccounted.length > 0 ? (
+        <>
+          <p className="faint">
+            {roundAccount.unaccounted.length} team(s) are neither assigned nor marked bye/inactive. Publishing
+            will ask for an explicit exception.
+          </p>
+          <ul>
+            {roundAccount.unaccounted.map((teamId) => (
+              <li key={teamId}>
+                {teamName(teamId)}{' '}
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  isDisabled={bridge.busy}
+                  onPress={() => bridge.setTeamDisposition(teamId, 'bye')}
+                >
+                  Bye
+                </Button>{' '}
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  isDisabled={bridge.busy}
+                  onPress={() => bridge.setTeamDisposition(teamId, 'inactive')}
+                >
+                  Inactive
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {roundAccount.byes.length + roundAccount.inactive.length > 0 ? (
+        <p className="faint">
+          Sitting out:{' '}
+          {roundAccount.byes.map((teamId) => (
+            <span key={`bye:${teamId}`}>
+              {teamName(teamId)} (bye){' '}
+              <Button
+                size="sm"
+                variant="quiet"
+                isDisabled={bridge.busy}
+                onPress={() => bridge.setTeamDisposition(teamId, null)}
+              >
+                Clear
+              </Button>{' '}
+            </span>
+          ))}
+          {roundAccount.inactive.map((teamId) => (
+            <span key={`inactive:${teamId}`}>
+              {teamName(teamId)} (inactive){' '}
+              <Button
+                size="sm"
+                variant="quiet"
+                isDisabled={bridge.busy}
+                onPress={() => bridge.setTeamDisposition(teamId, null)}
+              >
+                Clear
+              </Button>{' '}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Portable plans and emergency packs.
+ *
+ * Plans carry ids plus the YellowFruit fingerprint they were prepared against — never relay
+ * credentials or publication state — and imports replace exactly the rounds the file covers
+ * after an explicit diff review. Packs are the next N rounds as ordinary QBJ files plus a
+ * manifest, for a USB stick before anything breaks.
+ */
+function PlanExchangeSection({ bridge }: { bridge: BridgeApi }) {
+  const [packRounds, setPackRounds] = useState(3);
+  return (
+    <div className="plan-exchange" style={{ marginTop: 'var(--qbs-space-3)' }}>
+      <h3>Plan exchange and emergency packs</h3>
+      <div className="row">
+        <Button variant="quiet" isDisabled={bridge.busy} onPress={() => void bridge.exportRoundPlan()}>
+          Export plan file
+        </Button>
+        <Button variant="quiet" isDisabled={bridge.busy} onPress={() => void bridge.importRoundPlan()}>
+          Import plan file
+        </Button>
+        <Button variant="quiet" isDisabled={bridge.busy} onPress={() => void bridge.exportPrelimCsvFile()}>
+          Export prelim CSV
+        </Button>
+        <label htmlFor="pack-rounds">
+          Pack rounds
+          <input
+            id="pack-rounds"
+            type="number"
+            min={1}
+            max={12}
+            value={packRounds}
+            onChange={(event) => setPackRounds(Math.max(1, Math.min(12, Number(event.target.value) || 1)))}
+          />
+        </label>
+        <Button
+          variant="quiet"
+          isDisabled={bridge.busy}
+          onPress={() => void bridge.exportEmergencyPack(packRounds)}
+        >
+          Export emergency pack
+        </Button>
+      </div>
+      <p className="faint">
+        A plan file holds room names, round pairings, and byes tied to the loaded file&rsquo;s fingerprint.
+        Imports never guess renamed teams or rooms: unknown ids are refused, and a plan from a different file
+        needs an explicit review. Pack files are a separate delivery path — never hand one out for a room the
+        relay is serving.
+      </p>
+    </div>
+  );
+}
+
 export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
   const [poolFilter, setPoolFilter] = useState<PoolFilter | null>(null);
@@ -609,6 +776,8 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           changed after it was published, and Relay holds another round means this room is currently serving a
           different round&rsquo;s game.
         </p>
+        <AccountabilitySection bridge={bridge} />
+        <PlanExchangeSection bridge={bridge} />
       </section>
       <ConfirmDialog
         isOpen={bridge.pendingPublicationReview !== null}
@@ -633,6 +802,55 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
             <li key={`${item.roomId}:${item.message}:${index}`}>
               <strong>{item.roomName}:</strong> {item.message}
             </li>
+          ))}
+        </ul>
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={bridge.pendingPlanImport !== null}
+        title={
+          bridge.pendingPlanImport ? `Apply plan ${bridge.pendingPlanImport.sourceName}?` : 'Apply plan?'
+        }
+        confirmLabel="Apply plan"
+        cancelLabel="Go back"
+        onConfirm={bridge.confirmPlanImport}
+        onCancel={bridge.cancelPlanImport}
+      >
+        <p>
+          This replaces exactly the rounds the file covers; rounds it does not mention are untouched. Nothing
+          has been applied yet.
+        </p>
+        {bridge.pendingPlanImport ? (
+          <ul>
+            <li>
+              {bridge.pendingPlanImport.diff.roundCount} round(s) ·{' '}
+              {bridge.pendingPlanImport.diff.pairingCount} pairing(s) ·{' '}
+              {bridge.pendingPlanImport.diff.byeCount} bye/inactive marking(s)
+            </li>
+            <li>
+              YellowFruit fingerprint:{' '}
+              {bridge.pendingPlanImport.diff.fingerprintMatch
+                ? 'matches the loaded file'
+                : 'DIFFERENT from the loaded file — review every matchup before publishing'}
+            </li>
+          </ul>
+        ) : null}
+      </ConfirmDialog>
+      <ConfirmDialog
+        isOpen={bridge.pendingPackExport !== null}
+        title="Write emergency pack anyway?"
+        confirmLabel="Write pack anyway"
+        cancelLabel="Go back"
+        confirmVariant="danger"
+        onConfirm={() => void bridge.confirmPackExport()}
+        onCancel={bridge.cancelPackExport}
+      >
+        <p>
+          These rooms are live on the relay. Handing out their pack files creates two active writers for one
+          game. Continue only if no scorer will open the relay game. Nothing has been written yet.
+        </p>
+        <ul>
+          {bridge.pendingPackExport?.warnings.map((warning, index) => (
+            <li key={index}>{warning}</li>
           ))}
         </ul>
       </ConfirmDialog>
