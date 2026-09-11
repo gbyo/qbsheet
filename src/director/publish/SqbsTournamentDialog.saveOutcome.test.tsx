@@ -23,9 +23,7 @@ test('a cancelled native save does not announce SQBS compatibility warnings afte
   render(<SqbsTournamentDialog state={state} onAnnounce={onAnnounce} onClose={vi.fn()} />);
 
   expect(screen.getAllByText('Export warning').length).toBeGreaterThan(0);
-  fireEvent.click(
-    screen.getByRole('button', { name: /Download Ninety-Six-Invitational-tournament\.sqbs/ }),
-  );
+  fireEvent.click(screen.getByRole('button', { name: /Download Ninety-Six-Invitational-tournament\.sqbs/ }));
 
   await waitFor(() => {
     expect(onAnnounce).toHaveBeenCalledWith(
