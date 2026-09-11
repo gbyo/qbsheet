@@ -7,6 +7,7 @@ import {
   reportAnswerHeaders,
   reportEscape,
   reportGameAnchor,
+  reportGamesPlayedCell,
   reportNumberCell,
   reportPlayerAnchor,
   reportPointsMetricLabel,
@@ -113,7 +114,7 @@ function rosterTable(snapshot: StatsSnapshot, row: TeamStatsRow, presentation: R
       return (
         `<tr><td>${playerCell}</td>` +
         `${showGrade ? `<td class="num">${reportEscape(player.schoolYear ?? '—')}</td>` : ''}` +
-        `<td class="num">${player.gamesPlayed}</td>${reportNumberCell(player.tossupsHeard)}` +
+        `${reportGamesPlayedCell(player.gamesPlayedKnown ? player.gamesPlayed : null)}${reportNumberCell(player.tossupsHeard)}` +
         `${reportAnswerCells(player, presentation)}` +
         `${reportNumberCell(player.points)}<td class="num">${reportEscape(reportPointsMetricValue(player, presentation))}</td>` +
         `${reportNumberCell(player.pptuh, presentation.precision.rate)}` +

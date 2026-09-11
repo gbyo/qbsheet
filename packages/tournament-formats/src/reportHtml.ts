@@ -113,9 +113,13 @@ export function reportNumberCell(value: number | null | undefined, digits?: numb
  * games round to two decimals. Callers gate unknown GP to null first; this shapes
  * known values only, so every printable page shares one GP vocabulary (#746).
  */
+export function reportGamesPlayedText(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
 export function reportGamesPlayedCell(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return `<td class="num">${reportUnknown}</td>`;
-  return `<td class="num">${Number.isInteger(value) ? String(value) : value.toFixed(2)}</td>`;
+  return `<td class="num">${reportGamesPlayedText(value)}</td>`;
 }
 
 /**
