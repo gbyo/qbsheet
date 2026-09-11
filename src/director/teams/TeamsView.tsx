@@ -20,6 +20,7 @@ import {
   PageHeader,
   Panel,
   SearchField,
+  Segmented,
   StateLabel,
   TextArea,
   TextInput,
@@ -42,6 +43,11 @@ interface PlayerDraft {
   captain: boolean;
   active: boolean;
   rosterNumber: string;
+  /** Structured school year/grade as typed; empty means none. */
+  schoolYear: string;
+  /** Tri-state eligibility: true/false are explicit, null is unknown. */
+  undergraduateEligible: boolean | null;
+  divisionTwoEligible: boolean | null;
   notes: string;
   removed?: boolean;
 }
@@ -53,9 +59,43 @@ function newPlayerDraft(): PlayerDraft {
     captain: false,
     active: true,
     rosterNumber: '',
+    schoolYear: '',
+    undergraduateEligible: null,
+    divisionTwoEligible: null,
     notes: '',
   };
 }
+
+/**
+ * Roster year input: blank stays unset, a finite number sets it, anything else is
+ * false so the save refuses junk instead of persisting it.
+ */
+function parseSchoolYear(value: string): number | null | false {
+  const trimmed = value.trim();
+  if (trimmed === '') return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : false;
+}
+
+type TriStateChoice = 'yes' | 'no' | 'unknown';
+
+function triStateChoice(value: boolean | null): TriStateChoice {
+  if (value === true) return 'yes';
+  if (value === false) return 'no';
+  return 'unknown';
+}
+
+function fromTriStateChoice(choice: TriStateChoice): boolean | null {
+  if (choice === 'yes') return true;
+  if (choice === 'no') return false;
+  return null;
+}
+
+const TRI_STATE_OPTIONS: { value: TriStateChoice; label: string }[] = [
+  { value: 'yes', label: 'Yes' },
+  { value: 'no', label: 'No' },
+  { value: 'unknown', label: 'Unknown' },
+];
 
 export function TeamsView({
   state,
@@ -520,6 +560,9 @@ function TeamDialog({
             captain: player.captain,
             active: player.active,
             rosterNumber: player.rosterNumber == null ? '' : String(player.rosterNumber),
+            schoolYear: player.schoolYear == null ? '' : String(player.schoolYear),
+            undergraduateEligible: player.undergraduateEligible ?? null,
+            divisionTwoEligible: player.divisionTwoEligible ?? null,
             notes: player.notes ?? '',
           }))
       : [];
@@ -634,20 +677,32 @@ function TeamDialog({
       return;
     }
     for (const player of players) {
+      if (player.removed) {
+        if (!player.id) continue;
+        if (!controller.removePlayer(player.id)) {
+          onAnnounce(
+            errorNotice(`Could not remove ${player.name || 'that player'}; review the Director error.`),
+          );
+          return;
+        }
+        continue;
+      }
+      const schoolYear = parseSchoolYear(player.schoolYear);
+      if (schoolYear === false) {
+        onAnnounce(errorNotice(`School year for ${player.name || 'that player'} must be a number.`));
+        return;
+      }
       if (player.id) {
-        if (player.removed) {
-          if (!controller.removePlayer(player.id)) {
-            onAnnounce(
-              errorNotice(`Could not remove ${player.name || 'that player'}; review the Director error.`),
-            );
-            return;
-          }
-        } else if (
+        if (
           !controller.updatePlayer(player.id, {
             name: player.name,
             captain: player.captain,
             active: player.active,
             rosterNumber: player.rosterNumber || undefined,
+            // An emptied year clears the stored value; a filled one sets it.
+            schoolYear: schoolYear ?? null,
+            undergraduateEligible: player.undergraduateEligible,
+            divisionTwoEligible: player.divisionTwoEligible,
             notes: player.notes || undefined,
           })
         ) {
@@ -664,6 +719,11 @@ function TeamDialog({
             player.captain,
             player.rosterNumber || undefined,
             player.notes || undefined,
+            {
+              schoolYear: schoolYear ?? undefined,
+              undergraduateEligible: player.undergraduateEligible,
+              divisionTwoEligible: player.divisionTwoEligible,
+            },
           )
         ) {
           onAnnounce(errorNotice(`Could not add ${player.name}; review the Director error.`));
@@ -771,6 +831,34 @@ function TeamDialog({
                   value={player.rosterNumber}
                   onChange={(event) => updatePlayer(player.key, { rosterNumber: event.target.value })}
                   placeholder="No."
+                />
+                <TextInput
+                  aria-label={`Player ${index + 1} school year`}
+                  value={player.schoolYear}
+                  onChange={(event) => updatePlayer(player.key, { schoolYear: event.target.value })}
+                  placeholder="Yr"
+                />
+                <span className="director-roster-entry-flag" aria-hidden="true">
+                  UG
+                </span>
+                <Segmented<TriStateChoice>
+                  ariaLabel={`Player ${index + 1} undergraduate eligibility`}
+                  value={triStateChoice(player.undergraduateEligible)}
+                  options={TRI_STATE_OPTIONS}
+                  onChange={(choice) =>
+                    updatePlayer(player.key, { undergraduateEligible: fromTriStateChoice(choice) })
+                  }
+                />
+                <span className="director-roster-entry-flag" aria-hidden="true">
+                  D2
+                </span>
+                <Segmented<TriStateChoice>
+                  ariaLabel={`Player ${index + 1} division two eligibility`}
+                  value={triStateChoice(player.divisionTwoEligible)}
+                  options={TRI_STATE_OPTIONS}
+                  onChange={(choice) =>
+                    updatePlayer(player.key, { divisionTwoEligible: fromTriStateChoice(choice) })
+                  }
                 />
                 <Checkbox
                   checked={player.captain}

@@ -209,3 +209,88 @@ test('navigation opens a team repeatedly and pasted names preserve pending remov
   fireEvent.click(screen.getByRole('button', { name: 'Find team' }));
   expect(within(screen.getByRole('dialog')).getByDisplayValue('Unsaved Player')).toBeTruthy();
 });
+
+test('roster year and tri-state UG/D2 persist and round-trip through the team editor (#755)', async () => {
+  HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+  };
+  const state = directorFixture();
+  const teamId = state.teams[0].id;
+  state.rounds = [];
+  state.scheduledGames = [];
+  state.players = [
+    {
+      id: 'veteran',
+      teamId,
+      name: 'Veteran',
+      captain: false,
+      active: true,
+      schoolYear: 10,
+      undergraduateEligible: true,
+      divisionTwoEligible: false,
+    },
+  ];
+  const repository = new MemoryDirectorRepository();
+  await repository.save(state);
+  let controller: DirectorController;
+  function Harness() {
+    controller = useDirectorController(repository);
+    const [target, setTarget] = useState<DirectorNavigationTarget | null>(null);
+    return (
+      <>
+        <button onClick={() => setTarget({ section: 'teams', entityType: 'team', entityId: teamId })}>
+          Find team
+        </button>
+        {!controller.loading && (
+          <TeamsView
+            state={controller.state}
+            controller={controller}
+            onAnnounce={vi.fn()}
+            navigationTarget={target}
+            onClearNavigationTarget={() => setTarget(null)}
+          />
+        )}
+      </>
+    );
+  }
+  render(<Harness />);
+  await waitFor(() => expect(controller!.loading).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: 'Find team' }));
+  const dialog = screen.getByRole('dialog');
+
+  // Stored values round-trip into the controls: year present, UG Yes, D2 No.
+  expect(within(dialog).getByDisplayValue('10')).toBeTruthy();
+  const ug = within(dialog).getByRole('group', { name: 'Player 1 undergraduate eligibility' });
+  expect(within(ug).getByRole('button', { name: 'Yes' })).toHaveAttribute('aria-pressed', 'true');
+  const d2 = within(dialog).getByRole('group', { name: 'Player 1 division two eligibility' });
+  expect(within(d2).getByRole('button', { name: 'No' })).toHaveAttribute('aria-pressed', 'true');
+
+  // Edit the veteran and add a rookie with explicit metadata.
+  fireEvent.change(within(dialog).getByLabelText('Player 1 school year'), { target: { value: '11' } });
+  fireEvent.click(within(ug).getByRole('button', { name: 'No' }));
+  fireEvent.click(within(d2).getByRole('button', { name: 'Unknown' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add player' }));
+  fireEvent.change(within(dialog).getByLabelText('Player 2 name'), { target: { value: 'Rookie' } });
+  fireEvent.change(within(dialog).getByLabelText('Player 2 school year'), { target: { value: '9' } });
+  const rookieUg = within(dialog).getByRole('group', { name: 'Player 2 undergraduate eligibility' });
+  fireEvent.click(within(rookieUg).getByRole('button', { name: 'Yes' }));
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+  await waitFor(() => expect(controller!.saving).toBe(false));
+
+  const veteran = controller!.state.players.find((player) => player.id === 'veteran');
+  expect(veteran?.schoolYear).toBe(11);
+  expect(veteran?.undergraduateEligible).toBe(false);
+  expect(veteran?.divisionTwoEligible).toBeNull();
+  const rookie = controller!.state.players.find((player) => player.name === 'Rookie');
+  expect(rookie?.schoolYear).toBe(9);
+  expect(rookie?.undergraduateEligible).toBe(true);
+  expect(rookie?.divisionTwoEligible).toBeNull();
+
+  // Reopening shows the persisted values, not defaults.
+  fireEvent.click(screen.getByRole('button', { name: 'Find team' }));
+  const reopened = screen.getByRole('dialog');
+  expect(within(reopened).getByDisplayValue('11')).toBeTruthy();
+  expect(within(reopened).getByDisplayValue('9')).toBeTruthy();
+  const reopenedUg = within(reopened).getByRole('group', { name: 'Player 1 undergraduate eligibility' });
+  expect(within(reopenedUg).getByRole('button', { name: 'No' })).toHaveAttribute('aria-pressed', 'true');
+});
