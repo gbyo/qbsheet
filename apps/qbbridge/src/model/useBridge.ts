@@ -27,6 +27,9 @@ import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 /** How often the results poll runs while the window is open. */
 export const resultPollIntervalMs = 5000;
 
+/** Routine confirmations are useful briefly, while problems need to remain available. */
+export const noticeAutoDismissMs = 4000;
+
 /**
  * How many unsaved results may pile up before the operator is told.
  *
@@ -47,6 +50,7 @@ export interface BridgeApi {
   /** What the last `.yft` read reported that QBSheet could not carry over. */
   loadWarnings: string[];
   notice: BridgeNotice | null;
+  dismissNotice(): void;
   relayReachable: boolean | null;
   busy: boolean;
   native: boolean;
@@ -102,6 +106,14 @@ export function useBridge(): BridgeApi {
   const [busy, setBusy] = useState(false);
   const [changingRelay, setChangingRelay] = useState(false);
   const stateRef = useRef(state);
+
+  const dismissNotice = useCallback(() => setNotice(null), []);
+
+  useEffect(() => {
+    if (notice?.kind !== 'good') return;
+    const timer = setTimeout(() => setNotice(null), noticeAutoDismissMs);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const commit = useCallback((next: BridgeState | ((current: BridgeState) => BridgeState)) => {
     setState((current) => {
@@ -659,6 +671,7 @@ export function useBridge(): BridgeApi {
     tournament,
     loadWarnings,
     notice,
+    dismissNotice,
     relayReachable,
     busy,
     native: isNativeHost(),

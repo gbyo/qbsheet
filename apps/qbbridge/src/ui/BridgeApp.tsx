@@ -3,7 +3,7 @@
  */
 
 import { useState } from 'react';
-import { Notice, StatusBadge, Tab, TabList, TabPanel, Tabs } from '@qbsheet/ui';
+import { Button, Notice, StatusBadge, Tab, TabList, TabPanel, Tabs } from '@qbsheet/ui';
 import wordmark from '../assets/qbsheet-wordmark.svg';
 import { useBridge } from '../model/useBridge';
 import SetupView from './SetupView';
@@ -72,8 +72,18 @@ export default function BridgeApp() {
               <Notice
                 tone={noticeTone[bridge.notice.kind]}
                 live={bridge.notice.kind === 'bad' ? 'assertive' : 'polite'}
+                className="page-notice"
               >
-                {bridge.notice.message}
+                <span className="page-notice__message">{bridge.notice.message}</span>
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  className="page-notice__dismiss"
+                  aria-label="Dismiss notice"
+                  onPress={bridge.dismissNotice}
+                >
+                  ×
+                </Button>
               </Notice>
             ) : null}
             {bridge.unsavedResultWarning ? (

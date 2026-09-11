@@ -73,6 +73,21 @@ describe('the shell', () => {
     expect(screen.getByRole('button', { name: 'Reload YellowFruit File' })).toBeInTheDocument();
   });
 
+  test('a loaded success notice can be dismissed and does not return when changing tabs', async () => {
+    const user = userEvent.setup();
+    render(<BridgeApp />);
+    await user.click(screen.getByRole('button', { name: 'Open YellowFruit File' }));
+
+    const loadedNotice = await screen.findByText(/Loaded 2025 MEQBA Season Opener/);
+    expect(loadedNotice).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Dismiss notice' }));
+    expect(screen.queryByText(/Loaded 2025 MEQBA Season Opener/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Help' }));
+    await user.click(screen.getByRole('tab', { name: 'Tournament' }));
+    expect(screen.queryByText(/Loaded 2025 MEQBA Season Opener/)).not.toBeInTheDocument();
+  });
+
   test('a room takes two teams and shows its pairing code', async () => {
     const user = userEvent.setup();
     render(<BridgeApp />);
