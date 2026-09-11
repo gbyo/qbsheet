@@ -101,7 +101,7 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   // Completion is explicitly a review state, not a trap or a second final screen. Editing is visible
   // before confirmation, while detailed exports stay out of the decision path until requested.
   await expect(page.getByRole('heading', { name: 'Confirm the result' })).toBeVisible();
-  await expect(page.getByText('Not submitted yet.')).toBeVisible();
+  await expect(page.getByText(/You can still edit this game here/)).toBeVisible();
   await expect(page.getByLabel('Final score confirmed with both teams')).toBeVisible();
   await page.getByRole('button', { name: 'Edit game' }).first().click();
   await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
@@ -141,16 +141,6 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
   await expect(copy.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
-
-  // A finished result must remain editable. Return to the scorer, verify the completed review is
-  // still the active presentation, then submit it again so the original exit path remains covered.
-  await page.getByRole('button', { name: 'Review score' }).click();
-  await expect(page.locator('.scorer-completion')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Edit game' }).first()).toBeVisible();
-  await page.getByLabel('Final score confirmed with both teams').check();
-  await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
-
   await page.getByRole('button', { name: 'Done' }).click();
 
   await expect(page.getByRole('heading', { name: 'Start scoring' })).toBeVisible();
@@ -159,6 +149,27 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
     .filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('Tuesday practice');
   await expect(recent).toContainText('Ninety Six');
+});
+
+test('reviewing an already submitted result does not claim it is unsent', async ({ page }) => {
+  await page.goto('/');
+
+  await fillSetupForm(page, 'Submitted review');
+  await page.getByRole('button', { name: 'Start game' }).click();
+  await chooseStarters(page);
+
+  for (let tossup = 1; tossup <= 4; tossup += 1) {
+    await page.getByRole('button', { name: 'No buzz' }).click();
+  }
+  await page.getByLabel('Final score confirmed with both teams').check();
+  await page.getByRole('button', { name: 'Submit result' }).click();
+  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Review score' }).click();
+  await expect(page.locator('.scorer-completion')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit game' }).first()).toBeVisible();
+  await expect(page.getByText('Not submitted yet.')).toHaveCount(0);
+  await expect(page.getByText(/if you opened a result that was already sent/i)).toBeVisible();
 });
 
 test('an accidentally ended game can return to live scoring before submission', async ({ page }) => {
@@ -173,7 +184,7 @@ test('an accidentally ended game can return to live scoring before submission', 
   await endGameEarly(page, 'Ended by mistake');
 
   await expect(page.getByRole('heading', { name: 'Confirm the result' })).toBeVisible();
-  await expect(page.getByText('Not submitted yet.')).toBeVisible();
+  await expect(page.getByText(/You can still edit this game here/)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Resume scoring/ })).toBeVisible();
 
   // Resume uses the same auditable correction surface as every other post-game correction. Removing
