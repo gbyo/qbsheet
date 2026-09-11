@@ -67,7 +67,7 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     selectRound: noop,
     plannedTeamsFor: () => ({ leftTeamId: null, rightTeamId: null }),
     planStatus: () => 'no-game' as const,
-    roundProgress: { roundId: null, assigned: 0, total: 0 },
+    roundProgress: { roundId: null, assigned: 0 },
     phaseRoundProgress: [],
     publish: async () => {},
     publishRoomSetup: async () => {},

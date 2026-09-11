@@ -32,7 +32,7 @@ function bridgeWhileBatchSaving(): BridgeApi {
     changingRelay: false,
     plannedTeamsFor: () => ({ leftTeamId: null, rightTeamId: null }),
     planStatus: () => 'no-game' as const,
-    roundProgress: { roundId: null, assigned: 0, total: 0 },
+    roundProgress: { roundId: null, assigned: 0 },
     phaseRoundProgress: [],
     warnings: [],
     savingResults: true,
