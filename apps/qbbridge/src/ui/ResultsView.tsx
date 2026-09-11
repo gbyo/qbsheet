@@ -5,7 +5,7 @@
  */
 
 import { Button, StatusBadge } from '@qbsheet/ui';
-import { resultFileName, resultSummary } from '../model/results';
+import { resultActionLabel, resultFileName, resultSummary } from '../model/results';
 import type { BridgeApi } from '../model/useBridge';
 
 export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
@@ -57,6 +57,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
               </StatusBadge>
               <Button
                 size="sm"
+                aria-label={resultActionLabel(summary, entry.resultId, entry.savedPath !== undefined)}
                 isDisabled={bridge.resultBusy(entry.resultId) || !state.resultFolder}
                 onPress={() => void bridge.saveResult(entry.resultId)}
               >

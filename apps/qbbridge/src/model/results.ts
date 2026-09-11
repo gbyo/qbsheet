@@ -25,6 +25,24 @@ export interface ResultSummary {
   rightPoints: number | null;
 }
 
+/**
+ * Name a per-result action for direct screen-reader navigation.
+ *
+ * The stable result id is included even when the descriptive fields are complete: a relay can
+ * retain a corrected final for the same room and matchup, and those two rows must not collapse
+ * into indistinguishable buttons.
+ */
+export function resultActionLabel(summary: ResultSummary, resultId: string, saved: boolean): string {
+  const matchup = [summary.leftName, summary.rightName].filter((name): name is string => name !== null);
+  const context = [
+    summary.roundName ? `Round ${summary.roundName}` : null,
+    summary.location,
+    matchup.length > 0 ? matchup.join(' vs ') : null,
+  ].filter((part): part is string => part !== null && part !== '');
+  const description = context.length > 0 ? ` — ${context.join(', ')}` : '';
+  return `${saved ? 'Save again' : 'Save'} result${description} (result ${resultId})`;
+}
+
 /** Keep result names below the common 255-byte filesystem component limit, with some margin. */
 export const maximumResultFileNameBytes = 240;
 const resultFileExtension = '.result.qbj';
