@@ -87,9 +87,38 @@ describe('round-stat rule variants', () => {
     });
     const row = deriveRoundStats([overtime]).rows[0]!;
     expect(row.tossupsRead).toBe(21);
-    expect(row.pointsPerTeamPerXTuh).toBeCloseTo(((300 + 200) / 2) * (20 / 21));
     expect(row.tossupConversionRate).toBeCloseTo(18 / 21);
     expect(row.negRatePerXTuh).toBeCloseTo((3 / 21) * 20);
+  });
+
+  test('Pts/team/X TUH excludes overtime points and TUH when the split is known (#755)', () => {
+    const overtime = game('overtime', {
+      tossupsRead: 21,
+      overtimeTossupsRead: 1,
+      teamStats: [
+        team('A', 300, {
+          powers: 2,
+          gets: 8,
+          negs: 1,
+          bonusesHeard: 10,
+          bonusPoints: 180,
+          overtimePoints: 30,
+        }),
+        team('B', 200, { powers: 1, gets: 7, negs: 2, bonusesHeard: 8, bonusPoints: 150, overtimePoints: 0 }),
+      ],
+    });
+    const row = deriveRoundStats([overtime]).rows[0]!;
+    // Regulation: 270 + 200 over 20 TUH, normalized to X = 20.
+    expect(row.pointsPerTeamPerXTuh).toBeCloseTo(((270 + 200) / 2) * (20 / 20));
+  });
+
+  test('Pts/team/X TUH stays unknown when the overtime points split is missing (#755)', () => {
+    const overtime = game('overtime', {
+      tossupsRead: 21,
+      overtimeTossupsRead: 1,
+    });
+    const row = deriveRoundStats([overtime]).rows[0]!;
+    expect(row.pointsPerTeamPerXTuh).toBeNull();
   });
 
   test('marks power rate unavailable when power eligibility changes within one round', () => {

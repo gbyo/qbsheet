@@ -7,7 +7,7 @@ import {
   type ReportScoringDefinition,
   type StatsSnapshot,
 } from '@qbsheet/tournament-formats';
-import type { DirectorState, TournamentRules } from '../domain';
+import { normalizedPointsPerX, type DirectorState, type TournamentRules } from '../domain';
 
 function scoringDefinition(rules: TournamentRules, id?: string): ReportScoringDefinition {
   return {
@@ -142,7 +142,7 @@ export function withReportPresentation(
     teams: snapshot.teams.map((row) => ({
       ...row,
       answerCounts: semanticAnswerCounts(row),
-      pointsPerX: pointsPerX(row.pptuh, x),
+      pointsPerX: normalizedPointsPerX(row.regulationPoints, row.tossupsHeardRegulation, x),
     })),
     players: snapshot.players.map((row) => ({
       ...row,

@@ -51,6 +51,11 @@ export interface TeamStatsRow {
    * Normalized PPX-style display divides by this denominator, never by summed player exposure.
    */
   tossupsHeardRegulation: number | null;
+  /**
+   * Regulation points (total minus known overtime); null when the overtime split is
+   * unknown. Normalized Pts/X divides this numerator by the regulation denominator.
+   */
+  regulationPoints: number | null;
   /** Null when tossups-heard is unknown or zero: PPTUH is undefined, not zero. */
   pptuh: number | null;
   bonusPoints: number;

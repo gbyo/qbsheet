@@ -9,14 +9,15 @@
 import {
   buildReportPresentation,
   defaultReportOptions,
-  pointsPerX,
   reportNumber,
   reportPercent,
   type ReportAnswerKey,
 } from '@qbsheet/tournament-formats';
 import {
   isTeamClassification,
+  normalizedPointsPerX,
   playerPptuh,
+  regulationDerivationForTeam,
   type DirectorState,
   type Player,
   type PlayerStanding,
@@ -580,11 +581,17 @@ export function teamStatCell(
       return formatAverage(standing.pointsFor, standing.gamesPlayed);
     case 'papg':
       return formatAverage(standing.pointsAgainst, standing.gamesPlayed);
-    case 'ppx':
+    case 'ppx': {
+      const regulation = regulationDerivationForTeam(standing);
       return reportNumber(
-        pointsPerX(pptuhValue(standing.pointsFor, standing), context.pointsTossups ?? null),
+        normalizedPointsPerX(
+          regulation.regulationPoints,
+          standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
+          context.pointsTossups ?? null,
+        ),
         2,
       );
+    }
     case 'superpowers':
       return String(standing.superpowers);
     case 'powers':
