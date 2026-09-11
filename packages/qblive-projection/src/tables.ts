@@ -20,6 +20,7 @@ import {
   canonicalCompetitionRanks,
   deriveTeamStandings,
   derivePlayerStandings,
+  exhibitionTeamIdsOf,
   normalizedPointsPerX,
   playerPptuh,
   regulationDerivationForTeam,
@@ -605,6 +606,7 @@ function standingsRankOf(
       teamIds: scope.teamIds,
     }),
     state.tournament?.rules.tiebreakers,
+    exhibitionTeamIdsOf(state),
   );
   const counts = new Map<number, number>();
   for (const rank of ranks.values()) counts.set(rank, (counts.get(rank) ?? 0) + 1);

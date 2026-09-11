@@ -790,7 +790,7 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
     format.kind === 'custom'
       ? state.teams.filter(
           (team) =>
-            team.status === 'confirmed' &&
+            (team.status === 'confirmed' || team.status === 'exhibition') &&
             games.some((game) => game.leftTeamId === team.id || game.rightTeamId === team.id),
         )
       : expectedRoundTeams(state, phase);
@@ -825,7 +825,9 @@ export function roundScheduleIsValid(state: DirectorState, roundId: DirectorId):
   const confirmedIds = new Set(activeTournamentTeams(state).map((team) => team.id));
   const eligiblePoolTeamIds = new Set(
     state.teams
-      .filter((team) => team.status === 'confirmed' || team.status === 'dropped')
+      .filter(
+        (team) => team.status === 'confirmed' || team.status === 'exhibition' || team.status === 'dropped',
+      )
       .map((team) => team.id),
   );
   const poolTeamIds = pools.flatMap((pool) => pool?.teamIds ?? []);

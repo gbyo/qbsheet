@@ -262,7 +262,7 @@ export interface ImportedTeamInput {
   organizationId?: string;
   teamLetter?: string;
   seed?: number | null;
-  status?: 'confirmed' | 'waitlist' | 'dropped';
+  status?: 'confirmed' | 'waitlist' | 'dropped' | 'exhibition';
   notes?: string;
   players?: Array<{
     id?: string;
@@ -526,6 +526,7 @@ export interface DirectorController {
   updateTeam(teamId: DirectorId, changes: Partial<NewTeamInput>): boolean;
   dropTeam(teamId: DirectorId, reason?: string): boolean;
   restoreTeam(teamId: DirectorId): boolean;
+  setTeamExhibition(teamId: DirectorId, exhibition: boolean): boolean;
   addPlayer(
     teamId: DirectorId,
     name: string,
@@ -2707,6 +2708,51 @@ export function useDirectorController(repository = createDirectorRepository()): 
     [commit],
   );
 
+  const setTeamExhibition = useCallback(
+    (teamId: DirectorId, exhibition: boolean): boolean => {
+      const snapshot = stateRef.current;
+      const current = snapshot.teams.find((entry) => entry.id === teamId);
+      if (!current) {
+        setError('That team is no longer in the tournament workspace.');
+        return false;
+      }
+      const target = exhibition ? 'exhibition' : 'confirmed';
+      if (current.status === target) {
+        setError(exhibition ? 'That team is already exhibition.' : 'That team is already confirmed.');
+        return false;
+      }
+      if (current.status !== 'confirmed' && current.status !== 'exhibition') {
+        setError(
+          exhibition
+            ? 'Only confirmed teams can be marked exhibition. Restore or confirm the team first.'
+            : 'Only exhibition teams can be returned to confirmed status. Restore the team first.',
+        );
+        return false;
+      }
+      return commit((draft) => {
+        const team = draft.teams.find((entry) => entry.id === teamId);
+        if (!team) return;
+        team.status = exhibition ? 'exhibition' : 'confirmed';
+        team.updatedAt = isoNow();
+        draft.audit.push({
+          id: newDirectorId('audit'),
+          at: team.updatedAt,
+          actor: 'Director',
+          type: 'team-changed',
+          summary: exhibition
+            ? `${team.displayName} marked as an exhibition team.`
+            : `${team.displayName} returned to confirmed status.`,
+          entityId: teamId,
+        });
+        // Flipping exhibition state reinterprets decided games for every
+        // opponent: dependent bases must be recommitted, never left reading
+        // current under the new semantics (#895).
+        invalidateDependentAdvancementBases(snapshot, draft, 'team-exhibition-changed', { teamId });
+      });
+    },
+    [commit],
+  );
+
   const addPlayer = useCallback(
     (
       teamId: DirectorId,
@@ -4186,8 +4232,8 @@ export function useDirectorController(repository = createDirectorRepository()): 
         }
         seenTeams.add(assignment.teamId);
         const team = snapshot.teams.find((entry) => entry.id === assignment.teamId);
-        if (!team || team.status !== 'confirmed') {
-          return fail('Only confirmed teams can advance into playoff pools.');
+        if (!team || (team.status !== 'confirmed' && team.status !== 'exhibition')) {
+          return fail('Only confirmed or exhibition teams can advance into playoff pools.');
         }
       }
       const preview = previewAdvancement(snapshot, source);
@@ -7858,6 +7904,7 @@ export function useDirectorController(repository = createDirectorRepository()): 
     updateTeam,
     dropTeam,
     restoreTeam,
+    setTeamExhibition,
     addPlayer,
     updatePlayer,
     removePlayer,

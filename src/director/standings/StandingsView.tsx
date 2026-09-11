@@ -4,6 +4,7 @@ import {
   canonicalCompetitionRanks,
   derivePlayerStandings,
   deriveTeamStandings,
+  exhibitionTeamIdsOf,
   playerHasAppearance,
   totalAcceptedResults,
   type DirectorState,
@@ -261,7 +262,12 @@ export function StandingsView({
   // except under explicit final placement, which is already a total order.
   const rankOf = scope.final
     ? new Map(teamStandings.map((standing, index) => [standing.teamId, index + 1]))
-    : canonicalCompetitionRanks(teamStandings, scopedGames, state.tournament?.rules.tiebreakers);
+    : canonicalCompetitionRanks(
+        teamStandings,
+        scopedGames,
+        state.tournament?.rules.tiebreakers,
+        exhibitionTeamIdsOf(state),
+      );
   const tiedRanks = scope.final ? new Set<string>() : tiedTeamIds(rankOf);
   const playerRankOf = new Map(playerStandings.map((standing, index) => [standing.playerId, index + 1]));
   const tiedPlayerRanks = playerRankTies(playerStandings);

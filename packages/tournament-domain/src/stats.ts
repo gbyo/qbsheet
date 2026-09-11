@@ -258,6 +258,16 @@ export function acceptedGameRecords(
   return [...byScheduledGame.values()];
 }
 
+/**
+ * Exhibition teams compete fully and keep their own competitive aggregates, but
+ * games against an exhibition team never inflate the non-exhibition opponent's
+ * record or individual statistics — the conventional SQBS exhibition semantics
+ * (#895). Exhibition-vs-exhibition games count for both sides.
+ */
+export function exhibitionTeamIdsOf(state: DirectorState): Set<DirectorId> {
+  return new Set(state.teams.filter((team) => team.status === 'exhibition').map((team) => team.id));
+}
+
 export function deriveTeamStandings(
   state: DirectorState,
   games: GameRecord[] = acceptedGameRecords(state),
@@ -318,6 +328,7 @@ export function deriveTeamStandings(
   }
 
   const bouncebackTotals = new Map<DirectorId, BouncebackSideTotals>();
+  const exhibitionIds = exhibitionTeamIdsOf(state);
   const bouncebackTotalsFor = (teamId: DirectorId): BouncebackSideTotals => {
     const existing = bouncebackTotals.get(teamId);
     if (existing) return existing;
@@ -334,64 +345,81 @@ export function deriveTeamStandings(
     const gameRules = rulesForGame(state, game) ?? defaultRules;
     const detailKnown = gameDetailedCountsKnown(game);
     const definitionProven = historicalDefinitionResolved(state, game);
-    leftStanding.gamesPlayed += 1;
-    rightStanding.gamesPlayed += 1;
-    leftStanding.pointsFor += left.score;
-    leftStanding.pointsAgainst += right.score;
-    rightStanding.pointsFor += right.score;
-    rightStanding.pointsAgainst += left.score;
-    leftStanding.margin += left.score - right.score;
-    rightStanding.margin += right.score - left.score;
-    leftStanding.superpowers += left.superpowers;
-    rightStanding.superpowers += right.superpowers;
+    // A game counts for a side unless the opponent is exhibition and this side
+    // is not: the exhibition side keeps its own aggregates while the
+    // non-exhibition opponent's competitive totals ignore the game (#895).
+    const leftCounts = exhibitionIds.has(left.teamId) || !exhibitionIds.has(right.teamId);
+    const rightCounts = exhibitionIds.has(right.teamId) || !exhibitionIds.has(left.teamId);
+    if (leftCounts) leftStanding.gamesPlayed += 1;
+    if (rightCounts) rightStanding.gamesPlayed += 1;
+    if (leftCounts) leftStanding.pointsFor += left.score;
+    if (leftCounts) leftStanding.pointsAgainst += right.score;
+    if (rightCounts) rightStanding.pointsFor += right.score;
+    if (rightCounts) rightStanding.pointsAgainst += left.score;
+    if (leftCounts) leftStanding.margin += left.score - right.score;
+    if (rightCounts) rightStanding.margin += right.score - left.score;
+    if (leftCounts) leftStanding.superpowers += left.superpowers;
+    if (rightCounts) rightStanding.superpowers += right.superpowers;
     if (!gameDetailedCountsKnown(game)) {
-      leftStanding.powersKnown = false;
-      rightStanding.powersKnown = false;
-      leftStanding.getsKnown = false;
-      rightStanding.getsKnown = false;
+      if (leftCounts) leftStanding.powersKnown = false;
+      if (rightCounts) rightStanding.powersKnown = false;
+      if (leftCounts) leftStanding.getsKnown = false;
+      if (rightCounts) rightStanding.getsKnown = false;
     }
-    addTeamGameTuh(state, leftStanding, game);
-    addTeamGameTuh(state, rightStanding, game);
-    addTeamGameOvertimePoints(state, leftStanding, left.teamId, game);
-    addTeamGameOvertimePoints(state, rightStanding, right.teamId, game);
-    leftStanding.powers += left.powers;
-    leftStanding.gets += left.gets;
-    leftStanding.negs += left.negs;
-    leftStanding.bonuses += left.bonuses;
-    leftStanding.bonusPoints += left.bonusPoints;
-    accumulateBouncebackSide(
-      bouncebackTotalsFor(left.teamId),
-      left,
-      right,
-      game,
-      gameRules,
-      detailKnown,
-      definitionProven,
-    );
-    accumulateTeamLightning(leftStanding, left.lightningPoints, game, gameRules, definitionProven);
-    rightStanding.powers += right.powers;
-    rightStanding.gets += right.gets;
-    rightStanding.negs += right.negs;
-    rightStanding.bonuses += right.bonuses;
-    rightStanding.bonusPoints += right.bonusPoints;
-    accumulateBouncebackSide(
-      bouncebackTotalsFor(right.teamId),
-      right,
-      left,
-      game,
-      gameRules,
-      detailKnown,
-      definitionProven,
-    );
+    if (leftCounts) addTeamGameTuh(state, leftStanding, game);
+    if (rightCounts) addTeamGameTuh(state, rightStanding, game);
+    if (leftCounts) addTeamGameOvertimePoints(state, leftStanding, left.teamId, game);
+    if (rightCounts) addTeamGameOvertimePoints(state, rightStanding, right.teamId, game);
+    if (leftCounts) leftStanding.powers += left.powers;
+    if (leftCounts) leftStanding.gets += left.gets;
+    if (leftCounts) leftStanding.negs += left.negs;
+    if (leftCounts) leftStanding.bonuses += left.bonuses;
+    if (leftCounts) leftStanding.bonusPoints += left.bonusPoints;
+    if (leftCounts) {
+      accumulateBouncebackSide(
+        bouncebackTotalsFor(left.teamId),
+        left,
+        right,
+        game,
+        gameRules,
+        detailKnown,
+        definitionProven,
+      );
+    }
+    if (leftCounts) {
+      accumulateTeamLightning(leftStanding, left.lightningPoints, game, gameRules, definitionProven);
+    }
+    if (rightCounts) rightStanding.powers += right.powers;
+    if (rightCounts) rightStanding.gets += right.gets;
+    if (rightCounts) rightStanding.negs += right.negs;
+    if (rightCounts) rightStanding.bonuses += right.bonuses;
+    if (rightCounts) rightStanding.bonusPoints += right.bonusPoints;
+    if (rightCounts) {
+      accumulateBouncebackSide(
+        bouncebackTotalsFor(right.teamId),
+        right,
+        left,
+        game,
+        gameRules,
+        detailKnown,
+        definitionProven,
+      );
+    }
     const leftOutcome = gameOutcomeForTeam(game, left.teamId);
     const rightOutcome = gameOutcomeForTeam(game, right.teamId);
-    if (leftOutcome === 'win') leftStanding.wins += 1;
-    else if (leftOutcome === 'loss') leftStanding.losses += 1;
-    else if (leftOutcome === 'tie') leftStanding.ties += 1;
-    if (rightOutcome === 'win') rightStanding.wins += 1;
-    else if (rightOutcome === 'loss') rightStanding.losses += 1;
-    else if (rightOutcome === 'tie') rightStanding.ties += 1;
-    accumulateTeamLightning(rightStanding, right.lightningPoints, game, gameRules, definitionProven);
+    if (leftCounts) {
+      if (leftOutcome === 'win') leftStanding.wins += 1;
+      else if (leftOutcome === 'loss') leftStanding.losses += 1;
+      else if (leftOutcome === 'tie') leftStanding.ties += 1;
+    }
+    if (rightCounts) {
+      if (rightOutcome === 'win') rightStanding.wins += 1;
+      else if (rightOutcome === 'loss') rightStanding.losses += 1;
+      else if (rightOutcome === 'tie') rightStanding.ties += 1;
+    }
+    if (rightCounts) {
+      accumulateTeamLightning(rightStanding, right.lightningPoints, game, gameRules, definitionProven);
+    }
   }
 
   for (const standing of byTeam.values()) {
@@ -417,7 +445,7 @@ export function deriveTeamStandings(
 
   const allStandings = [...byTeam.values()];
   for (const standing of allStandings) {
-    standing.headToHead = headToHeadValue(standing.teamId, allStandings, scopedGames);
+    standing.headToHead = headToHeadValue(standing.teamId, allStandings, scopedGames, exhibitionIds);
   }
   const visibleStandings = allStandings.filter((standing) => {
     if (options.teamIds && !options.teamIds.includes(standing.teamId)) return false;
@@ -427,15 +455,16 @@ export function deriveTeamStandings(
   const rules = options.tiebreakers
     ? { ...(state.tournament?.rules ?? ({} as TournamentRules)), tiebreakers: options.tiebreakers }
     : state.tournament?.rules;
-  return rankStandings(visibleStandings, scopedGames, rules);
+  return rankStandings(visibleStandings, scopedGames, rules, exhibitionIds);
 }
 
 function rankStandings(
   standings: TeamStanding[],
   games: GameRecord[],
   rules?: TournamentRules,
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): TeamStanding[] {
-  return rankTeamStandings(standings, games, rules?.tiebreakers);
+  return rankTeamStandings(standings, games, rules?.tiebreakers, exhibitionTeamIds);
 }
 
 /**
@@ -448,6 +477,7 @@ export function rankTeamStandings(
   standings: readonly TeamStanding[],
   games: readonly GameRecord[],
   tiebreakers?: TournamentRules['tiebreakers'],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): TeamStanding[] {
   const order = tiebreakers ?? ['record', 'points', 'margin', 'powers', 'gets'];
   let groups: TeamStanding[][] = [[...standings]];
@@ -457,16 +487,19 @@ export function rankTeamStandings(
       // A detailed criterion cannot turn data availability into a competitive result. When one
       // team in the currently tied group is unknown, leave the whole group tied for this key and
       // let a later comparable criterion decide it.
-      if (!tiebreakerIsComparable(key, group, games)) return [group];
+      if (!tiebreakerIsComparable(key, group, games, exhibitionTeamIds)) return [group];
       const ordered = [...group].sort(
-        (left, right) => comparisonValue(right, key, group, games) - comparisonValue(left, key, group, games),
+        (left, right) =>
+          comparisonValue(right, key, group, games, exhibitionTeamIds) -
+          comparisonValue(left, key, group, games, exhibitionTeamIds),
       );
       const partitions: TeamStanding[][] = [];
       for (const standing of ordered) {
         const previous = partitions.at(-1);
         if (
           previous &&
-          comparisonValue(previous[0], key, group, games) === comparisonValue(standing, key, group, games)
+          comparisonValue(previous[0], key, group, games, exhibitionTeamIds) ===
+            comparisonValue(standing, key, group, games, exhibitionTeamIds)
         ) {
           previous.push(standing);
         } else {
@@ -484,8 +517,9 @@ function comparisonValue(
   key: TournamentRules['tiebreakers'][number],
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): number {
-  return teamTiebreakerValue(standing, key, group, games) ?? 0;
+  return teamTiebreakerValue(standing, key, group, games, exhibitionTeamIds) ?? 0;
 }
 
 export function teamTiebreakerValue(
@@ -493,6 +527,7 @@ export function teamTiebreakerValue(
   key: TournamentRules['tiebreakers'][number],
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): number | null {
   if (key === 'powers' && !standing.powersKnown) return null;
   if (key === 'gets' && !standing.getsKnown) return null;
@@ -501,7 +536,7 @@ export function teamTiebreakerValue(
   if (key === 'margin') return standing.margin;
   if (key === 'powers') return standing.powers;
   if (key === 'gets') return standing.gets;
-  if (key === 'head-to-head') return headToHeadValue(standing.teamId, group, games);
+  if (key === 'head-to-head') return headToHeadValue(standing.teamId, group, games, exhibitionTeamIds);
   return 0;
 }
 
@@ -509,8 +544,11 @@ export function tiebreakerIsComparable(
   key: TournamentRules['tiebreakers'][number],
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): boolean {
-  return group.every((standing) => teamTiebreakerValue(standing, key, group, games) !== null);
+  return group.every(
+    (standing) => teamTiebreakerValue(standing, key, group, games, exhibitionTeamIds) !== null,
+  );
 }
 
 /**
@@ -802,6 +840,7 @@ function headToHeadValue(
   teamId: DirectorId,
   group: readonly TeamStanding[],
   games: readonly GameRecord[],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): number {
   const groupIds = new Set(group.map((standing) => standing.teamId));
   let wins = 0;
@@ -811,6 +850,11 @@ function headToHeadValue(
     if (!own) continue;
     const opponent = game.scores.find((score) => score.teamId !== teamId && groupIds.has(score.teamId));
     if (!opponent) continue;
+    // A mixed exhibition meeting decides no competitive tiebreak: the game
+    // does not count in the non-exhibition side's record (#895).
+    if (exhibitionTeamIds && exhibitionTeamIds.has(teamId) !== exhibitionTeamIds.has(opponent.teamId)) {
+      continue;
+    }
     gamesPlayed += 1;
     const outcome = gameOutcomeForTeam(game, teamId);
     if (outcome === 'win') wins += 1;
@@ -923,6 +967,7 @@ export function derivePlayerStandings(
     });
   }
   const games = acceptedGameRecords(state, options);
+  const exhibitionIds = exhibitionTeamIdsOf(state);
   for (const game of games) {
     const values = scoringValuesForGame(state, game);
     // Fractional GP uses the same game-TUH convention YellowFruit uses; a forfeit supplies no
@@ -931,6 +976,15 @@ export function derivePlayerStandings(
     for (const stat of game.playerStats) {
       const standing = byPlayer.get(stat.playerId);
       if (!standing) continue;
+      // Individual totals follow the same side-specific exhibition policy as
+      // team totals: a non-exhibition player's lines against an exhibition
+      // opponent do not count (#895).
+      if (
+        !exhibitionIds.has(stat.teamId) &&
+        game.scores.some((score) => score.teamId !== stat.teamId && exhibitionIds.has(score.teamId))
+      ) {
+        continue;
+      }
       addPlayerGame(standing, stat, gameTuh);
       standing.points += playerPoints(stat, values);
     }

@@ -30,7 +30,11 @@ export type {
 
 export type DirectorId = string;
 export type TournamentStatus = 'draft' | 'running' | 'complete' | 'archived';
-export type TeamStatus = 'confirmed' | 'waitlist' | 'dropped';
+/**
+ * Exhibition teams compete fully — scheduled, scored, and counted in official
+ * standings — but are labeled as exhibition and flagged in SQBS exports.
+ */
+export type TeamStatus = 'confirmed' | 'waitlist' | 'dropped' | 'exhibition';
 export type RoomStatus = 'available' | 'live' | 'finished' | 'help' | 'offline';
 export type GameStatus =
   'scheduled' | 'live' | 'submitted' | 'accepted' | 'rejected' | 'cancelled' | 'forfeit';

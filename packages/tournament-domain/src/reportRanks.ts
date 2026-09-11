@@ -17,6 +17,7 @@ export function canonicalCompetitionRanks(
   standings: readonly TeamStanding[],
   games: readonly GameRecord[],
   tiebreakers?: TournamentRules['tiebreakers'],
+  exhibitionTeamIds?: ReadonlySet<DirectorId>,
 ): Map<DirectorId, number> {
   const order: TournamentRules['tiebreakers'] = tiebreakers ?? [
     'record',
@@ -29,17 +30,21 @@ export function canonicalCompetitionRanks(
 
   for (const key of order) {
     groups = groups.flatMap((group) => {
-      if (group.length < 2 || !tiebreakerIsComparable(key, group, games)) return [group];
+      if (group.length < 2 || !tiebreakerIsComparable(key, group, games, exhibitionTeamIds)) {
+        return [group];
+      }
       const ordered = [...group].sort(
         (left, right) =>
-          (teamTiebreakerValue(right, key, group, games) ?? 0) -
-          (teamTiebreakerValue(left, key, group, games) ?? 0),
+          (teamTiebreakerValue(right, key, group, games, exhibitionTeamIds) ?? 0) -
+          (teamTiebreakerValue(left, key, group, games, exhibitionTeamIds) ?? 0),
       );
       const partitions: TeamStanding[][] = [];
       for (const standing of ordered) {
         const previous = partitions.at(-1);
-        const value = teamTiebreakerValue(standing, key, group, games);
-        const previousValue = previous ? teamTiebreakerValue(previous[0]!, key, group, games) : undefined;
+        const value = teamTiebreakerValue(standing, key, group, games, exhibitionTeamIds);
+        const previousValue = previous
+          ? teamTiebreakerValue(previous[0]!, key, group, games, exhibitionTeamIds)
+          : undefined;
         if (previous && previousValue === value) previous.push(standing);
         else partitions.push([standing]);
       }
@@ -51,7 +56,7 @@ export function canonicalCompetitionRanks(
     [...group].sort((left, right) => left.teamId.localeCompare(right.teamId)),
   );
   const flattened = normalizedGroups.flat();
-  const canonical = rankTeamStandings(standings, games, tiebreakers);
+  const canonical = rankTeamStandings(standings, games, tiebreakers, exhibitionTeamIds);
   if (
     flattened.map((row) => row.teamId).join('\u0000') !== canonical.map((row) => row.teamId).join('\u0000')
   ) {

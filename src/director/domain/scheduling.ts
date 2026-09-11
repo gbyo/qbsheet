@@ -160,7 +160,10 @@ export function formatDistance(state: DirectorState, phaseId: DirectorId): Forma
           ? Math.max(
               ...pools.map((pool) =>
                 roundRobinCycleLength(
-                  pool.teamIds.filter((teamId) => teamsById.get(teamId)?.status === 'confirmed').length,
+                  pool.teamIds.filter((teamId) => {
+                    const status = teamsById.get(teamId)?.status;
+                    return status === 'confirmed' || status === 'exhibition';
+                  }).length,
                 ),
               ),
             )
@@ -542,7 +545,9 @@ function poolConfigurationProblem(
     const confirmed = pool.teamIds.filter((teamId) => confirmedTeamIds.includes(teamId));
     const invalid = pool.teamIds.filter((teamId) => {
       const team = teamsById.get(teamId);
-      return !team || (team.status !== 'confirmed' && team.status !== 'dropped');
+      return (
+        !team || (team.status !== 'confirmed' && team.status !== 'exhibition' && team.status !== 'dropped')
+      );
     });
     if (invalid.length > 0) return `Pool ${pool.name} contains a missing or non-confirmed team.`;
     if (confirmed.length === 0) return `Pool ${pool.name} has no confirmed teams.`;
