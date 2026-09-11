@@ -111,11 +111,17 @@ describe('ResultsView save controls', () => {
     expect(new Set(saveAgainButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(2);
     expect(saveButtons.every((button) => button.textContent === 'Save')).toBe(true);
     expect(saveAgainButtons.every((button) => button.textContent === 'Save again')).toBe(true);
-    expect(screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Save result — Round 4, Room 102, Cony vs Deering/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 102, Cony vs Deering/ }),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Save result \(result blank\)/ })).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }));
+    await user.click(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
+    );
     expect(bridge.saveResult).toHaveBeenCalledWith('new-a');
   });
 });
