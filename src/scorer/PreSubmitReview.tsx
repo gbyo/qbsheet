@@ -178,6 +178,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
   const displayedScore = mapSides({ left: game.left.points, right: game.right.points }, displaySides);
   const hasAttention =
     blockers.length > 0 || warnings.length > 0 || openProtests.length > 0 || unsyncedRosterAdditions.length > 0;
+  const reversibleFinish =
+    game.phase.kind === 'complete' && (game.phase.reason === 'forfeit' || game.phase.reason === 'short');
   const completionQualifier =
     game.phase.kind === 'complete' && game.phase.reason === 'forfeit'
       ? 'Forfeit recorded'
@@ -223,13 +225,27 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
         <button type="button" className="scorer-action scorer-review-edit" onClick={onReview} disabled={submitting}>
           Edit game
         </button>
-        {onResume && (
-          <button type="button" className="scorer-action" onClick={onResume} disabled={submitting}>
-            Resume scoring
+        {reversibleFinish && (
+          <button
+            type="button"
+            className="scorer-action"
+            onClick={onResume ?? onReview}
+            disabled={submitting}
+            aria-describedby={onResume ? undefined : 'scorer-review-resume-note'}
+          >
+            {onResume ? 'Resume scoring' : 'Resume scoring…'}
           </button>
         )}
         <span className="scorer-review-edit-note">
           Corrections recalculate the score and player statistics automatically.
+          {reversibleFinish && !onResume && (
+            <>
+              {' '}
+              <span id="scorer-review-resume-note">
+                To continue play, open the review and remove the game-ending event.
+              </span>
+            </>
+          )}
         </span>
       </div>
 
