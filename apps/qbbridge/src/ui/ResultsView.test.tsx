@@ -12,6 +12,8 @@ function bridgeWhileBatchSaving(): BridgeApi {
     tournamentName: null,
     rooms: [],
     selectedRoundId: null,
+    pendingRoomRemovals: [],
+    retiredRoomIds: [],
     resultFolder: '/tournaments/results',
     results: [{ resultId: 'result-1', qbj: {}, receivedAt: '2026-09-11T15:00:00Z' }],
   };
@@ -41,6 +43,7 @@ function bridgeWhileBatchSaving(): BridgeApi {
     regeneratePairingCode: vi.fn(),
     selectRound: vi.fn(),
     publish: vi.fn(async () => undefined),
+    publishRoomSetup: vi.fn(async () => undefined),
     roomStatus: vi.fn(),
     chooseFolder: vi.fn(async () => undefined),
     saveNewResults: vi.fn(async () => undefined),
