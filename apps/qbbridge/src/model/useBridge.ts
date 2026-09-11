@@ -22,11 +22,20 @@ import {
 } from './relay';
 import { resultFileContents, resultFileName, resultFilePath, resultSummary } from './results';
 import { nextRoomId } from './identity';
-import { newRoom, pairingWarnings, roomTombstone, type Room, type RoomStatus } from './rooms';
 import {
+  newRoom,
+  pairingWarnings,
+  resetRelayPublication,
+  roomTombstone,
+  type Room,
+  type RoomStatus,
+} from './rooms';
+import {
+  emptyState,
   loadState,
   saveState,
   type BridgeState,
+  type PersistResult,
   type ScorerReadinessSnapshot,
   type StoredResult,
 } from './persistence';
@@ -77,7 +86,16 @@ export interface BridgeApi {
 
   loadFile(): Promise<void>;
   loadFileContents(path: string | null, contents: string): void;
+  pendingFileSwitch: { tournamentName: string; path: string | null } | null;
+  confirmFileSwitch(): void;
+  cancelFileSwitch(): void;
   connectRelay(input: { baseUrl: string; tournamentId: string; setupToken: string }): Promise<boolean>;
+  /** True when a claimed credential is held in memory until local persistence succeeds. */
+  relayCredentialSavePending: boolean;
+  retryRelayCredentialSave(): Promise<boolean>;
+  /** True when a relay-accepted state transition still needs a durable local retry. */
+  persistenceSavePending: boolean;
+  retryStatePersistence(): boolean;
   /** Re-run the management-authenticated check for the fixed qbsheet.com Scorer origin. */
   checkScorerReadiness(): Promise<void>;
   /** Show the relay setup form without touching the stored relay. */
@@ -164,6 +182,45 @@ function readinessNotice(readiness: ScorerReadinessState): BridgeNotice {
   return { kind: 'warn', message: readiness.message };
 }
 
+function hasRelayPublication(rooms: readonly Room[], pendingRoomRemovals: readonly unknown[]): boolean {
+  return (
+    pendingRoomRemovals.length > 0 ||
+    rooms.some(
+      (room) =>
+        room.relayPublished ||
+        room.publishedMatchId !== null ||
+        room.publishedRoundId !== null ||
+        room.assignmentRevision !== 0,
+    )
+  );
+}
+
+function isRelayReplacement(current: BridgeState, connection: RelayConnection): boolean {
+  const previous = connectionOf(current);
+  return (
+    (previous !== null && !sameRelayConnection(previous, connection)) ||
+    (previous === null && hasRelayPublication(current.rooms, current.pendingRoomRemovals))
+  );
+}
+
+/** Build the state for a newly claimed relay without exposing its credential to ordinary UI. */
+function stateWithRelay(current: BridgeState, connection: RelayConnection): BridgeState {
+  const replacing = isRelayReplacement(current, connection);
+  return {
+    ...current,
+    scorerReadiness: null,
+    relay: {
+      ...connection,
+      epoch: 1,
+      revision: 0,
+    },
+    rooms: replacing ? current.rooms.map(resetRelayPublication) : current.rooms,
+    // A tombstone describes a room that existed on the old relay. A new relay has never seen it;
+    // keeping the local retired id is still useful, but sending the tombstone would recreate it.
+    pendingRoomRemovals: replacing ? [] : current.pendingRoomRemovals,
+  };
+}
+
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
@@ -181,8 +238,20 @@ export function useBridge(): BridgeApi {
   );
   const [busy, setBusy] = useState(false);
   const [changingRelay, setChangingRelay] = useState(false);
+  const [pendingFileSwitch, setPendingFileSwitch] = useState<{
+    tournamentName: string;
+    path: string | null;
+  } | null>(null);
   const stateRef = useRef(state);
   const pollGenerationRef = useRef(0);
+  const pendingFileRef = useRef<{
+    path: string | null;
+    tournament: BridgeTournament;
+    warnings: string[];
+  } | null>(null);
+  const pendingRelayClaimRef = useRef<RelayConnection | null>(null);
+  const [relayCredentialSavePending, setRelayCredentialSavePending] = useState(false);
+  const [persistenceSavePending, setPersistenceSavePending] = useState(false);
   const savingResultIdsRef = useRef(new Set<string>());
   const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
   const savingBatchRef = useRef(false);
@@ -197,14 +266,25 @@ export function useBridge(): BridgeApi {
   }, [notice]);
   const readinessKeyRef = useRef<string | null>(null);
 
-  const commit = useCallback((next: BridgeState | ((current: BridgeState) => BridgeState)) => {
-    setState((current) => {
-      const resolved = typeof next === 'function' ? next(current) : next;
-      stateRef.current = resolved;
-      saveState(resolved);
-      return resolved;
-    });
+  const activateState = useCallback((next: BridgeState): void => {
+    stateRef.current = next;
+    setState(next);
   }, []);
+
+  const commit = useCallback(
+    (
+      next: BridgeState | ((current: BridgeState) => BridgeState),
+      options: { critical?: boolean } = {},
+    ): { state: BridgeState; persisted: PersistResult } => {
+      const current = stateRef.current;
+      const resolved = typeof next === 'function' ? next(current) : next;
+      const persisted = saveState(resolved);
+      if (options.critical) setPersistenceSavePending(!persisted.ok);
+      activateState(resolved);
+      return { state: resolved, persisted };
+    },
+    [activateState],
+  );
 
   useEffect(() => {
     stateRef.current = state;
@@ -268,35 +348,117 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
-  const loadFileContents = useCallback(
-    (path: string | null, contents: string) => {
-      const report = loadYellowFruitTournament(contents);
-      if (!report.ok) {
-        setTournament(null);
-        setNotice({ kind: 'bad', message: report.errors.join(' ') });
-        return;
+  const applyLoadedFile = useCallback(
+    (
+      path: string | null,
+      report: { ok: true; tournament: BridgeTournament; warnings: string[] },
+      startNew: boolean,
+    ): boolean => {
+      const current = stateRef.current;
+      const firstRoundId = report.tournament.rounds[0]?.id ?? null;
+      if (startNew) {
+        const next: BridgeState = {
+          ...emptyState(),
+          resultFolder: current.resultFolder,
+          yftPath: path,
+          tournamentName: report.tournament.name,
+          selectedRoundId: firstRoundId,
+        };
+        const persisted = saveState(next);
+        if (!persisted.ok) {
+          setNotice({
+            kind: 'bad',
+            message:
+              'The new tournament could not be started because QBBridge could not save its local state.',
+          });
+          return false;
+        }
+        pollGenerationRef.current += 1;
+        readinessKeyRef.current = null;
+        pendingRelayClaimRef.current = null;
+        setRelayCredentialSavePending(false);
+        setPersistenceSavePending(false);
+        setScorerReadiness(null);
+        setRelayReachable(null);
+        setChangingRelay(false);
+        activateState(next);
+      } else {
+        commit((currentState) => {
+          const roundIds = new Set(report.tournament.rounds.map((round) => round.id));
+          return {
+            ...currentState,
+            yftPath: path,
+            tournamentName: report.tournament.name,
+            selectedRoundId:
+              currentState.selectedRoundId && roundIds.has(currentState.selectedRoundId)
+                ? currentState.selectedRoundId
+                : firstRoundId,
+          };
+        });
       }
       setTournament(report.tournament);
       setLoadWarnings(report.warnings);
       setNotice({
         kind: 'good',
-        message: `Loaded ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.`,
+        message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.`,
       });
-      commit((current) => {
-        const roundIds = new Set(report.tournament.rounds.map((round) => round.id));
-        return {
-          ...current,
-          yftPath: path,
-          tournamentName: report.tournament.name,
-          selectedRoundId:
-            current.selectedRoundId && roundIds.has(current.selectedRoundId)
-              ? current.selectedRoundId
-              : (report.tournament.rounds[0]?.id ?? null),
-        };
-      });
+      return true;
     },
-    [commit],
+    [activateState, commit],
   );
+
+  const loadFileContents = useCallback(
+    (path: string | null, contents: string) => {
+      const report = loadYellowFruitTournament(contents);
+      if (!report.ok) {
+        // Parsing a candidate is transactional: a bad replacement must not unload the last
+        // working tournament while its persisted bridge state remains active.
+        pendingFileRef.current = null;
+        setPendingFileSwitch(null);
+        setNotice({ kind: 'bad', message: report.errors.join(' ') });
+        return;
+      }
+      const current = stateRef.current;
+      const differentFile = current.yftPath !== null && path !== null && current.yftPath !== path;
+      if (differentFile) {
+        pendingFileRef.current = { path, tournament: report.tournament, warnings: report.warnings };
+        setPendingFileSwitch({ path, tournamentName: report.tournament.name });
+        setNotice({
+          kind: 'warn',
+          message:
+            "You're opening a different YellowFruit file. Confirm if you want to start a new QBBridge tournament setup.",
+        });
+        return;
+      }
+      // A successful reload of the current file supersedes any older replacement proposal. Do not
+      // leave a stale confirmation dialog able to switch away from the file now on screen.
+      pendingFileRef.current = null;
+      setPendingFileSwitch(null);
+      applyLoadedFile(path, report, false);
+    },
+    [applyLoadedFile],
+  );
+
+  const confirmFileSwitch = useCallback(() => {
+    const pending = pendingFileRef.current;
+    if (!pending) return;
+    if (
+      !applyLoadedFile(
+        pending.path,
+        { ok: true, tournament: pending.tournament, warnings: pending.warnings },
+        true,
+      )
+    )
+      return;
+    pendingFileRef.current = null;
+    setPendingFileSwitch(null);
+  }, [applyLoadedFile]);
+
+  const cancelFileSwitch = useCallback(() => {
+    pendingFileRef.current = null;
+    setPendingFileSwitch(null);
+    setNotice({ kind: 'warn', message: 'The current YellowFruit file and QBBridge setup are unchanged.' });
+  }, []);
 
   const loadFile = useCallback(async () => {
     setBusy(true);
@@ -311,6 +473,53 @@ export function useBridge(): BridgeApi {
     }
   }, [loadFileContents]);
 
+  /** Persist a claimed relay before exposing it as the active connection. */
+  const activateClaimedRelay = useCallback(
+    async (connection: RelayConnection): Promise<boolean> => {
+      const replacing = isRelayReplacement(stateRef.current, connection);
+      const next = stateWithRelay(stateRef.current, connection);
+      const persisted = saveState(next);
+      if (!persisted.ok) {
+        // The claim crossed a one-time boundary, so retain only the returned credential needed for
+        // an in-session retry. It is deliberately not placed in BridgeState or any user-visible
+        // diagnostic while it is not durable.
+        pendingRelayClaimRef.current = connection;
+        setRelayCredentialSavePending(true);
+        setChangingRelay(true);
+        setRelayReachable(null);
+        setNotice({
+          kind: 'bad',
+          message:
+            'The relay claim succeeded, but QBBridge could not save the returned management credential. The new relay is not active yet; fix local storage and retry saving the credential.',
+        });
+        return false;
+      }
+
+      pendingRelayClaimRef.current = null;
+      setRelayCredentialSavePending(false);
+      setPersistenceSavePending(false);
+      pollGenerationRef.current += 1;
+      readinessKeyRef.current = null;
+      activateState(next);
+      setChangingRelay(false);
+      setRelayReachable(true);
+      const readiness = await refreshScorerReadiness(connection);
+      if (readinessKeyRef.current === connectionKey(connection)) {
+        const nextNotice = readinessNotice(readiness);
+        setNotice(
+          replacing
+            ? {
+                ...nextNotice,
+                message: `${nextNotice.message} Publish Room Setup to activate these rooms on the new relay.`,
+              }
+            : nextNotice,
+        );
+      }
+      return true;
+    },
+    [activateState, refreshScorerReadiness],
+  );
+
   /**
    * Claim a relay and store the credential it returns.
    *
@@ -323,30 +532,26 @@ export function useBridge(): BridgeApi {
     async (input: { baseUrl: string; tournamentId: string; setupToken: string }): Promise<boolean> => {
       setBusy(true);
       try {
+        if (pendingRelayClaimRef.current !== null) {
+          setNotice({ kind: 'bad', message: 'Retry saving the previously claimed relay credential first.' });
+          return false;
+        }
+        const preflight = saveState(stateRef.current);
+        if (!preflight.ok) {
+          setNotice({
+            kind: 'bad',
+            message:
+              'Relay setup did not start because QBBridge could not write its local state. The setup token was not sent.',
+          });
+          return false;
+        }
         const claimed = await relayClaim(input);
-        // Invalidate an in-flight poll before publishing the replacement into state. This also
-        // fences a reconnect that happens to reuse the same URL, tournament id, and credential.
-        pollGenerationRef.current += 1;
         const connection: RelayConnection = {
           baseUrl: input.baseUrl.replace(/\/+$/, ''),
           tournamentId: claimed.tournamentId,
           managementToken: claimed.managementToken,
         };
-        commit((current) => ({
-          ...current,
-          scorerReadiness: null,
-          relay: {
-            ...connection,
-            // A different relay is a different tournament object with its own revision counter.
-            epoch: 1,
-            revision: 0,
-          },
-        }));
-        setChangingRelay(false);
-        setRelayReachable(true);
-        const readiness = await refreshScorerReadiness(connection);
-        if (readinessKeyRef.current === connectionKey(connection)) setNotice(readinessNotice(readiness));
-        return true;
+        return await activateClaimedRelay(connection);
       } catch (error) {
         setRelayReachable(false);
         setNotice({
@@ -358,8 +563,25 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [commit, refreshScorerReadiness],
+    [activateClaimedRelay],
   );
+
+  const retryRelayCredentialSave = useCallback(async (): Promise<boolean> => {
+    const connection = pendingRelayClaimRef.current;
+    if (!connection) return false;
+    setBusy(true);
+    try {
+      return await activateClaimedRelay(connection);
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `The relay credential is still not saved. ${(error as Error).message}`,
+      });
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [activateClaimedRelay]);
 
   const beginRelayChange = useCallback(() => setChangingRelay(true), []);
   const cancelRelayChange = useCallback(() => setChangingRelay(false), []);
@@ -391,14 +613,33 @@ export function useBridge(): BridgeApi {
    */
   const forgetRelayCredential = useCallback(() => {
     pollGenerationRef.current += 1;
-    commit((current) => ({ ...current, relay: null, scorerReadiness: null }));
+    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null }), {
+      critical: true,
+    }).persisted;
     setChangingRelay(true);
     setRelayReachable(null);
     setNotice({
-      kind: 'warn',
-      message: 'The relay credential was deleted from this machine. Set up a relay to publish again.',
+      kind: persisted.ok ? 'warn' : 'bad',
+      message: persisted.ok
+        ? 'The relay credential was deleted from this machine. Set up a relay to publish again.'
+        : 'The relay credential was removed from the active session but could not be saved locally. Retry saving local state before restarting.',
     });
   }, [commit]);
+
+  const retryStatePersistence = useCallback((): boolean => {
+    const persisted = saveState(stateRef.current);
+    if (persisted.ok) {
+      setPersistenceSavePending(false);
+      setNotice({ kind: 'good', message: 'The current relay state is saved locally.' });
+      return true;
+    }
+    setPersistenceSavePending(true);
+    setNotice({
+      kind: 'bad',
+      message: 'QBBridge still cannot save the current relay state. Restore local storage access and retry.',
+    });
+    return false;
+  }, []);
 
   const addRoom = useCallback(() => {
     commit((current) => {
@@ -510,42 +751,46 @@ export function useBridge(): BridgeApi {
     ) => {
       const byRoom = new Map(outcome.assignments.map((entry) => [entry.roomId, entry]));
       const cleared = new Set(outcome.clearedRoomIds);
-      commit((current) => ({
-        ...current,
-        relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
-        rooms: current.rooms.map((room) => {
-          const wasMirrored = pendingCodes.has(room.id);
-          if (!wasMirrored) return room;
-          const sentPendingCode = pendingCodes.get(room.id) ?? null;
-          const pendingStillCurrent = room.pendingPairingCode === sentPendingCode;
-          const published = {
-            ...room,
-            pairingCode: pendingStillCurrent && sentPendingCode !== null ? sentPendingCode : room.pairingCode,
-            pendingPairingCode: pendingStillCurrent ? null : room.pendingPairingCode,
-            relayPublished: true,
-          };
-          const assignment = byRoom.get(room.id);
-          if (assignment) {
+      return commit(
+        (current) => ({
+          ...current,
+          relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
+          rooms: current.rooms.map((room) => {
+            const wasMirrored = pendingCodes.has(room.id);
+            if (!wasMirrored) return room;
+            const sentPendingCode = pendingCodes.get(room.id) ?? null;
+            const pendingStillCurrent = room.pendingPairingCode === sentPendingCode;
+            const published = {
+              ...room,
+              pairingCode:
+                pendingStillCurrent && sentPendingCode !== null ? sentPendingCode : room.pairingCode,
+              pendingPairingCode: pendingStillCurrent ? null : room.pendingPairingCode,
+              relayPublished: true,
+            };
+            const assignment = byRoom.get(room.id);
+            if (assignment) {
+              return {
+                ...published,
+                publishedMatchId: assignment.matchId,
+                publishedRoundId: assignment.roundId,
+                assignmentRevision: assignment.assignmentRevision,
+              };
+            }
+            if (!cleared.has(room.id)) return published;
+            // The relay just cleared this room. Local state says so too, or the room table would
+            // keep reporting a game that is no longer on the relay.
             return {
               ...published,
-              publishedMatchId: assignment.matchId,
-              publishedRoundId: assignment.roundId,
-              assignmentRevision: assignment.assignmentRevision,
+              publishedMatchId: null,
+              publishedRoundId: null,
+              assignmentRevision: room.assignmentRevision + 1,
             };
-          }
-          if (!cleared.has(room.id)) return published;
-          // The relay just cleared this room. Local state says so too, or the room table would
-          // keep reporting a game that is no longer on the relay.
-          return {
-            ...published,
-            publishedMatchId: null,
-            publishedRoundId: null,
-            assignmentRevision: room.assignmentRevision + 1,
-          };
+          }),
+          pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
+          retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
         }),
-        pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
-        retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
-      }));
+        { critical: true },
+      ).persisted;
     },
     [commit],
   );
@@ -581,9 +826,16 @@ export function useBridge(): BridgeApi {
           rooms: current.rooms,
           tombstones: current.pendingRoomRemovals,
         });
-        applyPublication(outcome, pendingCodes, tombstoneIds);
+        const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
         setRelayReachable(true);
-        setNotice({ kind: input.successKind, message: input.successMessage(outcome) });
+        setNotice(
+          persisted.ok
+            ? { kind: input.successKind, message: input.successMessage(outcome) }
+            : {
+                kind: 'warn',
+                message: `${input.successMessage(outcome)} The relay accepted it, but QBBridge could not save the new revision locally. Keep this window open and retry saving local state before restarting.`,
+              },
+        );
         return outcome;
       } catch (error) {
         if (error instanceof RelayError) setRelayReachable(false);
@@ -621,7 +873,7 @@ export function useBridge(): BridgeApi {
           plan.cleared.length > 0
             ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
             : '';
-        return `Published round ${round.qbjName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+        return `Published round ${round.displayName} to ${outcome.assignments.length} room(s).${clearedNote}`;
       },
       failureMessage: 'Round not published — the rooms still have whatever they had before.',
       missingRelayMessage: 'Connect the relay before publishing a round.',
@@ -883,7 +1135,8 @@ export function useBridge(): BridgeApi {
 
   const roomStatus = useCallback(
     (room: Room): RoomStatus => {
-      if (!room.publishedMatchId) return 'ready';
+      if (!room.relayPublished) return 'not-published';
+      if (!room.publishedMatchId) return 'ready-to-pair';
       if (resultMatchIds.has(room.publishedMatchId)) return 'result-received';
       return 'waiting';
     },
@@ -931,7 +1184,14 @@ export function useBridge(): BridgeApi {
     native: isNativeHost(),
     loadFile,
     loadFileContents,
+    pendingFileSwitch,
+    confirmFileSwitch,
+    cancelFileSwitch,
     connectRelay,
+    relayCredentialSavePending,
+    retryRelayCredentialSave,
+    persistenceSavePending,
+    retryStatePersistence,
     checkScorerReadiness,
     beginRelayChange,
     cancelRelayChange,

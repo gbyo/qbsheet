@@ -24,9 +24,9 @@
 import {
   readYellowFruitTournament,
   yellowFruitScoringRules,
-  type GameRecord,
   type FormatWarning,
   type JsonObject,
+  type RoundRecord,
   type YellowFruitScheduleDescription,
 } from '@qbsheet/tournament-formats';
 
@@ -49,33 +49,18 @@ export interface BridgeTeam {
 export interface BridgeRound {
   id: string;
   /**
-   * `Round.name` exactly as YellowFruit spelled it — usually a bare number.
+   * The name serialized into an assignment's QBJ `Round.name`.
    *
-   * Not a display string. Stock YellowFruit's importer resolves a round by running `parseInt` over
-   * this field, so rewriting `"4"` into `"Round 4"` produces a result file that looks right and
-   * imports as "couldn't find a round". See `TournamentManager.importMatchesFromWholeQbj`.
+   * Stock YellowFruit resolves a round by running `parseInt` over this field. When YellowFruit
+   * supplies a numeric round number, that number wins over a display label such as `"Finals"`.
    */
   qbjName: string;
-  /** The number parsed out of the name, when there was one. Display and filenames only. */
+  /** YellowFruit's display name, which may be nonnumeric. */
+  displayName: string;
+  /** The numeric identity supplied by YellowFruit, when there was one. */
   number?: number;
   phaseId: string;
   phaseName: string;
-}
-
-/**
- * A concrete, unplayed Match that YellowFruit already put in the file.
- *
- * This is a suggestion only. QBBridge never treats it as a room assignment, never generates the
- * missing games in a round-robin, and still publishes through its ordinary manual assignment path.
- */
-export interface BridgeGameSuggestion {
-  id: string;
-  roundId: string;
-  phaseId: string;
-  teamIds: [string, string];
-  /** A source location/room label, when the Match carried one. It is never guessed from position. */
-  location?: string;
-  poolId?: string;
 }
 
 export interface BridgeTournament {
@@ -91,8 +76,6 @@ export interface BridgeTournament {
   ruleNotes: string[];
   teams: BridgeTeam[];
   rounds: BridgeRound[];
-  /** Concrete unplayed source Matches, for optional manual prefill in the Rooms view. */
-  suggestedGames: BridgeGameSuggestion[];
   playerCount: number;
 }
 
@@ -128,61 +111,6 @@ function registrationIndex(objects: JsonObject[]): Map<string, { id: string; nam
     }
   }
   return byTeam;
-}
-
-function stringField(source: JsonObject | undefined, keys: readonly string[]): string | undefined {
-  if (!source) return undefined;
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === 'string' && value.trim() !== '') return value;
-  }
-  return undefined;
-}
-
-function objectField(source: JsonObject | undefined, key: string): JsonObject | undefined {
-  const value = source?.[key];
-  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : undefined;
-}
-
-function sourceLocation(game: GameRecord): string | undefined {
-  // `source` is the original Match object retained by the formats importer. Prefer its explicit
-  // location before `_qbtcp.room_id`, whose value may be an internal id rather than a display name.
-  return (
-    stringField(game.source, ['location', 'room', 'room_name', 'roomName']) ??
-    stringField(game.extensions, ['location', 'room', 'room_name', 'roomName']) ??
-    stringField(objectField(game.source, '_qbtcp'), ['room_id', 'roomId']) ??
-    game.roomId
-  );
-}
-
-function unplayedGameSuggestion(game: GameRecord, teamIds: ReadonlySet<string>): BridgeGameSuggestion | null {
-  // The QBJ importer marks a Match with any tossup/score detail as complete (or forfeit). Keep the
-  // status check as a second guard so a custom importer cannot turn a scored game into a suggestion.
-  const status = game.status?.toLocaleLowerCase();
-  if (game.result !== undefined || (status !== undefined && !['scheduled', 'released'].includes(status))) {
-    return null;
-  }
-  const [leftId, rightId] = game.teamIds;
-  if (
-    !game.roundId ||
-    !game.phaseId ||
-    typeof leftId !== 'string' ||
-    typeof rightId !== 'string' ||
-    leftId === rightId ||
-    !teamIds.has(leftId) ||
-    !teamIds.has(rightId)
-  ) {
-    return null;
-  }
-  const location = sourceLocation(game);
-  return {
-    id: game.id,
-    roundId: game.roundId,
-    phaseId: game.phaseId,
-    teamIds: [leftId, rightId],
-    ...(location === undefined ? {} : { location }),
-    ...(game.poolId === undefined ? {} : { poolId: game.poolId }),
-  };
 }
 
 const bridgeWarningCodes = new Set([
@@ -267,18 +195,19 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
     };
   });
 
-  const rounds: BridgeRound[] = imported.rounds.map((round) => ({
+  const rounds: BridgeRound[] = imported.rounds.map((round: RoundRecord) => ({
     id: round.id,
-    qbjName: round.qbjName ?? round.name,
+    // Stock YellowFruit's importer only has the serialized name when it resolves the result. A
+    // source display label such as "Finals" must therefore use the imported numeric identity.
+    qbjName:
+      round.number !== undefined && Number.isSafeInteger(round.number)
+        ? String(round.number)
+        : (round.qbjName ?? round.name),
+    displayName: round.name,
     ...(round.number !== undefined ? { number: round.number } : {}),
     phaseId: round.phaseId ?? '',
     phaseName: round.phaseId ? (phaseName.get(round.phaseId) ?? '') : '',
   }));
-
-  const teamIds = new Set(teams.map((team) => team.id));
-  const suggestedGames = imported.games
-    .map((game) => unplayedGameSuggestion(game, teamIds))
-    .filter((game): game is BridgeGameSuggestion => game !== null);
 
   // The importer reports one warning per unread extension field, which on a real file is dozens
   // of copies of the same sentence. The operator needs to know what was left behind once.
@@ -295,7 +224,6 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
       ruleNotes: rulesResult.value.notes,
       teams,
       rounds,
-      suggestedGames,
       playerCount: teams.reduce((total, team) => total + team.players.length, 0),
     },
     warnings,

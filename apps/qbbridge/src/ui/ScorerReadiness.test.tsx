@@ -1,4 +1,5 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
 import { emptyState } from '../model/persistence';
 import type { BridgeApi, ScorerReadinessState } from '../model/useBridge';
@@ -45,7 +46,14 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     native: true,
     loadFile: async () => {},
     loadFileContents: noop,
+    pendingFileSwitch: null,
+    confirmFileSwitch: noop,
+    cancelFileSwitch: noop,
     connectRelay: async () => true,
+    relayCredentialSavePending: false,
+    retryRelayCredentialSave: async () => false,
+    persistenceSavePending: false,
+    retryStatePersistence: () => true,
     checkScorerReadiness: async () => {},
     beginRelayChange: noop,
     cancelRelayChange: noop,
@@ -60,7 +68,7 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     roundChangeDiscardsSelections: false,
     publish: async () => {},
     publishRoomSetup: async () => {},
-    roomStatus: () => 'ready',
+    roomStatus: () => 'ready-to-pair',
     warnings: [],
     chooseFolder: async () => {},
     saveNewResults: async () => {},
@@ -73,6 +81,40 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
 }
 
 describe('Scorer-origin readiness UX', () => {
+  test('clears a consumed setup token after a successful relay claim', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.changingRelay = true;
+    bridge.connectRelay = vi.fn(async () => true);
+    render(<SetupView bridge={bridge} />);
+
+    await user.type(screen.getByLabelText('Relay URL'), 'https://relay.example');
+    const token = screen.getByLabelText('One-time setup token');
+    await user.type(token, 'consumed-token');
+    await user.click(screen.getByRole('button', { name: 'Claim New Relay' }));
+
+    await waitFor(() => expect(token).toHaveValue(''));
+    expect(bridge.connectRelay).toHaveBeenCalledWith(
+      expect.objectContaining({ setupToken: 'consumed-token' }),
+    );
+  });
+
+  test('keeps the setup token after a failed relay claim', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    bridge.changingRelay = true;
+    bridge.connectRelay = vi.fn(async () => false);
+    render(<SetupView bridge={bridge} />);
+
+    await user.type(screen.getByLabelText('Relay URL'), 'https://relay.example');
+    const token = screen.getByLabelText('One-time setup token');
+    await user.type(token, 'still-needed');
+    await user.click(screen.getByRole('button', { name: 'Claim New Relay' }));
+
+    await waitFor(() => expect(bridge.connectRelay).toHaveBeenCalled());
+    expect(token).toHaveValue('still-needed');
+  });
+
   test('setup names the deployment fix when qbsheet.com is blocked', () => {
     render(<SetupView bridge={bridgeFor('blocked')} />);
 

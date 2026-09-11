@@ -76,6 +76,8 @@ export interface BridgeState {
   results: StoredResult[];
 }
 
+export type PersistResult = { ok: true } | { ok: false; error: unknown };
+
 export function emptyState(): BridgeState {
   return {
     version: 1,
@@ -191,7 +193,12 @@ function restoreResults(value: unknown): StoredResult[] {
 export function loadState(): BridgeState {
   const store = storage();
   if (!store) return emptyState();
-  const raw = store.getItem(storageKey);
+  let raw: string | null;
+  try {
+    raw = store.getItem(storageKey);
+  } catch {
+    return emptyState();
+  }
   if (!raw) return emptyState();
   try {
     const parsed: unknown = JSON.parse(raw);
@@ -227,17 +234,26 @@ export function loadState(): BridgeState {
   }
 }
 
-export function saveState(state: BridgeState): void {
+export function saveState(state: BridgeState): PersistResult {
   const store = storage();
-  if (!store) return;
+  if (!store) return { ok: false, error: new Error('local storage is unavailable') };
   try {
-    store.setItem(storageKey, JSON.stringify(state));
-  } catch {
-    // A full or disabled store is not worth interrupting a round for. The relay still holds every
-    // result, and the operator can save them before restarting.
+    const serialized = JSON.stringify(state);
+    store.setItem(storageKey, serialized);
+    if (store.getItem(storageKey) !== serialized) {
+      return { ok: false, error: new Error('local storage did not retain the saved state') };
+    }
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error };
   }
 }
 
 export function clearState(): void {
-  storage()?.removeItem(storageKey);
+  try {
+    storage()?.removeItem(storageKey);
+  } catch {
+    // Forgetting the local copy is best effort; the caller has already deliberately discarded it
+    // from the in-memory state.
+  }
 }

@@ -43,13 +43,14 @@ class MemoryStorage implements Storage {
   }
 }
 
-if (!globalThis.localStorage) {
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    writable: true,
-    value: new MemoryStorage(),
-  });
-}
+// Install the same object even when a Node version or jsdom happens to expose its own storage.
+// The application uses globalThis.localStorage, and tests need to be able to spy on that exact
+// object; otherwise Node 22 and Node 26 exercise different storage surfaces.
+Object.defineProperty(globalThis, 'localStorage', {
+  configurable: true,
+  writable: true,
+  value: new MemoryStorage(),
+});
 
 beforeEach(() => {
   globalThis.localStorage.clear();

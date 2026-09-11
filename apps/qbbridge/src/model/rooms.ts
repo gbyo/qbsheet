@@ -7,14 +7,12 @@
  */
 
 export type RoomStatus =
-  /** Configured; nothing published yet. */
-  | 'ready'
-  /** An assignment is on the relay and no scorer has opened it. */
+  /** Configured locally; this room has not reached the current relay. */
+  | 'not-published'
+  /** The room and its pairing identity are on the relay, without an active assignment. */
+  | 'ready-to-pair'
+  /** An assignment is on the relay and QBBridge is waiting for its result. */
   | 'waiting'
-  /** A scorer has opened this room's session for the published match. */
-  | 'paired'
-  /** A scorer is sending progress for the published match. */
-  | 'scoring'
   /** A completed result for this room's published match has arrived. */
   | 'result-received';
 
@@ -75,6 +73,17 @@ export function roomTombstone(room: Room): RoomTombstone {
     pairingCode: room.pairingCode,
     pendingPairingCode: null,
     assignmentRevision: room.assignmentRevision,
+  };
+}
+
+/** Keep local room setup while removing facts that belonged to a previous relay. */
+export function resetRelayPublication(room: Room): Room {
+  return {
+    ...room,
+    relayPublished: false,
+    publishedMatchId: null,
+    publishedRoundId: null,
+    assignmentRevision: 0,
   };
 }
 

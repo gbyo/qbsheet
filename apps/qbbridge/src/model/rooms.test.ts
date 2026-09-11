@@ -8,7 +8,14 @@
 
 import { describe, expect, test } from 'vitest';
 import { nextRoomId } from './identity';
-import { newRoom, pairingWarnings, publishableRooms, roomTombstone, type Room } from './rooms';
+import {
+  newRoom,
+  pairingWarnings,
+  publishableRooms,
+  resetRelayPublication,
+  roomTombstone,
+  type Room,
+} from './rooms';
 
 const name = (id: string) => id.replace('Team_', '');
 
@@ -84,6 +91,25 @@ describe('room publication identity', () => {
       pairingCode: '48213906',
       pendingPairingCode: null,
       assignmentRevision: 3,
+    });
+  });
+
+  test('changing relays preserves room setup but clears old relay facts', () => {
+    const room = {
+      ...newRoom('room-1', 'Room 101', '48213906'),
+      leftTeamId: 'Team_A',
+      rightTeamId: 'Team_B',
+      relayPublished: true,
+      publishedMatchId: 'match-1',
+      publishedRoundId: 'round-4',
+      assignmentRevision: 7,
+    };
+    expect(resetRelayPublication(room)).toEqual({
+      ...room,
+      relayPublished: false,
+      publishedMatchId: null,
+      publishedRoundId: null,
+      assignmentRevision: 0,
     });
   });
 });

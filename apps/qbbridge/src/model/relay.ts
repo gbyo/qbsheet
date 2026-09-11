@@ -220,8 +220,8 @@ export interface MirrorRoomInput {
  *    stop accepting the code printed on its QR.
  * 3. `sessions` is applied the same way: listed sessions are upserted, unlisted ones are left
  *    alone. QBBridge models no sessions, so it sends an empty list, which touches none. Room
- *    tokens live in their own table and a mirror does not revoke them, so a device paired in
- *    round 1 is still paired in round 8.
+ *    tokens live in their own table and a mirror does not revoke them, so a device's room token
+ *    from round 1 remains valid in round 8.
  */
 export async function relayPublishMirror(
   connection: RelayConnection,

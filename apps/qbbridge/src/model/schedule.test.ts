@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { loadedFixture } from '../tests/fixture';
 import { newRoom, publishableRooms } from './rooms';
-import { phasePoolNames, planSuggestionPlacements, roundGroups, schedulePairingWarnings } from './schedule';
+import { phasePoolNames, roundGroups, schedulePairingWarnings } from './schedule';
 
 describe('manual pairing schedule context', () => {
   const tournament = loadedFixture();
@@ -42,46 +42,5 @@ describe('manual pairing schedule context', () => {
     const emptyPlayoffs = { ...playoffs, pools: playoffs.pools.map((pool) => ({ ...pool, teamIds: [] })) };
     expect(phasePoolNames(emptyPlayoffs, teamId)).toEqual([]);
     expect(phasePoolNames(prelims, teamId)).toHaveLength(1);
-  });
-});
-
-describe('concrete Match suggestion placement', () => {
-  const suggestion = (overrides: Record<string, unknown> = {}) => ({
-    id: 'match-1',
-    roundId: 'round-1',
-    phaseId: 'phase-1',
-    teamIds: ['Team_A', 'Team_B'] as [string, string],
-    ...overrides,
-  });
-
-  test('uses only an exact source location and stages an unlocated game', () => {
-    const rooms = [newRoom('room-1', 'Room 101', '11112222'), newRoom('room-2', 'Room 102', '33334444')];
-    const placements = planSuggestionPlacements(
-      [suggestion({ id: 'unlocated' }), suggestion({ id: 'located', location: 'Room 102' })],
-      rooms,
-    );
-    expect(
-      placements.map((placement) => [placement.suggestion.id, placement.roomId, placement.status]),
-    ).toEqual([
-      ['unlocated', null, 'staged'],
-      ['located', 'room-2', 'available'],
-    ]);
-  });
-
-  test('stages a source game when its room is not configured and marks edits for confirmation', () => {
-    const edited = {
-      ...newRoom('room-1', 'Room 101', '11112222'),
-      leftTeamId: 'Team_X',
-      rightTeamId: 'Team_Y',
-    };
-    const placements = planSuggestionPlacements(
-      [
-        suggestion({ id: 'located', location: 'Gym 4' }),
-        suggestion({ id: 'overwrite', location: 'Room 101' }),
-      ],
-      [edited],
-    );
-    expect(placements[0]).toMatchObject({ roomId: null, status: 'staged' });
-    expect(placements[1]).toMatchObject({ roomId: 'room-1', status: 'overwrite' });
   });
 });

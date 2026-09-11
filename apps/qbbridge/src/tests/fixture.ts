@@ -40,6 +40,26 @@ export function timedFixtureText(): string {
   return JSON.stringify(parsed);
 }
 
+/** A file whose first round has a display label but still supplies YellowFruit's numeric identity. */
+export function nonnumericRoundFixtureText(): string {
+  const parsed = JSON.parse(yftFixtureText()) as { objects: Record<string, unknown>[] };
+  const tournament = parsed.objects.find((entry) => entry.type === 'Tournament') ?? parsed.objects[0];
+  const phases = Array.isArray(tournament?.phases) ? tournament.phases : [];
+  const firstPhase = phases.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+  );
+  const rounds = Array.isArray(firstPhase?.rounds) ? firstPhase.rounds : [];
+  const firstRound = rounds.find(
+    (entry): entry is Record<string, unknown> =>
+      typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+  );
+  if (!firstRound) throw new Error('fixture has no first round');
+  firstRound.name = 'Finals';
+  firstRound.number = 9;
+  return JSON.stringify(parsed);
+}
+
 /** A copy of the real fixture with two concrete unplayed games and one invalid one in round 1. */
 export function unplayedGamesFixtureText(): string {
   const parsed = JSON.parse(yftFixtureText()) as { objects: Record<string, unknown>[] };

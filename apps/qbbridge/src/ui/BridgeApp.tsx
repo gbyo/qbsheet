@@ -19,7 +19,7 @@ export default function BridgeApp() {
   const unsaved = bridge.state.results.filter((entry) => !entry.savedPath).length;
 
   return (
-    <div className="shell">
+    <div id="app-root" className="shell">
       <header className="titlebar">
         {/*
          * The designed two-colour wordmark reads "QBSheet Bridge" on its own — seven black
@@ -87,6 +87,21 @@ export default function BridgeApp() {
                   onPress={bridge.dismissNotice}
                 >
                   ×
+                </Button>
+              </Notice>
+            ) : null}
+            {bridge.persistenceSavePending ? (
+              <Notice tone="warning">
+                The relay accepted the last change, but this machine has not saved the new relay revision.
+                Keep QBBridge open and retry before restarting.
+                <Button
+                  size="sm"
+                  variant="quiet"
+                  style={{ marginLeft: 'var(--qbs-space-2)' }}
+                  onPress={bridge.retryStatePersistence}
+                  isDisabled={bridge.busy}
+                >
+                  Retry saving local state
                 </Button>
               </Notice>
             ) : null}

@@ -45,7 +45,15 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
     tournamentId === '' || isRelayTournamentId(tournamentId)
       ? undefined
       : 'A tournament ID is 24 characters: digits and lowercase consonants.';
-  const canClaim = urlCheck?.ok === true && isRelayTournamentId(tournamentId) && setupToken.trim() !== '';
+  const canClaim =
+    !bridge.relayCredentialSavePending &&
+    urlCheck?.ok === true &&
+    isRelayTournamentId(tournamentId) &&
+    setupToken.trim() !== '';
+  // A claim consumes the token even if the local write needs a retry. Derive the field value from
+  // that state so the one-time value disappears without an effect-driven cascading render.
+  const visibleSetupToken =
+    bridge.relayCredentialSavePending || (state.relay !== null && !bridge.changingRelay) ? '' : setupToken;
   const readiness = bridge.scorerReadiness;
   const readinessStatus = readiness?.status ?? 'unknown';
   const readinessHeading =
@@ -161,9 +169,26 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
             className="setup-form"
             onSubmit={(event) => {
               event.preventDefault();
-              void bridge.connectRelay({ baseUrl, tournamentId, setupToken });
+              void bridge.connectRelay({ baseUrl, tournamentId, setupToken }).then((connected) => {
+                if (connected) setSetupToken('');
+              });
             }}
           >
+            {bridge.relayCredentialSavePending ? (
+              <Notice tone="warning">
+                The relay accepted the setup token, but the returned credential is not saved yet. The token
+                has been cleared; restore local storage access, then retry the credential save.
+                <div className="row" style={{ marginTop: 'var(--qbs-space-2)' }}>
+                  <Button
+                    variant="primary"
+                    onPress={() => void bridge.retryRelayCredentialSave()}
+                    isDisabled={bridge.busy}
+                  >
+                    Retry saving credential
+                  </Button>
+                </div>
+              </Notice>
+            ) : null}
             {state.relay ? (
               <Notice tone="info">
                 The relay above stays connected and keeps working until a new one is claimed successfully.
@@ -194,7 +219,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
             <TextField
               label="One-time setup token"
               type="password"
-              value={setupToken}
+              value={visibleSetupToken}
               onChange={setSetupToken}
               description="Consumed by the claim. The relay returns a management credential once."
               autoComplete="off"
@@ -205,7 +230,10 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                 {state.relay ? 'Claim New Relay' : 'Connect Relay'}
               </Button>
               {state.relay ? (
-                <Button onPress={bridge.cancelRelayChange} isDisabled={bridge.busy}>
+                <Button
+                  onPress={bridge.cancelRelayChange}
+                  isDisabled={bridge.busy || bridge.relayCredentialSavePending}
+                >
                   Cancel
                 </Button>
               ) : null}
@@ -233,6 +261,23 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
         <span className="code">{state.relay?.tournamentId}</span>. The relay&rsquo;s setup token was used up
         when this credential was claimed, so the same relay cannot be claimed again and QBBridge will not be
         able to publish to it or collect its results. Rooms already holding an assignment keep scoring.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={bridge.pendingFileSwitch !== null}
+        title="Open a different YellowFruit file?"
+        confirmLabel="Start New Tournament"
+        onCancel={bridge.cancelFileSwitch}
+        onConfirm={bridge.confirmFileSwitch}
+      >
+        {bridge.pendingFileSwitch ? (
+          <>
+            This will replace the current QBBridge tournament setup for{' '}
+            <span className="code">{bridge.pendingFileSwitch.tournamentName}</span>. The relay connection,
+            rooms, active publications and received results will be cleared from this machine. Your results
+            folder preference will stay. Nothing will be deleted from disk or from the relay.
+          </>
+        ) : null}
       </ConfirmDialog>
     </>
   );

@@ -152,7 +152,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
  * The descriptive part of the name is identical for both, and a second save over the first would
  * destroy a result that nobody had looked at yet.
  *
- * So the name ends in six hex characters derived from the relay's own `result_id` — the thing
+ * So the name ends in twelve hex characters derived from the relay's own `result_id` — the thing
  * that distinguishes the two. It is stable, so re-saving one result rewrites its own file rather
  * than accumulating copies, and it is a hash rather than a slice of the id because the relay's
  * ids are case-sensitive and two of them differing only in case would be one filename on a
@@ -192,9 +192,9 @@ export function resultFilePath(directory: string, fileName: string): string {
   return trimmed.length > 0 ? `${trimmed}${separator}${fileName}` : `${separator}${fileName}`;
 }
 
-/** Six lowercase hex characters that identify one retained relay result. */
+/** Twelve lowercase hex characters that identify one retained relay result. */
 export function resultFileSuffix(resultId: string): string {
-  return fnv1a64(resultId).slice(0, 6);
+  return fnv1a64(resultId).slice(0, 12);
 }
 
 /**
