@@ -82,6 +82,8 @@ function matchTeam(format: IScorekeeperFormat, team: IDerivedTeam): QbjObject {
     team: { name: team.name },
     forfeit_loss: team.forfeited,
     points: team.points,
+    bonuses_heard: team.bonusesHeard,
+    bonus_points: team.bonusPoints,
     bonus_bounceback_points: team.bonusBouncebackPoints,
     lightning_points: team.lightningPoints,
     // Tossups converted with no bonus after them, which in YellowFruit means overtime.
