@@ -28,8 +28,8 @@ describe('pairing match identity', () => {
       roomId: 'room',
     };
 
-    expect(
-      pairingMatchId({ ...common, leftTeamId: 'left', rightTeamId: 'right' }),
-    ).not.toBe(pairingMatchId({ ...common, leftTeamId: 'right', rightTeamId: 'left' }));
+    expect(pairingMatchId({ ...common, leftTeamId: 'left', rightTeamId: 'right' })).not.toBe(
+      pairingMatchId({ ...common, leftTeamId: 'right', rightTeamId: 'left' }),
+    );
   });
 });
