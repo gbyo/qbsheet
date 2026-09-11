@@ -47,7 +47,10 @@ function snapshot(): StatsSnapshot {
         teamId: 'team-a',
         teamName: 'Aiken & Sons',
         schoolYear: 12,
+        undergraduateEligible: null,
+        divisionTwoEligible: null,
         gamesPlayed: 2,
+        gamesPlayedKnown: true,
         tossupsHeard: 40,
         superpowers: 1,
         powers: 3,
@@ -66,7 +69,10 @@ function snapshot(): StatsSnapshot {
         playerName: 'Bob',
         teamId: 'team-b',
         teamName: 'Wren',
+        undergraduateEligible: null,
+        divisionTwoEligible: null,
         gamesPlayed: 2,
+        gamesPlayedKnown: true,
         tossupsHeard: 40,
         superpowers: 0,
         powers: 1,
@@ -426,6 +432,23 @@ describe('printable team detail parity (#751)', () => {
     expect(aiken).toContain('50.0% BB conv');
     expect(aiken).toContain('40 lightning pts');
     expect(foot).toContain('<td class="num">30</td>');
+  });
+
+  test('roster gates unknown games-played instead of fabricating a count (#751)', () => {
+    const snap = snapshot();
+    snap.players[0].gamesPlayed = 2.5;
+    snap.players[1].gamesPlayedKnown = false;
+    const page = buildExtendedStatReportBundle(snap).find(
+      (entry) => entry.name === 'teamdetail.html',
+    )!.content;
+    const aiken = sectionFor(page, 'team-team-a');
+    const wren = sectionFor(page, 'team-team-b');
+
+    // Alice: known fractional GP renders with the shared #746 vocabulary.
+    expect(aiken).toContain('<td class="num">2.50</td>');
+    // Bob: GP unknown renders as — while the known TUH of 40 stays numeric.
+    // (Wren's roster shows no Grade column: showGrade is per-team.)
+    expect(wren).toContain('>Bob</a></td><td class="num">—</td><td class="num">40</td>');
   });
 
   test('unknown aggregates render as unknown, never zero', () => {
