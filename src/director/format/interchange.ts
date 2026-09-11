@@ -43,6 +43,7 @@ import {
   type TournamentTimelineEvent,
 } from '../domain';
 import { normalizeDirectorState } from '../persistence/stateMigrations';
+import { carryoverGames, statInput } from '../reports/standingsReport';
 import { scoringRulesObject } from '../transfers/assignment';
 
 /**
@@ -1543,6 +1544,32 @@ function retainedNoBonusConversions(
  * scopes lose pool semantics (SQBS divisions describe one stage), which is
  * reported — never silently flattened.
  */
+
+/**
+ * The statistical game set for one SQBS scope: exactly what canonical
+ * standings count for that scope (#894).
+ *
+ * A carryover stage includes qualifying prior-phase head-to-head games once
+ * each; games on tiebreaker packets are excluded unless the tournament rules
+ * count them statistically. This reuses the canonical composition
+ * (`carryoverGames` + `statInput`) instead of maintaining a second copy.
+ */
+export function sqbsStatisticalGames(state: DirectorState, scope: SqbsTournamentScope): GameRecord[] {
+  const stats = statInput(state);
+  const pool = scope.poolId ? state.pools.find((entry) => entry.id === scope.poolId) : undefined;
+  const phase = scope.phaseId
+    ? state.phases.find((entry) => entry.id === scope.phaseId)
+    : pool
+      ? state.phases.find((entry) => entry.id === pool.phaseId)
+      : undefined;
+  if (phase?.carryover && (scope.phaseId || pool)) {
+    return carryoverGames(stats, phase, pool);
+  }
+  if (pool) return acceptedGameRecords(stats, { poolId: pool.id });
+  if (scope.phaseId) return acceptedGameRecords(stats, { phaseId: scope.phaseId });
+  return acceptedGameRecords(stats);
+}
+
 export function exportSqbsTournament(
   state: DirectorState,
   scope: SqbsTournamentScope = {},
@@ -1569,8 +1596,18 @@ export function exportSqbsTournament(
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  const scopePhase = scope.phaseId ? state.phases.find((entry) => entry.id === scope.phaseId) : undefined;
   const scopeRounds = state.rounds
-    .filter((round) => !scope.phaseId || round.phaseId === scope.phaseId)
+    .filter(
+      (round) =>
+        !scope.phaseId ||
+        round.phaseId === scope.phaseId ||
+        // Carryover games keep their original round/packet identity as far as
+        // SQBS permits (#894): earlier-stage rounds stay numbered, not flattened.
+        (scopePhase?.carryover === true &&
+          (state.phases.find((entry) => entry.id === round.phaseId)?.order ?? Number.MAX_SAFE_INTEGER) <
+            scopePhase.order),
+    )
     .sort(
       (left, right) =>
         (left.dayOrder ?? Number.MAX_SAFE_INTEGER) - (right.dayOrder ?? Number.MAX_SAFE_INTEGER) ||
@@ -1578,15 +1615,27 @@ export function exportSqbsTournament(
         left.id.localeCompare(right.id),
     );
   const roundOrder = new Map(scopeRounds.map((round, index) => [round.id, index]));
-  const games = acceptedGameRecords(state, scoped).sort(
+  // The statistical game set for this scope: exactly what canonical standings
+  // count (#894). A carryover stage pulls in qualifying prior-phase games once
+  // each; tiebreaker-packet games stay out unless the rules count them.
+  const games = sqbsStatisticalGames(state, scope).sort(
     (left, right) =>
       (roundOrder.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
         (roundOrder.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id),
   );
-  // The archival team universe includes dropped teams: a withdrawal must not
-  // make an otherwise valid final export unrepresentable (#893). Standings
-  // order stays canonical; dropped teams simply keep their ranked rows.
-  const standings = deriveTeamStandings(state, undefined, { ...scoped, includeDroppedTeams: true });
+  // Standings aggregate exactly the exported statistical set, so team order
+  // matches the canonical table for this scope (#894). Both ids travel: gameIds
+  // pick the games (carryover history included) while teamIds keep the team
+  // universe to statistical participants, preserving the empty-scope error.
+  // Dropped participants stay ranked: a withdrawal must not make an otherwise
+  // valid final export unrepresentable (#893).
+  const statisticalScheduledIds = [...new Set(games.map((game) => game.scheduledGameId))];
+  const statisticalTeamIds = [...new Set(games.flatMap((game) => game.scores.map((score) => score.teamId)))];
+  const standings = deriveTeamStandings(state, undefined, {
+    gameIds: statisticalScheduledIds,
+    teamIds: statisticalTeamIds,
+    includeDroppedTeams: true,
+  });
   const teamById = new Map(state.teams.map((team) => [team.id, team]));
   const orderedTeams = standings
     .map((standing) => teamById.get(standing.teamId))
@@ -1854,11 +1903,47 @@ export function exportSqbsTournament(
 
   // A scope whose games span several stages cannot keep pool semantics:
   // SQBS divisions describe one stage. Report it; never flatten silently.
+  // Carryover inclusions are by design, not flattening: they get their own
+  // note naming the canonical composition instead.
   const gamePhases = new Set(games.map((game) => roundById.get(game.roundId)?.phaseId ?? game.roundId));
   const hasPools = state.pools.some((pool) => !pool.archived);
-  if (divisions.length === 0 && hasPools && gamePhases.size > 1 && !scope.poolId) {
+  const carriedPhaseIds = new Set(
+    scopePhase?.carryover === true
+      ? state.phases.filter((phase) => phase.order < scopePhase.order).map((phase) => phase.id)
+      : [],
+  );
+  const carriedGames = scope.phaseId
+    ? games.filter((game) => carriedPhaseIds.has(roundById.get(game.roundId)?.phaseId ?? ''))
+    : [];
+  if (carriedGames.length > 0) {
+    warnings.push(
+      `This export includes ${carriedGames.length} carryover game${carriedGames.length === 1 ? '' : 's'} from earlier stages, matching Director standings for this stage (including carryover).`,
+    );
+  }
+  const unexpectedPhases = scope.phaseId
+    ? [...gamePhases].filter((phaseId) => phaseId !== scope.phaseId && !carriedPhaseIds.has(phaseId))
+    : [...gamePhases];
+  if (
+    divisions.length === 0 &&
+    hasPools &&
+    !scope.poolId &&
+    (scope.phaseId ? unexpectedPhases.length > 0 : gamePhases.size > 1)
+  ) {
     warnings.push(
       'This export covers multiple stages, so pool assignments are omitted: SQBS divisions can only describe one stage. Export each stage separately to keep its divisions.',
+    );
+  }
+  // Tiebreaker-packet games stay out of statistical totals unless the rules
+  // count them: name the omission instead of dropping games silently.
+  const statisticalIds = new Set(games.map((game) => game.id));
+  const omittedTiebreakers = acceptedGameRecords(state, scoped).filter(
+    (game) => !statisticalIds.has(game.id),
+  );
+  if (omittedTiebreakers.length > 0) {
+    warnings.push(
+      `${omittedTiebreakers.length} tiebreaker game${omittedTiebreakers.length === 1 ? '' : 's'} do${
+        omittedTiebreakers.length === 1 ? 'es' : ''
+      } not count statistically under tournament rules and ${omittedTiebreakers.length === 1 ? 'is' : 'are'} omitted from this SQBS file.`,
     );
   }
 
@@ -1950,7 +2035,7 @@ export function sqbsTournamentScopes(state: DirectorState): SqbsTournamentScopeO
 }
 
 function scopeGameCount(state: DirectorState, scope: SqbsTournamentScope): string {
-  const count = acceptedGameRecords(state, scope).length;
+  const count = sqbsStatisticalGames(state, scope).length;
   return `${count} game${count === 1 ? '' : 's'}`;
 }
 

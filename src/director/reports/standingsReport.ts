@@ -119,8 +119,11 @@ function tiebreakerGameIds(state: DirectorState): Set<string> {
  * unless the tournament's canonical rules say they count statistically. The
  * games remain visible as explicit tiebreaker result context and in every
  * per-game surface; only the standings-stat snapshots exclude them.
+ *
+ * Exported for SQBS stage/pool scoping (#894): a statistical file must encode
+ * exactly the game set canonical standings count for its scope.
  */
-function statInput(state: DirectorState): DirectorState {
+export function statInput(state: DirectorState): DirectorState {
   if (state.tournament?.rules.tiebreakerCountsStatistically === true) return state;
   const ids = tiebreakerGameIds(state);
   if (ids.size === 0) return state;
