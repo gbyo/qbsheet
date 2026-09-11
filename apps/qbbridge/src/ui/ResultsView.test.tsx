@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, test, vi } from 'vitest';
-import type { BridgeState, StoredResult } from '../model/persistence';
+import type { BridgeState } from '../model/persistence';
 import type { BridgeApi } from '../model/useBridge';
 import { scoredResultDocument } from '../tests/scoredResult';
 import ResultsView from './ResultsView';
@@ -78,35 +78,13 @@ function bridgeWhileBatchSaving(): BridgeApi {
   };
 }
 
-function resultQbj(location: string, leftName: string, rightName: string): object {
-  return {
-    objects: [
-      { type: 'Tournament', id: 'tournament', phases: [{ $ref: 'phase' }] },
-      { type: 'Phase', id: 'phase', rounds: [{ $ref: 'round' }] },
-      { type: 'Round', id: 'round', name: '4', matches: [{ $ref: 'match' }] },
-      { type: 'Team', id: 'left', name: leftName },
-      { type: 'Team', id: 'right', name: rightName },
-      {
-        type: 'Match',
-        id: 'match',
-        location,
-        match_teams: [
-          { team: { $ref: 'left' }, points: 300 },
-          { team: { $ref: 'right' }, points: 200 },
-        ],
-      },
-    ],
-  };
-}
-
-function bridgeWithResults(results: StoredResult[], resultFolder: string | null = '/tournaments/results'): BridgeApi {
+function bridgeForResults(results: BridgeState['results']): BridgeApi {
   const bridge = bridgeWhileBatchSaving();
   return {
     ...bridge,
-    state: { ...bridge.state, resultFolder, results },
+    state: { ...bridge.state, results },
     savingResults: false,
     resultBusy: vi.fn(() => false),
-    saveResult: vi.fn(async () => undefined),
   };
 }
 
@@ -115,67 +93,44 @@ describe('ResultsView save controls', () => {
     render(<ResultsView bridge={bridgeWhileBatchSaving()} />);
 
     expect(screen.getByRole('button', { name: /Save New Results/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Save result/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Save result/ })).toBeDisabled();
   });
 
-  test('gives each row save a contextual, unique accessible name without changing visible copy', () => {
-    const bridge = bridgeWithResults([
-      {
-        resultId: 'result-a',
-        qbj: resultQbj('Room 101', 'Aiken', 'Dorman'),
-        receivedAt: '2026-09-11T15:00:00Z',
-      },
-      {
-        resultId: 'result-b',
-        qbj: resultQbj('Room 102', 'Southside', 'Wren A'),
-        receivedAt: '2026-09-11T15:01:00Z',
-      },
+  test('gives every Save and Save again action a distinct result identity', async () => {
+    const user = userEvent.setup();
+    const first = scoredResultDocument().result;
+    const second = JSON.parse(JSON.stringify(first)) as typeof first;
+    const secondMatch = second.objects.find((entry) => entry.type === 'Match');
+    if (!secondMatch) throw new Error('fixture has no match');
+    secondMatch.location = 'Room 102';
+
+    const bridge = bridgeForResults([
+      { resultId: 'new-a', qbj: first, receivedAt: '2026-09-11T15:01:00Z' },
+      { resultId: 'new-b', qbj: second, receivedAt: '2026-09-11T15:02:00Z' },
+      { resultId: 'saved-a', qbj: first, receivedAt: '2026-09-11T15:03:00Z', savedPath: '/results/a.qbj' },
+      { resultId: 'saved-b', qbj: second, receivedAt: '2026-09-11T15:04:00Z', savedPath: '/results/b.qbj' },
+      { resultId: 'blank', qbj: {}, receivedAt: '2026-09-11T15:05:00Z' },
     ]);
-
     render(<ResultsView bridge={bridge} />);
 
-    const aiken = screen.getByRole('button', {
-      name: /Save result — Round 4, Room 101, Aiken vs Dorman, result [0-9a-f]{12}/,
-    });
-    const southside = screen.getByRole('button', {
-      name: /Save result — Round 4, Room 102, Southside vs Wren A, result [0-9a-f]{12}/,
-    });
-    expect(aiken).toHaveTextContent('Save');
-    expect(southside).toHaveTextContent('Save');
+    const saveButtons = screen.getAllByRole('button', { name: /^Save result/ });
+    const saveAgainButtons = screen.getAllByRole('button', { name: /^Save again result/ });
+    expect(new Set(saveButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(3);
+    expect(new Set(saveAgainButtons.map((button) => button.getAttribute('aria-label'))).size).toBe(2);
+    expect(saveButtons.every((button) => button.textContent === 'Save')).toBe(true);
+    expect(saveAgainButtons.every((button) => button.textContent === 'Save again')).toBe(true);
+    expect(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 102, Cony vs Deering/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save result \(result blank\)/ })).toBeInTheDocument();
 
-    fireEvent.click(aiken);
-    expect(bridge.saveResult).toHaveBeenCalledWith('result-a');
-  });
-
-  test('saved and sparse rows remain uniquely named and preserve disabled state without a folder', () => {
-    const bridge = bridgeWithResults(
-      [
-        {
-          resultId: 'saved-a',
-          qbj: resultQbj('Room 101', 'Aiken', 'Dorman'),
-          receivedAt: '2026-09-11T15:00:00Z',
-          savedPath: '/old/result-a.qbj',
-        },
-        {
-          resultId: 'saved-b',
-          qbj: {},
-          receivedAt: '2026-09-11T15:01:00Z',
-          savedPath: '/old/result-b.qbj',
-        },
-      ],
-      null,
+    await user.click(
+      screen.getByRole('button', { name: /Save result — Round 4, Room 101, Cony vs Deering/ }),
     );
-
-    render(<ResultsView bridge={bridge} />);
-
-    const contextual = screen.getByRole('button', {
-      name: /Save result again — Round 4, Room 101, Aiken vs Dorman, result [0-9a-f]{12}/,
-    });
-    const sparse = screen.getByRole('button', { name: /Save result again — result [0-9a-f]{12}/ });
-    expect(contextual).toHaveTextContent('Save again');
-    expect(sparse).toHaveTextContent('Save again');
-    expect(contextual).toBeDisabled();
-    expect(sparse).toBeDisabled();
+    expect(bridge.saveResult).toHaveBeenCalledWith('new-a');
   });
 
   test('shows the local import marker and lets the operator filter it', async () => {
