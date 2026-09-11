@@ -35,6 +35,8 @@ import { buildCanonicalSnapshot } from '../src/director/reports/canonicalReports
 import { withReportPresentation } from '../src/director/reports/reportPresentation';
 import { playerStatCell, teamStatCell } from '../src/director/standings/statsDisplay';
 
+const POINTS_TOSSUPS = 20;
+
 /** The real export flow: presentation first, then the page bundle. */
 function presentedBundle(state: DirectorState, options?: ReportOptions) {
   const snapshot = withReportPresentation(
@@ -430,6 +432,13 @@ describe('cross-surface parity matrix', () => {
     expect(playerStanding.gamesPlayed).toBe(0.5);
     expect(playerStatCell('year', playerStanding, player)).toBe('Grade 10');
     expect(playerStatCell('ug', playerStanding, player)).toBe('Yes');
+
+    // Individuals: Director player Pts/X (PPTUH × X) matches the printable individuals page.
+    const a1 = derivePlayerStandings(state, {}).find((entry) => entry.playerId === 'a1')!;
+    expect(playerStatCell('ppx', a1, undefined, { pointsTossups: POINTS_TOSSUPS })).toBe('75.00');
+    const metricPages = presentedBundle(state, { ...defaultReportOptions, pointsMetric: 'pointsPerX' });
+    const individualsPage = metricPages.find((entry) => entry.name === 'individuals.html')!.content;
+    expect(individualsPage).toContain('75.00');
   });
 
   test('partial mode: every surface renders unknowns, never zeroes', () => {

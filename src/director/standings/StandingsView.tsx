@@ -140,6 +140,7 @@ function playerTableColumns(
   schema: StatsColumn[],
   rankOf: Map<string, number>,
   tied: Set<string>,
+  context: TeamStatContext,
 ): Column<PlayerStanding>[] {
   const playerById = new Map(state.players.map((player) => [player.id, player]));
   return [
@@ -168,7 +169,7 @@ function playerTableColumns(
       align: 'right',
       optional: column.priority === 3,
       render: (standing) =>
-        statCell(playerStatCell(column.id, standing, playerById.get(standing.playerId)), column),
+        statCell(playerStatCell(column.id, standing, playerById.get(standing.playerId), context), column),
     })),
   ];
 }
@@ -411,7 +412,9 @@ export function StandingsView({
           ) : (
             <DataTable
               items={playerStandings}
-              columns={playerTableColumns(state, playerSchema, playerRankOf, tiedPlayerRanks)}
+              columns={playerTableColumns(state, playerSchema, playerRankOf, tiedPlayerRanks, {
+                pointsTossups: statsPresentation.pointsTossups,
+              })}
               rowKey={(standing) => standing.playerId}
               ariaLabel="Player statistics"
               enabledOptionalColumns={playerCols}
