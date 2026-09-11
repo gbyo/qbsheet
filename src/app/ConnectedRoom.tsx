@@ -222,6 +222,7 @@ export default function ConnectedRoom(props: {
   recovery?: IRecoveryUi;
   onRecovery?: () => void;
   onPractice: () => void;
+  onCreateGame?: () => void;
   onOtherScoring: () => void;
   onChangeTournament: () => void;
   onResume: (record: IStoredGameRecord) => void | Promise<void>;
@@ -247,6 +248,7 @@ export default function ConnectedRoom(props: {
     recovery,
     onRecovery = () => undefined,
     onOtherScoring,
+    onCreateGame = onOtherScoring,
     onChangeTournament,
     onResume,
     onStart,
@@ -799,6 +801,14 @@ export default function ConnectedRoom(props: {
           disabled={starting}
         >
           {practiceInProgress ? 'Resume practice' : 'Practice'}
+        </button>
+        <button
+          type="button"
+          className="shell-button shell-button-quiet"
+          onClick={onCreateGame}
+          disabled={starting}
+        >
+          Create game manually
         </button>
         <button
           type="button"
