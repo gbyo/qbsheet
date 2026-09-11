@@ -10,9 +10,11 @@
  * element already does.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button, ConfirmDialog, StatusBadge, TeamComboBox, type Tone } from '@qbsheet/ui';
-import { pairingLink } from '../model/pairing';
+import wordmark from '../assets/qbsheet-wordmark.svg';
+import { pairingLink, type PairingLink } from '../model/pairing';
+import { buildRoomPrintData, type RoomPrintData } from '../model/print';
 import type { Room, RoomStatus } from '../model/rooms';
 import {
   destinationPoolName,
@@ -34,6 +36,57 @@ const status: Record<RoomStatus, { label: string; tone: Tone }> = {
   scoring: { label: 'Scoring', tone: 'info' },
   'result-received': { label: 'Result received', tone: 'success' },
 };
+
+type PrintTarget = 'all' | string;
+
+function RoomPrintSheet({ data }: { data: RoomPrintData }) {
+  return (
+    <article className="room-print-sheet" data-room-id={data.roomId}>
+      <header className="room-print-sheet__brand">
+        <img className="room-print-sheet__wordmark" src={wordmark} alt="QBSheet Bridge" />
+        <p className="room-print-sheet__tournament">{data.tournamentName}</p>
+      </header>
+
+      <h1 className="room-print-sheet__room">{data.roomName}</h1>
+      <p className="room-print-sheet__kicker">Pair this room</p>
+
+      <div className="room-print-sheet__pairing">
+        <Qr url={data.pairingUrl} roomName={data.roomName} />
+        <div className="room-print-sheet__code-block">
+          <p className="room-print-sheet__label">Pairing code</p>
+          <p className="room-print-sheet__code">{data.pairingCode}</p>
+          <p className="room-print-sheet__scan-help">Scan the QR with QBSheet Scorer.</p>
+        </div>
+      </div>
+
+      <section className="room-print-sheet__manual" aria-labelledby={`manual-${data.roomId}`}>
+        <h2 id={`manual-${data.roomId}`}>Pair manually</h2>
+        <ol>
+          <li>
+            Open <strong>qbsheet.com</strong>.
+          </li>
+          <li>
+            Choose <strong>Connect to tournament control</strong>.
+          </li>
+          <li>
+            <strong>Tournament control address:</strong> <code>{data.tournamentControlUrl}</code>
+          </li>
+          <li>
+            <strong>Pairing code:</strong> <code>{data.pairingCode}</code>
+          </li>
+          <li>
+            <strong>Room:</strong> {data.roomName}
+          </li>
+        </ol>
+      </section>
+
+      <p className="room-print-sheet__url">
+        <span>Pairing link: </span>
+        <a href={data.pairingUrl}>{data.pairingUrl}</a>
+      </p>
+    </article>
+  );
+}
 
 function poolSizeLabel(pool: { teamIds: readonly string[]; expectedSize?: number }): string {
   if (pool.teamIds.length > 0) return `${pool.teamIds.length} teams`;
@@ -77,6 +130,7 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const [pendingRound, setPendingRound] = useState<string | null>(null);
   const [poolFilter, setPoolFilter] = useState<PoolFilter | null>(null);
   const [pendingPrefill, setPendingPrefill] = useState<PendingPrefill | null>(null);
+  const [printTarget, setPrintTarget] = useState<PrintTarget | null>(null);
   const round = tournament?.rounds.find((entry) => entry.id === state.selectedRoundId) ?? null;
   const phase = tournament ? phaseForRound(tournament, round) : undefined;
   const roundGroupsForDisplay = useMemo(() => (tournament ? roundGroups(tournament) : []), [tournament]);
@@ -108,6 +162,15 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   // A reload changes the source evidence. A pending confirmation is only valid for the exact
   // tournament object from which its plan was derived; the derived value closes it otherwise.
   const activePendingPrefill = pendingPrefill?.tournament === tournament ? pendingPrefill.plan : null;
+
+  useEffect(() => {
+    if (printTarget === null || typeof window === 'undefined') return undefined;
+
+    const finishPrint = () => setPrintTarget(null);
+    window.addEventListener('afterprint', finishPrint);
+    if (typeof window.print === 'function') window.print();
+    return () => window.removeEventListener('afterprint', finishPrint);
+  }, [printTarget]);
 
   const warningsByRoom = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -155,21 +218,54 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     );
   }
 
-  const linkFor = (room: Room): string | null => {
+  const pairingFor = (room: Room): PairingLink | null => {
     if (!state.relay) return null;
     try {
-      return pairingLink({
+      const pairing = pairingLink({
         baseUrl: state.relay.baseUrl,
         tournamentId: state.relay.tournamentId,
         code: room.pairingCode,
         roomId: room.id,
-      }).url;
+      });
+      return pairing;
     } catch {
       return null;
     }
   };
 
+  const linkFor = (room: Room): string | null => pairingFor(room)?.url ?? null;
+
   const scorerReady = bridge.scorerReadiness?.status === 'ready';
+  /** A sheet is only offered after this room's active pairing has reached the relay. */
+  const printDataFor = (room: Room): RoomPrintData | null => {
+    if (!scorerReady || room.publishedRoundId === null) return null;
+    const pairing = pairingFor(room);
+    return pairing
+      ? buildRoomPrintData({
+          tournamentName: tournament.name,
+          room,
+          pairing,
+        })
+      : null;
+  };
+
+  const printableRooms = state.rooms
+    .map(printDataFor)
+    .filter((entry): entry is RoomPrintData => entry !== null);
+  const printableById = new Map(printableRooms.map((entry) => [entry.roomId, entry]));
+  const canPrintAll = state.rooms.length > 0 && printableRooms.length === state.rooms.length;
+
+  const startPrint = (target: PrintTarget): void => {
+    if (target === 'all' ? !canPrintAll : !printableById.has(target)) return;
+    setPrintTarget(target);
+  };
+
+  const sheetsToPrint =
+    printTarget === 'all'
+      ? printableRooms
+      : printTarget === null
+        ? []
+        : printableRooms.filter((entry) => entry.roomId === printTarget);
 
   const requestRound = (roundId: string): void => {
     if (roundId === state.selectedRoundId) return;
@@ -247,6 +343,12 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           onPress={() => void bridge.publishRoomSetup()}
         >
           Publish Room Setup
+        </Button>
+        <Button
+          isDisabled={bridge.busy || printTarget !== null || !canPrintAll}
+          onPress={() => startPrint('all')}
+        >
+          Print all room sheets
         </Button>
         <Button
           variant="primary"
@@ -358,6 +460,13 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           </ul>
         </div>
       ) : null}
+      {state.rooms.length > 0 && !canPrintAll ? (
+        <p className="faint room-print-hint">
+          {scorerReady
+            ? 'Publish the room setup to the relay before printing pairing sheets.'
+            : 'Confirm Scorer origin readiness before printing pairing sheets.'}
+        </p>
+      ) : null}
 
       {state.rooms.length === 0 ? (
         <p className="muted">No rooms yet. Add one for each room the tournament is using.</p>
@@ -447,6 +556,14 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                     <Button
                       size="sm"
                       variant="quiet"
+                      isDisabled={bridge.busy || printTarget !== null || !printableById.has(room.id)}
+                      onPress={() => startPrint(room.id)}
+                    >
+                      Print sheet
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="quiet"
                       isDisabled={bridge.busy}
                       onPress={() => bridge.removeRoom(room.id)}
                     >
@@ -494,6 +611,13 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         and pairing codes will stay unchanged. Only the listed unplayed games will be filled; other games
         remain manual.
       </ConfirmDialog>
+      {printTarget !== null ? (
+        <div className="room-print-sheets" data-print-target={printTarget}>
+          {sheetsToPrint.map((data) => (
+            <RoomPrintSheet key={data.roomId} data={data} />
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }
