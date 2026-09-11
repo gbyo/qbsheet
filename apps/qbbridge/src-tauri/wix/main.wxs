@@ -99,16 +99,16 @@
           out so repair, uninstall, and version upgrades never trip on their own product.
         -->
         <Property Id="QBB_MACHINE_INSTALL">
-          <RegistrySearch Id="QBB_SearchMachineInstall" Root="HKLM" Key="SOFTWARE\{{manufacturer}}\{{product_name}}" Name="InstalledAllUsers" Type="raw" />
+          <RegistrySearch Id="QBB_SearchMachineInstall" Root="HKLM" Key="SOFTWARE\\{{manufacturer}}\\{{product_name}}" Name="InstalledAllUsers" Type="raw" />
         </Property>
         <Property Id="QBB_USER_INSTALL">
-          <RegistrySearch Id="QBB_SearchUserInstall" Root="HKCU" Key="Software\{{manufacturer}}\{{product_name}}" Name="InstallDir" Type="raw" />
+          <RegistrySearch Id="QBB_SearchUserInstall" Root="HKCU" Key="Software\\{{manufacturer}}\\{{product_name}}" Name="InstallDir" Type="raw" />
         </Property>
         <Property Id="QBB_NSIS_USER_UNINSTALL">
-          <RegistrySearch Id="QBB_SearchNsisUser" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{{product_name}}" Name="UninstallString" Type="raw" />
+          <RegistrySearch Id="QBB_SearchNsisUser" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}" Name="UninstallString" Type="raw" />
         </Property>
         <Property Id="QBB_NSIS_MACHINE_UNINSTALL">
-          <RegistrySearch Id="QBB_SearchNsisMachine" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\{{product_name}}" Name="UninstallString" Type="raw" />
+          <RegistrySearch Id="QBB_SearchNsisMachine" Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\\{{product_name}}" Name="UninstallString" Type="raw" />
         </Property>
         <Condition Message="QBSheet Bridge is already installed for all users on this computer. Uninstall it from Settings, Apps, first, then run this installer again to install only for your account.">NOT MSIINSTALLPERUSER OR NOT QBB_MACHINE_INSTALL OR UPGRADINGPRODUCTCODE OR Installed</Condition>
         <Condition Message="QBSheet Bridge is already installed for your account. Uninstall it from Settings, Apps, first, then run this installer again to install for all users.">MSIINSTALLPERUSER OR NOT QBB_USER_INSTALL OR UPGRADINGPRODUCTCODE OR Installed</Condition>
@@ -188,39 +188,40 @@
                      Value="InstallScopeDlg"
                      Order="3">1</Publish>
             {{/unless}}
+
+            <!--
+              Install scope choice: Standard (all users, recommended) or Current user without
+              administrator approval. A Dialog lives under UI, not Product. The radio group sets
+              QBB_INSTALLSCOPE, which the SetProperty above maps onto MSIINSTALLPERUSER before
+              CostInitialize in both sequences, so the directory page already shows the
+              context-correct default folder.
+            -->
+            <Dialog Id="InstallScopeDlg" Width="370" Height="270" Title="{{product_name}} Setup">
+                <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+                <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+                <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="Installation scope" />
+                <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose who can use {{product_name}} on this computer." />
+                <Control Id="ScopeText" Type="Text" X="20" Y="60" Width="330" Height="40" NoPrefix="yes" Text="Standard installs for everyone (Program Files, needs administrator approval). Current user installs only for this account (user folder, no approval needed)." />
+                <Control Id="ScopeRadioGroup" Type="RadioButtonGroup" X="20" Y="105" Width="330" Height="60" Property="QBB_INSTALLSCOPE">
+                    <RadioButtonGroup Property="QBB_INSTALLSCOPE">
+                        <RadioButton Value="perMachine" X="0" Y="0" Width="330" Height="18" Text="Standard install for everyone on this PC (recommended)" />
+                        <RadioButton Value="perUser" X="0" Y="25" Width="330" Height="18" Text="Current user only, no administrator approval needed" />
+                    </RadioButtonGroup>
+                </Control>
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+                    <Publish Event="NewDialog" Value="WelcomeDlg">1</Publish>
+                </Control>
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
+                    <Publish Event="NewDialog" Value="InstallDirDlg">1</Publish>
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+                    <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+                </Control>
+            </Dialog>
         </UI>
 
         <UIRef Id="WixUI_InstallDir" />
-
-        <!--
-          Install scope choice: Standard (all users, recommended) or Current user without
-          administrator approval. The radio group sets QBB_INSTALLSCOPE, which the SetProperty
-          above maps onto MSIINSTALLPERUSER before CostInitialize in both sequences, so the
-          directory page already shows the context-correct default folder.
-        -->
-        <Dialog Id="InstallScopeDlg" Width="370" Height="270" Title="{{product_name}} Setup">
-            <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
-            <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
-            <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
-            <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="Installation scope" />
-            <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Choose who can use {{product_name}} on this computer." />
-            <Control Id="ScopeText" Type="Text" X="20" Y="60" Width="330" Height="40" NoPrefix="yes" Text="Standard installs for everyone (Program Files, needs administrator approval). Current user installs only for this account (user folder, no approval needed)." />
-            <Control Id="ScopeRadioGroup" Type="RadioButtonGroup" X="20" Y="105" Width="330" Height="60" Property="QBB_INSTALLSCOPE">
-                <RadioButtonGroup Property="QBB_INSTALLSCOPE">
-                    <RadioButton Value="perMachine" X="0" Y="0" Width="330" Height="18" Text="Standard install for everyone on this PC (recommended)" />
-                    <RadioButton Value="perUser" X="0" Y="25" Width="330" Height="18" Text="Current user only, no administrator approval needed" />
-                </RadioButtonGroup>
-            </Control>
-            <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
-                <Publish Event="NewDialog" Value="WelcomeDlg">1</Publish>
-            </Control>
-            <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.WixUINext)">
-                <Publish Event="NewDialog" Value="InstallDirDlg">1</Publish>
-            </Control>
-            <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
-                <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
-            </Control>
-        </Dialog>
 
         <Directory Id="TARGETDIR" Name="SourceDir">
             <Directory Id="DesktopFolder" Name="Desktop">
@@ -315,7 +316,7 @@
             -->
             <Component Id="CMP_PerMachineMarker" Guid="*">
                 <Condition>NOT MSIINSTALLPERUSER</Condition>
-                <RegistryValue Root="HKLM" Key="SOFTWARE\{{manufacturer}}\{{product_name}}" Name="InstalledAllUsers" Type="integer" Value="1" KeyPath="yes" />
+                <RegistryValue Root="HKLM" Key="SOFTWARE\\{{manufacturer}}\\{{product_name}}" Name="InstalledAllUsers" Type="integer" Value="1" KeyPath="yes" />
             </Component>
         </DirectoryRef>
 
