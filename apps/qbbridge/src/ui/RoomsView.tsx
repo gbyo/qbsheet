@@ -63,6 +63,18 @@ function gamesLabel(count: number): string {
   return count === 1 ? '1 game' : `${count} games`;
 }
 
+/**
+ * The batch print action names its actual scope, never implying a complete tournament setup.
+ *
+ * A partial batch counts its ready sheets; the all-ready and nothing-ready states keep the
+ * familiar label, with the hint below saying what is still missing.
+ */
+function batchPrintLabel(totalRooms: number, readyRooms: number): string {
+  if (readyRooms === 1 && totalRooms > 1) return 'Print 1 ready room sheet';
+  if (readyRooms > 0 && readyRooms < totalRooms) return `Print ${readyRooms} ready room sheets`;
+  return 'Print all room sheets';
+}
+
 function RoomPrintSheet({ data }: { data: RoomPrintData }) {
   return (
     <article className="room-print-sheet" data-room-id={data.roomId}>
@@ -245,9 +257,24 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
   const linkFor = (room: Room): string | null => pairingFor(room)?.url ?? null;
 
   const scorerReady = bridge.scorerReadiness?.status === 'ready';
+  /**
+   * Why one room has no pairing sheet, or null when it does.
+   *
+   * The single source of truth for the print guards. Printing a stale or unpublished code would
+   * lock a scorekeeper out of the room, so an unready room is excluded rather than approximated —
+   * and the batch action below prints the ready subset instead of refusing everything.
+   */
+  const printExclusionReason = (room: Room): string | null => {
+    if (!scorerReady) return 'Scorer readiness is not confirmed';
+    if (!room.relayPublished) return 'its room setup is not published yet';
+    if (room.pendingPairingCode !== null) return 'a replacement code is waiting to be published';
+    if (linkFor(room) === null) return 'its pairing link is unavailable';
+    return null;
+  };
+
   /** A sheet is only offered after this room's current pairing identity has reached the relay. */
   const printDataFor = (room: Room): RoomPrintData | null => {
-    if (!scorerReady || !room.relayPublished || room.pendingPairingCode !== null) return null;
+    if (printExclusionReason(room) !== null) return null;
     const pairing = pairingFor(room);
     return pairing
       ? buildRoomPrintData({
@@ -262,11 +289,23 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
     .map(printDataFor)
     .filter((entry): entry is RoomPrintData => entry !== null);
   const printableById = new Map(printableRooms.map((entry) => [entry.roomId, entry]));
-  const canPrintAll = state.rooms.length > 0 && printableRooms.length === state.rooms.length;
+  const excludedRooms = state.rooms.filter((room) => !printableById.has(room.id));
+  const allReady = state.rooms.length > 0 && excludedRooms.length === 0;
+  const canPrintReady = printableRooms.length > 0;
 
   const startPrint = (target: PrintTarget): void => {
-    if (target === 'all' ? !canPrintAll : !printableById.has(target)) return;
+    if (target === 'all' ? !canPrintReady : !printableById.has(target)) return;
     setPrintTarget(target);
+  };
+
+  const printHintText = (): string => {
+    if (canPrintReady) {
+      const excluded = excludedRooms.map((room) => `${room.name} (${printExclusionReason(room)})`).join(', ');
+      return `Printing ${printableRooms.length} of ${state.rooms.length} room sheets. Not included: ${excluded}.`;
+    }
+    return scorerReady
+      ? 'Publish the room setup to the relay before printing pairing sheets. A pending new code must be published first.'
+      : 'Confirm Scorer origin readiness before printing pairing sheets.';
   };
 
   const sheetsToPrint =
@@ -339,10 +378,10 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
             Publish Room Setup
           </Button>
           <Button
-            isDisabled={bridge.busy || printTarget !== null || !canPrintAll}
+            isDisabled={bridge.busy || printTarget !== null || !canPrintReady}
             onPress={() => startPrint('all')}
           >
-            Print all room sheets
+            {batchPrintLabel(state.rooms.length, printableRooms.length)}
           </Button>
           <Button
             variant="primary"
@@ -415,11 +454,9 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           </div>
         ) : null}
 
-        {state.rooms.length > 0 && !canPrintAll ? (
-          <p className="faint room-print-hint">
-            {scorerReady
-              ? 'Publish the room setup to the relay before printing pairing sheets. A pending new code must be published first.'
-              : 'Confirm Scorer origin readiness before printing pairing sheets.'}
+        {state.rooms.length > 0 && !allReady ? (
+          <p className="faint room-print-hint" data-testid="print-hint">
+            {printHintText()}
           </p>
         ) : null}
 

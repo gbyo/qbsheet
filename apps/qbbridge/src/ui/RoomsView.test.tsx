@@ -30,7 +30,7 @@ function testRoom(
   };
 }
 
-function testBridge(rooms: Room[]): BridgeApi {
+function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
   const tournament = loadedFixture();
   const selectedRoundId = tournament.rounds[0]?.id ?? null;
   const state: BridgeState = {
@@ -60,11 +60,17 @@ function testBridge(rooms: Room[]): BridgeApi {
     notice: null,
     dismissNotice: noop,
     relayReachable: true,
-    scorerReadiness: {
-      status: 'ready',
-      origin: 'https://qbsheet.com',
-      message: 'https://qbsheet.com can pair and use this relay.',
-    },
+    scorerReadiness: scorerReady
+      ? {
+          status: 'ready',
+          origin: 'https://qbsheet.com',
+          message: 'https://qbsheet.com can pair and use this relay.',
+        }
+      : {
+          status: 'blocked',
+          origin: 'https://qbsheet.com',
+          message: 'Add https://qbsheet.com to RELAY_ALLOWED_ORIGINS in the Cloudflare deployment.',
+        },
     busy: false,
     native: true,
     loadFile: vi.fn(async () => undefined),
@@ -208,5 +214,122 @@ describe('room pairing sheets', () => {
 
     expect(screen.getByRole('button', { name: 'Print sheet' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Print all room sheets' })).toBeDisabled();
+  });
+});
+
+describe('batch printing the ready subset', () => {
+  test('one unpublished room leaves the batch available for the ready rooms', async () => {
+    const user = userEvent.setup();
+    const tournament = loadedFixture();
+    const rooms = [
+      testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true),
+      testRoom(tournament.rounds[0].id, 'room-2', 'Room 2', '91374620', false),
+    ];
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    render(<RoomsView bridge={testBridge(rooms)} />);
+
+    // The batch names its scope instead of refusing everything...
+    const batch = screen.getByRole('button', { name: 'Print 1 ready room sheet' });
+    expect(batch).toBeEnabled();
+    // ...and says what is left out and why, so a partial batch is never mistaken for setup done.
+    expect(screen.getByTestId('print-hint')).toHaveTextContent(
+      'Printing 1 of 2 room sheets. Not included: Room 2 (its room setup is not published yet).',
+    );
+
+    await user.click(batch);
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    // The print document holds only the ready room's sheet.
+    expect(
+      [...document.querySelectorAll<HTMLElement>('.room-print-sheet')].map((sheet) => sheet.dataset.roomId),
+    ).toEqual(['room-1']);
+
+    window.dispatchEvent(new Event('afterprint'));
+    await waitFor(() => expect(document.querySelector('.room-print-sheet')).toBeNull());
+  });
+
+  test('a pending replacement code stays excluded while other rooms batch', async () => {
+    const user = userEvent.setup();
+    const tournament = loadedFixture();
+    const rooms = [
+      testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true),
+      {
+        ...testRoom(tournament.rounds[0].id, 'room-pending', 'Room Pending', '91374620', true),
+        pendingPairingCode: '00000000',
+      },
+    ];
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    render(<RoomsView bridge={testBridge(rooms)} />);
+
+    // The stale code is not printable on its own...
+    expect(screen.getByRole('button', { name: 'Print 1 ready room sheet' })).toBeEnabled();
+    expect(screen.getByTestId('print-hint')).toHaveTextContent(
+      'Printing 1 of 2 room sheets. Not included: Room Pending (a replacement code is waiting to be published).',
+    );
+
+    // ...and the batch carries only the ready room.
+    await user.click(screen.getByRole('button', { name: 'Print 1 ready room sheet' }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(
+      [...document.querySelectorAll<HTMLElement>('.room-print-sheet')].map((sheet) => sheet.dataset.roomId),
+    ).toEqual(['room-1']);
+
+    window.dispatchEvent(new Event('afterprint'));
+    await waitFor(() => expect(document.querySelector('.room-print-sheet')).toBeNull());
+  });
+
+  test('several ready rooms batch together and name every excluded room', async () => {
+    const user = userEvent.setup();
+    const tournament = loadedFixture();
+    const rooms = [
+      testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true),
+      testRoom(tournament.rounds[0].id, 'room-2', 'Room 2', '91374620', true),
+      testRoom(tournament.rounds[0].id, 'room-3', 'Room 3', '75038112', false),
+    ];
+    const print = vi.spyOn(window, 'print').mockImplementation(() => undefined);
+    render(<RoomsView bridge={testBridge(rooms)} />);
+
+    await user.click(screen.getByRole('button', { name: 'Print 2 ready room sheets' }));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(
+      [...document.querySelectorAll<HTMLElement>('.room-print-sheet')].map((sheet) => sheet.dataset.roomId),
+    ).toEqual(['room-1', 'room-2']);
+    expect(screen.getByTestId('print-hint')).toHaveTextContent(
+      'Printing 2 of 3 room sheets. Not included: Room 3 (its room setup is not published yet).',
+    );
+
+    window.dispatchEvent(new Event('afterprint'));
+    await waitFor(() => expect(document.querySelector('.room-print-sheet')).toBeNull());
+  });
+
+  test('zero printable rooms keeps the batch disabled with guidance', () => {
+    const tournament = loadedFixture();
+    render(
+      <RoomsView
+        bridge={testBridge([testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', false)])}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Print all room sheets' })).toBeDisabled();
+    expect(screen.getByTestId('print-hint')).toHaveTextContent(
+      'Publish the room setup to the relay before printing pairing sheets.',
+    );
+  });
+
+  test('without Scorer readiness nothing is printable', () => {
+    const tournament = loadedFixture();
+    const rooms = [
+      testRoom(tournament.rounds[0].id, 'room-1', 'Room 1', '48213906', true),
+      testRoom(tournament.rounds[0].id, 'room-2', 'Room 2', '91374620', true),
+    ];
+    render(<RoomsView bridge={testBridge(rooms, false)} />);
+
+    expect(screen.getByRole('button', { name: 'Print all room sheets' })).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: 'Print sheet' })).toHaveLength(2);
+    for (const button of screen.getAllByRole('button', { name: 'Print sheet' })) {
+      expect(button).toBeDisabled();
+    }
+    expect(screen.getByTestId('print-hint')).toHaveTextContent(
+      'Confirm Scorer origin readiness before printing pairing sheets.',
+    );
   });
 });
