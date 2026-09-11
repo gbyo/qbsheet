@@ -61,6 +61,9 @@ describe('tournament-shaped columns', () => {
     expect(teams).toContain('bonuses');
     expect(teams).not.toContain('superpowers');
     expect(individualColumnsForState(state).map((column) => column.id)).not.toContain('superpowers');
+    // Normalized Pts/X is one shared schema: both tables offer it on single-X scopes (#750).
+    expect(teams).toContain('ppx');
+    expect(individualColumnsForState(state).map((column) => column.id)).toContain('ppx');
   });
 
   test('a tossup-only format drops every bonus column instead of zero-filling it', () => {
@@ -184,6 +187,13 @@ describe('shared cell values', () => {
     expect(playerStatCell('pptuh', played)).toBe('8.50');
     expect(playerStatCell('tuh', { ...played, tossupsHeardKnown: false })).toBe('—');
     expect(playerStatCell('pptuh', { ...played, tossupsHeardKnown: false })).toBe('—');
+    // Normalized Pts/X is PPTUH × X, the shared-helper expression the
+    // printable schema uses; without X it declines like every rate (#750).
+    expect(playerStatCell('ppx', played, undefined, { pointsTossups: 20 })).toBe('170.00');
+    expect(playerStatCell('ppx', played)).toBe('—');
+    expect(
+      playerStatCell('ppx', { ...played, tossupsHeardKnown: false }, undefined, { pointsTossups: 20 }),
+    ).toBe('—');
   });
 
   test('the individual mapping renders unknown participation as unknown, not zero', () => {
