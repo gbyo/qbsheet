@@ -154,7 +154,10 @@ export function deriveRoundStats(
         // A side with no breakdown where the stored definition defines no bouncebacks
         // is N/A rather than unknown; a game excused on both sides contributes
         // nothing at all (#755).
-        const sideExcused = (bouncebacks: number | null): boolean =>
+        const sideExcused = (bouncebacks: number | null | undefined): boolean =>
+          // An omitted breakdown is the legacy zero shorthand (aggregates
+          // as-entered below); only explicit null takes the N/A path, matching
+          // accumulateBouncebackSide in stats.ts.
           bouncebacks === null && !!rules && !rules.bouncebacks && !!game.definitionDigest;
         if (!left || !right) {
           bouncebackPartsKnown = false;
