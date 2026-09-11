@@ -276,7 +276,7 @@ export default function ConnectedSetup(
                 inputMode="url"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="192.168.1.50:8080"
+                placeholder="192.168.1.50:8787"
                 value={address}
                 onChange={(event) => {
                   setAddressTracked(event.target.value);
