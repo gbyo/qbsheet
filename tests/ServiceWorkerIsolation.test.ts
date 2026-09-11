@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, test, vi } from 'vitest';
-import { isScorerPrecacheAsset, serviceWorkerSource } from '../vite.config';
+import { isScorerPrecacheAsset, scorerBuildManifest, serviceWorkerSource } from '../vite.config';
 
 interface IFetchEvent {
   request: { method: string; mode: string; url: string };
@@ -177,5 +177,25 @@ describe('the generated scorer service worker', () => {
 
     const cachedUrl = harness.cache.put.mock.calls[0]?.[0];
     expect(String(cachedUrl)).toBe('https://qbsheet.com/index.html');
+  });
+
+  test('keeps the build manifest out of the precache and off the cache', () => {
+    // A cached manifest would pin the tournament to the build that cached it. The manifest is
+    // deployment metadata: always network, never shell.
+    expect(isScorerPrecacheAsset('scorer-build.json')).toBe(false);
+
+    const harness = workerHarness({ scope: 'https://qbsheet.com/qbsheet/' });
+    const manifest = harness.dispatchFetch('https://qbsheet.com/qbsheet/scorer-build.json', 'cors');
+
+    expect(manifest.respondWith).not.toHaveBeenCalled();
+    expect(harness.fetch).not.toHaveBeenCalled();
+    expect(harness.caches.open).not.toHaveBeenCalled();
+    expect(harness.cache.put).not.toHaveBeenCalled();
+  });
+
+  test('the build manifest carries the exact commit-derived identity', () => {
+    expect(
+      scorerBuildManifest({ version: '0.1.0', commit: 'a1b2c3d', builtAt: '2026-09-01T00:00:00Z' }),
+    ).toEqual({ version: '0.1.0', commit: 'a1b2c3d', builtAt: '2026-09-01T00:00:00Z' });
   });
 });

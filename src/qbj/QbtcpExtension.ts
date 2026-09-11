@@ -47,6 +47,20 @@ export const qbtcpExtensionVersion = 1;
 
 const maxHandoffInstructionLength = 2000;
 
+/**
+ * The Scorer build that scored a game: the release number plus the short source commit.
+ *
+ * Both strings, both non-blank, both echoed verbatim — never compared here. `version` and
+ * `commit` are not QBJ key names (a top-level document `version` already survives the reference
+ * importer's key conversion untouched), so the nested object arrives intact like `scorekeeper`
+ * does. A dev or checkout-less build reports its honest placeholder (`dev`, `unknown`)
+ * rather than omitting the stamp: "no stamp" must keep meaning "predates stamps".
+ */
+export interface IQbtcpScorerBuild {
+  version: string;
+  commit: string;
+}
+
 /** Scoring semantics QBJ genuinely cannot express. Exactly one, and it stays that way by design. */
 export interface IQbtcpScorekeeper {
   /**
@@ -88,6 +102,15 @@ export interface IQbtcpExtension {
   definitionDigest?: string;
   /** A stable room identity, which survives "Room 204" being renamed to "Library". */
   roomId?: string;
+  /**
+   * Which Scorer build scored this game.
+   *
+   * A tournament pins the build it validated before Round 1, and every room is supposed to run
+   * it. The pin is verifiable only if results say which build produced them, so the scorer
+   * stamps every result it writes. Tournament control reads the stamp back out of the relayed
+   * result — no new pairing-time protocol, no relay change, and offline USB results carry it too.
+   */
+  scorerBuild?: IQbtcpScorerBuild;
   /** Halves, clock and timeouts. Operations, not scoring; QBJ models scoring. */
   procedure?: IRoomProcedure;
   /**
@@ -141,6 +164,15 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   }
   if (nonBlankString(raw.definition_digest)) extension.definitionDigest = raw.definition_digest;
   if (nonBlankString(raw.room_id)) extension.roomId = raw.room_id;
+  if (isPlainObject(raw.scorer_build)) {
+    const version = raw.scorer_build.version;
+    const commit = raw.scorer_build.commit;
+    // Present but malformed degrades to absent, like every field but `procedure`: a stamp this
+    // build cannot read says nothing about which build scored the game.
+    if (nonBlankString(version) && nonBlankString(commit)) {
+      extension.scorerBuild = { version, commit };
+    }
+  }
   if (
     typeof raw.handoff_instruction === 'string' &&
     raw.handoff_instruction.length <= maxHandoffInstructionLength
@@ -227,6 +259,13 @@ export function buildQbtcpExtension(extension: Omit<IQbtcpExtension, 'version'>)
   }
   if (nonBlankString(extension.roomId)) {
     block.room_id = extension.roomId;
+    carriesSomething = true;
+  }
+  if (extension.scorerBuild) {
+    block.scorer_build = {
+      version: extension.scorerBuild.version,
+      commit: extension.scorerBuild.commit,
+    } as unknown as QbjObject;
     carriesSomething = true;
   }
   if (extension.procedure) {

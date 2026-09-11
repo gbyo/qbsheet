@@ -21,6 +21,7 @@ import {
   scoresheetOrigin,
 } from '../../../../src/director/relay/relayConfig';
 import { generateTournamentId } from '../model/relay';
+import { scorerBuildLabel } from '../model/scorerBuilds';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
 
@@ -246,6 +247,49 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               >
                 {readinessStatus === 'checking' ? 'Checking…' : 'Check Scorer Readiness'}
               </Button>
+            </div>
+
+            <div className="scorer-readiness" aria-live="polite">
+              <h3>Pinned Scorer build</h3>
+              {bridge.scorerBuildPin ? (
+                <p>
+                  This tournament runs <strong>{scorerBuildLabel(bridge.scorerBuildPin)}</strong>, pinned{' '}
+                  {bridge.scorerBuildPin.pinnedAt.slice(0, 10)}. Every result arrives stamped with the build
+                  that scored it; anything else warns below.
+                </p>
+              ) : (
+                <p className="faint">
+                  No build pinned. Pin the production build validated before Round 1 so rooms that reload onto
+                  a different build warn instead of silently diverging.
+                </p>
+              )}
+              <div className="row">
+                <Button onPress={() => void bridge.pinScorerBuild()} isDisabled={bridge.busy}>
+                  {bridge.scorerBuildPin ? 'Re-pin current production build' : 'Pin current production build'}
+                </Button>
+                {bridge.scorerBuildPin ? (
+                  <Button variant="quiet" onPress={bridge.clearScorerBuildPin} isDisabled={bridge.busy}>
+                    Clear pin
+                  </Button>
+                ) : null}
+              </div>
+              {bridge.roomScorerBuilds.length > 0 ? (
+                <ul>
+                  {bridge.roomScorerBuilds.map((entry) => (
+                    <li key={entry.roomId}>
+                      {entry.roomName}:{' '}
+                      {entry.build ? scorerBuildLabel(entry.build) : 'no scored game yet — unverified'}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {bridge.scorerBuildWarnings.length > 0 ? (
+                <ul>
+                  {bridge.scorerBuildWarnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
             </div>
           </>
         ) : null}

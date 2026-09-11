@@ -31,6 +31,7 @@
  * `PortableQbj` and `docs/QBJ_ASSIGNMENT_PROFILE.md` for that boundary.
  */
 import { IGameDefinition, playerIdentityKey } from '../game/GameDefinition';
+import { buildVersion } from '../pwa/BuildVersion';
 import { IDerivedGame } from '../scoring/deriveGame';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
@@ -153,8 +154,12 @@ export function buildResultMatch(options: IQbjResultOptions): QbjObject {
 
   // The operational block. Round revision is the field that makes a stale result detectable, so it
   // travels with the result and not only with the assignment. The definition identity travels
-  // too: it says which competitive truth this result was actually scored under (#670).
+  // too: it says which competitive truth this result was actually scored under (#670). And the
+  // scorer build travels so a pinned tournament can verify every room ran the validated build:
+  // the stamp is read back out of the relayed result, which is also why USB-carried results
+  // prove their build without any network at all.
   return withQbtcpExtension(match, {
+    scorerBuild: { version: buildVersion.version, commit: buildVersion.commit },
     roundRevision: definition.round.revision,
     ...(definition.round.assignmentRevision !== undefined
       ? { assignmentRevision: definition.round.assignmentRevision }

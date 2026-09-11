@@ -656,6 +656,42 @@ describe('assignment to result', () => {
     expect(extension.room_id).toBe('room-204');
   });
 
+  test('every result stamps the scorer build that scored it', () => {
+    const { definition } = openOne(assignmentDocument());
+    const format = definition.scorekeeperFormat;
+    const game = deriveGame(format, setupFor(definition), []);
+
+    const match = objectOfType(buildResultDocument({ definition, format, game }), 'Match');
+    const extension = match[qbtcpExtensionKey] as QbjObject;
+
+    // Under test the build is the honest dev placeholder, never a fictional release.
+    expect(extension.scorer_build).toEqual({ version: '0.0.0', commit: 'dev' });
+    // And the stamp reads back through the same parser tournament control uses.
+    expect(readQbtcpExtension(match)?.scorerBuild).toEqual({ version: '0.0.0', commit: 'dev' });
+  });
+
+  test('a malformed scorer stamp degrades to absent, never to a guessed build', () => {
+    for (const scorer_build of [
+      null,
+      '0.1.0+a1b2c3d',
+      { version: '', commit: 'a1b2c3d' },
+      { version: '0.1.0' },
+      { commit: 'a1b2c3d' },
+    ]) {
+      const extension = readQbtcpExtension({
+        [qbtcpExtensionKey]: { version: qbtcpExtensionVersion, scorer_build },
+      });
+      expect(extension?.scorerBuild).toBeUndefined();
+    }
+    const extension = readQbtcpExtension({
+      [qbtcpExtensionKey]: {
+        version: qbtcpExtensionVersion,
+        scorer_build: { version: '0.1.0', commit: 'a1b2c3d' },
+      },
+    });
+    expect(extension?.scorerBuild).toEqual({ version: '0.1.0', commit: 'a1b2c3d' });
+  });
+
   test('the extension never restates what standard QBJ already carries', () => {
     const { definition } = openOne(assignmentDocument());
     const format = definition.scorekeeperFormat;

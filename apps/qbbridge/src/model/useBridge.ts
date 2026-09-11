@@ -103,6 +103,14 @@ import {
   recoveryPackageState,
 } from './recovery';
 import { schedulePairingWarnings } from './schedule';
+import {
+  parseBuildManifest,
+  roomScorerBuilds as roomScorerBuildsOf,
+  scorerBuildLabel,
+  scorerBuildWarnings as scorerBuildWarningsFor,
+  type RoomScorerBuild,
+  type ScorerBuildPin,
+} from './scorerBuilds';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
@@ -196,6 +204,22 @@ export interface BridgeApi {
   retryStatePersistence(): boolean;
   /** Re-run the management-authenticated check for the fixed qbsheet.com Scorer origin. */
   checkScorerReadiness(): Promise<void>;
+  /**
+   * The production Scorer build this tournament validated. Null until pinned: rooms cannot be
+   * verified against a pin that does not exist.
+   */
+  scorerBuildPin: ScorerBuildPin | null;
+  /**
+   * Fetch production's build manifest and pin it. Re-pinning is the explicit upgrade: rooms
+   * that still report the old build warn until they reload.
+   */
+  pinScorerBuild(): Promise<void>;
+  /** Drop the pin. Rooms stop verifying; use only when leaving pinned operation deliberately. */
+  clearScorerBuildPin(): void;
+  /** Which build each room's latest result reports, from the result stamps. */
+  roomScorerBuilds: RoomScorerBuild[];
+  /** Every divergence between the pin and the rooms. Empty when the fleet is clean. */
+  scorerBuildWarnings: string[];
   /** Show the relay setup form without touching the stored relay. */
   beginRelayChange(): void;
   /** Close the setup form and keep whatever relay was already stored. */
@@ -1118,6 +1142,64 @@ export function useBridge(): BridgeApi {
     const readiness = await refreshScorerReadiness(connection);
     if (readinessKeyRef.current === connectionKey(connection)) setNotice(readinessNotice(readiness));
   }, [refreshScorerReadiness]);
+
+  /**
+   * Pin the production Scorer build this tournament validated.
+   *
+   * The manifest is fetched from production at pin time — not copied from a room, which would
+   * let the fleet pin itself to whatever it happens to run. Re-pinning to a newer production
+   * build is the explicit upgrade path; rooms still on the old build warn until they reload.
+   */
+  const pinScorerBuild = useCallback(async (): Promise<void> => {
+    setBusy(true);
+    try {
+      const response = await fetch(`${scoresheetOrigin}/scorer-build.json`, { cache: 'no-store' });
+      if (!response.ok) {
+        setNotice({
+          kind: 'bad',
+          message: `Production did not answer with a build manifest (HTTP ${response.status}). The pin is unchanged.`,
+        });
+        return;
+      }
+      const parsed = parseBuildManifest(await response.text());
+      if (!parsed.ok) {
+        setNotice({ kind: 'bad', message: `${parsed.error} The pin is unchanged.` });
+        return;
+      }
+      const pin: ScorerBuildPin = { ...parsed.build, pinnedAt: new Date().toISOString() };
+      commit((current) => ({ ...current, scorerBuildPin: pin }));
+      setNotice({
+        kind: 'good',
+        message: `Pinned Scorer build ${scorerBuildLabel(pin)} for this tournament. Rooms reporting anything else will warn.`,
+      });
+    } catch (error) {
+      setNotice({
+        kind: 'bad',
+        message: `The production build could not be pinned. ${(error as Error).message} The pin is unchanged.`,
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, [commit]);
+
+  const clearScorerBuildPin = useCallback((): void => {
+    if (!stateRef.current.scorerBuildPin) return;
+    commit((current) => ({ ...current, scorerBuildPin: null }));
+    setNotice({
+      kind: 'warn',
+      message: 'The Scorer build pin was cleared. Room builds are no longer verified.',
+    });
+  }, [commit]);
+
+  const roomScorerBuilds = useMemo(
+    () => roomScorerBuildsOf(state.results, state.rooms),
+    [state.results, state.rooms],
+  );
+
+  const scorerBuildWarnings = useMemo(
+    () => scorerBuildWarningsFor({ pin: state.scorerBuildPin, rooms: roomScorerBuilds }),
+    [state.scorerBuildPin, roomScorerBuilds],
+  );
 
   useEffect(() => {
     if (!state.relay) {
@@ -2083,6 +2165,11 @@ export function useBridge(): BridgeApi {
     persistenceSavePending,
     retryStatePersistence,
     checkScorerReadiness,
+    scorerBuildPin: state.scorerBuildPin,
+    pinScorerBuild,
+    clearScorerBuildPin,
+    roomScorerBuilds,
+    scorerBuildWarnings,
     beginRelayChange,
     cancelRelayChange,
     changingRelay,

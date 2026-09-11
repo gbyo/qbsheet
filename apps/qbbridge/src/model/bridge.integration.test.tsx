@@ -1011,6 +1011,7 @@ describe('persistence', () => {
       retiredRoomIds: [],
       selectedRoundId: null,
       roundPlans: [],
+      scorerBuildPin: null,
       resultFolder: null,
       results: [],
     });
@@ -2353,5 +2354,109 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+describe('pinned Scorer builds', () => {
+  function stubProductionManifest(body: unknown, status = 200): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      })),
+    );
+  }
+
+  test('pinning records the production manifest and rooms verify against it', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d', builtAt: '2026-09-01' });
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      await publishReviewed(rendered);
+      const [first] = rendered.result.current.state.rooms;
+      const matchId = first.publishedMatchId;
+      expect(matchId).not.toBeNull();
+
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).toMatchObject({
+        version: '0.1.0',
+        commit: 'a1b2c3d',
+      });
+      expect(rendered.result.current.notice?.kind).toBe('good');
+
+      // A room whose game was scored by a different build warns instead of passing quietly.
+      relayResults = [
+        {
+          result_id: 'off-pin-result',
+          room_id: first.id,
+          received_at: '2026-09-11T18:00:00Z',
+          qbj: {
+            version: '2.1.1',
+            objects: [
+              {
+                type: 'Match',
+                id: matchId,
+                _qbtcp: { version: 1, scorer_build: { version: '0.1.0', commit: 'e5f6a7b' } },
+              },
+            ],
+          },
+        },
+      ];
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      const builds = rendered.result.current.roomScorerBuilds;
+      expect(builds.find((entry) => entry.roomId === first.id)?.build).toEqual({
+        version: '0.1.0',
+        commit: 'e5f6a7b',
+      });
+      expect(
+        rendered.result.current.scorerBuildWarnings.some((warning) =>
+          /e5f6a7b.*pinned 0\.1\.0 · a1b2c3d/.test(warning),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('a failed pin fetch leaves the existing pin untouched', async () => {
+    stubProductionManifest({ error: true }, 503);
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/pin is unchanged/);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('clearing the pin stops verification with an explicit warning', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d' });
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).not.toBeNull();
+      act(() => {
+        rendered.result.current.clearScorerBuildPin();
+      });
+      expect(rendered.result.current.scorerBuildPin).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('warn');
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
   });
 });

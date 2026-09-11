@@ -1,43 +1,90 @@
-name: Deploy to GitHub Pages
+# Production promotion for the QBSheet web site (Scorer, about pages, creator).
+#
+# # Why promotion exists
+#
+# Merging to `main` builds and tests everything but must not move production: a tournament that
+# validated one Scorer build must never have its rooms' reloads silently served another because
+# an unrelated change merged mid-event. Production moves only when an operator promotes an
+# explicit ref here, and rollback is the same action pointed at the prior known-good SHA.
+#
+# # What the gates enforce
+#
+# The `gates` job refuses a ref whose own CI check-runs are not all green (or skipped). A ref
+# with failures — or with no runs at all, meaning nothing validated it — cannot be promoted.
+# The promoted artifact is built from that exact ref, and the deployed site carries
+# `scorer-build.json` naming the commit, so the promotion is auditable after the fact and a
+# tournament can pin the build it validated (#1010).
+name: Promote web site to production
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'
-      - '!src/director/**'
-      - 'about/**'
-      - 'game-package-creator/**'
-      - 'public/**'
-      - 'wiki/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'tsconfig.json'
-      - 'tsconfig.build.json'
-      - 'tsconfig.core.json'
-      - 'vite.config.ts'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit SHA or tag to promote (rollback = promote the prior known-good SHA)'
+        required: false
+        default: 'main'
 
 permissions:
   contents: read
   pages: write
   id-token: write
+  checks: read
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
+  gates:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve the promoted ref
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ inputs.ref }}
+        run: |
+          sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${REF}" --jq .sha)"
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
+          echo "Promoting ${REF} at ${sha}"
+
+      - name: Require green CI on the promoted ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/check-runs?per_page=100")"
+          total="$(echo "${runs}" | jq '.total_count')"
+          if [ "${total}" = "0" ]; then
+            echo "::error::No CI check-runs exist for ${SHA}; nothing validated this ref, so it cannot be promoted."
+            exit 1
+          fi
+          bad="$(echo "${runs}" | jq -r '.check_runs[] | select(.status == "completed" and (.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")) | "\(.name): \(.conclusion)"')"
+          if [ -n "${bad}" ]; then
+            echo "::error::Refusing to promote ${SHA} with red CI:"
+            echo "${bad}"
+            exit 1
+          fi
+          pending="$(echo "${runs}" | jq -r '.check_runs[] | select(.status != "completed") | .name')"
+          if [ -n "${pending}" ]; then
+            echo "::error::Refusing to promote ${SHA} while CI is still running:"
+            echo "${pending}"
+            exit 1
+          fi
+          echo "All ${total} check-runs on ${SHA} are green or skipped."
+
   build:
+    needs: gates
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out source
+      - name: Check out the gated commit exactly
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          ref: ${{ needs.gates.outputs.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
@@ -51,6 +98,11 @@ jobs:
 
       - name: Build
         run: BASE_PATH=/ npm run build
+
+      - name: Stamp the promoted commit
+        run: |
+          echo "Promoted ref: ${{ inputs.ref }}"
+          cat dist/scorer-build.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
