@@ -227,6 +227,12 @@ YellowFruit → Import Games Only`}</pre>
           If a room submits a correction, it arrives as a second result with its own filename. The first file
           is never replaced.
         </p>
+        <p>
+          A result is acknowledged by the relay only after its QBJ bytes are safely written to this computer.
+          Seeing it on this screen is not an acknowledgement, and an ACK request that fails is retried on a
+          later poll. This says only that QBBridge saved a local copy — it does not mean YellowFruit imported,
+          reviewed or accepted the game.
+        </p>
       </>
     ),
   },
