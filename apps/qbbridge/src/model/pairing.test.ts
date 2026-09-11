@@ -25,11 +25,11 @@ describe('pairing codes', () => {
     const getRandomValues = vi.spyOn(crypto, 'getRandomValues');
     getRandomValues
       .mockImplementationOnce((values) => {
-        values[0] = 4_200_000_000;
+        (values as Uint32Array)[0] = 4_200_000_000;
         return values;
       })
       .mockImplementationOnce((values) => {
-        values[0] = 123;
+        (values as Uint32Array)[0] = 123;
         return values;
       });
 
