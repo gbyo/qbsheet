@@ -25,6 +25,22 @@
  * cookies, so no `Access-Control-Allow-Credentials` is issued and none is needed.
  */
 
+/**
+ * The origin ordinary browser Scorer is served from.
+ *
+ * `GET manage/tournaments/{id}/scorer-readiness` answers one question — can a scorekeeper who
+ * opens ordinary QBSheet Scorer pair against this relay — and that question is about this fixed
+ * origin. It is not configuration: an operator who changes it has not made a different Scorer
+ * reachable, they have made the readiness check describe a Scorer nobody uses.
+ *
+ * Director states the same constant in `src/director/relay/relayConfig.ts`, and the relay does not
+ * import it from there. It cannot: this directory is deployed by itself, with nothing above it on
+ * disk (see `./credentials.ts`). The two are held equal by
+ * `tests/relay/standaloneBoundary.test.ts` in the monorepo instead, which is the only place that
+ * can see both.
+ */
+export const scoresheetOrigin = 'https://qbsheet.com';
+
 /** Headers a browser scorer or Director console may send on a credentialed relay request. */
 export const CREDENTIALED_REQUEST_HEADERS = [
   'authorization',

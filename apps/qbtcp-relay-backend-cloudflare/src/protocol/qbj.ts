@@ -14,7 +14,7 @@
  * receipt carries the same fingerprint the Rust contract would compute.
  */
 
-import { randomToken, sha256Hex, timingSafeEqual } from '@qbsheet/cloudflare-runtime-core';
+import { randomToken, sha256Hex, timingSafeEqual } from './credentials';
 
 export { randomToken, sha256Hex, timingSafeEqual };
 

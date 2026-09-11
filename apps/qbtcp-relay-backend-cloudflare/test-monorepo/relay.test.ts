@@ -26,7 +26,7 @@ import deriveGame from '../../../src/scoring/deriveGame';
 import type { ScoreEvent } from '../../../src/scoring/ScoreEvents';
 import { event } from '../../../tests/events';
 import { assignmentDocument, greenwood, matchObject, ninetySix } from '../../../tests/qbjDocuments';
-import { scoresheetOrigin } from '../../../src/director/relay/relayConfig';
+import { scoresheetOrigin } from '../src/protocol/cors';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
 import receiptFixture from '../../../tests/fixtures/qbtcp-stream/receipt.json';
 import helloFixture from '../../../tests/fixtures/qbtcp-stream/hello.json';

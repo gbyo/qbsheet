@@ -40,6 +40,9 @@ const nodeTestFiles = [
   'tests/Roster.test.ts',
   'tests/ScoringRulesInput.test.ts',
   'tests/SpreadsheetGame.test.ts',
+  // The QBTCP relay's Deploy-to-Cloudflare boundary. Reads the relay's manifest and module graph
+  // off disk and imports both halves of the duplicated helpers, so it wants no browser.
+  'tests/relay/standaloneBoundary.test.ts',
   // The CI change-impact classifier. Pure path and lockfile analysis, so it wants no browser.
   'tests/ci/impact.test.ts',
   // The release version guards. They read manifests off disk through `import.meta.url`, which
