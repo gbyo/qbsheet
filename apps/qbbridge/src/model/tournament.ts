@@ -7,9 +7,10 @@
  * canonical QBJ records. QBBridge writes no second `.yft` parser; this module picks the handful of
  * things an assignment is built from out of what that importer returns, and drops the rest.
  *
- * Dropped deliberately: standings, rankings, advancement, schedule templates, final placements,
- * statistics, and every game already in the file. QBBridge publishes rounds that have not been
- * played; YellowFruit remains the authority on everything that has.
+ * Dropped deliberately: standings, rankings, calculated advancement, final placements, statistics,
+ * and every game already in the file. The imported schedule template is retained as read-only
+ * context; QBBridge publishes rounds that have not been played and YellowFruit remains the authority
+ * on everything that has.
  *
  * # Two views of the same import
  *
@@ -24,6 +25,7 @@ import {
   readYellowFruitTournament,
   yellowFruitScoringRules,
   type JsonObject,
+  type YellowFruitScheduleDescription,
 } from '@qbsheet/tournament-formats';
 
 export interface BridgePlayer {
@@ -63,6 +65,8 @@ export interface BridgeTournament {
   name: string;
   /** The completed QBJ `ScoringRules` every assignment carries. */
   rules: JsonObject;
+  /** YellowFruit's schedule-template metadata, for context only; this app never executes it. */
+  schedule: YellowFruitScheduleDescription;
   /** YellowFruit's timed flag, or null when the file did not state it. */
   timed: boolean | null;
   /** What the rules helper derived rather than read. Shown, never hidden. */
@@ -165,6 +169,7 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
       id: imported.tournament.id,
       name: imported.tournament.name,
       rules: rulesResult.value.rules,
+      schedule: report.value.schedule,
       timed: rulesResult.value.timed,
       ruleNotes: rulesResult.value.notes,
       teams,

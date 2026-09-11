@@ -1,0 +1,168 @@
+{
+  "version": "2.1.1",
+  "objects": [
+    {
+      "type": "Tournament",
+      "id": "Tournament_Schedule_Metadata",
+      "name": "Schedule Metadata Fixture",
+      "YfData": {
+        "usingScheduleTemplate": true
+      },
+      "scoring_rules": {
+        "YfData": {
+          "timed": false
+        },
+        "maximum_players_per_team": 4,
+        "maximum_regulation_tossup_count": 20,
+        "minimum_overtime_question_count": 3,
+        "overtime_includes_bonuses": false,
+        "total_divisor": 5,
+        "maximum_bonus_score": 30,
+        "bonus_divisor": 10,
+        "minimum_parts_per_bonus": 3,
+        "maximum_parts_per_bonus": 3,
+        "points_per_bonus_part": 10,
+        "bonuses_bounce_back": false,
+        "answer_types": [
+          {
+            "value": 15,
+            "id": "AnswerType_15"
+          },
+          {
+            "value": 10,
+            "id": "AnswerType_10"
+          },
+          {
+            "value": -5,
+            "id": "AnswerType_-5"
+          }
+        ]
+      },
+      "registrations": [
+        {
+          "id": "Registration_Alpha",
+          "name": "Alpha",
+          "teams": [
+            {
+              "id": "Team_Alpha",
+              "name": "Alpha"
+            }
+          ]
+        },
+        {
+          "id": "Registration_Bravo",
+          "name": "Bravo",
+          "teams": [
+            {
+              "id": "Team_Bravo",
+              "name": "Bravo"
+            }
+          ]
+        },
+        {
+          "id": "Registration_Charlie",
+          "name": "Charlie",
+          "teams": [
+            {
+              "id": "Team_Charlie",
+              "name": "Charlie"
+            }
+          ]
+        },
+        {
+          "id": "Registration_Delta",
+          "name": "Delta",
+          "teams": [
+            {
+              "id": "Team_Delta",
+              "name": "Delta"
+            }
+          ]
+        }
+      ],
+      "phases": [
+        {
+          "id": "Phase_Custom",
+          "name": "Custom Rounds",
+          "YfData": {
+            "phaseType": "Prelim",
+            "code": "custom",
+            "wildCardAdvancementRules": [
+              {
+                "tier": 1,
+                "numberOfTeams": 2
+              },
+              {
+                "tier": 2,
+                "numberOfTeams": 1
+              }
+            ],
+            "wildCardRankingMethod": "RecordThanPPB",
+            "topWildCardSeed": 9,
+            "forceNumericRounds": true
+          },
+          "rounds": [
+            {
+              "name": "1",
+              "YfData": {
+                "number": 1
+              }
+            },
+            {
+              "name": "2",
+              "YfData": {
+                "number": 2
+              }
+            }
+          ],
+          "pools": [
+            {
+              "id": "Pool_Custom",
+              "name": "Card System",
+              "position": 1,
+              "YfData": {
+                "size": 4,
+                "roundRobins": 0,
+                "seeds": [1, 4, 5, 8],
+                "hasCarryover": false,
+                "autoAdvanceRules": [
+                  {
+                    "tier": 1,
+                    "ranksThatAdvance": [1, 2],
+                    "rankingRule": "RecordThenPPGThenOther"
+                  }
+                ]
+              },
+              "pool_teams": [
+                {
+                  "YfData": {},
+                  "team": {
+                    "$ref": "Team_Alpha"
+                  }
+                },
+                {
+                  "YfData": {},
+                  "team": {
+                    "$ref": "Team_Bravo"
+                  }
+                },
+                {
+                  "YfData": {},
+                  "team": {
+                    "$ref": "Team_Charlie"
+                  }
+                },
+                {
+                  "YfData": {},
+                  "team": {
+                    "$ref": "Team_Delta"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

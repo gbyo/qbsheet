@@ -45,6 +45,16 @@ describe('loading a YellowFruit file', () => {
 
     // Pools are display context only.
     expect(cony?.poolNames).toEqual(['Prelim A', '7th Place']);
+
+    // The schedule template is available as read-only context, without executing advancement.
+    expect(
+      tournament.schedule.phases.map((phase) => [phase.name, phase.firstRound, phase.lastRound]),
+    ).toEqual([
+      ['Prelims', 1, 5],
+      ['Playoffs', 6, 8],
+    ]);
+    expect(tournament.schedule.phases[0]?.pools.map((pool) => pool.tier)).toEqual([1, 1]);
+    expect(tournament.schedule.phases[1]?.pools.map((pool) => pool.hasCarryover)).toEqual([true, true]);
   });
 
   test('the structural scoring configuration arrives complete', () => {
