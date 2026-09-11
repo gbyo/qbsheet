@@ -67,45 +67,75 @@ function RoomPrintSheet({ data }: { data: RoomPrintData }) {
   return (
     <article className="room-print-sheet" data-room-id={data.roomId}>
       <header className="room-print-sheet__brand">
-        <img className="room-print-sheet__wordmark" src={wordmark} alt="QBSheet Bridge" />
+        <img className="room-print-sheet__wordmark" src={wordmark} alt="QBSheet" />
         <p className="room-print-sheet__tournament">{data.tournamentName}</p>
       </header>
 
-      <h1 className="room-print-sheet__room">{data.roomName}</h1>
-      <p className="room-print-sheet__kicker">Pair this room</p>
-
-      <div className="room-print-sheet__pairing">
-        <Qr url={data.pairingUrl} roomName={data.roomName} />
-        <div className="room-print-sheet__code-block">
-          <p className="room-print-sheet__label">Pairing code</p>
-          <p className="room-print-sheet__code">{data.pairingCode}</p>
-          <p className="room-print-sheet__scan-help">Scan the QR with QBSheet Scorer.</p>
-        </div>
+      <div className="room-print-sheet__heading">
+        <p className="room-print-sheet__eyebrow">Scorekeeper setup</p>
+        <h1 className="room-print-sheet__room">{data.roomName}</h1>
       </div>
 
-      <section className="room-print-sheet__manual" aria-labelledby={`manual-${data.roomId}`}>
-        <h2 id={`manual-${data.roomId}`}>Pair manually</h2>
-        <ol>
+      <div className="room-print-sheet__setup">
+        <section className="room-print-sheet__qr-card" aria-label={`QR code for ${data.roomName}`}>
+          <Qr url={data.pairingUrl} roomName={data.roomName} />
+          <strong>Scan to connect automatically</strong>
+          <span>Open QBSheet&rsquo;s QR scanner and point it at this code.</span>
+        </section>
+
+        <section className="room-print-sheet__instructions" aria-labelledby={`setup-${data.roomId}`}>
+          <h2 id={`setup-${data.roomId}`}>Set up QBSheet</h2>
+          <ol className="room-print-sheet__steps">
+            <li>
+              <strong>Go to qbsheet.com.</strong>
+              <span>Open QBSheet on the device you will use to score this room.</span>
+            </li>
+            <li>
+              <strong>Enter your name.</strong>
+              <span>If QBSheet asks who is scoring, enter your name and continue.</span>
+            </li>
+            <li>
+              <strong>Connect to tournament control.</strong>
+              <span>
+                In <em>Tournament control address</em>, enter:
+              </span>
+              <code className="room-print-sheet__address">{data.tournamentControlUrl}</code>
+            </li>
+            <li>
+              <strong>Enter this access code.</strong>
+              <span>
+                QBSheet labels this field <em>Pairing code</em>. Then choose <em>Pair this room</em>.
+              </span>
+              <code className="room-print-sheet__access-code">{data.pairingCode}</code>
+            </li>
+          </ol>
+        </section>
+      </div>
+
+      <section className="room-print-sheet__troubleshooting" aria-labelledby={`trouble-${data.roomId}`}>
+        <h2 id={`trouble-${data.roomId}`}>Trouble connecting?</h2>
+        <ul>
           <li>
-            Open <strong>qbsheet.com</strong>.
+            <strong>QR won&rsquo;t scan?</strong> Use the four manual steps above. The printed address and
+            code do the same thing as the QR.
           </li>
           <li>
-            Choose <strong>Connect to tournament control</strong>.
+            <strong>Can&rsquo;t reach tournament control?</strong> Check that the device has an internet
+            connection, reload qbsheet.com, and try the address again.
           </li>
           <li>
-            <strong>Tournament control address:</strong> <code>{data.tournamentControlUrl}</code>
+            <strong>Code rejected or wrong room?</strong> Stop and ask tournament staff for this room&rsquo;s
+            current code. Do not use another room&rsquo;s sheet.
           </li>
           <li>
-            <strong>Pairing code:</strong> <code>{data.pairingCode}</code>
+            <strong>Connection drops during a game?</strong> Keep scoring in the same QBSheet game. Do not
+            start a second scoresheet; tell tournament staff when the game is over.
           </li>
-          <li>
-            <strong>Room:</strong> {data.roomName}
-          </li>
-        </ol>
+        </ul>
       </section>
 
       <p className="room-print-sheet__url">
-        <span>Pairing link: </span>
+        <span>Direct pairing link (fallback): </span>
         <a href={data.pairingUrl}>{data.pairingUrl}</a>
       </p>
     </article>

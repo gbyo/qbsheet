@@ -152,6 +152,11 @@ describe('room pairing sheets', () => {
     expect(sheet).toHaveTextContent(tournament.name);
     expect(sheet).toHaveTextContent('Room 204');
     expect(sheet).toHaveTextContent('48213906');
+    expect(sheet).toHaveTextContent('Go to qbsheet.com.');
+    expect(sheet).toHaveTextContent('Enter your name.');
+    expect(sheet).toHaveTextContent('Tournament control address');
+    expect(sheet).toHaveTextContent('Pairing code');
+    expect(sheet).toHaveTextContent('Trouble connecting?');
     expect(screen.getByRole('link', { name: expectedUrl })).toHaveAttribute('href', expectedUrl);
     expect(sheet).not.toHaveTextContent('management-secret');
     expect(sheet).not.toHaveTextContent('setupToken');
