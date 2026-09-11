@@ -16,6 +16,12 @@
  *
  * Corrections are grouped by match, listed, and never auto-resolved: picking a winner
  * between two finals for one game is the operator's call in YellowFruit.
+ *
+ * Rooms with an assignment still out block closing, tiered by aliveness: a room with an
+ * unexpired scorer heartbeat is live mid-game, a room active within the staleness budget
+ * is probably a result still in flight, and a quiet room has no scorer attached. When the
+ * sessions feed cannot be read the tiers collapse to the plain assignment-out blocker —
+ * unknown is reported as unknown, never as quiet.
  */
 
 export interface ReconcileRelayFinal {
@@ -40,6 +46,10 @@ export interface ReconcileRoom {
   name: string;
   /** A room with an assignment still out when the day ends. */
   active: boolean;
+  /** Newest unexpired scorer heartbeat, or null when no scorer is attached right now. */
+  lastHeartbeatAt: string | null;
+  /** Newest relay-side session activity of any kind, or null when never seen. */
+  lastActivityAt: string | null;
 }
 
 export interface ReconcileInput {
@@ -50,7 +60,23 @@ export interface ReconcileInput {
   rooms: ReconcileRoom[];
   pendingPublication: number;
   pendingRecovery: number;
+  /**
+   * True when the sessions feed could not be read, so every heartbeat is unknown rather
+   * than quiet. Active rooms keep the legacy generic blocker instead of claiming a
+   * scorer is gone that might just be unreachable from here.
+   */
+  heartbeatUnknown: boolean;
 }
+
+/**
+ * How long after its last relay-side activity a room still counts as recently active.
+ *
+ * Presence heartbeats expire after sixty seconds, so a live heartbeat is always younger
+ * than that; this budget covers the tail after the heartbeat stops — a scorer between
+ * questions, a game just submitted. Older than this with no heartbeat, the room is quiet
+ * and the blocker says so instead of crying live.
+ */
+export const reconcileHeartbeatStaleAfterMs = 5 * 60 * 1000;
 
 export interface ReconcileCorrection {
   matchId: string;
@@ -167,10 +193,30 @@ export function buildTournamentReconciliation(
     blockers.push(
       `${plural(needsImport.length, 'saved result is', 'saved results are')} not marked imported in YellowFruit.`,
     );
-  if (activeRooms.length > 0)
+  if (activeRooms.length > 0) {
+    // An assignment still out blocks closing, but not every such room is equally live: a
+    // scorer heartbeating right now is a game in progress, a recently active room is
+    // probably a submitted game whose result has not arrived yet, and a quiet room is one
+    // to chase down, not one to wait on. When the sessions feed could not be read there is
+    // no signal at all, and the blocker says nothing about aliveness.
+    const describeRoom = (room: ReconcileRoom): string => {
+      if (input.heartbeatUnknown || room.lastHeartbeatAt !== null) return room.name;
+      const activityMs = room.lastActivityAt !== null ? Date.parse(room.lastActivityAt) : NaN;
+      if (!Number.isNaN(activityMs) && nowMs - activityMs <= reconcileHeartbeatStaleAfterMs)
+        return `${room.name} (active moments ago)`;
+      return `${room.name} (no live heartbeat)`;
+    };
+    const liveNames = activeRooms
+      .filter((room) => !input.heartbeatUnknown && room.lastHeartbeatAt !== null)
+      .map((room) => room.name);
+    const detail = activeRooms.map(describeRoom).join(', ');
     blockers.push(
-      `${plural(activeRooms.length, 'room still has', 'rooms still have')} an assignment out: ${activeRooms.map((room) => room.name).join(', ')}.`,
+      `${plural(activeRooms.length, 'room still has', 'rooms still have')} an assignment out: ${detail}.` +
+        (liveNames.length > 0
+          ? ` ${plural(liveNames.length, 'Scorer is', 'Scorers are')} attached right now in ${liveNames.join(', ')} — do not close mid-game.`
+          : ''),
     );
+  }
   if (input.pendingPublication > 0)
     blockers.push(`${plural(input.pendingPublication, 'publication is', 'publications are')} still pending.`);
   if (input.pendingRecovery > 0)

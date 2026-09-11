@@ -17,6 +17,7 @@ export type GuardedActionId =
   | 'forget-credential'
   | 'remove-room'
   | 'regenerate-code'
+  | 'publish-late-rooms'
   | 'switch-tournament'
   | 'finish-dirty'
   | 'reopen-tournament';
@@ -52,6 +53,11 @@ function guardLabels(id: GuardedActionId, subject: string | null): { label: stri
       return {
         label: `Regenerate pairing code${what}`,
         base: 'The current code stops working as soon as the room is published. Scorers paired with the old code are stranded until they re-pair.',
+      };
+    case 'publish-late-rooms':
+      return {
+        label: `Publish never-published rooms${what}`,
+        base: 'These rooms joined after go-live, so their assignments and pairing codes were never reviewed. Publishing hands their Scorers the official record of play mid-tournament.',
       };
     case 'switch-tournament':
       return {

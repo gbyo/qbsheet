@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
+import type { TournamentReconciliation } from './reconcile';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
@@ -57,6 +58,10 @@ let secureCredentials = new Map<string, string>();
 let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
+/** Rows served by GET manage/sessions: room presence and activity for reconciliation. */
+let relaySessions: unknown[] = [];
+/** Set to make the sessions feed fail, so aliveness degrades to unknown. */
+let sessionsFail = false;
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
@@ -226,6 +231,13 @@ function installFakeTauri(): void {
             }),
           };
         }
+        if (url.endsWith('/sessions')) {
+          if (sessionsFail) return { status: 503, body: JSON.stringify({ message: 'sessions down' }) };
+          return {
+            status: 200,
+            body: JSON.stringify({ tournamentId: relayTournament, sessions: relaySessions }),
+          };
+        }
         if (url.endsWith('/acks')) {
           if (ackFailuresRemaining > 0) {
             ackFailuresRemaining -= 1;
@@ -263,6 +275,8 @@ function installFakeTauri(): void {
 
 beforeEach(() => {
   relayResults = [];
+  relaySessions = [];
+  sessionsFail = false;
   recoveryPackage = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
@@ -2468,6 +2482,313 @@ describe('tournament lifecycle guards', () => {
       rendered.result.current.confirmLiveOverride();
     });
     expect(rendered.result.current.phase).toBe('finished');
+    rendered.unmount();
+  });
+});
+
+describe('live late-join publication guards', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  function mirrorCount(): number {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+  }
+
+  test('a room added while live waits for an explicit override before its first publish', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    act(() => {
+      rendered.result.current.goLive();
+      rendered.result.current.addRoom();
+    });
+    const late = rendered.result.current.state.rooms.at(-1)!;
+    act(() => {
+      rendered.result.current.setRoomTeams(late.id, 'left', 'Team_Hebron Academy');
+      rendered.result.current.setRoomTeams(late.id, 'right', 'Team_Deering');
+    });
+    const mirrorsBefore = mirrorCount();
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    // Blocked before anything reaches the relay, and the override names the late room.
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    const pending = rendered.result.current.pendingLiveOverride;
+    expect(pending?.action.id).toBe('publish-late-rooms');
+    expect(pending?.action.label).toMatch(new RegExp(late.name));
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    // The override opens the review, where the late room stays visible.
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    expect(rendered.result.current.pendingPublicationReview?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ roomId: late.id, message: expect.stringMatching(/never been published/) }),
+      ]),
+    );
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(mirrorCount()).toBeGreaterThan(mirrorsBefore);
+    expect(rendered.result.current.state.rooms.find((room) => room.id === late.id)?.relayPublished).toBe(
+      true,
+    );
+    rendered.unmount();
+  });
+
+  test('room setup for a late room takes the same override', async () => {
+    const rendered = await setUpConnectedRooms();
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCount()).toBe(1);
+    act(() => {
+      rendered.result.current.goLive();
+      rendered.result.current.addRoom();
+    });
+    const late = rendered.result.current.state.rooms.at(-1)!;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    // Pairing codes for a never-published room are content too: held for override.
+    expect(mirrorCount()).toBe(1);
+    expect(rendered.result.current.pendingLiveOverride?.action.id).toBe('publish-late-rooms');
+    expect(rendered.result.current.pendingLiveOverride?.action.label).toMatch(new RegExp(late.name));
+    act(() => {
+      rendered.result.current.confirmLiveOverride();
+    });
+    await waitFor(() => expect(mirrorCount()).toBe(2));
+    rendered.unmount();
+  });
+
+  test('confirming a review after the pairings changed refuses and keeps the relay untouched', async () => {
+    const rendered = await setUpTournament();
+    const [first, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    const mirrorsBefore = mirrorCount();
+    // The plan under review changes while the review is open.
+    act(() => {
+      rendered.result.current.setRoomTeams(first.id, 'right', 'Team_Windham C');
+    });
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/changed after this plan was reviewed/);
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    expect(rendered.result.current.pendingPublicationReview).toBeNull();
+    // Reviewing again publishes the new plan, not the stale one.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(mirrorCount()).toBeGreaterThan(mirrorsBefore);
+    expect(rendered.result.current.state.rooms[0].relayPublished).toBe(true);
+    rendered.unmount();
+  });
+
+  test('confirming a review after the relay moved refuses', async () => {
+    const rendered = await setUpTournament();
+    const [, second] = rendered.result.current.state.rooms;
+    act(() => {
+      rendered.result.current.setRoomTeams(second.id, 'right', 'Team_Hebron Academy');
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    await waitFor(() => expect(rendered.result.current.pendingPublicationReview).not.toBeNull());
+    const mirrorsBefore = mirrorCount();
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev/',
+        tournamentId: relayTournament,
+        setupToken: 'fresh',
+      });
+    });
+    await act(async () => {
+      await rendered.result.current.confirmPublicationReview();
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/relay changed after this plan was reviewed/);
+    expect(mirrorCount()).toBe(mirrorsBefore);
+    rendered.unmount();
+  });
+});
+
+describe('publication critical section', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  function mirrorCalls(): InvokeCall[] {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+  }
+
+  /**
+   * Start a publish with the mirror held open, going through the review when the pairings
+   * warrant one. Resolves once the mirror request is actually in flight.
+   */
+  async function startHeldPublish(
+    rendered: Awaited<ReturnType<typeof setUpTournament>>,
+  ): Promise<{ publishing: Promise<void> }> {
+    let publishing: Promise<void>;
+    act(() => {
+      publishing = rendered.result.current.publish();
+    });
+    await waitFor(() => {
+      if (!deferredMirrorStarted && rendered.result.current.pendingPublicationReview === null)
+        throw new Error('publish has neither opened its review nor reached the relay yet');
+    });
+    if (rendered.result.current.pendingPublicationReview !== null) {
+      act(() => {
+        publishing = rendered.result.current.confirmPublicationReview();
+      });
+      await waitFor(() => expect(deferredMirrorStarted).toBe(true));
+    }
+    // Wrapped: returning the bare promise through an async boundary would adopt it, and
+    // awaiting the helper would park at the held mirror instead of returning it.
+    return { publishing: publishing! };
+  }
+
+  test('a result polled while a publish is in flight lands alongside the publication', async () => {
+    const { result: document } = scoredResultDocument();
+    const rendered = await setUpTournament();
+    const roomId = rendered.result.current.state.rooms[0].id;
+    let releaseMirror: (() => void) | null = null;
+    deferMirror = new Promise<void>((resolve) => {
+      releaseMirror = resolve;
+    });
+    const { publishing } = await startHeldPublish(rendered);
+    relayResults = [
+      { result_id: 'res-1', room_id: roomId, received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+    releaseMirror!();
+    await act(async () => {
+      await publishing;
+    });
+    deferMirror = null;
+    // Both landed: the publication was adopted and the polled result survived it.
+    expect(rendered.result.current.state.rooms[0].relayPublished).toBe(true);
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-1']);
+    expect(rendered.result.current.notice?.message).toMatch(/Published round/);
+    rendered.unmount();
+  });
+
+  test('replacing the relay while a publish is in flight refuses without adopting anything', async () => {
+    const rendered = await setUpTournament();
+    let releaseMirror: (() => void) | null = null;
+    deferMirror = new Promise<void>((resolve) => {
+      releaseMirror = resolve;
+    });
+    const { publishing } = await startHeldPublish(rendered);
+    act(() => {
+      rendered.result.current.beginRelayChange();
+    });
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: 'https://qbtcp-relay-other.workers.dev/',
+        tournamentId: relayTournament,
+        setupToken: 'fresh',
+      });
+    });
+    releaseMirror!();
+    await act(async () => {
+      await publishing;
+    });
+    deferMirror = null;
+    expect(rendered.result.current.notice?.message).toMatch(/relay changed while this round was publishing/);
+    expect(rendered.result.current.auditLog.some((entry) => entry.action === 'publication-confirmed')).toBe(
+      false,
+    );
+    // The only mirror went to the replaced relay; nothing was adopted from it.
+    expect(mirrorCalls()).toHaveLength(1);
+    expect(String(mirrorCalls()[0]?.args.url).startsWith(relayBase)).toBe(true);
+    rendered.unmount();
+  });
+});
+
+describe('reconciliation aliveness', () => {
+  beforeEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  afterEach(() => {
+    localStorage.removeItem('qbbridge.lifecycle.v1');
+    localStorage.removeItem('qbbridge.audit.v1');
+  });
+
+  test('active rooms are tiered by live heartbeat', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    const [first, second] = rendered.result.current.state.rooms;
+    const now = new Date().toISOString();
+    relaySessions = [
+      {
+        session_id: 'session-1',
+        room_id: first.id,
+        updated_at: now,
+        presence: [{ updated_at: now }],
+      },
+    ];
+    let report: TournamentReconciliation | null | undefined;
+    await act(async () => {
+      report = await rendered.result.current.refreshReconciliation();
+    });
+    expect(report).not.toBeNull();
+    expect(report?.safeToClose).toBe(false);
+    const blocker = report?.blockers.find((entry) => entry.includes('assignment out'));
+    expect(blocker).toMatch(/do not close mid-game/);
+    expect(blocker).toMatch(new RegExp(first.name));
+    // The room with no session anywhere is quiet, not live.
+    expect(blocker).toMatch(new RegExp(`${second.name} \\(no live heartbeat\\)`));
+    rendered.unmount();
+  });
+
+  test('an unreadable sessions feed degrades to unknown instead of failing', async () => {
+    const rendered = await setUpTournament();
+    await publishReviewed(rendered);
+    sessionsFail = true;
+    let report: TournamentReconciliation | null | undefined;
+    await act(async () => {
+      report = await rendered.result.current.refreshReconciliation();
+    });
+    expect(report).not.toBeNull();
+    expect(report?.safeToClose).toBe(false);
+    const blocker = report?.blockers.find((entry) => entry.includes('assignment out'));
+    expect(blocker).toBeDefined();
+    expect(blocker).not.toMatch(/heartbeat|mid-game|moments ago/);
     rendered.unmount();
   });
 });

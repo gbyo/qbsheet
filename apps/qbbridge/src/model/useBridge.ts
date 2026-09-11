@@ -29,8 +29,10 @@ import {
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
+  lateJoinedRoomIds,
   planRoomSetup,
   planRound,
+  publicationPlansEqual,
   publicationReviewItems,
   publishRound,
   type PublicationReviewItem,
@@ -57,6 +59,7 @@ import {
   relayCheckScorerReadiness,
   relayFetchRetainedFinals,
   relayFetchResults,
+  relayFetchRoomActivity,
   relayHealth,
   relayProvisionBackup,
   relayRevokeBackup,
@@ -65,6 +68,7 @@ import {
   relayTransfer,
   relayUnackedWindow,
   RelayError,
+  type RelayRoomActivity,
   type BackupProvisionResult,
   type RelayConnection,
   type ScorerReadinessResult,
@@ -260,14 +264,14 @@ export interface BridgeApi {
   regeneratePairingCode(roomId: string): void;
   /** Change which round the table is editing. Changes nothing else, and discards nothing. */
   selectRound(roundId: string): void;
-  publish(): Promise<void>;
+  publish(options?: { lateRoomsOverride?: boolean }): Promise<void>;
   pendingPublicationReview: PendingPublicationReview | null;
   confirmPublicationReview(): Promise<void>;
   cancelPublicationReview(): void;
   assignmentFallback: AssignmentFallback | null;
   exportAssignmentFallback(): Promise<boolean>;
   /** Publish room identities and pairing hashes without sending any match assignments. */
-  publishRoomSetup(): Promise<void>;
+  publishRoomSetup(options?: { lateRoomsOverride?: boolean }): Promise<void>;
   roomStatus(room: Room): RoomStatus;
   warnings: ReturnType<typeof pairingWarnings>;
 
@@ -421,6 +425,7 @@ function stateWithRelay(current: BridgeState, connection: RelayConnection): Brid
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
+  const tournamentRef = useRef<BridgeTournament | null>(null);
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
@@ -596,6 +601,10 @@ export function useBridge(): BridgeApi {
     stateRef.current = state;
   }, [state]);
 
+  useEffect(() => {
+    tournamentRef.current = tournament;
+  }, [tournament]);
+
   const [phase, setPhase] = useState<TournamentPhase>(loadTournamentPhase);
   const phaseRef = useRef<TournamentPhase>(phase);
   const [pendingLiveOverride, setPendingLiveOverride] = useState<{
@@ -678,6 +687,16 @@ export function useBridge(): BridgeApi {
     try {
       const { finals, truncated } = await relayFetchRetainedFinals(connection);
       if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return null;
+      // Aliveness is advisory: a sessions failure degrades the room tiers to unknown
+      // rather than failing the whole reconciliation.
+      let activity = new Map<string, RelayRoomActivity>();
+      let heartbeatUnknown = false;
+      try {
+        activity = await relayFetchRoomActivity(connection);
+      } catch {
+        heartbeatUnknown = true;
+      }
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return null;
       const live = stateRef.current;
       const report = buildTournamentReconciliation({
         relayFinals: finals.map((entry) => ({
@@ -703,9 +722,12 @@ export function useBridge(): BridgeApi {
             room.relayPublished ||
             room.pendingPairingCode !== null ||
             live.roundPlans.some((plan) => plan.pairings.some((pairing) => pairing.roomId === room.id)),
+          lastHeartbeatAt: activity.get(room.id)?.lastHeartbeatAt ?? null,
+          lastActivityAt: activity.get(room.id)?.lastActivityAt ?? null,
         })),
         pendingPublication: (pendingPublicationReviewRef.current ? 1 : 0) + live.pendingRoomRemovals.length,
         pendingRecovery: relayCredentialSavePending || persistenceSavePending ? 1 : 0,
+        heartbeatUnknown,
       });
       setReconciliation(report);
       return report;
@@ -1624,6 +1646,19 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  /**
+   * Send one plan through the relay's compare-and-swap. The critical section is exactly
+   * the mirror PUT between the two relay-identity checks, and the checks sort every
+   * out-of-band operation into two kinds:
+   *
+   * - Relay replacement (or any revision move) inside the section refuses: the checks
+   *   compare the connection and revision before and after, and a mismatch drops the
+   *   local adoption without touching rooms.
+   * - Result polls, recovery saves, and room edits merge safely by construction: polls
+   *   and recovery only ever add results, and publication adoption is a functional merge
+   *   over exactly the rooms in the plan, so a poll landing mid-publish loses nothing
+   *   either way.
+   */
   const publishPlan = useCallback(
     async (input: {
       plan: PublishPlan;
@@ -1720,6 +1755,48 @@ export function useBridge(): BridgeApi {
     const review = pendingPublicationReviewRef.current;
     if (!review) return;
     rememberPublicationReview(null);
+    // The review is a snapshot, not a lock: the relay may have moved, or the operator may
+    // have edited pairings, rooms, or the tournament file while it was open. Re-derive the
+    // plan from current state and refuse on any drift, so confirm can only send exactly what
+    // was reviewed. (The relay-moved half is re-checked inside publishPlan against the review
+    // snapshot; this re-check names the cause before anything is sent.)
+    // Occupancy verification plugs in here once that feed exists (#1021): at this point the
+    // plan is known-fresh, so per-room holder checks would evaluate the exact room set about
+    // to be written. Until then revision continuity is the only controller-identity signal.
+    const current = stateRef.current;
+    if (
+      !sameRelayConnection(review.snapshot.connection, connectionOf(current)) ||
+      review.snapshot.revision !== current.relay?.revision
+    ) {
+      setNotice({
+        kind: 'bad',
+        message: 'The relay changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
+    const tournamentNow = tournamentRef.current;
+    const roundNow = tournamentNow?.rounds.find((entry) => entry.id === review.roundId);
+    if (!tournamentNow || !roundNow) {
+      setNotice({
+        kind: 'bad',
+        message: 'The tournament file changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
+    const freshPlan = planRound(
+      tournamentNow,
+      roundNow,
+      current.rooms,
+      pairingsForRound(current.roundPlans, review.roundId),
+      current.pendingRoomRemovals,
+    );
+    if (!publicationPlansEqual(review.plan, freshPlan)) {
+      setNotice({
+        kind: 'bad',
+        message: 'The pairings or room setup changed after this plan was reviewed. Review it again.',
+      });
+      return;
+    }
     await publishPlan({
       plan: review.plan,
       tournamentName: review.tournamentName,
@@ -1751,114 +1828,253 @@ export function useBridge(): BridgeApi {
     setNotice({ kind: 'warn', message: 'Round publication canceled. The room selections are unchanged.' });
   }, [rememberPublicationReview]);
 
-  const publish = useCallback(async () => {
-    const current = stateRef.current;
-    const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
-    if (!tournament || !round) {
-      setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
-      return;
-    }
-    const pairings = pairingsForRound(current.roundPlans, round.id);
-    const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
-    const snapshot = publicationSnapshot(current);
-    const teamNameForReview = (id: string): string =>
-      tournament.teams.find((team) => team.id === id)?.name ?? id;
-    const reviewItems = publicationReviewItems(
-      plan,
-      [
-        ...pairingWarnings(current.rooms, pairings, teamNameForReview),
-        ...schedulePairingWarnings(tournament, round, current.rooms, pairings),
-      ],
-      current.rooms,
-      pairings,
-      teamNameForReview,
-    );
-    // A round with no playable matchup is not a round publication. Keep the explicit room-setup
-    // action as the only way to send a clear-only mirror; otherwise a mistaken empty round could
-    // silently revoke every room's active assignment.
-    if (plan.assignments.length === 0) {
-      setNotice({
-        kind: 'bad',
-        message:
-          'No room in this round has two teams chosen. Use “Publish Room Setup” to publish room codes or clear assignments.',
+  /**
+   * Carry an already-built round publication through the review-or-send tail. Split out of
+   * `publish` so the live late-join guard can route through the override dialog and resume
+   * here: the guard names a separate worker rather than calling the guarded callback back,
+   * which keeps the override continuation a plain reference the hooks lint can follow.
+   */
+  const executeRoundPublish = useCallback(
+    async (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): Promise<void> => {
+      const { tournamentName, roundId, roundName, plan, snapshot } = built;
+      await publishPlan({
+        plan,
+        tournamentName,
+        successKind: plan.cleared.length > 0 ? 'warn' : 'good',
+        successMessage: (outcome) => {
+          const clearedNote =
+            plan.cleared.length > 0
+              ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
+              : '';
+          return `Published round ${roundName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+        },
+        failureMessage: 'Round not published — the rooms still have whatever they had before.',
+        missingRelayMessage: 'Connect the relay before publishing a round.',
+        assignmentFallback: {
+          tournamentName,
+          roundId,
+          roundName,
+          plan,
+          exportedRoomIds: [],
+          exportDirectory: null,
+        },
+        snapshot,
       });
-      return;
-    }
-    const previousFallback = assignmentFallbackRef.current;
-    if (
-      previousFallback?.roundId === round.id &&
-      previousFallback.exportedRoomIds.length > 0 &&
-      plan.assignments.length > 0
-    ) {
-      reviewItems.unshift({
-        roomId: plan.assignments[0]?.roomId ?? round.id,
-        roomName: plan.assignments[0]?.roomName ?? `Round ${round.displayName}`,
-        message:
-          'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
-      });
-    }
-    const assignmentFallback: AssignmentFallback = {
-      tournamentName: tournament.name,
-      roundId: round.id,
-      roundName: round.displayName,
-      plan,
-      exportedRoomIds: [],
-      exportDirectory: null,
-    };
-    if (reviewItems.length > 0) {
+    },
+    [publishPlan],
+  );
+
+  const openRoundReview = useCallback(
+    (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): void => {
       rememberPublicationReview({
+        tournamentName: built.tournamentName,
+        roundId: built.roundId,
+        roundName: built.roundName,
+        plan: built.plan,
+        items: built.reviewItems,
+        snapshot: built.snapshot,
+      });
+      setNotice({
+        kind: 'warn',
+        message: `Round ${built.roundName} has ${built.reviewItems.length} issue(s) to review before publishing.`,
+      });
+    },
+    [rememberPublicationReview],
+  );
+
+  /**
+   * The fallback warning plus the review-or-send tail of a round publish, shared by the
+   * direct path and the late-join override continuation.
+   */
+  const publishTail = useCallback(
+    async (built: {
+      tournamentName: string;
+      roundId: string;
+      roundName: string;
+      plan: PublishPlan;
+      reviewItems: PublicationReviewItem[];
+      snapshot: PublicationSnapshot;
+    }): Promise<void> => {
+      const { roundId, roundName, plan, reviewItems } = built;
+      const previousFallback = assignmentFallbackRef.current;
+      if (
+        previousFallback?.roundId === roundId &&
+        previousFallback.exportedRoomIds.length > 0 &&
+        plan.assignments.length > 0
+      ) {
+        reviewItems.unshift({
+          roomId: plan.assignments[0]?.roomId ?? roundId,
+          roomName: plan.assignments[0]?.roomName ?? `Round ${roundName}`,
+          message:
+            'Fallback assignment files for this round were already exported. Publishing the same games to the relay can create two active writers; continue only if no scorer opened those files.',
+        });
+      }
+      if (reviewItems.length > 0) {
+        openRoundReview(built);
+        return;
+      }
+      rememberPublicationReview(null);
+      await executeRoundPublish(built);
+    },
+    [executeRoundPublish, openRoundReview, rememberPublicationReview],
+  );
+
+  const publish = useCallback(
+    async (options?: { lateRoomsOverride?: boolean }) => {
+      const current = stateRef.current;
+      const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
+      if (!tournament || !round) {
+        setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
+        return;
+      }
+      const pairings = pairingsForRound(current.roundPlans, round.id);
+      const plan = planRound(tournament, round, current.rooms, pairings, current.pendingRoomRemovals);
+      const snapshot = publicationSnapshot(current);
+      const teamNameForReview = (id: string): string =>
+        tournament.teams.find((team) => team.id === id)?.name ?? id;
+      const reviewItems = publicationReviewItems(
+        plan,
+        [
+          ...pairingWarnings(current.rooms, pairings, teamNameForReview),
+          ...schedulePairingWarnings(tournament, round, current.rooms, pairings),
+        ],
+        current.rooms,
+        pairings,
+        teamNameForReview,
+      );
+      // A round with no playable matchup is not a round publication. Keep the explicit room-setup
+      // action as the only way to send a clear-only mirror; otherwise a mistaken empty round could
+      // silently revoke every room's active assignment.
+      if (plan.assignments.length === 0) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'No room in this round has two teams chosen. Use “Publish Room Setup” to publish room codes or clear assignments.',
+        });
+        return;
+      }
+      // A room added while live was never vetted: publishing hands its Scorer the official
+      // record of play mid-tournament. Once live this needs an explicit override naming the
+      // rooms, and the late rooms stay visible as review items after the override.
+      const lateRoomIds =
+        phaseRef.current === 'live'
+          ? lateJoinedRoomIds(
+              plan.assignments.map((assignment) => assignment.roomId),
+              current.rooms,
+            )
+          : [];
+      if (lateRoomIds.length > 0) {
+        const lateNames = lateRoomIds.map(
+          (roomId) => current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+        );
+        for (const roomId of lateRoomIds) {
+          reviewItems.push({
+            roomId,
+            roomName: current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+            message:
+              'This room joined after go-live and has never been published. Its assignment is leaving review for the first time mid-tournament.',
+          });
+        }
+        if (!options?.lateRoomsOverride) {
+          const built = {
+            tournamentName: tournament.name,
+            roundId: round.id,
+            roundName: round.displayName,
+            plan,
+            reviewItems,
+            snapshot,
+          };
+          requestGuarded('publish-late-rooms', lateNames.join(', '), () => void publishTail(built));
+          return;
+        }
+      }
+      await publishTail({
         tournamentName: tournament.name,
         roundId: round.id,
         roundName: round.displayName,
         plan,
-        items: reviewItems,
+        reviewItems,
         snapshot,
       });
-      setNotice({
-        kind: 'warn',
-        message: `Round ${round.displayName} has ${reviewItems.length} issue(s) to review before publishing.`,
-      });
-      return;
-    }
-    rememberPublicationReview(null);
-    await publishPlan({
-      plan,
-      tournamentName: tournament.name,
-      successKind: plan.cleared.length > 0 ? 'warn' : 'good',
-      successMessage: (outcome) => {
-        const clearedNote =
-          plan.cleared.length > 0
-            ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
-            : '';
-        return `Published round ${round.displayName} to ${outcome.assignments.length} room(s).${clearedNote}`;
-      },
-      failureMessage: 'Round not published — the rooms still have whatever they had before.',
-      missingRelayMessage: 'Connect the relay before publishing a round.',
-      assignmentFallback,
-      snapshot,
-    });
-  }, [publishPlan, rememberPublicationReview, tournament]);
+    },
+    [publishTail, requestGuarded, tournament],
+  );
 
-  const publishRoomSetup = useCallback(async () => {
-    const current = stateRef.current;
-    if (!current.tournamentName) {
-      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before publishing room setup.' });
-      return;
-    }
-    const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
-    await publishPlan({
-      plan,
-      tournamentName: current.tournamentName,
-      successKind: 'good',
-      successMessage: () => {
-        const removed = plan.publications.length - current.rooms.length;
-        const removedNote = removed > 0 ? ` Cleared ${removed} removed room(s) from the relay.` : '';
-        return `Published room setup for ${current.rooms.length} room(s). Pairing codes are now active and room tokens remain valid.${removedNote}`;
-      },
-      failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
-      missingRelayMessage: 'Connect the relay before publishing room setup.',
-    });
-  }, [publishPlan]);
+  /**
+   * Send an already-built room-setup plan. Split out of `publishRoomSetup` for the same
+   * reason as the round worker: the late-join override continuation names this instead of
+   * calling the guarded callback back.
+   */
+  const executeRoomSetupPublish = useCallback(
+    async (input: { plan: PublishPlan; tournamentName: string; roomCount: number }): Promise<void> => {
+      const { plan, tournamentName, roomCount } = input;
+      await publishPlan({
+        plan,
+        tournamentName,
+        successKind: 'good',
+        successMessage: () => {
+          const removed = plan.publications.length - roomCount;
+          const removedNote = removed > 0 ? ` Cleared ${removed} removed room(s) from the relay.` : '';
+          return `Published room setup for ${roomCount} room(s). Pairing codes are now active and room tokens remain valid.${removedNote}`;
+        },
+        failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
+        missingRelayMessage: 'Connect the relay before publishing room setup.',
+      });
+    },
+    [publishPlan],
+  );
+
+  const publishRoomSetup = useCallback(
+    async (options?: { lateRoomsOverride?: boolean }) => {
+      const current = stateRef.current;
+      if (!current.tournamentName) {
+        setNotice({ kind: 'bad', message: 'Load a YellowFruit file before publishing room setup.' });
+        return;
+      }
+      const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
+      // Room setup publishes pairing codes, so a never-published room joining mid-tournament
+      // takes the same override as a round publish. Tombstones clear removed rooms and need none.
+      const lateRoomIds =
+        phaseRef.current === 'live'
+          ? lateJoinedRoomIds(
+              plan.publications.map((publication) => publication.roomId),
+              current.rooms,
+            )
+          : [];
+      if (lateRoomIds.length > 0 && !options?.lateRoomsOverride) {
+        const lateNames = lateRoomIds.map(
+          (roomId) => current.rooms.find((room) => room.id === roomId)?.name ?? roomId,
+        );
+        const built = {
+          plan,
+          tournamentName: current.tournamentName,
+          roomCount: current.rooms.length,
+        };
+        requestGuarded('publish-late-rooms', lateNames.join(', '), () => void executeRoomSetupPublish(built));
+        return;
+      }
+      await executeRoomSetupPublish({
+        plan,
+        tournamentName: current.tournamentName,
+        roomCount: current.rooms.length,
+      });
+    },
+    [executeRoomSetupPublish, requestGuarded],
+  );
 
   const pollResults = useCallback(async () => {
     const current = stateRef.current;

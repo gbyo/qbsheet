@@ -45,7 +45,22 @@ function input(overrides: Partial<ReconcileInput> = {}): ReconcileInput {
     rooms: [],
     pendingPublication: 0,
     pendingRecovery: 0,
+    heartbeatUnknown: false,
     ...overrides,
+  };
+}
+
+function room(
+  roomId: string,
+  name: string,
+  overrides: Partial<{ lastHeartbeatAt: string | null; lastActivityAt: string | null }> = {},
+) {
+  return {
+    roomId,
+    name,
+    active: true as const,
+    lastHeartbeatAt: overrides.lastHeartbeatAt ?? null,
+    lastActivityAt: overrides.lastActivityAt ?? null,
   };
 }
 
@@ -136,7 +151,7 @@ describe('final tournament reconciliation', () => {
   test('active rooms and pending operations block the close', () => {
     const report = buildTournamentReconciliation(
       input({
-        rooms: [{ roomId: 'room-9', name: 'Room 9', active: true }],
+        rooms: [room('room-9', 'Room 9')],
         pendingPublication: 1,
         pendingRecovery: 1,
       }),
@@ -145,6 +160,70 @@ describe('final tournament reconciliation', () => {
     expect(report.safeToClose).toBe(false);
     expect(report.activeRooms).toHaveLength(1);
     expect(report.blockers).toHaveLength(3);
+  });
+
+  test('a heartbeating room blocks as live mid-game', () => {
+    const report = buildTournamentReconciliation(
+      input({
+        rooms: [
+          room('live', 'Room Live', {
+            lastHeartbeatAt: new Date(NOW - 30 * 1000).toISOString(),
+            lastActivityAt: new Date(NOW - 30 * 1000).toISOString(),
+          }),
+        ],
+      }),
+      NOW,
+    );
+    expect(report.safeToClose).toBe(false);
+    expect(report.blockers.some((blocker) => blocker.includes('do not close mid-game'))).toBe(true);
+    expect(report.blockers.some((blocker) => blocker.includes('Room Live'))).toBe(true);
+  });
+
+  test('a recently active room without a heartbeat reads as in flight, not live', () => {
+    const report = buildTournamentReconciliation(
+      input({
+        rooms: [
+          room('recent', 'Room Recent', {
+            lastActivityAt: new Date(NOW - 2 * 60 * 1000).toISOString(),
+          }),
+        ],
+      }),
+      NOW,
+    );
+    expect(report.safeToClose).toBe(false);
+    expect(report.blockers.some((blocker) => blocker.includes('Room Recent (active moments ago)'))).toBe(
+      true,
+    );
+    expect(report.blockers.some((blocker) => blocker.includes('mid-game'))).toBe(false);
+  });
+
+  test('a quiet room is named as having no live heartbeat', () => {
+    const report = buildTournamentReconciliation(
+      input({
+        rooms: [
+          room('quiet', 'Room Quiet', {
+            lastActivityAt: new Date(NOW - 3 * HOUR).toISOString(),
+          }),
+        ],
+      }),
+      NOW,
+    );
+    expect(report.safeToClose).toBe(false);
+    expect(report.blockers.some((blocker) => blocker.includes('Room Quiet (no live heartbeat)'))).toBe(true);
+  });
+
+  test('an unreadable sessions feed degrades to the plain assignment-out blocker', () => {
+    const report = buildTournamentReconciliation(
+      input({
+        rooms: [room('mystery', 'Room Mystery')],
+        heartbeatUnknown: true,
+      }),
+      NOW,
+    );
+    expect(report.safeToClose).toBe(false);
+    const blocker = report.blockers.find((entry) => entry.includes('Room Mystery'));
+    expect(blocker).toBeDefined();
+    expect(blocker).not.toMatch(/heartbeat|mid-game|moments ago/);
   });
 
   test('unimported saves are named so YellowFruit import can finish them', () => {
