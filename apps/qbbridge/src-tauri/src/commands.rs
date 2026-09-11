@@ -182,6 +182,33 @@ pub struct RelayResponse {
     pub body: String,
 }
 
+fn relay_response_too_large() -> CommandError {
+    CommandError::new(
+        "relay_response_too_large",
+        "The relay answered with more data than QBSheet Bridge will read.",
+    )
+}
+
+fn append_relay_response_chunk(body: &mut Vec<u8>, chunk: &[u8]) -> CommandResult<()> {
+    if chunk.len() > MAX_RELAY_RESPONSE_BYTES.saturating_sub(body.len()) {
+        return Err(relay_response_too_large());
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
+}
+
+async fn read_relay_response_body(mut response: reqwest::Response) -> CommandResult<Vec<u8>> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|error| CommandError::new("relay_unreachable", error.to_string()))?
+    {
+        append_relay_response_chunk(&mut body, &chunk)?;
+    }
+    Ok(body)
+}
+
 /// One HTTP call to the relay.
 ///
 /// Deliberately dumb: it does not know what a mirror is, retries nothing, and interprets no status
@@ -237,16 +264,7 @@ pub async fn relay_request(
         .await
         .map_err(|error| CommandError::new("relay_unreachable", error.to_string()))?;
     let status = response.status().as_u16();
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|error| CommandError::new("relay_unreachable", error.to_string()))?;
-    if bytes.len() > MAX_RELAY_RESPONSE_BYTES {
-        return Err(CommandError::new(
-            "relay_response_too_large",
-            "The relay answered with more data than QBSheet Bridge will read.",
-        ));
-    }
+    let bytes = read_relay_response_body(response).await?;
     Ok(RelayResponse {
         status,
         body: String::from_utf8_lossy(&bytes).into_owned(),
@@ -255,7 +273,37 @@ pub async fn relay_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{safe_file_name, write_result_file};
+    use super::{
+        append_relay_response_chunk, safe_file_name, write_result_file, MAX_RELAY_RESPONSE_BYTES,
+    };
+
+    #[test]
+    fn relay_response_under_bound_is_accepted() {
+        let mut body = Vec::new();
+        append_relay_response_chunk(&mut body, b"{}")
+            .expect("a response under the bound should be accepted");
+        assert_eq!(body, b"{}");
+    }
+
+    #[test]
+    fn relay_response_at_bound_is_accepted() {
+        let mut body = Vec::new();
+        let chunk = vec![b'x'; MAX_RELAY_RESPONSE_BYTES];
+
+        append_relay_response_chunk(&mut body, &chunk)
+            .expect("a response at the bound should be accepted");
+        assert_eq!(body.len(), MAX_RELAY_RESPONSE_BYTES);
+    }
+
+    #[test]
+    fn relay_response_over_bound_is_rejected_before_appending() {
+        let mut body = vec![b'x'; MAX_RELAY_RESPONSE_BYTES - 1];
+
+        let error = append_relay_response_chunk(&mut body, b"xx")
+            .expect_err("a response over the bound should be refused");
+        assert_eq!(error.code, "relay_response_too_large");
+        assert_eq!(body.len(), MAX_RELAY_RESPONSE_BYTES - 1);
+    }
 
     #[test]
     fn plain_names_are_accepted() {
