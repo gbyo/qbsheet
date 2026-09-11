@@ -291,9 +291,7 @@ describe('the shell', () => {
     });
 
     await user.click(screen.getByRole('button', { name: '+ Room' }));
-    expect(
-      screen.getByText(/cannot save the current tournament state on this machine/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/cannot save the current tournament state on this machine/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry saving local state' })).toBeInTheDocument();
 
     const name = screen.getByRole('textbox', { name: 'Name of Room 1' });
