@@ -250,6 +250,10 @@ function scenarioState(): DirectorState {
       ],
       source: 'manual',
       detailedStats: 'complete',
+      // Exact match TUH, as ingest persists it: team TUH and GP derive from
+      // this game fact, never from summed player exposure (#746).
+      tossupsRead: 20,
+      overtimeTossupsRead: 0,
     },
     {
       // Forfeit: Dorman forfeits to Wren B.
