@@ -199,6 +199,8 @@ describe('buildCanonicalRoundStatsSnapshot', () => {
       powers: null,
       superpowers: null,
       bonuses: null,
+      bouncebacks: null,
+      lightning: null,
       maximumBonusScore: null,
       source: 'unknown',
     });

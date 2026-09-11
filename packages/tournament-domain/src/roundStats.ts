@@ -5,6 +5,7 @@ import {
   acceptedGameRecords,
   bouncebackPartsHeardForTeam,
   type DirectorStandingsOptions,
+  historicalDefinitionResolved,
   isPureForfeitPlaceholder,
   rulesForGame,
 } from './stats.js';
@@ -151,20 +152,27 @@ export function deriveRoundStats(
         if (isPureForfeitPlaceholder(game)) continue;
         const rules = rulesForGame(state, game);
         const [left, right] = game.scores;
-        // A side with no breakdown where the stored definition defines no bouncebacks
-        // is N/A rather than unknown; a game excused on both sides contributes
-        // nothing at all (#755).
+        // A side whose proven definition defines no bouncebacks is N/A rather
+        // than unknown — whether the stored breakdown is an omitted null or a
+        // scorer-exported numeric zero; a game excused on both sides contributes
+        // nothing at all (#755, matching accumulateBouncebackSide in stats.ts).
+        // Entered nonzero detail under a proven-off definition is contradictory,
+        // never N/A: points aggregate as-entered while parts decline below.
+        // Provenance means a resolved snapshot, never a bare echoed digest.
+        const provenOff = !!rules && !rules.bouncebacks && historicalDefinitionResolved(state, game);
         const sideExcused = (bouncebacks: number | null | undefined): boolean =>
-          // An omitted breakdown is the legacy zero shorthand (aggregates
-          // as-entered below); only explicit null takes the N/A path, matching
-          // accumulateBouncebackSide in stats.ts.
-          bouncebacks === null && !!rules && !rules.bouncebacks && !!game.definitionDigest;
+          (bouncebacks === null || bouncebacks === 0) && provenOff;
         if (!left || !right) {
           bouncebackPartsKnown = false;
           bouncebackUnknownGames += 1;
           continue;
         }
         if (sideExcused(left.bouncebacks) && sideExcused(right.bouncebacks)) continue;
+        if (provenOff) {
+          bouncebackPartsKnown = false;
+          bouncebackUnknownGames += 1;
+          continue;
+        }
         const leftHeard =
           rules && gameDetailedCountsKnown(game)
             ? bouncebackPartsHeardForTeam(right.bonuses, right.bonusPoints, rules)

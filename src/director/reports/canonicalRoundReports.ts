@@ -101,6 +101,10 @@ function qbjRoundDefinition(game: GameRecord): RoundStatDefinition | null {
     rules.bonuses_bounce_back === true ||
     positiveNumber(rules.minimum_parts_per_bonus) !== null;
   const minimumOvertime = finiteNumber(rules.minimum_overtime_question_count);
+  const bouncebacks =
+    rules.bonuses_bounce_back === true ? true : rules.bonuses_bounce_back === false ? false : null;
+  const lightningCount = positiveNumber(rules.lightning_count_per_team);
+  const lightning = lightningCount === null ? null : lightningCount > 0;
 
   return {
     regulationTossups: regulation,
@@ -110,6 +114,8 @@ function qbjRoundDefinition(game: GameRecord): RoundStatDefinition | null {
     powers,
     superpowers,
     bonuses,
+    bouncebacks,
+    lightning,
     maximumBonusScore: bonuses ? inferredMaximumBonusScore : null,
     source: 'qbj',
   };
@@ -132,6 +138,8 @@ function unknownHistoricalDefinition(): RoundStatDefinition {
     powers: null,
     superpowers: null,
     bonuses: null,
+    bouncebacks: null,
+    lightning: null,
     maximumBonusScore: null,
     source: 'unknown',
   };

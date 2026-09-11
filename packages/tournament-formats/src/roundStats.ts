@@ -18,6 +18,10 @@ export interface RoundStatDefinition {
   powers: boolean | null;
   superpowers: boolean | null;
   bonuses: boolean | null;
+  /** Whether bouncebacks apply; null when the definition cannot prove it. */
+  bouncebacks: boolean | null;
+  /** Whether lightning rounds apply; null when the definition cannot prove it. */
+  lightning: boolean | null;
   maximumBonusScore: number | null;
   source: 'game' | 'qbj' | 'legacy-tournament' | 'unknown';
 }

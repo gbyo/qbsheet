@@ -14,7 +14,10 @@ import {
   derivePlayerStandings,
   deriveRoundStats,
   deriveTeamStandings,
+  normalizedPointsPerX,
   playerPptuh,
+  regulationDerivationForTeam,
+  scopeScoringApplicability,
   type TeamStanding,
 } from '../src/index.js';
 import {
@@ -24,9 +27,13 @@ import {
   fractionalGpMode,
   irregularBonusMode,
   lightningMode,
+  mixedBouncebackMode,
   mixedDefinitionsMode,
+  mixedLightningMode,
   multiRoundMode,
+  overtimeKnownPointsMode,
   overtimeMode,
+  overtimeUnknownSplitMode,
   partialMode,
   standardMode,
   superpowerMode,
@@ -233,5 +240,82 @@ describe('parity matrix goldens', () => {
     // 105 under the modern 15-point power plus 115 under the legacy 20-point power.
     expect(a1.points).toBe(220);
     expect(standingOf(state, 'a')).toMatchObject({ pointsFor: 620 });
+  });
+
+  test('15. mixed bounceback history: the off game storing 0 is N/A, not parts', () => {
+    const state = mixedBouncebackMode();
+    const games = acceptedGameRecords(state, {});
+    // The scope still offers bouncebacks because game-1 uses them.
+    expect(scopeScoringApplicability(state, games).bouncebacks).toBe(true);
+    const a = standingOf(state, 'a');
+    expect(a).toMatchObject({ gamesPlayed: 2, pointsFor: 650 });
+    // Game-2's scorer-exported zero contributes no points, parts, or knownness.
+    expect(a).toMatchObject({
+      bouncebacksKnown: true,
+      bouncebackPoints: 30,
+      bouncebackPartsHeard: 9,
+      bouncebackPartsConverted: 3,
+    });
+    expect(a.bouncebackConversion).toBeCloseTo(1 / 3, 12);
+    expect(a.totalBonusConversion).toBeCloseTo(23 / 39, 12);
+    const b = standingOf(state, 'b');
+    expect(b).toMatchObject({
+      bouncebacksKnown: true,
+      bouncebackPoints: 0,
+      bouncebackPartsHeard: 10,
+      bouncebackPartsConverted: 0,
+    });
+    expect(b.bouncebackConversion).toBe(0);
+    // Round aggregation skips the N/A game: 9 + 10 heard, 3 + 0 converted.
+    const round = deriveRoundStats(state).find((entry) => entry.roundId === 'round-1')!;
+    expect(round.bouncebacks).toBe(30);
+    expect(round.bouncebackPartsHeard).toBe(19);
+    expect(round.bouncebackPartsConverted).toBe(3);
+    expect(round.bouncebackConversion).toBeCloseTo(3 / 19, 12);
+  });
+
+  test('16. mixed lightning history: the off game without a field is N/A, not unknown', () => {
+    const state = mixedLightningMode();
+    const games = acceptedGameRecords(state, {});
+    expect(scopeScoringApplicability(state, games).lightning).toBe(true);
+    const a = standingOf(state, 'a');
+    expect(a).toMatchObject({ gamesPlayed: 2, lightningKnown: true, lightningPoints: 40 });
+    // Denominator counts only the lightning-applicable non-forfeit game.
+    expect(a.lightningGames).toBe(1);
+    const b = standingOf(state, 'b');
+    expect(b).toMatchObject({ lightningKnown: true, lightningPoints: 30, lightningGames: 1 });
+  });
+
+  test('17. overtime with a known split: normalized Pts/X excludes overtime points', () => {
+    const state = overtimeKnownPointsMode();
+    const a = standingOf(state, 'a');
+    // Numerator: 330 total minus 30 known overtime = 300 regulation points.
+    const regulation = regulationDerivationForTeam(a);
+    expect(regulation).toMatchObject({ overtimePoints: 30, regulationPoints: 300 });
+    // Denominator: 20 tossups read minus 2 overtime = 18 regulation TUH.
+    expect(a).toMatchObject({ tossupsHeardRegulation: 18, tossupsHeardRegulationKnown: true });
+    const x = scopeScoringApplicability(state, acceptedGameRecords(state, {})).regulationTossups;
+    expect(x).toBe(20);
+    // Final value excludes overtime; final-score scaling would give 330.
+    expect(normalizedPointsPerX(regulation.regulationPoints, a.tossupsHeardRegulation, x)).toBeCloseTo(
+      (300 / 18) * 20,
+      12,
+    );
+    expect(normalizedPointsPerX(regulation.regulationPoints, a.tossupsHeardRegulation, x)).not.toBeCloseTo(
+      330,
+      12,
+    );
+  });
+
+  test('18. overtime-capable game with an unknown split: Pts/X declines, never guesses', () => {
+    const state = overtimeUnknownSplitMode();
+    const a = standingOf(state, 'a');
+    expect(a.overtimePointsKnown).toBe(false);
+    // Regulation TUH is still known, but the points numerator is not.
+    expect(a).toMatchObject({ tossupsHeardRegulation: 18, tossupsHeardRegulationKnown: true });
+    const regulation = regulationDerivationForTeam(a);
+    expect(regulation.overtimePoints).toBeNull();
+    expect(regulation.regulationPoints).toBeNull();
+    expect(normalizedPointsPerX(regulation.regulationPoints, a.tossupsHeardRegulation, 20)).toBeNull();
   });
 });

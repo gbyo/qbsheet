@@ -15,6 +15,8 @@ const baseDefinition: RoundStatDefinition = {
   powers: true,
   superpowers: false,
   bonuses: true,
+  bouncebacks: false,
+  lightning: false,
   maximumBonusScore: 30,
   source: 'game',
 };
