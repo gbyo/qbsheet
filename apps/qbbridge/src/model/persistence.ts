@@ -22,6 +22,7 @@
 import type { Room, RoomTombstone } from './rooms';
 import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
+import { normalizeScorerBuildPin, type ScorerBuildPin } from './scorerBuilds';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /**
@@ -99,6 +100,11 @@ export interface BridgeState {
    * only the rooms with a side chosen. Changing the selected round never touches this.
    */
   roundPlans: RoundPlan[];
+  /**
+   * The production Scorer build this tournament validated, pinned before Round 1. Room builds
+   * reported by results are verified against it; null means no build has been pinned yet.
+   */
+  scorerBuildPin: ScorerBuildPin | null;
   resultFolder: string | null;
   results: StoredResult[];
 }
@@ -117,6 +123,7 @@ export function emptyState(): BridgeState {
     retiredRoomIds: [],
     selectedRoundId: null,
     roundPlans: [],
+    scorerBuildPin: null,
     resultFolder: null,
     results: [],
   };
@@ -334,6 +341,7 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     roundPlans: dedupeRoundPlans(
       selectedRoundId !== null && pairings.length > 0 ? [{ roundId: selectedRoundId, pairings }] : [],
     ),
+    scorerBuildPin: normalizeScorerBuildPin(state.scorerBuildPin),
     resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
     results: restoreResults(state.results),
   };
@@ -342,7 +350,11 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
 /** Read a version 2 state, normalizing every field the same way the migration does. */
 function readV2(state: Partial<BridgeState> & Record<string, unknown>): BridgeState {
   const migrated = migrateV1(state);
-  return { ...migrated, roundPlans: normalizeRoundPlans(state.roundPlans) };
+  return {
+    ...migrated,
+    roundPlans: normalizeRoundPlans(state.roundPlans),
+    scorerBuildPin: normalizeScorerBuildPin(state.scorerBuildPin),
+  };
 }
 
 export function loadState(): BridgeState {

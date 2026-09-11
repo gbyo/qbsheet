@@ -21,6 +21,7 @@ import {
   scoresheetOrigin,
 } from '../../../../src/director/relay/relayConfig';
 import { generateTournamentId } from '../model/relay';
+import { roomScorerBuildStatus, scorerBuildLabel } from '../model/scorerBuilds';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
 
@@ -34,6 +35,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   const [setupToken, setSetupToken] = useState('');
   const [confirmForget, setConfirmForget] = useState(false);
   const [confirmRevokeBackup, setConfirmRevokeBackup] = useState(false);
+  const [confirmClearPin, setConfirmClearPin] = useState(false);
   const [backupLabel, setBackupLabel] = useState('Tournament backup controller');
   const [backupPassphrase, setBackupPassphrase] = useState('');
   const [importPassphrase, setImportPassphrase] = useState('');
@@ -247,6 +249,48 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                 {readinessStatus === 'checking' ? 'Checking…' : 'Check Scorer Readiness'}
               </Button>
             </div>
+
+            <div className="scorer-readiness" aria-live="polite">
+              <h3>Pinned Scorer build</h3>
+              {bridge.scorerBuildPin ? (
+                <p>
+                  This tournament runs <strong>{scorerBuildLabel(bridge.scorerBuildPin)}</strong>, pinned{' '}
+                  {bridge.scorerBuildPin.pinnedAt.slice(0, 10)}. Every result arrives stamped with the build
+                  that scored it; anything else warns below.
+                </p>
+              ) : (
+                <p className="faint">
+                  No build pinned. Pin the production build validated before Round 1 so rooms that reload onto
+                  a different build warn instead of silently diverging.
+                </p>
+              )}
+              <div className="row">
+                <Button onPress={() => void bridge.pinScorerBuild()} isDisabled={bridge.busy}>
+                  {bridge.scorerBuildPin ? 'Re-pin current production build' : 'Pin current production build'}
+                </Button>
+                {bridge.scorerBuildPin ? (
+                  <Button variant="quiet" onPress={() => setConfirmClearPin(true)} isDisabled={bridge.busy}>
+                    Clear pin…
+                  </Button>
+                ) : null}
+              </div>
+              {bridge.roomScorerBuilds.length > 0 ? (
+                <ul>
+                  {bridge.roomScorerBuilds.map((entry) => (
+                    <li key={entry.roomId}>
+                      {entry.roomName}: {roomScorerBuildStatus(entry)}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              {bridge.scorerBuildWarnings.length > 0 ? (
+                <ul>
+                  {bridge.scorerBuildWarnings.map((warning, index) => (
+                    <li key={index}>{warning}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </>
         ) : null}
 
@@ -385,6 +429,22 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
         This invalidates the provisioned backup credential without deleting rooms, retained finals, or the
         primary relay credential. Create a new encrypted package before the next event if another backup
         laptop is needed.
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={confirmClearPin}
+        title="Clear the pinned Scorer build?"
+        confirmLabel="Clear Pin"
+        confirmVariant="danger"
+        onCancel={() => setConfirmClearPin(false)}
+        onConfirm={() => {
+          setConfirmClearPin(false);
+          bridge.clearScorerBuildPin();
+        }}
+      >
+        This disables build verification for the tournament: rooms that reload onto a different Scorer build
+        will no longer warn, and off-pin rooms will pass quietly. Re-pin the validated production build before
+        Round 1 if clearing was a mistake.
       </ConfirmDialog>
 
       <ConfirmDialog

@@ -76,6 +76,11 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     planStatus: () => 'no-game' as const,
     roundProgress: { roundId: null, assigned: 0 },
     phaseRoundProgress: [],
+    scorerBuildPin: null,
+    pinScorerBuild: vi.fn(async () => undefined),
+    clearScorerBuildPin: vi.fn(),
+    roomScorerBuilds: [],
+    scorerBuildWarnings: [],
     publish: async () => {},
     pendingPublicationReview: null,
     confirmPublicationReview: async () => {},
@@ -196,5 +201,51 @@ describe('Scorer-origin readiness UX', () => {
     render(<RoomsView bridge={bridgeFor('ready')} />);
 
     expect(screen.getByRole('img', { name: /Pairing QR code for Room 1/ })).toBeInTheDocument();
+  });
+});
+
+describe('pinned Scorer build UX', () => {
+  test('offers to pin, then shows the pin with per-room builds and warnings', async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor('ready');
+    const { rerender } = render(<SetupView bridge={bridge} />);
+
+    expect(screen.getByRole('heading', { name: 'Pinned Scorer build' })).toBeInTheDocument();
+    expect(screen.getByText(/No build pinned/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Pin current production build' }));
+    expect(bridge.pinScorerBuild).toHaveBeenCalledOnce();
+
+    rerender(
+      <SetupView
+        bridge={{
+          ...bridge,
+          scorerBuildPin: { version: '0.1.0', commit: 'a1b2c3d', pinnedAt: '2026-09-11T18:00:00Z' },
+          roomScorerBuilds: [
+            {
+              roomId: 'room-1',
+              roomName: 'Room 1',
+              matchId: 'Match_1',
+              hasResult: true,
+              build: { version: '0.1.0', commit: 'e5f6a7b' },
+            },
+          ],
+          scorerBuildWarnings: [
+            'Room “Room 1” runs 0.1.0 · e5f6a7b but this tournament pinned 0.1.0 · a1b2c3d.',
+          ],
+        }}
+      />,
+    );
+    expect(screen.getAllByText(/0\.1\.0 · a1b2c3d/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Room 1:/)).toBeInTheDocument();
+    expect(screen.getByText(/runs 0\.1\.0 · e5f6a7b but this tournament pinned/)).toBeInTheDocument();
+    // Clearing is confirmed: opening the dialog keeps the pin, cancel keeps it too.
+    await user.click(screen.getByRole('button', { name: 'Clear pin…' }));
+    expect(screen.getByRole('alertdialog', { name: 'Clear the pinned Scorer build?' })).toBeInTheDocument();
+    expect(bridge.clearScorerBuildPin).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(bridge.clearScorerBuildPin).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Clear pin…' }));
+    await user.click(screen.getByRole('button', { name: 'Clear Pin' }));
+    expect(bridge.clearScorerBuildPin).toHaveBeenCalledOnce();
   });
 });

@@ -387,6 +387,7 @@ export class QbtcpRelay extends DurableObject<Env> {
         operator_name TEXT,
         updated_at TEXT NOT NULL DEFAULT '',
         expires_at TEXT NOT NULL DEFAULT '',
+        scorer_build TEXT,
         PRIMARY KEY (room_id, device_id)
       );
       CREATE TABLE IF NOT EXISTS relay_event (
@@ -430,6 +431,13 @@ export class QbtcpRelay extends DurableObject<Env> {
         // Already present on this Durable Object. Any other schema error is actionable and must
         // stop the request rather than leave a partially migrated authorization surface running.
       }
+    }
+    // Presence rows written before scorer builds were recorded have no `scorer_build`; they read
+    // as unknown rather than failing. Same idempotent discipline as above.
+    try {
+      this.sql.exec('ALTER TABLE presence ADD COLUMN scorer_build TEXT');
+    } catch (error) {
+      if (!String(error).toLowerCase().includes('duplicate column name')) throw error;
     }
   }
 
@@ -1606,6 +1614,7 @@ export class QbtcpRelay extends DurableObject<Env> {
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as {
       device_id?: unknown;
       operator_name?: unknown;
+      client?: unknown;
     };
     const deviceId = this.deviceId(request, body);
     const headerOperator = request.headers.get(OPERATOR_NAME_HEADER);
@@ -1614,6 +1623,9 @@ export class QbtcpRelay extends DurableObject<Env> {
       ...(typeof headerOperator === 'string' && typeof body.operator_name !== 'string'
         ? { operator_name: headerOperator }
         : {}),
+      // The scorer's self-reported build rides the heartbeat so management can name rooms
+      // running an off-pin build before they finish scoring. Validated and bounded at store.
+      ...(body.client !== undefined ? { client: body.client } : {}),
     });
     return json({ recorded: true }, 200, cors);
   }
@@ -2498,12 +2510,29 @@ export class QbtcpRelay extends DurableObject<Env> {
         )
         .toArray();
       const presence = this.sql
-        .exec<{ device_id: string; operator_name: string | null; updated_at: string; expires_at: string }>(
-          'SELECT device_id, operator_name, updated_at, expires_at FROM presence WHERE room_id = ? AND expires_at > ?',
+        .exec<{
+          device_id: string;
+          operator_name: string | null;
+          updated_at: string;
+          expires_at: string;
+          scorer_build: string | null;
+        }>(
+          'SELECT device_id, operator_name, updated_at, expires_at, scorer_build FROM presence WHERE room_id = ? AND expires_at > ?',
           session.room_id,
           now,
         )
-        .toArray();
+        .toArray()
+        .map((row) => {
+          // Only unexpired heartbeats reach here; a missing build is unknown, never a mismatch.
+          const scorerBuild = this.storedScorerBuild(row.scorer_build);
+          return {
+            device_id: row.device_id,
+            operator_name: row.operator_name,
+            updated_at: row.updated_at,
+            expires_at: row.expires_at,
+            ...(scorerBuild ? { scorer_build: scorerBuild } : {}),
+          };
+        });
       let progress: unknown = null;
       if (session.progress_body) {
         try {
@@ -3482,6 +3511,38 @@ export class QbtcpRelay extends DurableObject<Env> {
    * never lands in SQLite, so there is nothing to re-present. These internal variants take the
    * proven room directly and run the same storage path as their HTTP siblings.
    */
+  /**
+   * The scorer build a presence payload claims, as storable JSON — or null when the sender is
+   * old, silent, or lying in a way validation cannot honor. A missing build is unknown, never
+   * a mismatch: pre-build scorers predate the field entirely. Malformed builds are dropped while
+   * the presence itself is still recorded, because a heartbeat with a bad label is still proof
+   * the room is alive.
+   */
+  private presenceScorerBuild(payload: Record<string, unknown>): string | null {
+    const client = payload.client;
+    if (client === null || typeof client !== 'object' || Array.isArray(client)) return null;
+    const record = client as Record<string, unknown>;
+    const version = cleanBoundedText(record.version ?? record.build, 100);
+    const commit = cleanBoundedText(record.commit, 100);
+    if (version === null || commit === null) return null;
+    return JSON.stringify({ version, commit });
+  }
+
+  /** Parse a stored presence build back to `{version, commit}`; null when absent or corrupt. */
+  private storedScorerBuild(stored: string | null): { version: string; commit: string } | null {
+    if (typeof stored !== 'string' || stored === '') return null;
+    try {
+      const parsed: unknown = JSON.parse(stored);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+      const record = parsed as Record<string, unknown>;
+      if (typeof record.version !== 'string' || record.version === '') return null;
+      if (typeof record.commit !== 'string' || record.commit === '') return null;
+      return { version: record.version, commit: record.commit };
+    } catch {
+      return null;
+    }
+  }
+
   private async postPresenceForRoom(
     roomId: string,
     deviceId: string,
@@ -3490,15 +3551,17 @@ export class QbtcpRelay extends DurableObject<Env> {
     this.requireTournament();
     this.guardWrites();
     const operatorName = cleanBoundedText(payload.operator_name, 200);
+    const scorerBuild = this.presenceScorerBuild(payload);
     const now = nowIso();
     this.sql.exec(
-      'INSERT INTO presence (room_id, device_id, operator_name, updated_at, expires_at) VALUES (?, ?, ?, ?, ?) ' +
-        'ON CONFLICT(room_id, device_id) DO UPDATE SET operator_name = excluded.operator_name, updated_at = excluded.updated_at, expires_at = excluded.expires_at',
+      'INSERT INTO presence (room_id, device_id, operator_name, updated_at, expires_at, scorer_build) VALUES (?, ?, ?, ?, ?, ?) ' +
+        'ON CONFLICT(room_id, device_id) DO UPDATE SET operator_name = excluded.operator_name, updated_at = excluded.updated_at, expires_at = excluded.expires_at, scorer_build = excluded.scorer_build',
       roomId,
       deviceId,
       operatorName,
       now,
       new Date(Date.now() + PRESENCE_TTL_MS).toISOString(),
+      scorerBuild,
     );
     this.wrote();
     this.bump('presence_writes');

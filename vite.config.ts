@@ -79,8 +79,27 @@ export function isScorerPrecacheAsset(fileName: string): boolean {
   return (
     !fileName.endsWith('.map') &&
     !fileName.startsWith('about/') &&
-    !fileName.startsWith('game-package-creator/')
+    !fileName.startsWith('game-package-creator/') &&
+    // The build manifest is deployment metadata, not shell: tournament control fetches it to learn
+    // which build production serves, and a cached copy would answer with last week's build.
+    fileName !== 'scorer-build.json'
   );
+}
+
+/**
+ * The immutable identity production serves at `scorer-build.json`.
+ *
+ * Same commit-derived identity the bundle and the service worker carry, as a fetchable document
+ * so tournament control can pin the exact build it validated. The file is regenerated every
+ * build and never cached (see `isScorerPrecacheAsset` and the worker's fetch bypass): a stale
+ * manifest would pin the wrong build, silently.
+ */
+export function scorerBuildManifest(identity: IBuildIdentity): {
+  version: string;
+  commit: string;
+  builtAt: string;
+} {
+  return { version: identity.version, commit: identity.commit, builtAt: identity.builtAt };
 }
 
 /** The element in `about/index.html` that the rendered page is placed inside, and the only edit made to it. */
@@ -375,6 +394,11 @@ function serviceWorkerPlugin(identity: IBuildIdentity): Plugin {
         fileName: 'sw.js',
         source: serviceWorkerSource(buildId, precache, identity),
       });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'scorer-build.json',
+        source: JSON.stringify(scorerBuildManifest(identity), null, 2),
+      });
     },
   };
 }
@@ -453,6 +477,10 @@ self.addEventListener('fetch', (event) => {
   // assets in the cache whose activation is coordinated around an active game. Every document on
   // the standalone surfaces is excluded by its own prefix, including the creator.
   if (relativePath === 'about' || relativePath.startsWith('about/') || relativePath === 'game-package-creator' || relativePath.startsWith('game-package-creator/')) return;
+  // The build manifest is read by tournament control to learn which build production serves. It is
+  // never precached and never served from cache: an old worker answering with its own build's
+  // manifest would pin the tournament to the past while showing the present.
+  if (relativePath === 'scorer-build.json') return;
 
   if (request.mode === 'navigate') {
     // The application has no path routes. Only the scope root (and an explicit index.html) is a

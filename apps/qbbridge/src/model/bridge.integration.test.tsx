@@ -57,6 +57,11 @@ let secureCredentials = new Map<string, string>();
 let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
+interface RelaySessionRow {
+  room_id: string;
+  presence: { scorer_build?: { version: string; commit: string } }[];
+}
+let relaySessions: RelaySessionRow[] = [];
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
@@ -251,6 +256,9 @@ function installFakeTauri(): void {
           const rows = [...relayResultsByBase.entries()].find(([base]) => url.startsWith(base))?.[1];
           return { status: 200, body: JSON.stringify({ results: rows ?? relayResults }) };
         }
+        if (url.endsWith('/sessions')) {
+          return { status: 200, body: JSON.stringify({ sessions: relaySessions }) };
+        }
         return { status: 404, body: '{}' };
       }
       default:
@@ -265,6 +273,7 @@ beforeEach(() => {
   relayResults = [];
   recoveryPackage = null;
   relayResultsByBase = new Map();
+  relaySessions = [];
   existingPaths = new Set();
   claimFails = false;
   mirrorFails = false;
@@ -1011,6 +1020,7 @@ describe('persistence', () => {
       retiredRoomIds: [],
       selectedRoundId: null,
       roundPlans: [],
+      scorerBuildPin: null,
       resultFolder: null,
       results: [],
     });
@@ -2353,5 +2363,180 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+describe('pinned Scorer builds', () => {
+  function stubProductionManifest(body: unknown, status = 200): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+      })),
+    );
+  }
+
+  test('pinning records the production manifest and rooms verify against it', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d', builtAt: '2026-09-01' });
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      await publishReviewed(rendered);
+      const [first] = rendered.result.current.state.rooms;
+      const matchId = first.publishedMatchId;
+      expect(matchId).not.toBeNull();
+
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).toMatchObject({
+        version: '0.1.0',
+        commit: 'a1b2c3d',
+      });
+      expect(rendered.result.current.notice?.kind).toBe('good');
+
+      // A room whose game was scored by a different build warns instead of passing quietly.
+      relayResults = [
+        {
+          result_id: 'off-pin-result',
+          room_id: first.id,
+          received_at: '2026-09-11T18:00:00Z',
+          qbj: {
+            version: '2.1.1',
+            objects: [
+              {
+                type: 'Match',
+                id: matchId,
+                _qbtcp: { version: 1, scorer_build: { version: '0.1.0', commit: 'e5f6a7b' } },
+              },
+            ],
+          },
+        },
+      ];
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      const builds = rendered.result.current.roomScorerBuilds;
+      expect(builds.find((entry) => entry.roomId === first.id)?.build).toEqual({
+        version: '0.1.0',
+        commit: 'e5f6a7b',
+      });
+      expect(
+        rendered.result.current.scorerBuildWarnings.some((warning) =>
+          /e5f6a7b.*pinned 0\.1\.0 · a1b2c3d/.test(warning),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('a failed pin fetch leaves the existing pin untouched', async () => {
+    stubProductionManifest({ error: true }, 503);
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/pin is unchanged/);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('a pin that cannot be persisted is session-only, never reported as success', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d' });
+    const rendered = await setUpTournament();
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('storage failed while pinning');
+    });
+    try {
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      // The in-memory pin applies, but success must mean durable: no green notice.
+      expect(rendered.result.current.scorerBuildPin).toMatchObject({
+        version: '0.1.0',
+        commit: 'a1b2c3d',
+      });
+      expect(rendered.result.current.notice?.kind).toBe('bad');
+      expect(rendered.result.current.notice?.message).toMatch(/session only/);
+      expect(rendered.result.current.persistenceSavePending).toBe(true);
+
+      setItem.mockRestore();
+      act(() => {
+        expect(rendered.result.current.retryStatePersistence()).toBe(true);
+      });
+      expect(rendered.result.current.persistenceSavePending).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('a live heartbeat on the wrong build warns before any result exists', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d' });
+    const rendered = await setUpTournament();
+    try {
+      await setUpRound(rendered, 0);
+      await publishReviewed(rendered);
+      const [first] = rendered.result.current.state.rooms;
+
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).not.toBeNull();
+
+      // No result has been scored or polled yet, but the room's heartbeat already reports a
+      // build the tournament did not pin.
+      relaySessions = [
+        { room_id: first.id, presence: [{ scorer_build: { version: '0.1.0', commit: 'e5f6a7b' } }] },
+      ];
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      expect(
+        rendered.result.current.scorerBuildWarnings.some((warning) =>
+          /currently runs 0\.1\.0 · e5f6a7b but this tournament pinned 0\.1\.0 · a1b2c3d/.test(warning),
+        ),
+      ).toBe(true);
+
+      // The room reloads onto the pin: the next poll goes quiet without any result scored.
+      relaySessions = [
+        { room_id: first.id, presence: [{ scorer_build: { version: '0.1.0', commit: 'a1b2c3d' } }] },
+      ];
+      await act(async () => {
+        await rendered.result.current.pollResults();
+      });
+      expect(rendered.result.current.scorerBuildWarnings).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
+  });
+
+  test('clearing the pin stops verification with an explicit warning', async () => {
+    stubProductionManifest({ version: '0.1.0', commit: 'a1b2c3d' });
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.pinScorerBuild();
+      });
+      expect(rendered.result.current.scorerBuildPin).not.toBeNull();
+      act(() => {
+        rendered.result.current.clearScorerBuildPin();
+      });
+      expect(rendered.result.current.scorerBuildPin).toBeNull();
+      expect(rendered.result.current.notice?.kind).toBe('warn');
+    } finally {
+      vi.unstubAllGlobals();
+      rendered.unmount();
+    }
   });
 });

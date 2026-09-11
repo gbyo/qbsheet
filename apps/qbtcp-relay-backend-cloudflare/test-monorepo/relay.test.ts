@@ -1905,6 +1905,61 @@ describe('director sync', () => {
     ).json()) as { sessions: unknown[] };
     expect(sessions.sessions).toEqual([]);
   });
+
+  it('carries presence scorer builds to management; old and malformed builds stay unknown', async () => {
+    const { tournamentId, management, roomToken } = await setupRoom();
+    await openSession(tournamentId, roomToken);
+
+    async function sessionsFor(
+      room: string,
+    ): Promise<{ room_id: string; presence: { scorer_build?: { version: string; commit: string } }[] }[]> {
+      const response = await SELF.fetch(`${manageBase(tournamentId)}/sessions`, {
+        headers: manageHeaders(management),
+      });
+      expect(response.status).toBe(200);
+      const body = (await response.json()) as {
+        sessions: { room_id: string; presence: { scorer_build?: { version: string; commit: string } }[] }[];
+      };
+      return body.sessions.filter((session) => session.room_id === room);
+    }
+
+    // A current scorer's heartbeat carries its build to management.
+    const heartbeat = await SELF.fetch(`${tournamentBase(tournamentId)}/presence`, {
+      method: 'POST',
+      headers: roomHeaders(roomToken),
+      body: JSON.stringify({
+        device_id: 'device-1',
+        client: { name: 'QBSheet', version: '0.1.0', build: 'a1b2c3d', commit: 'a1b2c3d' },
+      }),
+    });
+    expect(heartbeat.status).toBe(200);
+    let presence = (await sessionsFor('room-a'))[0]?.presence ?? [];
+    expect(presence).toHaveLength(1);
+    expect(presence[0].scorer_build).toEqual({ version: '0.1.0', commit: 'a1b2c3d' });
+
+    // A pre-build scorer stays unknown rather than mismatched; its heartbeat still lands.
+    const legacy = await SELF.fetch(`${tournamentBase(tournamentId)}/presence`, {
+      method: 'POST',
+      headers: roomHeaders(roomToken, 'device-legacy'),
+      body: JSON.stringify({ device_id: 'device-legacy', ready: true }),
+    });
+    expect(legacy.status).toBe(200);
+
+    // A malformed build is dropped while the heartbeat itself is still recorded.
+    const malformed = await SELF.fetch(`${tournamentBase(tournamentId)}/presence`, {
+      method: 'POST',
+      headers: roomHeaders(roomToken, 'device-bad'),
+      body: JSON.stringify({ device_id: 'device-bad', client: { version: '0.1.0' } }),
+    });
+    expect(malformed.status).toBe(200);
+
+    presence = (await sessionsFor('room-a'))[0]?.presence ?? [];
+    expect(presence).toHaveLength(3);
+    expect(presence.find((row) => row.scorer_build !== undefined)?.scorer_build).toEqual({
+      version: '0.1.0',
+      commit: 'a1b2c3d',
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
