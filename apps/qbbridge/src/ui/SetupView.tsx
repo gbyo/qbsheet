@@ -354,6 +354,55 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
         </div>
       </section>
 
+      <section className="panel">
+        <h2>Tournament readiness</h2>
+        <p className="muted">
+          One test of the actual setup before Round 1: the loaded file, the relay, Scorer pairing, the result
+          folder, the credential store, and recovery crypto. It uses synthetic probes only — nothing is
+          published, saved, acknowledged, or stored under a real name.
+        </p>
+        <div className="row">
+          <Button
+            variant="primary"
+            onPress={() => void bridge.runReadinessTest()}
+            isDisabled={bridge.busy || bridge.readinessRunning}
+          >
+            {bridge.readinessRunning ? 'Testing…' : 'Run readiness test'}
+          </Button>
+        </div>
+        {bridge.readinessReport ? (
+          <div aria-live="polite" style={{ marginTop: 'var(--qbs-space-3)' }}>
+            <p>
+              <strong>
+                {bridge.readinessReport.overall === 'pass'
+                  ? `Ready: ${bridge.readinessReport.checks.length} checks green.`
+                  : 'Not ready: fix the failed checks before Round 1.'}
+              </strong>{' '}
+              <span className="faint">
+                Tested {new Date(bridge.readinessReport.ranAt).toLocaleString()} · QBBridge{' '}
+                {bridge.readinessReport.bridgeVersion}
+              </span>
+            </p>
+            <ul className="plain">
+              {bridge.readinessReport.checks.map((entry) => (
+                <li key={entry.id}>
+                  <strong>
+                    {entry.status === 'pass' ? 'Pass' : entry.status === 'fail' ? 'Fail' : 'Skip'}:
+                  </strong>{' '}
+                  {entry.label} — {entry.detail}
+                  {entry.fix ? (
+                    <>
+                      {' '}
+                      <span className="faint">Fix: {entry.fix}</span>
+                    </>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
+
       <ConfirmDialog
         isOpen={confirmForget}
         title="Forget this relay credential?"

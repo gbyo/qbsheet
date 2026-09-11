@@ -13,4 +13,5 @@ commands.allow = [
   "write_result_file",
   "relay_request",
   "write_assignment_file",
+  "probe_result_destination",
 ]

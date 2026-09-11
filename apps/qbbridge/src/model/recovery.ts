@@ -10,8 +10,10 @@
 import { normalizeState, type BridgeState } from './persistence';
 import { isRelayTournamentId, normalizeRelayBaseUrl } from '../../../../src/director/relay/relayConfig';
 
-const packageFormat = 'qbsheet-bridge-recovery';
-const packageVersion = 1;
+/** Outer marker of an encrypted recovery package; exported so readiness can prove the crypto path. */
+export const packageFormat = 'qbsheet-bridge-recovery';
+/** Package schema version; exported so readiness can prove the crypto path. */
+export const packageVersion = 1;
 const kdfIterations = 210_000;
 const aad = 'qbsheet-bridge-recovery-v1';
 

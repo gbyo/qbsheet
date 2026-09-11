@@ -21,6 +21,7 @@ import {
   loadRelayCredential,
   openRecoveryPackage,
   openYellowFruitFile,
+  probeResultDestination,
   relayCredentialKey,
   storeRelayCredential,
   writeAssignmentFile,
@@ -54,6 +55,7 @@ import {
   type RelayConnection,
   type ScorerReadinessResult,
 } from './relay';
+import { runReadinessTest as runReadinessChecks, type ReadinessReport } from './readiness';
 import {
   resultFileContents,
   resultFileName,
@@ -196,6 +198,11 @@ export interface BridgeApi {
   retryStatePersistence(): boolean;
   /** Re-run the management-authenticated check for the fixed qbsheet.com Scorer origin. */
   checkScorerReadiness(): Promise<void>;
+  /** Last tournament readiness report: redacted, persisted locally, null before the first run. */
+  readinessReport: ReadinessReport | null;
+  readinessRunning: boolean;
+  /** Run the one-button readiness test against the live setup. Reentrancy-safe. */
+  runReadinessTest(): Promise<void>;
   /** Show the relay setup form without touching the stored relay. */
   beginRelayChange(): void;
   /** Close the setup form and keep whatever relay was already stored. */
@@ -383,10 +390,47 @@ function stateWithRelay(current: BridgeState, connection: RelayConnection): Brid
   };
 }
 
+/** Local-storage key for the last readiness report. Redacted by construction, never relayed. */
+const readinessReportStorageKey = 'qbbridge.readiness.last';
+
+/** Restore the last redacted readiness report. Unknown shapes read as "never ran". */
+function loadReadinessReport(): ReadinessReport | null {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(readinessReportStorageKey);
+  } catch {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const report = parsed as { overall?: unknown; checks?: unknown; ranAt?: unknown };
+    if ((report.overall !== 'pass' && report.overall !== 'fail') || !Array.isArray(report.checks)) {
+      return null;
+    }
+    return parsed as ReadinessReport;
+  } catch {
+    return null;
+  }
+}
+
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
+  // Mirrors for the readiness runner, which reads outside render.
+  const tournamentRef = useRef<BridgeTournament | null>(null);
+  const loadWarningsRef = useRef<string[]>([]);
+  useEffect(() => {
+    tournamentRef.current = tournament;
+  }, [tournament]);
+  useEffect(() => {
+    loadWarningsRef.current = loadWarnings;
+  }, [loadWarnings]);
+  const [readinessReport, setReadinessReport] = useState<ReadinessReport | null>(loadReadinessReport);
+  const [readinessRunning, setReadinessRunning] = useState(false);
+  const readinessRunningRef = useRef(false);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
   const [scorerReadiness, setScorerReadiness] = useState<ScorerReadinessState | null>(() =>
@@ -1129,6 +1173,92 @@ export function useBridge(): BridgeApi {
     if (readinessKeyRef.current === connectionKey(connection)) return;
     void refreshScorerReadiness(connection);
   }, [refreshScorerReadiness, state]);
+
+  /**
+   * Store a synthetic secret, read it back, compare, and delete it. The readiness credential
+   * check runs entirely through here so no real credential is ever touched by the test.
+   */
+  const credentialRoundTrip = useCallback(async (key: string, secret: string): Promise<void> => {
+    await storeRelayCredential(key, secret);
+    try {
+      const loaded = await loadRelayCredential(key);
+      if (loaded !== secret) {
+        throw new Error('The secure store returned a different secret than was written.');
+      }
+    } finally {
+      await deleteRelayCredential(key);
+    }
+  }, []);
+
+  /**
+   * Run the one-button tournament readiness test against the live setup and keep the
+   * redacted report. Reentrant calls join nothing: a second press while a run is in
+   * flight is ignored, and a relay disconnected mid-run fails its checks instead of
+   * reporting on a half-torn-down connection.
+   */
+  const runReadinessTest = useCallback(async (): Promise<void> => {
+    if (readinessRunningRef.current) return;
+    readinessRunningRef.current = true;
+    setReadinessRunning(true);
+    try {
+      const loaded = tournamentRef.current;
+      const warnings = loadWarningsRef.current;
+      const current = stateRef.current;
+      const report = await runReadinessChecks({
+        tournament: loaded
+          ? {
+              id: loaded.id,
+              teamCount: loaded.teams.length,
+              playerCount: loaded.playerCount,
+              roundCount: loaded.rounds.length,
+              relevantWarningCount: warnings.length,
+              tournament: loaded,
+              yftPath: current.yftPath,
+            }
+          : null,
+        relay: current.relay
+          ? {
+              baseUrl: current.relay.baseUrl,
+              tournamentId: current.relay.tournamentId,
+              epoch: current.relay.epoch,
+              revision: current.relay.revision,
+            }
+          : null,
+        resultFolder: current.resultFolder,
+        nativeHost: isNativeHost(),
+        fetchHealth: async () => {
+          const live = connectionOf(stateRef.current);
+          if (!live) throw new Error('The relay was disconnected during the readiness test.');
+          return relayHealth(live);
+        },
+        checkScorerReadiness: async () => {
+          const live = connectionOf(stateRef.current);
+          if (!live) throw new Error('The relay was disconnected during the readiness test.');
+          return relayCheckScorerReadiness(live);
+        },
+        probeDestination: (folder) => probeResultDestination(folder),
+        credentialRoundTrip,
+      });
+      setReadinessReport(report);
+      try {
+        localStorage.setItem(readinessReportStorageKey, JSON.stringify(report));
+      } catch {
+        // Diagnostics persistence must never break the run it records.
+      }
+      const failures = report.checks.filter((entry) => entry.status === 'fail');
+      setNotice(
+        failures.length === 0
+          ? { kind: 'good', message: `Readiness test passed: ${report.checks.length} checks green.` }
+          : {
+              kind: 'warn',
+              message: `Readiness test found ${failures.length} problem(s): ${failures[0].label} — ${failures[0].fix ?? 'open the readiness report'}.`,
+            },
+      );
+    } finally {
+      readinessRunningRef.current = false;
+      setReadinessRunning(false);
+    }
+  }, [credentialRoundTrip]);
 
   /**
    * Delete the stored management credential.
@@ -2083,6 +2213,9 @@ export function useBridge(): BridgeApi {
     persistenceSavePending,
     retryStatePersistence,
     checkScorerReadiness,
+    readinessReport,
+    readinessRunning,
+    runReadinessTest,
     beginRelayChange,
     cancelRelayChange,
     changingRelay,
