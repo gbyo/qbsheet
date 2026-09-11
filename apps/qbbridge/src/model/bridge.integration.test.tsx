@@ -1613,6 +1613,97 @@ describe('backup controller recovery', () => {
   });
 });
 
+describe('sleep and wake', () => {
+  function healthCalls(): number {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/health'),
+    ).length;
+  }
+
+  test('a long silence reconciles once: arrivals merge and one notice appears', async () => {
+    vi.useFakeTimers();
+    const rendered = await setUpTournament();
+    expect(healthCalls()).toBe(0);
+
+    // A final arrives while the lid is closed; no poll ticks run for ten minutes.
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      {
+        result_id: 'res-away',
+        room_id: 'room-1',
+        received_at: '2026-09-11T16:00:00Z',
+        qbj: document,
+      },
+    ];
+    vi.setSystemTime(Date.now() + 600000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(rendered.result.current.state.results.map((entry) => entry.resultId)).toEqual(['res-away']);
+    expect(rendered.result.current.notice?.message).toMatch(
+      /Recovered after sleep · 1 result arrived while away/,
+    );
+    expect(healthCalls()).toBe(1);
+
+    // Ten more minutes of ordinary ticks cost ordinary polls, never another reconcile.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600000);
+    });
+    expect(healthCalls()).toBe(1);
+    rendered.unmount();
+  });
+
+  test('a relay that moved while away is reported and never silently adopted', async () => {
+    vi.useFakeTimers();
+    const rendered = await setUpTournament();
+    relayRevision = 3;
+    vi.setSystemTime(Date.now() + 60000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(rendered.result.current.notice?.message).toMatch(
+      /Recovered after sleep · relay moved while away \(epoch 1→1, revision 0→3\)/,
+    );
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+    rendered.unmount();
+  });
+
+  test('a quiet resume checks once and stays quiet', async () => {
+    vi.useFakeTimers();
+    const rendered = await setUpTournament();
+    vi.setSystemTime(Date.now() + 60000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(healthCalls()).toBe(1);
+    expect(rendered.result.current.notice).toBeNull();
+    rendered.unmount();
+  });
+
+  test('a backward clock correction just re-baselines', async () => {
+    vi.useFakeTimers();
+    const rendered = await setUpTournament();
+    vi.setSystemTime(Date.now() - 60000);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000);
+    });
+    expect(healthCalls()).toBe(0);
+    expect(rendered.result.current.notice).toBeNull();
+    rendered.unmount();
+  });
+
+  test('becoming visible reconciles immediately without waiting for the interval', async () => {
+    const rendered = await setUpTournament();
+    relayRevision = 2;
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await waitFor(() => expect(rendered.result.current.notice?.message).toMatch(/Recovered after sleep/));
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+    rendered.unmount();
+  });
+});
+
 describe('Scorer origin readiness', () => {
   test('persists a blocked readiness result without discarding the claimed credential', async () => {
     globalThis.localStorage.removeItem(storageKey);
