@@ -12,6 +12,7 @@ import {
   reportAnswerHeaders,
   reportEscape,
   reportGameAnchor,
+  reportGamesPlayedText,
   reportNumberCell,
   reportPlayerAnchor,
   reportPointsMetricLabel,
@@ -46,9 +47,28 @@ function scoreText(game: GameStatsRow): string {
   return `${left}–${right}`;
 }
 
+/**
+ * Prose form of the shared GP vocabulary (#746/#751): unknown GP renders as
+ * unknown instead of fabricating a count, matching the Individuals table.
+ */
+function summaryGamesPlayed(row: PlayerStatsRow): string {
+  if (!row.gamesPlayedKnown) return 'GP —';
+  return `${reportGamesPlayedText(row.gamesPlayed)} games`;
+}
+
+/**
+ * Prose form of the Individuals UG/D2 markers (#751): the same Yes/No/unknown
+ * vocabulary as the eligibility cells, so unknown metadata never reads as a claim.
+ */
+function eligibilitySummary(label: 'UG' | 'D2', value: boolean | null): string {
+  if (value === true) return ` · ${label} Yes`;
+  if (value === false) return ` · ${label} No`;
+  return ` · ${label} —`;
+}
+
 function summary(row: PlayerStatsRow, presentation: ReportPresentation): string {
   const pieces = [
-    `${row.gamesPlayed} games`,
+    summaryGamesPlayed(row),
     row.tossupsHeard === null ? 'TUH —' : `${row.tossupsHeard} TUH`,
     ...presentation.answerColumns.map(
       (column) =>
@@ -114,11 +134,18 @@ function playerSection(
   const teamCell = presentation.options.pages.includes('teamDetail')
     ? `<a href="teamdetail.html#${reportTeamAnchor(team)}">${teamName}</a>`
     : teamName;
+  // Eligibility columns appear under the same predicate as Individuals (#751).
+  const showUndergraduate = snapshot.players.some(
+    (player) => typeof player.undergraduateEligible === 'boolean',
+  );
+  const showDivisionTwo = snapshot.players.some((player) => typeof player.divisionTwoEligible === 'boolean');
 
   return (
     `<section id="${reportPlayerAnchor(row)}" aria-label="${reportEscape(row.playerName)}"><h2>${reportEscape(row.playerName)}</h2>` +
     `<p>${teamCell}` +
-    `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''} · ${reportEscape(summary(row, presentation))}</p>` +
+    `${typeof row.schoolYear === 'number' ? ` · Grade ${row.schoolYear}` : ''}` +
+    `${showUndergraduate ? eligibilitySummary('UG', row.undergraduateEligible) : ''}` +
+    `${showDivisionTwo ? eligibilitySummary('D2', row.divisionTwoEligible) : ''} · ${reportEscape(summary(row, presentation))}</p>` +
     `<h3>Game-by-game</h3>` +
     `${actualGames.length > 0 ? `<div class="table-wrap"><table><thead><tr><th scope="col">Round</th>${presentation.applicability.stage ? '<th scope="col">Stage</th>' : ''}<th scope="col">Opponent</th><th scope="col">Result</th><th scope="col" class="num">Score</th><th scope="col" class="num">TUH</th>${reportAnswerHeaders(presentation)}<th scope="col" class="num">Pts</th>${presentation.applicability.bonuses ? '<th scope="col" class="num">Bonus pts</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="meta">No canonical player-game lines.</p>'}` +
     `${omittedNote}</section>`

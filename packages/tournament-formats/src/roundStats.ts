@@ -18,9 +18,13 @@ export interface RoundStatDefinition {
   powers: boolean | null;
   superpowers: boolean | null;
   bonuses: boolean | null;
-  /** Whether bouncebacks apply; null when the definition cannot prove it. */
+  /**
+   * Whether bouncebacks apply. `false` means proven not-applicable (the game is
+   * N/A and must not poison sums or denominators); null means unknown
+   * applicability, which fails closed by staying in the sum (#755).
+   */
   bouncebacks: boolean | null;
-  /** Whether lightning rounds apply; null when the definition cannot prove it. */
+  /** Same N/A contract as `bouncebacks`, for lightning rounds. */
   lightning: boolean | null;
   maximumBonusScore: number | null;
   source: 'game' | 'qbj' | 'legacy-tournament' | 'unknown';
@@ -309,6 +313,40 @@ function sumKnown(
   return sum;
 }
 
+/**
+ * Games contributing to a format-specific sum. A proven `false` definition flag
+ * excuses the game (N/A: no values, no denominator) only when the stored
+ * breakdowns agree (absent or zero); entered nonzero detail is contradictory,
+ * never N/A, and stays in the sum as-entered — mirroring the canonical
+ * aggregation. Unknown applicability stays in the set and fails closed through
+ * `sumKnown` (#755).
+ */
+function applicableGames(
+  games: readonly GameStatsRow[],
+  key: 'bouncebacks' | 'lightning',
+  select: (team: GameTeamStatsRow) => number | null,
+): GameStatsRow[] {
+  return games.filter((game) => {
+    if (game.roundStatDefinition?.[key] !== false) return true;
+    const teams = allKnownTeamStats(game);
+    if (!teams) return true;
+    return teams.some((team) => typeof select(team) === 'number' && select(team) !== 0);
+  });
+}
+
+/**
+ * Like `sumKnown`, but an empty applicable set is N/A (null), never a
+ * fabricated zero: a scope with no applicable games has no total, not a zero
+ * total (#755).
+ */
+function sumKnownOrNullWhenEmpty(
+  games: readonly GameStatsRow[],
+  select: (team: GameTeamStatsRow) => number | null,
+): number | null {
+  if (games.length === 0) return null;
+  return sumKnown(games, select);
+}
+
 function metricEnabled(games: readonly GameStatsRow[], key: 'superpowers' | 'powers' | 'bonuses'): boolean {
   return games.some((game) => game.roundStatDefinition?.[key] === true);
 }
@@ -413,8 +451,14 @@ function aggregate(
   // Bounceback/total-bonus parts come precomputed per team-game from the canonical
   // adapter under each game's own definition; the aggregate only sums them (#748).
   // A single uncomputable side unknowns the whole row, never a known-subset value.
-  const bouncebackPartsHeard = sumKnown(played, (team) => team.bouncebackPartsHeard);
-  const bouncebackPartsConverted = sumKnown(played, (team) => team.bouncebackPartsConverted);
+  // Proven-N/A games are excused from the bounceback sums and denominators (#755);
+  // own bonus parts remain whole-scope facts.
+  const bouncebackGames = applicableGames(played, 'bouncebacks', (team) => team.bouncebacks);
+  const bouncebackPartsHeard = sumKnownOrNullWhenEmpty(bouncebackGames, (team) => team.bouncebackPartsHeard);
+  const bouncebackPartsConverted = sumKnownOrNullWhenEmpty(
+    bouncebackGames,
+    (team) => team.bouncebackPartsConverted,
+  );
   const bonusPartsHeard = sumKnown(played, (team) => team.bonusPartsHeard);
   const bonusPartsConverted = sumKnown(played, (team) => team.bonusPartsConverted);
   const bouncebackConversion =
@@ -433,9 +477,14 @@ function aggregate(
     const teams = allKnownTeamStats(game);
     return teams !== null && teams.every((team) => finite(team.bouncebackPartsHeard));
   });
-  const lightningPoints = sumKnown(played, (team) => team.lightningPoints);
+  // Proven-N/A games are excused from the lightning total and per-game
+  // denominator; pure forfeits are already outside `played` (#747, #755).
+  const lightningGames = applicableGames(played, 'lightning', (team) => team.lightningPoints);
+  const lightningPoints = sumKnownOrNullWhenEmpty(lightningGames, (team) => team.lightningPoints);
   const lightningRate =
-    lightningPoints !== null && played.length > 0 ? lightningPoints / (played.length * 2) : null;
+    lightningPoints !== null && lightningGames.length > 0
+      ? lightningPoints / (lightningGames.length * 2)
+      : null;
   const lightningPresent = played.some((game) => {
     const teams = allKnownTeamStats(game);
     return teams !== null && teams.every((team) => finite(team.lightningPoints));

@@ -165,6 +165,14 @@
                 "description": "Points per tossup heard"
               },
               {
+                "id": "ppx",
+                "label": "Pts/X",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per regulation set of 20"
+              },
+              {
                 "id": "bonuses",
                 "label": "Bonuses",
                 "kind": "integer",
@@ -249,6 +257,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 13,
                     "display": "13"
                   },
@@ -313,6 +325,10 @@
                   {
                     "value": 0,
                     "display": "0"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,
@@ -397,6 +413,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 10,
                     "display": "10"
                   },
@@ -461,6 +481,10 @@
                   {
                     "value": 2,
                     "display": "2"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,
@@ -591,6 +615,14 @@
                 "description": "Points per tossup heard"
               },
               {
+                "id": "ppx",
+                "label": "Pts/X",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per regulation set of 20"
+              },
+              {
                 "id": "bonuses",
                 "label": "Bonuses",
                 "kind": "integer",
@@ -675,6 +707,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 13,
                     "display": "13"
                   },
@@ -739,6 +775,10 @@
                   {
                     "value": 0,
                     "display": "0"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,
@@ -823,6 +863,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 10,
                     "display": "10"
                   },
@@ -887,6 +931,10 @@
                   {
                     "value": 2,
                     "display": "2"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,
@@ -1017,6 +1065,14 @@
                 "description": "Points per tossup heard"
               },
               {
+                "id": "ppx",
+                "label": "Pts/X",
+                "kind": "decimal",
+                "precision": 2,
+                "alignment": "trailing",
+                "description": "Points per regulation set of 20"
+              },
+              {
                 "id": "bonuses",
                 "label": "Bonuses",
                 "kind": "integer",
@@ -1101,6 +1157,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 13,
                     "display": "13"
                   },
@@ -1165,6 +1225,10 @@
                   {
                     "value": 0,
                     "display": "0"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,
@@ -1249,6 +1313,10 @@
                     "display": "—"
                   },
                   {
+                    "value": null,
+                    "display": "—"
+                  },
+                  {
                     "value": 10,
                     "display": "10"
                   },
@@ -1313,6 +1381,10 @@
                   {
                     "value": 2,
                     "display": "2"
+                  },
+                  {
+                    "value": null,
+                    "display": "—"
                   },
                   {
                     "value": null,

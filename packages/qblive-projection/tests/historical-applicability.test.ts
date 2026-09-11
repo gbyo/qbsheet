@@ -14,7 +14,7 @@ import {
   type DirectorState,
   type TournamentRules,
 } from '@qbsheet/tournament-domain';
-import { buildStandingsTable, buildTeamStatisticsTable } from '../src/tables';
+import { buildPlayerStatisticsTable, buildStandingsTable, buildTeamStatisticsTable } from '../src/tables';
 
 const at = '2026-09-10T10:00:00.000Z';
 
@@ -248,6 +248,14 @@ describe('QBLive historical applicability (#868)', () => {
     const powers = table.columns.find((column) => column.id === 'powers');
     expect(powers?.label).toBe('15');
     expect(cell(table, 'team-a', 'lightningpg')).toEqual({ value: 30, display: '30.0' });
+    for (const row of table.rows) expect(row.cells).toHaveLength(table.columns.length);
+  });
+
+  test('player statistics table keeps historical tier labels after a rules change (#871)', () => {
+    const table = buildPlayerStatisticsTable(historicalState(), overall, naming);
+    const powers = table.columns.find((column) => column.id === 'powers');
+    // Historical 15-point powers, not the current 20-point definition.
+    expect(powers?.label).toBe('15');
     for (const row of table.rows) expect(row.cells).toHaveLength(table.columns.length);
   });
 });

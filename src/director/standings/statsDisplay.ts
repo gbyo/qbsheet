@@ -9,6 +9,7 @@
 import {
   buildReportPresentation,
   defaultReportOptions,
+  pointsPerX,
   reportNumber,
   reportPercent,
   type ReportAnswerKey,
@@ -393,6 +394,7 @@ export const INDIVIDUAL_COLUMNS: StatsColumn[] = [
   { id: 'ppg', label: 'PPG', description: 'Points per game', priority: 2, defaultVisible: true },
   { id: 'tuh', label: 'TUH', description: 'Tossups heard', priority: 2, defaultVisible: true },
   { id: 'pptuh', label: 'PPTUH', description: 'Points per tossup heard', priority: 3, defaultVisible: true },
+  { id: 'ppx', label: 'Pts/X', description: 'Points per regulation set', priority: 3, defaultVisible: false },
   { id: 'year', label: 'Grade', description: 'School year or grade', priority: 3, defaultVisible: false },
   { id: 'ug', label: 'UG', description: 'Undergraduate eligible', priority: 3, defaultVisible: false },
   { id: 'd2', label: 'D2', description: 'Division II eligible', priority: 3, defaultVisible: false },
@@ -505,6 +507,7 @@ export function teamColumnsForState(state: DirectorState): StatsColumn[] {
 export function individualColumnsForState(state: DirectorState): StatsColumn[] {
   const bonus = bonusesInUse(state);
   const tiers = superpowersInUse(state);
+  const presentation = presentationForStats(state);
   return withTierLabels(
     INDIVIDUAL_COLUMNS.filter(
       (column) =>
@@ -512,9 +515,10 @@ export function individualColumnsForState(state: DirectorState): StatsColumn[] {
         (tiers || column.id !== 'superpowers') &&
         (playerYearInUse(state) || column.id !== 'year') &&
         (playerUndergraduateInUse(state) || column.id !== 'ug') &&
-        (playerDivisionTwoInUse(state) || column.id !== 'd2'),
+        (playerDivisionTwoInUse(state) || column.id !== 'd2') &&
+        (presentation.pointsTossups !== null || column.id !== 'ppx'),
     ),
-    presentationForStats(state),
+    presentation,
   );
 }
 
@@ -630,7 +634,12 @@ export function teamStatCell(
 }
 
 /** One shared mapping from schema column to cell text for the individual table (#750). */
-export function playerStatCell(columnId: string, standing: PlayerStanding, player?: Player): string {
+export function playerStatCell(
+  columnId: string,
+  standing: PlayerStanding,
+  player?: Player,
+  context: TeamStatContext = {},
+): string {
   switch (columnId) {
     case 'games':
       return String(formatGamesPlayed(standing));
@@ -642,6 +651,13 @@ export function playerStatCell(columnId: string, standing: PlayerStanding, playe
       return formatTuh(standing);
     case 'pptuh':
       return formatPptuh(standing.points, standing);
+    case 'ppx':
+      // Individuals carry no overtime split: normalized Pts/X is PPTUH × X,
+      // the same shared-helper expression the printable schema uses (#750).
+      return reportNumber(
+        pointsPerX(pptuhValue(standing.points, standing), context.pointsTossups ?? null),
+        2,
+      );
     case 'year':
       return typeof player?.schoolYear === 'number' ? `Grade ${player.schoolYear}` : UNKNOWN_STAT;
     case 'ug':

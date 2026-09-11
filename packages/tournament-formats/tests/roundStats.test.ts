@@ -197,6 +197,94 @@ describe('deriveRoundStats', () => {
     expect(row.partial).toBe(true);
   });
 
+  test('excuses proven-N/A games from bounceback and lightning sums and denominators', () => {
+    const on = game({
+      id: 'on',
+      left: {
+        powers: 2,
+        gets: 8,
+        negs: 1,
+        bonusesHeard: 10,
+        bonusPoints: 200,
+        bouncebackPartsHeard: 9,
+        bouncebackPartsConverted: 3,
+        bonusPartsHeard: 30,
+        bonusPartsConverted: 20,
+        lightningPoints: 40,
+      },
+      right: {
+        powers: 1,
+        gets: 7,
+        negs: 2,
+        bonusesHeard: 8,
+        bonusPoints: 150,
+        bouncebackPartsHeard: 10,
+        bouncebackPartsConverted: 0,
+        bonusPartsHeard: 24,
+        bonusPartsConverted: 15,
+        lightningPoints: 30,
+      },
+      definition: { bouncebacks: true, lightning: true },
+    });
+    // The off game stores null parts and no lightning breakdown: N/A, not unknown.
+    // Its own bonus parts remain whole-scope facts.
+    const off = game({
+      id: 'off',
+      left: {
+        powers: 2,
+        gets: 8,
+        negs: 1,
+        bonusesHeard: 10,
+        bonusPoints: 180,
+        bouncebackPartsHeard: null,
+        bouncebackPartsConverted: null,
+        bonusPartsHeard: 30,
+        bonusPartsConverted: 18,
+        lightningPoints: null,
+      },
+      right: {
+        powers: 1,
+        gets: 4,
+        negs: 2,
+        bonusesHeard: 5,
+        bonusPoints: 60,
+        bouncebackPartsHeard: null,
+        bouncebackPartsConverted: null,
+        bonusPartsHeard: 15,
+        bonusPartsConverted: 6,
+        lightningPoints: null,
+      },
+      definition: { bouncebacks: false, lightning: false },
+    });
+    const report = deriveRoundStats([on, off]);
+    const row = report.rows[0]!;
+    expect(row.bouncebackPartsHeard).toBe(19);
+    expect(row.bouncebackPartsConverted).toBe(3);
+    expect(row.bouncebackConversion).toBeCloseTo(3 / 19, 12);
+    // Own parts span both games: (20+15+18+6+3)/(30+24+30+15+19).
+    expect(row.totalBonusConversion).toBeCloseTo(62 / 118, 12);
+    expect(row.lightningPoints).toBe(70);
+    expect(row.lightningRate).toBe(35);
+    expect(report.showBouncebacks).toBe(true);
+    expect(report.showLightning).toBe(true);
+    expect(row.partial).toBe(false);
+  });
+
+  test('a scope with no applicable games reports nulls and hides the columns', () => {
+    const off = game({ id: 'off', definition: { bouncebacks: false, lightning: false } });
+    const report = deriveRoundStats([off]);
+    const row = report.rows[0]!;
+    // N/A is null, never a fabricated zero total.
+    expect(row.bouncebackPartsHeard).toBeNull();
+    expect(row.bouncebackPartsConverted).toBeNull();
+    expect(row.bouncebackConversion).toBeNull();
+    expect(row.totalBonusConversion).toBeNull();
+    expect(row.lightningPoints).toBeNull();
+    expect(row.lightningRate).toBeNull();
+    expect(report.showBouncebacks).toBe(false);
+    expect(report.showLightning).toBe(false);
+  });
+
   test('counts a pure forfeit as a result but not as a played-stat denominator', () => {
     const played = standardGames()[0]!;
     const forfeit = game({

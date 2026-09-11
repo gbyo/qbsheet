@@ -140,6 +140,8 @@ function parityState(): DirectorState {
       packetId: null,
       status: 'accepted',
       tossupsRead: 20,
+      // No overtime was played: the recorded zero keeps regulation scoring known.
+      overtimeTossupsRead: 0,
       scores: [
         teamScore('team-a', 350, {
           powers: 2,
@@ -203,6 +205,8 @@ function parityState(): DirectorState {
       packetId: null,
       status: 'accepted',
       tossupsRead: 20,
+      // No overtime was played: the recorded zero keeps regulation scoring known.
+      overtimeTossupsRead: 0,
       scores: [
         teamScore('team-c', 350, {
           powers: 2,
@@ -284,6 +288,7 @@ describe('QBLive standings parity set', () => {
       'negs',
       'tuh',
       'pptuh',
+      'ppx',
       'bonuses',
       'bonuspoints',
       'ppb',
@@ -305,6 +310,9 @@ describe('QBLive standings parity set', () => {
     expect(cell(table, 'team-a', 'lightning')).toEqual({ value: 40, display: '40' });
     expect(cell(table, 'team-a', 'lightningpg')).toEqual({ value: 40, display: '40.0' });
     expect(cell(table, 'team-a', 'pptuh')).toEqual({ value: 17.5, display: '17.50' });
+    // No overtime: regulation points equal total points, so Pts/20 equals the
+    // same value Director and the printable report derive canonically.
+    expect(cell(table, 'team-a', 'ppx')).toEqual({ value: 350, display: '350.00' });
     // A zero conversion is exact, not unknown.
     expect(cell(table, 'team-b', 'bbconv')).toEqual({ value: 0, display: '0.0%' });
   });
@@ -331,6 +339,17 @@ describe('QBLive standings parity set', () => {
     expect(ids).toContain('tuh');
     expect(ids).toContain('pptuh');
   });
+
+  test('an unknown overtime split declines Pts/X but keeps PPTUH', () => {
+    const state = parityState();
+    // The games predate overtime tracking: overtime-capable rules with no
+    // recorded split must fail closed, never smuggle overtime into Pts/X.
+    for (const game of state.games) delete (game as { overtimeTossupsRead?: unknown }).overtimeTossupsRead;
+    const table = buildStandingsTable(state, scope, naming);
+    expect(table.columns.map((column) => column.id)).toContain('ppx');
+    expect(cell(table, 'team-a', 'pptuh')).toEqual({ value: 17.5, display: '17.50' });
+    expect(cell(table, 'team-a', 'ppx')).toEqual({ value: null, display: '—' });
+  });
 });
 
 describe('QBLive team statistics parity set', () => {
@@ -344,6 +363,7 @@ describe('QBLive team statistics parity set', () => {
       'negs',
       'tuh',
       'pptuh',
+      'ppx',
       'bonuses',
       'bonuspoints',
       'ppb',
@@ -358,6 +378,7 @@ describe('QBLive team statistics parity set', () => {
     for (const row of table.rows) expect(row.cells).toHaveLength(table.columns.length);
     expect(cell(table, 'team-a', 'tuh')).toEqual({ value: 20, display: '20' });
     expect(cell(table, 'team-a', 'pptuh')).toEqual({ value: 17.5, display: '17.50' });
+    expect(cell(table, 'team-a', 'ppx')).toEqual({ value: 350, display: '350.00' });
     expect(cell(table, 'team-a', 'bonuses')).toEqual({ value: 10, display: '10' });
     expect(cell(table, 'team-a', 'bonuspoints')).toEqual({ value: 200, display: '200' });
     expect(cell(table, 'team-a', 'ppb')).toEqual({ value: 20, display: '20.00' });

@@ -45,7 +45,10 @@ function snapshot(): StatsSnapshot {
         teamId: 'team-a',
         teamName: 'Aiken',
         schoolYear: 12,
+        undergraduateEligible: true,
+        divisionTwoEligible: null,
         gamesPlayed: 2,
+        gamesPlayedKnown: true,
         tossupsHeard: 20,
         superpowers: 0,
         powers: 2,
@@ -64,7 +67,10 @@ function snapshot(): StatsSnapshot {
         playerName: 'Bob',
         teamId: 'team-b',
         teamName: 'Wren',
+        undergraduateEligible: null,
+        divisionTwoEligible: false,
         gamesPlayed: 1,
+        gamesPlayedKnown: true,
         tossupsHeard: 20,
         superpowers: 0,
         powers: 0,
@@ -206,6 +212,34 @@ describe('printable player detail', () => {
 
     expect(roundThree).toContain('<td class="num">0</td>');
     expect(alice).not.toContain('Round 2');
+  });
+
+  test('shows UG/D2 eligibility markers matching Individuals (#751)', () => {
+    const page = buildExtendedStatReportBundle(snapshot()).find(
+      (entry) => entry.name === 'playerdetail.html',
+    )!.content;
+    const alice = playerSection(page, 'player-player-a');
+    const bob = playerSection(page, 'player-player-b');
+
+    expect(alice).toContain('UG Yes');
+    expect(alice).toContain('D2 —');
+    expect(bob).toContain('UG —');
+    expect(bob).toContain('D2 No');
+  });
+
+  test('gates unknown games-played instead of fabricating a count (#751)', () => {
+    const snap = snapshot();
+    snap.players[0].gamesPlayed = 2.5;
+    snap.players[1].gamesPlayedKnown = false;
+    const page = buildExtendedStatReportBundle(snap).find(
+      (entry) => entry.name === 'playerdetail.html',
+    )!.content;
+    const alice = playerSection(page, 'player-player-a');
+    const bob = playerSection(page, 'player-player-b');
+
+    expect(alice).toContain('2.50 games');
+    expect(bob).toContain('GP —');
+    expect(bob).not.toContain('1 games');
   });
 
   test('shows multi-stage context and stable cross-report links', () => {

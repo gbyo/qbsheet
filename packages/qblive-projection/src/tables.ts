@@ -20,7 +20,9 @@ import {
   canonicalCompetitionRanks,
   deriveTeamStandings,
   derivePlayerStandings,
+  normalizedPointsPerX,
   playerPptuh,
+  regulationDerivationForTeam,
   scopeScoringApplicability,
   type DirectorState,
   type PlayerStanding,
@@ -78,6 +80,22 @@ function pptuhFor(
  */
 function ppbFor(bonusPoints: number, bonuses: number): number | null {
   return bonusPointsPerBonus(bonusPoints, bonuses);
+}
+
+/**
+ * Normalized points per regulation set through the canonical domain helpers —
+ * the same regulation-points numerator and regulation-TUH denominator Director
+ * and the printable reports use, never final-score PPTUH scaled by X (#755).
+ * Null (unknown overtime split, unknown regulation TUH, or mixed-X scope)
+ * renders "—", matching Director.
+ */
+function ppxFor(standing: TeamStanding, regulationTossups: number | null): number | null {
+  const regulation = regulationDerivationForTeam(standing);
+  return normalizedPointsPerX(
+    regulation.regulationPoints,
+    standing.tossupsHeardRegulationKnown ? standing.tossupsHeardRegulation : null,
+    regulationTossups,
+  );
 }
 
 /**
@@ -143,14 +161,19 @@ function record(standing: TeamStanding): QbliveCell {
 /**
  * The public standings vocabulary, YellowFruit parity (#753).
  *
- * Rank through PPTUH is the long-standing public set, with the tournament's
- * own answer tiers inline. Bonus facts, bouncebacks, and lightning append only
- * when the tournament's own rules configure them: a not-applicable statistic
- * omits its column rather than publishing a table of em dashes, while an
- * applicable-but-unknown value renders `—` with a null value in the row.
+ * Rank through PPTUH is the long-standing public set, with the scope's own
+ * historical answer tiers inline. Bonus facts, bouncebacks, and lightning append
+ * only when the accepted games' historical definitions configure them: a
+ * not-applicable statistic omits its column rather than publishing a table of
+ * em dashes, while an applicable-but-unknown value renders `—` with a null
+ * value in the row. Pts/X follows Director: one column when the scope agrees
+ * on a single regulation X, omitted for mixed-X scopes.
  */
 function standingsColumns(
-  applicability: Pick<ScopeScoringApplicability, 'bonuses' | 'bouncebacks' | 'lightning'>,
+  applicability: Pick<
+    ScopeScoringApplicability,
+    'bonuses' | 'bouncebacks' | 'lightning' | 'regulationTossups'
+  >,
   tiers: readonly AnswerTierColumn[],
 ): QbliveColumn[] {
   const trailing = 'trailing' as const;
@@ -189,6 +212,16 @@ function standingsColumns(
       description: 'Points per tossup heard',
     },
   ];
+  if (applicability.regulationTossups !== null) {
+    columns.push({
+      id: 'ppx',
+      label: 'Pts/X',
+      kind: 'decimal',
+      precision: 2,
+      alignment: trailing,
+      description: `Points per regulation set of ${applicability.regulationTossups}`,
+    });
+  }
   if (applicability.bonuses) {
     columns.push(
       { id: 'bonuses', label: 'Bonuses', kind: 'integer', alignment: trailing, description: 'Bonuses heard' },
@@ -319,7 +352,7 @@ function answerTierColumnDefs(tiers: readonly AnswerTierColumn[]): QbliveColumn[
  * same way as the standings table.
  */
 function teamStatisticsColumns(
-  meta: { bonuses: boolean; bouncebacks: boolean; lightning: boolean },
+  meta: { bonuses: boolean; bouncebacks: boolean; lightning: boolean; regulationTossups: number | null },
   tiers: readonly AnswerTierColumn[],
 ): QbliveColumn[] {
   const trailing = 'trailing' as const;
@@ -337,6 +370,16 @@ function teamStatisticsColumns(
       description: 'Points per tossup heard',
     },
   ];
+  if (meta.regulationTossups !== null) {
+    columns.push({
+      id: 'ppx',
+      label: 'Pts/X',
+      kind: 'decimal',
+      precision: 2,
+      alignment: trailing,
+      description: `Points per regulation set of ${meta.regulationTossups}`,
+    });
+  }
   if (meta.bonuses) {
     columns.push(
       { id: 'bonuses', label: 'Bonuses', kind: 'integer', alignment: trailing, description: 'Bonuses heard' },
@@ -607,6 +650,9 @@ export function buildStandingsTable(
       standing.tossupsHeardKnown ? integer(standing.tossupsHeard) : unknown(),
       decimalOrUnknown(pptuhFor(standing.pointsFor, standing.tossupsHeard, standing.tossupsHeardKnown), 2),
     ];
+    if (applicability.regulationTossups !== null) {
+      cells.push(decimalOrUnknown(ppxFor(standing, applicability.regulationTossups), 2));
+    }
     if (applicability.bonuses) {
       cells.push(
         integer(standing.bonuses),
@@ -658,6 +704,7 @@ export function buildTeamStatisticsTable(
       bonuses: showBonuses,
       bouncebacks: showBouncebacks,
       lightning: showLightning,
+      regulationTossups: applicability.regulationTossups,
     },
     tiers,
   );
@@ -678,6 +725,9 @@ export function buildTeamStatisticsTable(
       standing.tossupsHeardKnown ? integer(standing.tossupsHeard) : unknown(),
       decimalOrUnknown(pptuhFor(standing.pointsFor, standing.tossupsHeard, standing.tossupsHeardKnown), 2),
     ];
+    if (applicability.regulationTossups !== null) {
+      cells.push(decimalOrUnknown(ppxFor(standing, applicability.regulationTossups), 2));
+    }
     if (showBonuses) {
       cells.push(
         integer(standing.bonuses),
