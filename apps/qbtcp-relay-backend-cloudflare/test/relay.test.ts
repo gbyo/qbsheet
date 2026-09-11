@@ -18,7 +18,14 @@ import { trimTrailingSlashes } from '../src/protocol/cors';
 import { validateStreamFrame } from '../src/protocol/frames';
 import { resultFingerprint } from '../src/protocol/qbj';
 import FruityServerClient from '../../../src/integrations/fruity/FruityServerClient';
-import { assignmentDocument } from '../../../tests/qbjDocuments';
+import { exchangePairingCode, openControl } from '../../../src/app/ControlPairing';
+import { parsePairingLaunchUrl } from '../../../src/app/PairingLaunch';
+import { connectionMaxAgeMs, readConnection, writeConnection } from '../../../src/app/ConnectedSession';
+import { buildResultDocument } from '../../../src/qbj/QbjResult';
+import deriveGame from '../../../src/scoring/deriveGame';
+import type { ScoreEvent } from '../../../src/scoring/ScoreEvents';
+import { event } from '../../../tests/events';
+import { assignmentDocument, greenwood, matchObject, ninetySix } from '../../../tests/qbjDocuments';
 import finalFixture from '../../../tests/fixtures/qbtcp-stream/final.json';
 import receiptFixture from '../../../tests/fixtures/qbtcp-stream/receipt.json';
 import helloFixture from '../../../tests/fixtures/qbtcp-stream/hello.json';
@@ -178,6 +185,46 @@ async function openSession(
 
 function finalQbj(matchId: string = MATCH_ID, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { type: 'Match', id: matchId, match_teams: [{ score: 10 }], ...extra };
+}
+
+function scorerAssignment(
+  roomId: string,
+  matchId: string,
+  roundNumber: number,
+  roundRevision: number,
+  assignmentRevision: number,
+): object {
+  return assignmentDocument({
+    roundName: String(roundNumber),
+    roundNumber,
+    matches: [
+      matchObject({
+        id: matchId,
+        left: ninetySix,
+        right: greenwood,
+        location: 'Room 204',
+        qbtcp: {
+          round_revision: roundRevision,
+          assignment_revision: assignmentRevision,
+          room_id: roomId,
+          scorekeeper: { timed: false },
+        },
+      }),
+    ],
+  });
+}
+
+function memoryStorage(): {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+} {
+  const values = new Map<string, string>();
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+    removeItem: (key) => values.delete(key),
+  };
 }
 
 /** A tournament with one mirrored room, ready to pair. Returns the relay's handles. */
@@ -696,6 +743,397 @@ describe('sessions and writers', () => {
     const cleared = await scorer.assignment(identity);
     expect(cleared).toMatchObject({ ok: true, value: { state: 'none', definition: null, session: null } });
     expect(scorer.isQbtcp).toBe(true);
+  });
+
+  it('keeps one ordinary Scorer room paired through two scored rounds', async () => {
+    const tournamentId = freshTournamentId();
+    const roomId = 'room-204';
+    const roomName = 'Room 204';
+    const code = '47474747';
+    const nextCode = '48484848';
+    const server = tournamentBase(tournamentId);
+    const roundOneMatchId = 'Match_room-204-r1';
+    const roundTwoMatchId = 'Match_room-204-r2';
+    const pairingHash = await sha256Hex(code);
+    const nextPairingHash = await sha256Hex(nextCode);
+    const management = await claim(tournamentId);
+
+    // Director has published the room, but not a game yet. This is the ordinary pre-round setup.
+    expect(
+      (
+        await mirror(management, tournamentId, {
+          revision: 1,
+          rooms: [{ room_id: roomId, name: roomName, pairing_code_hash: pairingHash }],
+          sessions: [],
+        })
+      ).status,
+    ).toBe(200);
+
+    const launchText =
+      `https://qbsheet.com/#qbtcp-pair?v=1&server=${encodeURIComponent(server)}` +
+      `&code=${code}&room=${encodeURIComponent(roomId)}`;
+    const launch = parsePairingLaunchUrl(launchText);
+    expect(launch).toEqual({
+      kind: 'intent',
+      intent: { version: 1, server, code, roomId },
+    });
+    if (launch.kind !== 'intent') throw new Error('The pairing launch fixture did not parse.');
+
+    const requests: {
+      method: string;
+      path: string;
+      status: number;
+      allowOrigin: string | null;
+    }[] = [];
+    const scorerFetch: typeof fetch = async (input, init) => {
+      const headers = new Headers(init?.headers);
+      headers.set('origin', 'https://qbsheet.com');
+      const response = await SELF.fetch(input, { ...init, headers });
+      const requestUrl = input instanceof Request ? input.url : String(input);
+      requests.push({
+        method: (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase(),
+        path: new URL(requestUrl).pathname,
+        status: response.status,
+        allowOrigin: response.headers.get('access-control-allow-origin'),
+      });
+      return response;
+    };
+
+    // Use the same address/open/explicit-code path as the browser. The relay is reached through the
+    // generic client alias, so this test does not create a parallel QBBridge wire protocol.
+    vi.stubGlobal('fetch', scorerFetch);
+    try {
+      const openedControl = await openControl(launch.intent.server);
+      expect(openedControl).toMatchObject({ ok: true });
+      if (!openedControl.ok) throw new Error(openedControl.error);
+      expect(openedControl.value.client.isQbtcp).toBe(true);
+      expect(openedControl.value.client.missingCapabilities()).toEqual([]);
+
+      const paired = await exchangePairingCode(
+        openedControl.value.client,
+        launch.intent.code,
+        launch.intent.roomId,
+        'ordinary-scorer',
+      );
+      expect(paired).toMatchObject({ ok: true, lanOutcome: 'not-configured' });
+      if (!paired.ok) throw new Error(paired.error);
+      expect(paired.value.roomId).toBe(roomId);
+      expect(paired.value.roomName).toBe(roomName);
+      expect(paired.value.roomToken).toMatch(/^[0-9a-f]{64}$/);
+
+      const pairRequestCount = () => requests.filter((request) => request.path.endsWith('/pair')).length;
+      expect(pairRequestCount()).toBe(1);
+
+      // A reload reads the room token from the one browser connection record. It is intentionally
+      // accepted years later: the room token is the relay's authority, not a client-side clock.
+      const storage = memoryStorage();
+      expect(
+        writeConnection(
+          { ...paired.value, tournamentKey: tournamentId },
+          new Date('2026-09-11T08:00:00.000Z'),
+          storage,
+        ),
+      ).toBe(true);
+      expect(storage.getItem('qbsheet.connection.v1')).not.toContain(code);
+      const persistedRoom = readConnection(new Date('2036-09-11T08:00:00.000Z'), storage);
+      expect(persistedRoom).toMatchObject({
+        baseUrl: server,
+        roomId,
+        roomName,
+        roomToken: paired.value.roomToken,
+        deviceId: 'ordinary-scorer',
+        tournamentKey: tournamentId,
+      });
+      expect(connectionMaxAgeMs).toBe(Number.POSITIVE_INFINITY);
+      if (!persistedRoom) throw new Error('The paired room did not survive the simulated reload.');
+
+      const identity = {
+        roomId: persistedRoom.roomId,
+        roomName: persistedRoom.roomName,
+        token: persistedRoom.roomToken,
+        deviceId: persistedRoom.deviceId,
+      };
+      const roomHeadersForTest = { 'x-yf-room-token': identity.token, origin: 'https://qbsheet.com' };
+
+      const waitingStatus = await SELF.fetch(`${server}/assignment/status`, {
+        headers: roomHeadersForTest,
+      });
+      expect(waitingStatus.status).toBe(200);
+      expect(waitingStatus.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+      expect(await waitingStatus.json()).toMatchObject({ room_id: roomId, state: 'none', session: null });
+
+      const waitingBody = await SELF.fetch(`${server}/assignment`, { headers: roomHeadersForTest });
+      expect(waitingBody.status).toBe(204);
+      expect(waitingBody.headers.get('access-control-allow-origin')).toBe('https://qbsheet.com');
+      expect(await waitingBody.text()).toBe('');
+
+      const waiting = await openedControl.value.client.assignment(identity);
+      expect(waiting).toMatchObject({ ok: true, value: { state: 'none', definition: null, session: null } });
+      if (!waiting.ok) throw new Error(waiting.error);
+      expect(waiting.value.errors).toBeUndefined();
+      expect(requests.some((request) => request.path.endsWith('/assignment'))).toBe(false);
+
+      // A fresh client stands in for a browser reload. It reuses the persisted room token and never
+      // asks for another bootstrap code while the relay remains room-only.
+      const reloadedScorer = new FruityServerClient(server, scorerFetch);
+      const waitingAfterReload = await reloadedScorer.assignment(identity);
+      expect(waitingAfterReload).toMatchObject({
+        ok: true,
+        value: { state: 'none', definition: null, session: null },
+      });
+      expect(pairRequestCount()).toBe(1);
+
+      const roundOne = scorerAssignment(roomId, roundOneMatchId, 1, 1, 1);
+      expect(
+        (
+          await mirror(management, tournamentId, {
+            revision: 2,
+            rooms: [
+              {
+                room_id: roomId,
+                name: roomName,
+                pairing_code_hash: pairingHash,
+                assignment_qbj: roundOne,
+                match_id: roundOneMatchId,
+                round_revision: 1,
+                assignment_revision: 1,
+              },
+            ],
+            sessions: [],
+          })
+        ).status,
+      ).toBe(200);
+
+      const assignedStatus = await SELF.fetch(`${server}/assignment/status`, { headers: roomHeadersForTest });
+      expect(assignedStatus.status).toBe(200);
+      expect(await assignedStatus.json()).toMatchObject({
+        room_id: roomId,
+        state: 'assigned',
+        match_id: roundOneMatchId,
+        round_revision: 1,
+        assignment_revision: 1,
+        session: null,
+      });
+
+      const assignedBody = await SELF.fetch(`${server}/assignment`, { headers: roomHeadersForTest });
+      expect(assignedBody.status).toBe(200);
+      expect(assignedBody.headers.get('content-type')).toBe('application/vnd.quizbowl.qbj+json');
+      expect(await assignedBody.json()).toEqual(roundOne);
+
+      const assigned = await reloadedScorer.assignment(identity);
+      expect(assigned).toMatchObject({
+        ok: true,
+        value: { state: 'assigned', scheduledMatchId: roundOneMatchId, session: null },
+      });
+      if (!assigned.ok) throw new Error(assigned.error);
+      expect(assigned.value.errors).toBeUndefined();
+      expect(assigned.value.definition).not.toBeNull();
+      if (!assigned.value.definition) throw new Error('The ordinary QBJ assignment did not parse.');
+      const definition = assigned.value.definition;
+      expect(definition.origin).toBe('qbj');
+      expect(definition.qbjIdentity?.matchId).toBe(roundOneMatchId);
+      expect(definition.round.number).toBe(1);
+      expect(definition.left.name).toBe(ninetySix.name);
+      expect(definition.right.name).toBe(greenwood.name);
+      expect(definition.scorekeeperFormat.answerTypes.length).toBeGreaterThan(0);
+
+      const opened = await reloadedScorer.openSession(identity, roundOneMatchId);
+      expect(opened).toMatchObject({ ok: true, value: { writer: true } });
+      if (!opened.ok) throw new Error(opened.error);
+      const credentials = { sessionId: opened.value.sessionId, token: opened.value.token };
+
+      const startedStatus = await SELF.fetch(`${server}/assignment/status`, { headers: roomHeadersForTest });
+      expect(await startedStatus.json()).toMatchObject({
+        state: 'assigned',
+        session: {
+          session_id: credentials.sessionId,
+          status: 'open',
+          resumable: true,
+          final_received: false,
+        },
+      });
+
+      const power = definition.scorekeeperFormat.answerTypes.find((answerType) => answerType.value === 15);
+      if (!power) throw new Error('The assignment fixture did not provide a power answer type.');
+      const setup = {
+        left: { name: definition.left.name, players: definition.left.players.map((player) => player.name) },
+        right: {
+          name: definition.right.name,
+          players: definition.right.players.map((player) => player.name),
+        },
+      };
+      const scoreEvents: ScoreEvent[] = [
+        event({
+          type: 'tossup-buzz',
+          questionNumber: 1,
+          team: 'left',
+          playerName: 'Sarah',
+          answerTypeIndex: power.index,
+        }),
+        event({ type: 'bonus', questionNumber: 1, team: 'left', controlledPoints: 20 }),
+        event({
+          type: 'end-game-early',
+          questionNumber: 2,
+          reason: 'Packet ran out',
+          tossupsRead: 1,
+        }),
+      ];
+      const game = deriveGame(definition.scorekeeperFormat, setup, scoreEvents);
+      expect(game.left.points).toBe(35);
+      expect(game.right.points).toBe(0);
+      expect(game.phase).toEqual({ kind: 'complete', reason: 'short' });
+
+      // Session credentials can be carried by the persisted connection independently of the
+      // room's one-time pairing token, so a fresh adapter can submit the final after a reload.
+      expect(
+        writeConnection(
+          {
+            ...persistedRoom,
+            sessionId: credentials.sessionId,
+            sessionToken: credentials.token,
+          },
+          new Date('2026-09-11T08:15:00.000Z'),
+          storage,
+        ),
+      ).toBe(true);
+      const persistedSession = readConnection(new Date('2036-09-11T08:15:00.000Z'), storage);
+      expect(persistedSession).toMatchObject({
+        roomToken: identity.token,
+        sessionId: credentials.sessionId,
+        sessionToken: credentials.token,
+      });
+      if (!persistedSession?.sessionId || !persistedSession.sessionToken) {
+        throw new Error('The scoring session did not survive the simulated reload.');
+      }
+      const resumedCredentials = {
+        sessionId: persistedSession.sessionId,
+        token: persistedSession.sessionToken,
+      };
+      const resumedScorer = new FruityServerClient(server, scorerFetch);
+
+      const resultQbj = buildResultDocument({
+        definition,
+        format: definition.scorekeeperFormat,
+        game,
+      });
+      const finalReceipt = await resumedScorer.postFinal(resumedCredentials, resultQbj);
+      expect(finalReceipt).toMatchObject({
+        ok: true,
+        value: {
+          accepted: true,
+          received: true,
+          reviewRequired: true,
+          duplicate: false,
+          matchId: roundOneMatchId,
+        },
+      });
+      if (!finalReceipt.ok) throw new Error(finalReceipt.error);
+      expect(finalReceipt.value.fingerprint).toBe(await resultFingerprint(resultQbj));
+
+      const retainedResponse = await SELF.fetch(`${manageBase(tournamentId)}/results`, {
+        headers: manageHeaders(management),
+      });
+      expect(retainedResponse.status).toBe(200);
+      const retained = (await retainedResponse.json()) as {
+        results: { result_id: string; fingerprint: string; qbj: unknown }[];
+      };
+      expect(retained.results).toHaveLength(1);
+      expect(retained.results[0]).toMatchObject({
+        result_id: expect.stringMatching(/^result-/),
+        fingerprint: finalReceipt.value.fingerprint,
+        qbj: resultQbj,
+      });
+
+      const finalStatus = await SELF.fetch(`${server}/assignment/status`, { headers: roomHeadersForTest });
+      expect(await finalStatus.json()).toMatchObject({
+        state: 'assigned',
+        session: {
+          session_id: credentials.sessionId,
+          status: 'final-received',
+          resumable: false,
+          final_received: true,
+        },
+      });
+
+      // Clearing the assignment and publishing a new bootstrap hash does not unpair the room.
+      expect(
+        (
+          await mirror(management, tournamentId, {
+            revision: 3,
+            rooms: [{ room_id: roomId, name: roomName, pairing_code_hash: nextPairingHash }],
+            sessions: [],
+          })
+        ).status,
+      ).toBe(200);
+      const oldCode = await pair(tournamentId, code, roomId, `old-code-${tournamentId.slice(0, 8)}`);
+      expect(oldCode.status).toBe(401);
+
+      const clear = await resumedScorer.assignment(identity);
+      expect(clear).toMatchObject({ ok: true, value: { state: 'none', definition: null, session: null } });
+      expect(pairRequestCount()).toBe(1);
+
+      const relayLifetime = async () => {
+        const stub = env.QBTCP_RELAY.get(env.QBTCP_RELAY.idFromName(tournamentId));
+        return runInDurableObject(stub, async (_instance, state) => ({
+          room: state.storage.sql
+            .exec<{ pairing_expires_at: string | null }>(
+              'SELECT pairing_expires_at FROM room WHERE room_id = ?',
+              roomId,
+            )
+            .toArray()[0],
+          tokens: state.storage.sql
+            .exec<{ count: number }>('SELECT COUNT(*) AS count FROM room_token WHERE room_id = ?', roomId)
+            .toArray()[0]?.count,
+        }));
+      };
+      expect(await relayLifetime()).toEqual({ room: { pairing_expires_at: null }, tokens: 1 });
+
+      const roundTwo = scorerAssignment(roomId, roundTwoMatchId, 2, 2, 1);
+      expect(
+        (
+          await mirror(management, tournamentId, {
+            revision: 4,
+            rooms: [
+              {
+                room_id: roomId,
+                name: roomName,
+                pairing_code_hash: nextPairingHash,
+                assignment_qbj: roundTwo,
+                match_id: roundTwoMatchId,
+                round_revision: 2,
+                assignment_revision: 1,
+              },
+            ],
+            sessions: [],
+          })
+        ).status,
+      ).toBe(200);
+
+      const nextRoundScorer = new FruityServerClient(server, scorerFetch);
+      const nextRound = await nextRoundScorer.assignment(identity);
+      expect(nextRound).toMatchObject({
+        ok: true,
+        value: { state: 'assigned', scheduledMatchId: roundTwoMatchId },
+      });
+      if (!nextRound.ok) throw new Error(nextRound.error);
+      expect(nextRound.value.errors).toBeUndefined();
+      expect(nextRound.value.definition?.origin).toBe('qbj');
+      expect(nextRound.value.definition?.qbjIdentity?.matchId).toBe(roundTwoMatchId);
+      expect(nextRound.value.definition?.round.number).toBe(2);
+      expect(pairRequestCount()).toBe(1);
+      expect(await relayLifetime()).toEqual({ room: { pairing_expires_at: null }, tokens: 1 });
+
+      // The healthy ordinary-Scorer path has no hidden credential, origin, or assignment failure.
+      for (const request of requests.filter((entry) => !entry.path.endsWith('/rooms'))) {
+        expect(request.status, `${request.method} ${request.path}`).toBeGreaterThanOrEqual(200);
+        expect(request.status, `${request.method} ${request.path}`).toBeLessThan(300);
+        expect(request.allowOrigin, `${request.method} ${request.path}`).toBe(
+          request.path.endsWith('/qbtcp/v1') ? '*' : 'https://qbsheet.com',
+        );
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('refuses to start a room with no assignment', async () => {
