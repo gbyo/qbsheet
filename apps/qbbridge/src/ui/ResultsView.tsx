@@ -14,8 +14,25 @@ import {
   resultSummary,
 } from '../model/results';
 import type { BridgeApi } from '../model/useBridge';
+import type { ResultVerification } from '../model/yftSource';
 
 type ResultFilter = 'all' | 'needs-import' | 'imported';
+
+const verificationTone: Record<ResultVerification, 'success' | 'warning' | 'danger' | null> = {
+  verified: 'success',
+  superseded: 'warning',
+  conflict: 'danger',
+  'needs-import': null,
+  unknown: null,
+};
+
+const verificationLabel: Record<ResultVerification, string | null> = {
+  verified: 'Verified in YellowFruit',
+  superseded: 'Superseded by correction',
+  conflict: 'Cannot prove in YellowFruit',
+  'needs-import': null,
+  unknown: null,
+};
 
 export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   const { state } = bridge;
@@ -38,6 +55,13 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   const visible = described
     .filter((result) => filter === 'all' || result.importState === filter)
     .sort((left, right) => right.entry.receivedAt.localeCompare(left.entry.receivedAt));
+  // Games with more than one retained final whose newest is still unhandled: importing the
+  // original alongside its correction would hand YellowFruit the same game twice.
+  const multiFinalGames = bridge.correctionGroups.filter((group) => {
+    if (group.resultIds.length < 2) return false;
+    const latest = state.results.find((entry) => entry.resultId === group.latestResultId);
+    return latest !== undefined && resultImportStatus(latest) !== 'imported';
+  });
   const groups = new Map<string, typeof described>();
   for (const result of visible) {
     const key = result.summary.roundName ?? 'Round not identified';
@@ -75,6 +99,14 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
           {bridge.needsImportCount} result{bridge.needsImportCount === 1 ? '' : 's'} need YellowFruit import
         </span>
       </div>
+
+      {multiFinalGames.length > 0 ? (
+        <p className="muted">
+          {multiFinalGames.length} game{multiFinalGames.length === 1 ? ' has' : 's have'} more than one
+          retained final. Import only the newest file per game into YellowFruit — an original alongside its
+          correction counts the game twice.
+        </p>
+      ) : null}
 
       {visible.length === 0 ? (
         <p className="muted">
@@ -141,6 +173,26 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
                           ? 'Needs import'
                           : 'New'}
                     </StatusBadge>
+                    {(() => {
+                      const verification = bridge.resultVerification(entry.resultId);
+                      const tone = verificationTone[verification];
+                      const label = verificationLabel[verification];
+                      if (!tone || !label) return null;
+                      return (
+                        <span>
+                          <StatusBadge tone={tone}>{label}</StatusBadge>
+                          {verification === 'superseded' && importState === 'imported' ? (
+                            <span className="faint">
+                              {' '}
+                              YellowFruit still holds this version — import the correction.
+                            </span>
+                          ) : null}
+                          {verification === 'conflict' ? (
+                            <span className="faint"> Check the game in YellowFruit by hand.</span>
+                          ) : null}
+                        </span>
+                      );
+                    })()}
                     {entry.savedPath ? (
                       <Button
                         size="sm"
@@ -173,10 +225,12 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
 
       <p className="faint" style={{ marginTop: 'var(--qbs-space-4)' }}>
         Saved results are marked <strong>Needs import</strong> until you confirm that you handled the file in
-        YellowFruit &rarr; Import Games Only (Cmd/Ctrl+M). This is a local operator marker, not an automatic
-        verification. Each file is the scorer&rsquo;s own QBJ, written out unchanged; QBBridge recalculates
-        nothing and merges nothing. A file already in the folder is never replaced by a different result — a
-        corrected final arrives under its own name.
+        YellowFruit &rarr; Import Games Only (Cmd/Ctrl+M). That marker is yours; separately, QBBridge checks
+        each result against the loaded YellowFruit games and reports <strong>Verified in YellowFruit</strong>,{' '}
+        <strong>Superseded by correction</strong>, or <strong>Cannot prove in YellowFruit</strong> — proof
+        from the file, never a guess. Each file is the scorer&rsquo;s own QBJ, written out unchanged; QBBridge
+        recalculates nothing and merges nothing. A file already in the folder is never replaced by a different
+        result — a corrected final arrives under its own name.
       </p>
     </section>
   );

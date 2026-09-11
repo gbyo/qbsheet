@@ -203,6 +203,17 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               <dd className="code">{state.relay.tournamentId}</dd>
               <dt>Last publication</dt>
               <dd>{state.relay.revision === 0 ? 'None yet' : `Revision ${state.relay.revision}`}</dd>
+              <dt>Publication source</dt>
+              <dd>
+                {state.lastPublication
+                  ? `Revision ${state.lastPublication.revision} built from source #${(state.lastPublication.yftSha256 ?? 'unknown').slice(0, 12)}`
+                  : 'None yet'}
+              </dd>
+              <dt>Source file</dt>
+              <dd>
+                {state.yftPath ?? 'No file loaded'}
+                {state.yftChangedOnDisk ? ' — changed on disk, reload before publishing' : ''}
+              </dd>
             </dl>
             <p className="muted">
               The management credential is kept in this computer&rsquo;s operating-system secure storage. It

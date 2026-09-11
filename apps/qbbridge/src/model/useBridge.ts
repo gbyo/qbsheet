@@ -21,6 +21,8 @@ import {
   loadRelayCredential,
   openRecoveryPackage,
   openYellowFruitFile,
+  readYftSourceContents,
+  readYftSourceMetadata,
   relayCredentialKey,
   storeRelayCredential,
   writeAssignmentFile,
@@ -106,10 +108,24 @@ import {
   type RecoveryBaseline,
 } from './recovery';
 import { schedulePairingWarnings } from './schedule';
+import {
+  groupResultsByMatch,
+  sha256Hex,
+  verificationForResult,
+  type CorrectionGroup,
+  type ResultVerification,
+  type YftGame,
+} from './yftSource';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /** How often the results poll runs while the window is open. */
 export const resultPollIntervalMs = 5000;
+/**
+ * How often the loaded YellowFruit source file is re-stat'ed while Bridge is open. Metadata
+ * only — a mismatch re-reads and hashes before judging, so the steady-state cost is one
+ * stat call per interval and a same-content save costs one extra read.
+ */
+export const yftSourcePollIntervalMs = 15000;
 
 /** Routine confirmations are useful briefly, while problems need to remain available. */
 export const noticeAutoDismissMs = 4000;
@@ -245,6 +261,17 @@ export interface BridgeApi {
   markResultImported(resultId: string): void;
   unmarkResultImported(resultId: string): void;
   needsImportCount: number;
+  /**
+   * Relay finals grouped by logical game: an original and its corrections share one group,
+   * newest arrival last. The handoff unit is the group's latest, never the whole group.
+   */
+  correctionGroups: CorrectionGroup[];
+  /**
+   * What the operator should believe about one result: proven in the loaded YellowFruit
+   * file, still needing import, superseded by a correction, unprovable, or unknown when
+   * no authoritative games are loaded. The operator's manual import marker is separate.
+   */
+  resultVerification(resultId: string): ResultVerification;
   /** True when this row cannot start a save because a save or another bridge action is active. */
   resultBusy(resultId: string): boolean;
   /** True while an individual or batch result save is in progress. */
@@ -389,6 +416,16 @@ function stateWithRelay(current: BridgeState, connection: RelayConnection): Brid
 export function useBridge(): BridgeApi {
   const [state, setState] = useState<BridgeState>(() => loadState());
   const [tournament, setTournament] = useState<BridgeTournament | null>(null);
+  /**
+   * The authoritative games from the loaded `.yft`, for result verification and nothing
+   * else. In-memory only, alongside the tournament: after a restart there is no loaded
+   * source, so verification honestly reports unknown until the operator reloads.
+   */
+  const [yftGames, setYftGames] = useState<YftGame[] | null>(null);
+  /** Guards the source poller against overlapping metadata round-trips. */
+  const yftSourceCheckRef = useRef(false);
+  /** Last on-disk-change warning shown, so a sick file says so once, not every poll. */
+  const yftSourceNoticeRef = useRef<string | null>(null);
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
   const [notice, setNotice] = useState<BridgeNotice | null>(null);
   const [relayReachable, setRelayReachable] = useState<boolean | null>(null);
@@ -420,6 +457,8 @@ export function useBridge(): BridgeApi {
     tournament: BridgeTournament;
     warnings: string[];
     fingerprint: string;
+    sha256: string;
+    games: YftGame[];
   } | null>(null);
   const pendingRelayClaimRef = useRef<RelayConnection | null>(null);
   const [relayCredentialSavePending, setRelayCredentialSavePending] = useState(false);
@@ -612,12 +651,104 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
+  /**
+   * Establish the on-disk baseline for a freshly loaded source file, once.
+   *
+   * Fire-and-forget by design: loads stay synchronous and instant, and the baseline lands
+   * moments later. It commits only when the path and bytes it measured for are still the
+   * loaded ones, so a quick file switch cannot plant a baseline under the wrong source.
+   */
+  const refreshYftSourceBaseline = useCallback(
+    (path: string, sha256: string): void => {
+      if (!isNativeHost()) return;
+      void (async () => {
+        let metadata;
+        try {
+          metadata = await readYftSourceMetadata(path);
+        } catch {
+          return;
+        }
+        const current = stateRef.current;
+        if (current.yftPath !== path || current.yftSha256 !== sha256) return;
+        commit((pending) =>
+          pending.yftPath === path && pending.yftSha256 === sha256
+            ? {
+                ...pending,
+                yftSource: { byteLength: metadata.byteLength, modifiedMs: metadata.modifiedMs },
+              }
+            : pending,
+        );
+      })();
+    },
+    [commit],
+  );
+
+  /**
+   * One provenance probe of the loaded source file: metadata first, bytes on suspicion.
+   *
+   * - `current`: the bytes on disk hash to the loaded bytes (a same-content save adopts
+   *   the new metadata baseline silently);
+   * - `changed`: the bytes provably differ;
+   * - `unknown`: anything unreadable or unjudgeable — a deleted file has no newer content
+   *   to be stale against, and a persisted path from before source hashing has no loaded
+   *   bytes to compare. Unknown is never a refusal on its own.
+   */
+  const probeYftSource = useCallback(
+    async (
+      path: string,
+      sha256: string | null,
+      baseline: { byteLength: number; modifiedMs: number } | null,
+    ): Promise<{
+      status: 'current' | 'changed' | 'unknown';
+      live: { byteLength: number; modifiedMs: number } | null;
+    }> => {
+      if (sha256 === null) return { status: 'unknown', live: null };
+      try {
+        const live = await readYftSourceMetadata(path);
+        if (baseline && live.byteLength === baseline.byteLength && live.modifiedMs === baseline.modifiedMs) {
+          return { status: 'current', live };
+        }
+        const contents = await readYftSourceContents(path);
+        return sha256Hex(contents) === sha256 ? { status: 'current', live } : { status: 'changed', live };
+      } catch {
+        return { status: 'unknown', live: null };
+      }
+    },
+    [],
+  );
+
+  /**
+   * Whether the loaded source still matches the file on disk, adopting a same-content
+   * baseline along the way. Only a proven change reports false.
+   */
+  const checkYftSourceCurrent = useCallback(async (): Promise<boolean> => {
+    const current = stateRef.current;
+    if (!isNativeHost() || !current.yftPath) return true;
+    if (current.yftChangedOnDisk) return false;
+    const path = current.yftPath;
+    const sha256 = current.yftSha256;
+    const probe = await probeYftSource(path, sha256, current.yftSource);
+    if (probe.status === 'changed') return false;
+    if (probe.status === 'current' && probe.live) {
+      const live = probe.live;
+      const stillCurrent = stateRef.current;
+      if (stillCurrent.yftPath === path && stillCurrent.yftSha256 === sha256) {
+        commit((pending) => ({
+          ...pending,
+          yftSource: { byteLength: live.byteLength, modifiedMs: live.modifiedMs },
+        }));
+      }
+    }
+    return true;
+  }, [commit, probeYftSource]);
+
   const applyLoadedFile = useCallback(
     (
       path: string | null,
-      report: { ok: true; tournament: BridgeTournament; warnings: string[] },
+      report: { ok: true; tournament: BridgeTournament; warnings: string[]; games: YftGame[] },
       startNew: boolean,
       fingerprint: string,
+      sha256: string,
     ): boolean => {
       const current = stateRef.current;
       const firstRoundId = report.tournament.rounds[0]?.id ?? null;
@@ -629,6 +760,9 @@ export function useBridge(): BridgeApi {
           resultFolder: current.resultFolder,
           yftPath: path,
           yftFingerprint: fingerprint,
+          yftSha256: sha256,
+          yftSource: null,
+          yftChangedOnDisk: false,
           tournamentName: report.tournament.name,
           selectedRoundId: firstRoundId,
         };
@@ -674,6 +808,9 @@ export function useBridge(): BridgeApi {
             ...currentState,
             yftPath: path,
             yftFingerprint: fingerprint,
+            yftSha256: sha256,
+            yftSource: null,
+            yftChangedOnDisk: false,
             recoverySource: source ? { ...source, verified } : null,
             tournamentName: report.tournament.name,
             roundPlans: reconciliationReport.plans,
@@ -685,7 +822,10 @@ export function useBridge(): BridgeApi {
         });
       }
       setTournament(report.tournament);
+      setYftGames(report.games);
       setLoadWarnings(report.warnings);
+      yftSourceNoticeRef.current = null;
+      if (path !== null) refreshYftSourceBaseline(path, sha256);
       invalidateRoundArtifacts();
       const reconciliationNote =
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
@@ -700,7 +840,7 @@ export function useBridge(): BridgeApi {
       });
       return true;
     },
-    [activateState, commit, invalidateRoundArtifacts],
+    [activateState, commit, invalidateRoundArtifacts, refreshYftSourceBaseline],
   );
 
   const loadFileContents = useCallback(
@@ -722,6 +862,8 @@ export function useBridge(): BridgeApi {
           tournament: report.tournament,
           warnings: report.warnings,
           fingerprint: yftFingerprint(contents),
+          sha256: sha256Hex(contents),
+          games: report.games,
         };
         setPendingFileSwitch({ path, tournamentName: report.tournament.name });
         setNotice({
@@ -735,7 +877,7 @@ export function useBridge(): BridgeApi {
       // leave a stale confirmation dialog able to switch away from the file now on screen.
       pendingFileRef.current = null;
       setPendingFileSwitch(null);
-      applyLoadedFile(path, report, false, yftFingerprint(contents));
+      applyLoadedFile(path, report, false, yftFingerprint(contents), sha256Hex(contents));
     },
     [applyLoadedFile],
   );
@@ -746,9 +888,10 @@ export function useBridge(): BridgeApi {
     if (
       !applyLoadedFile(
         pending.path,
-        { ok: true, tournament: pending.tournament, warnings: pending.warnings },
+        { ok: true, tournament: pending.tournament, warnings: pending.warnings, games: pending.games },
         true,
         pending.fingerprint,
+        pending.sha256,
       )
     )
       return;
@@ -1083,6 +1226,7 @@ export function useBridge(): BridgeApi {
         setRelayCredentialSavePending(false);
         setPersistenceSavePending(false);
         setTournament(null);
+        setYftGames(null);
         setLoadWarnings([]);
         setChangingRelay(false);
         setRelayReachable(true);
@@ -1374,6 +1518,7 @@ export function useBridge(): BridgeApi {
       outcome: PublishOutcome,
       pendingCodes: ReadonlyMap<string, string | null>,
       tombstoneIds: ReadonlySet<string>,
+      provenance: { yftSha256: string | null; at: string },
     ) => {
       const byRoom = new Map(outcome.assignments.map((entry) => [entry.roomId, entry]));
       const fingerprints = new Map(
@@ -1383,6 +1528,13 @@ export function useBridge(): BridgeApi {
       return commit((current) => ({
         ...current,
         relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
+        // Which source produced this revision, so incident recovery can prove what the
+        // rooms were served from. Superseded by the next publication.
+        lastPublication: {
+          revision: outcome.revision,
+          yftSha256: provenance.yftSha256,
+          at: provenance.at,
+        },
         rooms: current.rooms.map((room) => {
           const wasMirrored = pendingCodes.has(room.id);
           if (!wasMirrored) return room;
@@ -1448,6 +1600,19 @@ export function useBridge(): BridgeApi {
           kind: 'bad',
           message:
             'Round not published because the relay changed after this plan was prepared. Review it again.',
+        });
+        return null;
+      }
+      // The assignments below are built from the loaded source, so the source must still be
+      // the file on disk. A YellowFruit edit that landed after load — a roster fix between
+      // rounds is the classic one — refuses here, loudly, instead of publishing a stale
+      // snapshot as the next round. Reloading is transactional and keeps rooms and plans.
+      if (!(await checkYftSourceCurrent())) {
+        commit((pending) => (pending.yftChangedOnDisk ? pending : { ...pending, yftChangedOnDisk: true }));
+        setNotice({
+          kind: 'bad',
+          message:
+            'Round not published because the YellowFruit source file changed on disk after it was loaded. Reload it in Setup — rooms and plans are kept — then publish again.',
         });
         return null;
       }
@@ -1529,7 +1694,10 @@ export function useBridge(): BridgeApi {
           });
           return null;
         }
-        const persisted = applyPublication(outcome, pendingCodes, tombstoneIds);
+        const persisted = applyPublication(outcome, pendingCodes, tombstoneIds, {
+          yftSha256: stateRef.current.yftSha256,
+          at: new Date().toISOString(),
+        });
         if (input.assignmentFallback) rememberAssignmentFallback(null);
         setRelayReachable(true);
         setNotice(
@@ -1558,7 +1726,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, rememberAssignmentFallback],
+    [applyPublication, checkYftSourceCurrent, commit, rememberAssignmentFallback],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
@@ -1785,6 +1953,63 @@ export function useBridge(): BridgeApi {
       clearInterval(timer);
     };
   }, [pollResults, state.relay]);
+
+  /**
+   * Watch the loaded YellowFruit source file while the app is open.
+   *
+   * YellowFruit stays open beside Bridge on tournament day, and a roster or rule edit that
+   * lands after load must never silently become next round's assignments. Metadata
+   * mismatches re-read and hash before judging, so a same-content save stays silent while
+   * a real edit latches `yftChangedOnDisk` — which only an explicit reload clears — and
+   * warns once. Publication re-checks on demand; this poller is the early warning.
+   */
+  useEffect(() => {
+    if (!isNativeHost()) return;
+    if (!state.yftPath || state.yftChangedOnDisk) return;
+    let cancelled = false;
+    const check = () => {
+      if (cancelled || yftSourceCheckRef.current) return;
+      yftSourceCheckRef.current = true;
+      void (async () => {
+        try {
+          const current = stateRef.current;
+          if (!current.yftPath || current.yftChangedOnDisk) return;
+          const path = current.yftPath;
+          const probe = await probeYftSource(path, current.yftSha256, current.yftSource);
+          if (cancelled) return;
+          if (probe.status === 'changed') {
+            const message =
+              'The YellowFruit source file changed on disk after it was loaded. Reload it in Setup — rooms and plans are kept — before publishing.';
+            commit((pending) =>
+              pending.yftPath === path ? { ...pending, yftChangedOnDisk: true } : pending,
+            );
+            if (yftSourceNoticeRef.current !== message) {
+              yftSourceNoticeRef.current = message;
+              setNotice({ kind: 'warn', message });
+            }
+          } else if (
+            probe.status === 'current' &&
+            probe.live &&
+            stateRef.current.yftPath === path &&
+            stateRef.current.yftSha256 === current.yftSha256
+          ) {
+            const live = probe.live;
+            commit((pending) => ({
+              ...pending,
+              yftSource: { byteLength: live.byteLength, modifiedMs: live.modifiedMs },
+            }));
+          }
+        } finally {
+          yftSourceCheckRef.current = false;
+        }
+      })();
+    };
+    const timer = setInterval(check, yftSourcePollIntervalMs);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [commit, probeYftSource, state.yftPath, state.yftChangedOnDisk]);
 
   const chooseFolder = useCallback(async () => {
     try {
@@ -2056,6 +2281,28 @@ export function useBridge(): BridgeApi {
     [state.results],
   );
 
+  /**
+   * Relay finals grouped by logical game, and what YellowFruit proves about each one.
+   *
+   * Both derive from the loaded authoritative games plus the results ledger, so a reload
+   * re-proves everything: verification is never a persisted claim that can outlive the
+   * source it was checked against. The operator's manual import marker stays separate —
+   * proof and confirmation answer different questions.
+   */
+  const correctionGroups = useMemo(() => groupResultsByMatch(state.results), [state.results]);
+  const resultChecks = useMemo(() => {
+    const teamIds = new Set((tournament?.teams ?? []).map((team) => team.id));
+    const checks = new Map<string, ResultVerification>();
+    for (const entry of state.results) {
+      checks.set(entry.resultId, verificationForResult(entry, correctionGroups, yftGames, teamIds));
+    }
+    return checks;
+  }, [correctionGroups, state.results, tournament, yftGames]);
+  const resultVerification = useCallback(
+    (resultId: string): ResultVerification => resultChecks.get(resultId) ?? 'unknown',
+    [resultChecks],
+  );
+
   const roomStatus = useCallback(
     (room: Room): RoomStatus => {
       if (!room.relayPublished) return 'not-published';
@@ -2237,6 +2484,8 @@ export function useBridge(): BridgeApi {
     markResultImported,
     unmarkResultImported,
     needsImportCount,
+    correctionGroups,
+    resultVerification,
     resultBusy,
     savingResults: savingBatch || savingResultIds.size > 0,
     pollResults,

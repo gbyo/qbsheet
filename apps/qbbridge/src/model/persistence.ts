@@ -93,6 +93,25 @@ export interface BridgeState {
    */
   yftFingerprint: string | null;
   /**
+   * SHA-256 over the exact loaded `.yft` bytes, or null when no file is loaded. The fast
+   * identity hash answers "same file?"; this answers "which exact bytes?" for publication
+   * records and incident recovery.
+   */
+  yftSha256: string | null;
+  /**
+   * On-disk baseline of the loaded source file: byte length plus last-modified time. The
+   * change poller compares live metadata against this; a mismatch triggers a byte re-read
+   * rather than a verdict, so a no-op save never reads as an edit. Null for path-less
+   * loads and non-native hosts, where on-disk detection is unavailable.
+   */
+  yftSource: { byteLength: number; modifiedMs: number } | null;
+  /**
+   * True once the source file provably differs from the loaded bytes. Set by the change
+   * poller or the pre-publish check; only an explicit reload clears it. Publication is
+   * refused while set.
+   */
+  yftChangedOnDisk: boolean;
+  /**
    * What the world looked like when this profile last created a recovery package. Compared
    * against live state to show package age per category. Null when no package was created
    * here; a backup that only imports never carries one.
@@ -121,6 +140,12 @@ export interface BridgeState {
   roundPlans: RoundPlan[];
   resultFolder: string | null;
   results: StoredResult[];
+  /**
+   * Which source produced the last accepted publication: relay revision, the SHA-256 of the
+   * `.yft` it was built from, and when. Incident recovery can prove which source state
+   * produced an assignment; a new load or publication supersedes it.
+   */
+  lastPublication: { revision: number; yftSha256: string | null; at: string } | null;
 }
 
 export type PersistResult = { ok: true } | { ok: false; error: unknown };
@@ -132,8 +157,12 @@ export function emptyState(): BridgeState {
     scorerReadiness: null,
     yftPath: null,
     yftFingerprint: null,
+    yftSha256: null,
+    yftSource: null,
+    yftChangedOnDisk: false,
     lastRecoveryPackage: null,
     recoverySource: null,
+    lastPublication: null,
     tournamentName: null,
     rooms: [],
     pendingRoomRemovals: [],
@@ -252,6 +281,46 @@ function normalizeTombstone(value: unknown): RoomTombstone | null {
 
 function readYftFingerprint(value: unknown): string | null {
   return typeof value === 'string' && /^[0-9a-f]{16}$/.test(value) ? value : null;
+}
+
+function readYftSha256(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : null;
+}
+
+/**
+ * Read the on-disk baseline. Malformed baselines are dropped, never repaired: without a
+ * trustworthy baseline the poller simply cannot judge the file, which reads as "unknown"
+ * rather than "current".
+ */
+function readYftSourceBaseline(value: unknown): { byteLength: number; modifiedMs: number } | null {
+  if (!isRecord(value)) return null;
+  const { byteLength, modifiedMs } = value;
+  if (
+    typeof byteLength !== 'number' ||
+    !Number.isInteger(byteLength) ||
+    byteLength < 0 ||
+    typeof modifiedMs !== 'number' ||
+    !Number.isFinite(modifiedMs)
+  ) {
+    return null;
+  }
+  return { byteLength, modifiedMs };
+}
+
+/**
+ * Read the last-publication provenance. A malformed record is dropped: the worst case is a
+ * Setup panel with no source to name until the next publication, never a wrong revision
+ * attributed to the wrong bytes.
+ */
+function readLastPublication(
+  value: unknown,
+): { revision: number; yftSha256: string | null; at: string } | null {
+  if (!isRecord(value)) return null;
+  const { revision, yftSha256, at } = value;
+  if (typeof revision !== 'number' || !Number.isInteger(revision) || typeof at !== 'string') {
+    return null;
+  }
+  return { revision, yftSha256: readYftSha256(yftSha256), at };
 }
 
 /**
@@ -408,8 +477,12 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     scorerReadiness: readScorerReadiness(state.scorerReadiness),
     yftPath: typeof state.yftPath === 'string' ? state.yftPath : null,
     yftFingerprint: readYftFingerprint(state.yftFingerprint),
+    yftSha256: readYftSha256(state.yftSha256),
+    yftSource: readYftSourceBaseline(state.yftSource),
+    yftChangedOnDisk: state.yftChangedOnDisk === true,
     lastRecoveryPackage: readRecoveryBaseline(state.lastRecoveryPackage),
     recoverySource: readRecoverySource(state.recoverySource),
+    lastPublication: readLastPublication(state.lastPublication),
     tournamentName: typeof state.tournamentName === 'string' ? state.tournamentName : null,
     rooms,
     pendingRoomRemovals,

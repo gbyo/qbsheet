@@ -29,6 +29,7 @@ import {
   type RoundRecord,
   type YellowFruitScheduleDescription,
 } from '@qbsheet/tournament-formats';
+import { extractYftGames, type YftGame } from './yftSource';
 
 export interface BridgePlayer {
   id: string;
@@ -80,7 +81,8 @@ export interface BridgeTournament {
 }
 
 export type LoadTournamentResult =
-  { ok: true; tournament: BridgeTournament; warnings: string[] } | { ok: false; errors: string[] };
+  | { ok: true; tournament: BridgeTournament; warnings: string[]; games: YftGame[] }
+  | { ok: false; errors: string[] };
 
 const scoringRulesId = 'ScoringRules_QBBridge';
 
@@ -227,6 +229,10 @@ export function loadYellowFruitTournament(contents: string): LoadTournamentResul
       playerCount: teams.reduce((total, team) => total + team.players.length, 0),
     },
     warnings,
+    // The authoritative games, kept for result verification and for nothing else: the
+    // standings and schedule stay YellowFruit's, but proof that a saved result is really in
+    // the file needs the games Bridge deliberately leaves out of the tournament model.
+    games: extractYftGames(report.value.document.objects),
   };
 }
 
