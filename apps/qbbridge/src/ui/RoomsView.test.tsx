@@ -132,6 +132,11 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     savingResults: false,
     pollResults: vi.fn(async () => undefined),
     unsavedResultWarning: null,
+    operations: null,
+    operationsRunning: false,
+    refreshOperations: async () => {},
+    operationsTimeline: [],
+    lastWriteAt: null,
   };
 }
 

@@ -82,6 +82,11 @@ function bridgeWhileBatchSaving(): BridgeApi {
     needsImportCount: 0,
     pollResults: vi.fn(async () => undefined),
     unsavedResultWarning: null,
+    operations: null,
+    operationsRunning: false,
+    refreshOperations: async () => {},
+    operationsTimeline: [],
+    lastWriteAt: null,
   };
 }
 

@@ -95,6 +95,11 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     savingResults: false,
     pollResults: async () => {},
     unsavedResultWarning: null,
+    operations: null,
+    operationsRunning: false,
+    refreshOperations: async () => {},
+    operationsTimeline: [],
+    lastWriteAt: null,
   };
 }
 
