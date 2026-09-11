@@ -1048,14 +1048,13 @@ export function useBridge(): BridgeApi {
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const outcome = await relayTakeover(connection, takeoverId);
-      const persisted = commit(
-        (stateAtCommit) =>
-          stateAtCommit.relay
-            ? {
-                ...stateAtCommit,
-                relay: { ...stateAtCommit.relay, epoch: outcome.directorEpoch, revision: outcome.revision },
-              }
-            : stateAtCommit,
+      const persisted = commit((stateAtCommit) =>
+        stateAtCommit.relay
+          ? {
+              ...stateAtCommit,
+              relay: { ...stateAtCommit.relay, epoch: outcome.directorEpoch, revision: outcome.revision },
+            }
+          : stateAtCommit,
       ).persisted;
       if (!persisted.ok) {
         setNotice({

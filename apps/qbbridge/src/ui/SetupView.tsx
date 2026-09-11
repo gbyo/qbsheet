@@ -72,6 +72,13 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
     readiness?.message ??
     `Check whether ${scoresheetOrigin} can pair with this relay before sharing room QR codes.`;
 
+  function cancelRelayChange() {
+    setBaseUrl('');
+    setTournamentId(generateTournamentId());
+    setSetupToken('');
+    bridge.cancelRelayChange();
+  }
+
   return (
     <>
       <section className="panel">
@@ -310,7 +317,7 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               </Button>
               {state.relay ? (
                 <Button
-                  onPress={bridge.cancelRelayChange}
+                  onPress={cancelRelayChange}
                   isDisabled={bridge.busy || bridge.relayCredentialSavePending}
                 >
                   Cancel
