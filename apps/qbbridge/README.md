@@ -116,7 +116,7 @@ running `parseInt` over that field, so `"4"` is never rewritten to `"Round 4"`.
 
 QBBridge speaks to the relay that already exists
 (`apps/qbtcp-relay-backend-cloudflare`), hosted in the tournament's own Cloudflare account. It
-deploys no Worker, forks no protocol, and makes three calls:
+deploys no Worker, forks no protocol, and makes four calls:
 
 ```text
 POST /qbtcp/v1/manage/claim
@@ -135,10 +135,11 @@ cursor or offset. A build that never acknowledged anything would, at result 129,
 could never reach by polling — a silent ceiling, which is the worst kind.
 
 So a result is acknowledged **only after its bytes are on the operator's disk**, never because it
-arrived and never because it was displayed. `unacked` therefore means "not yet saved locally": a
-queue that drains, and that cannot fill up while results are being saved. If the acknowledgment
-call itself fails the save still stands; the result is simply offered again next poll and
-recognised as already saved.
+arrived and never because it was displayed. The lifecycle is: result arrives → it remains unacked
+while displayed → the local QBJ write succeeds → its result id is acknowledged. `unacked` therefore
+means "not yet saved locally": a queue that drains, and that cannot fill up while results are being
+saved. If the acknowledgment call itself fails, the local save still stands; the result is simply
+offered again on a later poll, recognized as already saved, and its ACK is retried.
 
 The relay keeps an acknowledged result for seven days and still serves it under `state=all`, so the
 second copy the tournament wanted is there for the weekend. As a backstop, QBBridge warns when 100

@@ -27,8 +27,8 @@
  * changes is only that a saved result stops occupying the unacknowledged window.
  *
  * This is still not a synchronization engine. There is no event cursor, no replay, no
- * reconciliation, no result review and no retry coordinator: a call either worked or it is
- * reported as having failed.
+ * reconciliation, or result review. A failed ACK is intentionally retried on a later poll after
+ * the local save already succeeded; it is transport housekeeping, not YellowFruit acceptance.
  */
 
 import { buildRelayMirrorDocument } from '../../../../src/director/relay/relaySync';
