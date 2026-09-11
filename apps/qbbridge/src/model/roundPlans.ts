@@ -193,6 +193,80 @@ export function removeRoomFromPlans(plans: readonly RoundPlan[], roomId: string)
   return next;
 }
 
+/**
+ * Index a round's pairings by room, with the first entry winning.
+ *
+ * This matches the `find(...)` lookup the UI reads, so a duplicate row that reaches this point
+ * in memory cannot display one pairing while publishing another. Persisted duplicates are removed
+ * earlier by `dedupeRoundPlans`; this is the second fence, not the first.
+ */
+export function pairingsByRoom(pairings: readonly PlannedPairing[]): Map<string, PlannedPairing> {
+  const byRoom = new Map<string, PlannedPairing>();
+  for (const pairing of pairings) {
+    if (!byRoom.has(pairing.roomId)) byRoom.set(pairing.roomId, pairing);
+  }
+  return byRoom;
+}
+
+/**
+ * Restore the canonical plan shape: one plan per round, one row per room.
+ *
+ * Persisted state is a trust boundary — a stale build, a partial write, a hand edit, or a future
+ * migration can produce duplicate `roundId` or `roomId` entries that parse cleanly. Normal editing
+ * never creates them, so every duplicate here is treated as corruption, not intent:
+ *
+ * - exact duplicate rows collapse to one;
+ * - a room with conflicting rows is left unplanned rather than guessed at, because shipping either
+ *   matchup would be choosing a game the operator may not have meant;
+ * - duplicate round ids merge into a single plan under the same per-room rule;
+ * - rows with nothing chosen and rounds left with nothing planned are dropped, as elsewhere.
+ *
+ * Only the ambiguous plan data is discarded. Rooms, relay state, and results pass through
+ * untouched — see `persistence.ts`.
+ */
+export function dedupeRoundPlans(plans: readonly RoundPlan[]): RoundPlan[] {
+  const roomsByRound = new Map<string, Map<string, PlannedPairing>>();
+  const conflictedByRound = new Map<string, Set<string>>();
+  const roundOrder: string[] = [];
+  for (const plan of plans) {
+    let rooms = roomsByRound.get(plan.roundId);
+    if (!rooms) {
+      rooms = new Map();
+      roomsByRound.set(plan.roundId, rooms);
+      roundOrder.push(plan.roundId);
+    }
+    let conflicted = conflictedByRound.get(plan.roundId);
+    if (!conflicted) {
+      conflicted = new Set();
+      conflictedByRound.set(plan.roundId, conflicted);
+    }
+    for (const pairing of plan.pairings) {
+      if (pairing.leftTeamId === null && pairing.rightTeamId === null) continue;
+      if (conflicted.has(pairing.roomId)) continue;
+      const existing = rooms.get(pairing.roomId);
+      if (!existing) {
+        rooms.set(pairing.roomId, {
+          roomId: pairing.roomId,
+          leftTeamId: pairing.leftTeamId,
+          rightTeamId: pairing.rightTeamId,
+        });
+        continue;
+      }
+      if (existing.leftTeamId === pairing.leftTeamId && existing.rightTeamId === pairing.rightTeamId) {
+        continue;
+      }
+      rooms.delete(pairing.roomId);
+      conflicted.add(pairing.roomId);
+    }
+  }
+  const next: RoundPlan[] = [];
+  for (const roundId of roundOrder) {
+    const pairings = [...roomsByRound.get(roundId)!.values()];
+    if (pairings.length > 0) next.push({ roundId, pairings });
+  }
+  return next;
+}
+
 /** What reconciliation against a reloaded `.yft` had to drop or clear. */
 export interface PlanReconciliation {
   plans: RoundPlan[];

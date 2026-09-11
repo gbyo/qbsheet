@@ -20,6 +20,7 @@
  */
 
 import type { Room, RoomTombstone } from './rooms';
+import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
@@ -166,6 +167,13 @@ function legacyTeams(value: unknown): { leftTeamId: string | null; rightTeamId: 
   };
 }
 
+/**
+ * Read the persisted plans into the canonical shape the UI and publisher share.
+ *
+ * Parsing is lenient field by field, but duplicates are not passed through: see
+ * `dedupeRoundPlans`. Persisted state is a trust boundary, and two entries for one room must
+ * never reach one consumer as first-wins and another as last-wins.
+ */
 function normalizeRoundPlans(value: unknown): RoundPlan[] {
   if (!Array.isArray(value)) return [];
   const plans: RoundPlan[] = [];
@@ -184,7 +192,7 @@ function normalizeRoundPlans(value: unknown): RoundPlan[] {
     }
     if (pairings.length > 0) plans.push({ roundId: entry.roundId, pairings });
   }
-  return plans;
+  return dedupeRoundPlans(plans);
 }
 
 function normalizeTombstone(value: unknown): RoomTombstone | null {
@@ -300,8 +308,9 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     pendingRoomRemovals,
     retiredRoomIds,
     selectedRoundId,
-    roundPlans:
+    roundPlans: dedupeRoundPlans(
       selectedRoundId !== null && pairings.length > 0 ? [{ roundId: selectedRoundId, pairings }] : [],
+    ),
     resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
     results: restoreResults(state.results),
   };

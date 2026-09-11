@@ -28,7 +28,7 @@ import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
 import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
 import type { Room, RoomTombstone } from './rooms';
-import { isCompletePairing, type PlannedPairing } from './roundPlans';
+import { isCompletePairing, pairingsByRoom, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
 
 /** What one room should be holding after this publish. */
@@ -82,7 +82,7 @@ export function planRound(
   tombstones: readonly RoomTombstone[] = [],
 ): PublishPlan {
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
-  const plannedByRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
+  const plannedByRoom = pairingsByRoom(pairings);
   const publications: RoomPublication[] = [];
 
   for (const room of rooms) {

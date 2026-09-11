@@ -13,7 +13,7 @@
  */
 
 import type { PlannedPairing } from './roundPlans';
-import { isCompletePairing } from './roundPlans';
+import { isCompletePairing, pairingsByRoom } from './roundPlans';
 
 export type RoomStatus =
   /** Configured locally; this room has not reached the current relay. */
@@ -111,7 +111,7 @@ export function pairingWarnings(
   const warnings: PairingWarning[] = [];
   const seenNames = new Map<string, string>();
   const seenTeams = new Map<string, string>();
-  const byRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
+  const byRoom = pairingsByRoom(pairings);
   for (const room of rooms) {
     const key = room.name.trim().toLocaleLowerCase();
     if (key && seenNames.has(key)) {
@@ -146,6 +146,6 @@ export function pairingWarnings(
 
 /** Rooms with a complete matchup in this round's plan. Only these get an assignment. */
 export function publishableRooms(rooms: readonly Room[], pairings: readonly PlannedPairing[]): Room[] {
-  const byRoom = new Map(pairings.map((pairing) => [pairing.roomId, pairing]));
+  const byRoom = pairingsByRoom(pairings);
   return rooms.filter((room) => isCompletePairing(byRoom.get(room.id)));
 }

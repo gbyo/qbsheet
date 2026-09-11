@@ -18,7 +18,10 @@
  */
 
 import { beforeEach, describe, expect, test } from 'vitest';
+import { loadedFixture } from '../tests/fixture';
 import { currentStateVersion, loadState, saveState, storageKey } from './persistence';
+import { planRound } from './publish';
+import { pairingFor, pairingsForRound } from './roundPlans';
 
 /**
  * A version 1 state as the shipped build wrote it.
@@ -275,5 +278,91 @@ describe('reading a version 2 state', () => {
     globalThis.localStorage.setItem(storageKey, JSON.stringify({ ...v1, version: 3 }));
     expect(loadState().relay).toBeNull();
     expect(loadState().version).toBe(currentStateVersion);
+  });
+
+  test('conflicting duplicate rows cannot show one pairing while publishing another', () => {
+    // The malformed plan shows A-vs-B in one row and C-vs-D in another for room-1. The UI reads
+    // the first match and the publisher used to read the last, so restoring both would display
+    // one game while sending the other.
+    globalThis.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...v1,
+        version: 2,
+        roundPlans: [
+          {
+            roundId: 'Phase_Prelims__round_4',
+            pairings: [
+              { roomId: 'room-1', leftTeamId: 'Team_Cony', rightTeamId: 'Team_Deering' },
+              { roomId: 'room-1', leftTeamId: 'Team_Wells', rightTeamId: 'Team_Windham A' },
+              { roomId: 'room-2', leftTeamId: 'Team_Wells', rightTeamId: null },
+            ],
+          },
+        ],
+      }),
+    );
+    const state = loadState();
+    // The conflicted room is unplanned rather than guessed at; the unambiguous row survives.
+    expect(state.roundPlans).toEqual([
+      {
+        roundId: 'Phase_Prelims__round_4',
+        pairings: [{ roomId: 'room-2', leftTeamId: 'Team_Wells', rightTeamId: null }],
+      },
+    ]);
+    expect(pairingFor(state.roundPlans, 'Phase_Prelims__round_4', 'room-1')).toBeUndefined();
+
+    // Publishing after the restore clears room-1 instead of sending a game the screen hides.
+    const tournament = loadedFixture();
+    const round = tournament.rounds.find((entry) => entry.id === 'Phase_Prelims__round_4')!;
+    const plan = planRound(tournament, round, state.rooms, pairingsForRound(state.roundPlans, round.id));
+    expect(plan.assignments.some((entry) => entry.roomId === 'room-1')).toBe(false);
+    expect(plan.cleared.map((entry) => entry.roomId)).toContain('room-1');
+
+    // Only the ambiguous plan data was discarded.
+    expect(state.relay).toEqual(v1.relay);
+    expect(state.rooms.map((room) => room.id)).toEqual(['room-1', 'room-2', 'room-3']);
+    expect(state.rooms[0].pairingCode).toBe('48213906');
+    expect(state.pendingRoomRemovals).toEqual(v1.pendingRoomRemovals);
+    expect(state.results).toHaveLength(2);
+  });
+
+  test('duplicate round ids restore as one plan', () => {
+    globalThis.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...v1,
+        version: 2,
+        roundPlans: [
+          {
+            roundId: 'Phase_Prelims__round_4',
+            pairings: [{ roomId: 'room-1', leftTeamId: 'Team_Cony', rightTeamId: 'Team_Deering' }],
+          },
+          {
+            roundId: 'Phase_Prelims__round_4',
+            pairings: [
+              // An exact repeat restores once rather than twice.
+              { roomId: 'room-1', leftTeamId: 'Team_Cony', rightTeamId: 'Team_Deering' },
+              { roomId: 'room-2', leftTeamId: 'Team_Wells', rightTeamId: 'Team_Windham A' },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(loadState().roundPlans).toEqual([
+      {
+        roundId: 'Phase_Prelims__round_4',
+        pairings: [
+          { roomId: 'room-1', leftTeamId: 'Team_Cony', rightTeamId: 'Team_Deering' },
+          { roomId: 'room-2', leftTeamId: 'Team_Wells', rightTeamId: 'Team_Windham A' },
+        ],
+      },
+    ]);
+  });
+
+  test('a v1 state whose rooms share an id migrates to one pairing per room', () => {
+    storeV1({ rooms: [...v1.rooms, { ...v1.rooms[0] }] });
+    const state = loadState();
+    expect(state.roundPlans).toHaveLength(1);
+    expect(state.roundPlans[0].pairings.filter((entry) => entry.roomId === 'room-1')).toHaveLength(1);
   });
 });

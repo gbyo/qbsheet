@@ -110,6 +110,18 @@ describe('planning a round', () => {
     expect(plan.assignments.map((entry) => entry.roomId)).toEqual(['room-2']);
     expect(plan.cleared.map((entry) => entry.reason)).toContain('Both sides of this room are the same team.');
   });
+
+  test('a duplicated room row publishes the entry the UI shows', () => {
+    // Persistence removes duplicates before they arrive here, but an in-memory duplicate must
+    // still read the same way in both places: the UI lookup takes the first match.
+    const tournament = loadedFixture();
+    const plan = planRound(tournament, tournament.rounds[3], roomsFor(), [
+      { roomId: 'room-1', leftTeamId: teamId('Cony'), rightTeamId: teamId('Deering') },
+      { roomId: 'room-1', leftTeamId: teamId('Wells'), rightTeamId: teamId('Windham A') },
+    ]);
+    const room1 = plan.assignments.find((entry) => entry.roomId === 'room-1')!;
+    expect([room1.leftTeamName, room1.rightTeamName]).toEqual(['Cony', 'Deering']);
+  });
 });
 
 describe('the mirror body', () => {
