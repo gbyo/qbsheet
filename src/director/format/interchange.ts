@@ -38,6 +38,7 @@ import {
   type GameRecord,
   type TeamClassification,
   type TeamGameScore,
+  type TournamentRules,
   type TimelineEventType,
   type TimelineVisibility,
   type TournamentTimelineEvent,
@@ -1588,7 +1589,10 @@ export function exportSqbsTournament(
     teamCount,
     gameCount,
   });
-  const rules = state.tournament?.rules ?? defaultRules;
+  // Historical games carry their own pinned definitions (#671): every game is
+  // interpreted under the definition it was played with, never today's
+  // tournament defaults. This matches the canonical standings resolution.
+  const gameRulesOf = (game: GameRecord): TournamentRules => rulesForGame(state, game) ?? defaultRules;
   const scoped = {
     ...(scope.phaseId ? { phaseId: scope.phaseId } : {}),
     ...(scope.poolId ? { poolId: scope.poolId } : {}),
@@ -1675,16 +1679,28 @@ export function exportSqbsTournament(
     );
   }
 
-  // Tossup point slots follow the rules; stats that use a value the rules do
-  // not define are appended (up to SQBS's four) so legacy detail survives.
-  const ruleValues = [rules.superpowerValue, rules.powerValue, rules.tossupValue, rules.negValue].filter(
-    (value): value is number => typeof value === 'number' && value !== 0,
-  );
-  const slots = [...ruleValues];
+  // Tossup point slots follow the exported games' own pinned definitions, in
+  // export order. A file whose games need more than SQBS's four slots fails
+  // explicitly per game instead of flattening history into today's defaults.
+  const ruleValues: number[] = [];
+  for (const game of games) {
+    const gameRules = gameRulesOf(game);
+    for (const value of [
+      gameRules.superpowerValue,
+      gameRules.powerValue,
+      gameRules.tossupValue,
+      gameRules.negValue,
+    ]) {
+      if (typeof value === 'number' && value !== 0 && !ruleValues.includes(value)) {
+        ruleValues.push(value);
+      }
+    }
+  }
+  const slots = ruleValues.slice(0, 4);
   const slotOf = (value: number | null, label: string, gameId: string): number => {
     if (value === null) {
       errors.push(
-        `Game ${gameId} records ${label} tossups, but the tournament rules define no value for them.`,
+        `Game ${gameId} records ${label} tossups, but its scoring definition names no value for them.`,
       );
       return -1;
     }
@@ -1697,7 +1713,7 @@ export function exportSqbsTournament(
         return -1;
       }
       warnings.push(
-        `The value ${value} appears in game detail but not in the current rules; it was added as an extra SQBS point slot.`,
+        `The value ${value} appears in game detail but in no exported game's scoring definition; it was added as an extra SQBS point slot.`,
       );
       slots.push(value);
       index = slots.length - 1;
@@ -1787,10 +1803,11 @@ export function exportSqbsTournament(
         return;
       }
     }
-    // Each game is classified under its own historical rules (#671), so the
+    // Each game is classified under its own pinned definition (#671), so the
     // preflight and the overtime/bonus reasoning below agree on the definitions
-    // that were actually in force when the game was played.
-    const gameRules = rulesForGame(state, game) ?? rules;
+    // that were actually in force when the game was played, and a later defaults
+    // change cannot reprice historical detail.
+    const gameRules = gameRulesOf(game);
     // Authoritative-export preflight (#897): completeness is a per-game fact.
     // 'incomplete' individual stats must fail closed — partial player detail can
     // never be published as a complete SQBS game. 'unknown' stays exportable
@@ -1863,12 +1880,12 @@ export function exportSqbsTournament(
     let overtime: boolean | undefined;
     let leftWithoutBonus: number | undefined;
     let rightWithoutBonus: number | undefined;
-    if (!forfeit && gameRules?.useBonuses === false) {
+    if (!forfeit && gameRules.useBonuses === false) {
       // Bonus-less formats have no bonus opportunities to classify.
       overtime = (overtimeTuh ?? 0) > 0;
       leftWithoutBonus = 0;
       rightWithoutBonus = 0;
-    } else if (!forfeit && (overtimeTuh === 0 || gameRules?.overtime === false)) {
+    } else if (!forfeit && (overtimeTuh === 0 || gameRules.overtime === false)) {
       // Proven no overtime: an explicit zero, or rules with no overtime period.
       overtime = false;
       leftWithoutBonus = 0;
@@ -1879,10 +1896,10 @@ export function exportSqbsTournament(
       // play no bonuses in overtime.
       const sides = retainedMatchTeamsForGame(state, game, leftScore.teamId, rightScore.teamId);
       const leftNoBonus = sides
-        ? retainedNoBonusConversions(sides[0], gameRules?.overtimeBonuses === false)
+        ? retainedNoBonusConversions(sides[0], gameRules.overtimeBonuses === false)
         : undefined;
       const rightNoBonus = sides
-        ? retainedNoBonusConversions(sides[1], gameRules?.overtimeBonuses === false)
+        ? retainedNoBonusConversions(sides[1], gameRules.overtimeBonuses === false)
         : undefined;
       if (leftNoBonus !== undefined && rightNoBonus !== undefined) {
         // Conversions prove overtime even when exact overtime TUH is missing.
@@ -1918,10 +1935,10 @@ export function exportSqbsTournament(
         });
         const target = players[players.length - 1]!;
         const parts: Array<[number | null, number, string]> = [
-          [rules.superpowerValue, stat.superpowers, 'superpower'],
-          [rules.powerValue, stat.powers, 'power'],
-          [rules.tossupValue, stat.gets, 'regulation'],
-          [rules.negValue, stat.negs, 'neg'],
+          [gameRules.superpowerValue, stat.superpowers, 'superpower'],
+          [gameRules.powerValue, stat.powers, 'power'],
+          [gameRules.tossupValue, stat.gets, 'regulation'],
+          [gameRules.negValue, stat.negs, 'neg'],
         ];
         for (const [value, count, partLabel] of parts) {
           if (count === 0) continue;
@@ -1930,10 +1947,10 @@ export function exportSqbsTournament(
           target.counts[slot] = count;
         }
         target.points =
-          (rules.superpowerValue ?? 0) * stat.superpowers +
-          (rules.powerValue ?? 0) * stat.powers +
-          rules.tossupValue * stat.gets +
-          (rules.negValue ?? 0) * stat.negs;
+          (gameRules.superpowerValue ?? 0) * stat.superpowers +
+          (gameRules.powerValue ?? 0) * stat.powers +
+          gameRules.tossupValue * stat.gets +
+          (gameRules.negValue ?? 0) * stat.negs;
       }
       const bonusesKnown = game.detailedStats !== 'unknown';
       return {
@@ -1941,8 +1958,8 @@ export function exportSqbsTournament(
         score: score.score,
         bonusesHeard: bonusesKnown ? score.bonuses : null,
         bonusPoints: bonusesKnown ? score.bonusPoints : null,
-        bouncebacksHeard: rules.bouncebacks ? null : undefined,
-        bouncebackPoints: rules.bouncebacks ? score.bouncebacks : undefined,
+        bouncebacksHeard: gameRules.bouncebacks ? null : undefined,
+        bouncebackPoints: gameRules.bouncebacks ? score.bouncebacks : undefined,
         tossupsWithoutBonus: label === 'left' ? leftWithoutBonus : rightWithoutBonus,
         players,
       };
@@ -2010,13 +2027,17 @@ export function exportSqbsTournament(
     );
   }
 
+  // File-level capabilities are the union across exported games so no game's
+  // own data is dropped; each game's sides still populate only the fields
+  // their own definition enables (#671).
+  const fileRules = games.map(gameRulesOf);
   const exported = exportSqbsTournamentFile({
     tournamentName: state.tournament?.name ?? 'Tournament',
     pointValues: slots,
-    useBonuses: rules.useBonuses,
-    bouncebacks: rules.bouncebacks,
-    trackPowers: rules.powerValue !== null || rules.negValue !== null,
-    trackLightning: rules.lightning && rules.lightningCountPerTeam > 0,
+    useBonuses: fileRules.some((gameRules) => gameRules.useBonuses),
+    bouncebacks: fileRules.some((gameRules) => gameRules.bouncebacks),
+    trackPowers: fileRules.some((gameRules) => gameRules.powerValue !== null || gameRules.negValue !== null),
+    trackLightning: fileRules.some((gameRules) => gameRules.lightning && gameRules.lightningCountPerTeam > 0),
     divisions,
     teams: sqbsTeams,
     games: sqbsGames,
