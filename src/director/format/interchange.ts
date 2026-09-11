@@ -1583,7 +1583,10 @@ export function exportSqbsTournament(
       (roundOrder.get(left.roundId) ?? Number.MAX_SAFE_INTEGER) -
         (roundOrder.get(right.roundId) ?? Number.MAX_SAFE_INTEGER) || left.id.localeCompare(right.id),
   );
-  const standings = deriveTeamStandings(state, undefined, scoped);
+  // The archival team universe includes dropped teams: a withdrawal must not
+  // make an otherwise valid final export unrepresentable (#893). Standings
+  // order stays canonical; dropped teams simply keep their ranked rows.
+  const standings = deriveTeamStandings(state, undefined, { ...scoped, includeDroppedTeams: true });
   const teamById = new Map(state.teams.map((team) => [team.id, team]));
   const orderedTeams = standings
     .map((standing) => teamById.get(standing.teamId))
@@ -1656,7 +1659,24 @@ export function exportSqbsTournament(
   const teamIndex = new Map(orderedTeams.map((team, index) => [team.id, index]));
   const playerIndexByTeam = new Map<string, Map<string, number>>();
   const sqbsTeams = orderedTeams.map((team) => {
+    // Current roster order first, then any historical referenced players the
+    // exported games still credit (later marked inactive or moved): today's
+    // cleanup must not erase completed statistics (#893). Referenced in
+    // export order, so repeated exports of the same scope stay stable. A
+    // referenced id with no surviving player record stays an explicit error:
+    // SQBS needs a roster name and inventing one would reassign history.
     const roster = state.players.filter((player) => player.teamId === team.id && player.active);
+    const seen = new Set(roster.map((player) => player.id));
+    for (const game of games) {
+      for (const stat of game.playerStats) {
+        if (stat.teamId !== team.id || seen.has(stat.playerId)) continue;
+        const record = state.players.find((player) => player.id === stat.playerId);
+        if (record) {
+          roster.push(record);
+          seen.add(record.id);
+        }
+      }
+    }
     const indexes = new Map(roster.map((player, index) => [player.id, index]));
     playerIndexByTeam.set(team.id, indexes);
     return {
