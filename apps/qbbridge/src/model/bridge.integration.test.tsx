@@ -8,6 +8,7 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
@@ -418,6 +419,7 @@ describe('room setup and removal', () => {
     });
     const [, unused] = rendered.result.current.state.rooms;
     expect(bridgeStatus(rendered, unused.id)).toBe('waiting');
+    expect(unused.publishedAssignmentFingerprint).not.toBeNull();
 
     act(() => {
       rendered.result.current.setRoomTeams(unused.id, 'left', null);
@@ -431,6 +433,7 @@ describe('room setup and removal', () => {
       relayPublished: true,
       publishedMatchId: null,
       publishedRoundId: null,
+      publishedAssignmentFingerprint: null,
     });
     expect(bridgeStatus(rendered, unused.id)).toBe('ready-to-pair');
   });
@@ -1172,6 +1175,9 @@ describe('changing the relay', () => {
     await act(async () => {
       await rendered.result.current.publish();
     });
+    expect(
+      rendered.result.current.state.rooms.every((room) => room.publishedAssignmentFingerprint !== null),
+    ).toBe(true);
     const beforeRooms = rendered.result.current.state.rooms.map((room) => ({
       id: room.id,
       name: room.name,
@@ -1194,6 +1200,7 @@ describe('changing the relay', () => {
     expect(rendered.result.current.state.relay?.revision).toBe(0);
     expect(rendered.result.current.changingRelay).toBe(false);
     expect(rendered.result.current.notice?.message).toMatch(/Publish Room Setup to activate these rooms/);
+    // The rooms were published before the replacement, so content truth existed to be cleared.
     expect(
       rendered.result.current.state.rooms.map((room) => ({
         id: room.id,
@@ -1202,6 +1209,7 @@ describe('changing the relay', () => {
         relayPublished: room.relayPublished,
         publishedMatchId: room.publishedMatchId,
         publishedRoundId: room.publishedRoundId,
+        publishedAssignmentFingerprint: room.publishedAssignmentFingerprint,
         assignmentRevision: room.assignmentRevision,
       })),
     ).toEqual(
@@ -1210,6 +1218,7 @@ describe('changing the relay', () => {
         relayPublished: false,
         publishedMatchId: null,
         publishedRoundId: null,
+        publishedAssignmentFingerprint: null,
         assignmentRevision: 0,
       })),
     );
@@ -1919,6 +1928,114 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.planStatus(rendered.result.current.state.rooms[0])).toBe('edited');
   });
 
+  test('renaming a room after publishing reads as edited until it is republished', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const room = () => rendered.result.current.state.rooms[0];
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+
+    // Same tournament, round, room id, and teams — so the match id is unchanged — but the relay
+    // is serving an assignment whose location is still the old room name.
+    act(() => {
+      rendered.result.current.renameRoom(first.id, 'Auditorium');
+    });
+    expect(rendered.result.current.planStatus(room())).toBe('edited');
+
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+  });
+
+  test('reloading the same file with changed roster names reads as edited', async () => {
+    const { rendered, rounds, first } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const room = () => rendered.result.current.state.rooms[0];
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+
+    // Every team id is stable, so the plan survives reconciliation — but the relay serves the
+    // old rosters.
+    const reloaded = JSON.parse(yftFixtureText()) as {
+      objects: {
+        registrations?: { teams?: { players?: { name?: unknown }[] }[] }[];
+      }[];
+    };
+    for (const registration of reloaded.objects[0].registrations ?? []) {
+      for (const team of registration.teams ?? []) {
+        for (const player of team.players ?? []) {
+          if (typeof player.name === 'string') player.name = `${player.name} Jr`;
+        }
+      }
+    }
+    await act(async () => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', JSON.stringify(reloaded));
+    });
+    expect(rendered.result.current.plannedTeamsFor(first.id)).toEqual({
+      leftTeamId: 'Team_Cony',
+      rightTeamId: 'Team_Deering',
+    });
+    expect(rendered.result.current.planStatus(room())).toBe('edited');
+  });
+
+  test('reloading the same file with a changed timed setting reads as edited', async () => {
+    const { rendered, rounds } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const room = () => rendered.result.current.state.rooms[0];
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+
+    const reloaded = JSON.parse(yftFixtureText()) as {
+      objects: { scoring_rules?: Record<string, unknown> }[];
+    };
+    const rules = reloaded.objects[0].scoring_rules as Record<string, unknown>;
+    rules.YfData = { timed: true };
+    rules.maximum_regulation_tossup_count = 24;
+    await act(async () => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', JSON.stringify(reloaded));
+    });
+    // Same ids throughout, so the round is still planned — but the served assignment scored it
+    // untimed.
+    expect(rendered.result.current.planStatus(room())).toBe('edited');
+  });
+
+  test('a failed republish leaves the previous publication fingerprint intact', async () => {
+    const { rendered, rounds } = await planThreeRounds();
+    act(() => {
+      rendered.result.current.selectRound(rounds[0].id);
+    });
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    const room = () => rendered.result.current.state.rooms[0];
+    const before = room().publishedAssignmentFingerprint;
+    expect(before).not.toBeNull();
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    mirrorFails = false;
+
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(room().publishedAssignmentFingerprint).toBe(before);
+    expect(rendered.result.current.planStatus(room())).toBe('live');
+  });
+
   test('an edit made while a publish is in flight is not overwritten by the response', async () => {
     const { rendered, rounds, first } = await planThreeRounds();
     act(() => {
@@ -1959,6 +2076,15 @@ describe('preplanned rounds', () => {
     });
     // And the screen can tell the operator the two differ.
     expect(rendered.result.current.planStatus(room)).toBe('edited');
+    // Relay truth is the fingerprint of what was actually sent — A-vs-B under the old room
+    // name — not a rebuild from the newer plan the operator has since typed.
+    const sentMirror = calls.filter((call) => String(call.args.url ?? '').endsWith('/mirror')).at(-1);
+    const sentBody = JSON.parse(String(sentMirror!.args.body)) as {
+      rooms: { room_id: string; assignment_qbj?: Record<string, unknown> }[];
+    };
+    const sentRoom = sentBody.rooms.find((entry) => entry.room_id === first.id)!;
+    expect(room.publishedAssignmentFingerprint).toBe(assignmentFingerprint(sentRoom.assignment_qbj!));
+    expect(room.publishedAssignmentFingerprint).not.toBeNull();
   });
 
   test('a result still matches the match that was published, not the plan on screen', async () => {

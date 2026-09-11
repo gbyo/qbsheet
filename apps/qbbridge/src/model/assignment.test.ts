@@ -11,7 +11,12 @@ import { describe, expect, test } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { findSecretKeys } from '../../../../src/director/transfers/canonical';
 import { loadedFixture, nonnumericRoundFixtureText, timedFixtureText } from '../tests/fixture';
-import { buildAssignment, type PreparedAssignment } from './assignment';
+import {
+  assignmentFingerprint,
+  buildAssignment,
+  plannedAssignmentFingerprint,
+  type PreparedAssignment,
+} from './assignment';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 
 function teamNamed(tournament: BridgeTournament, name: string) {
@@ -268,6 +273,122 @@ describe('the scorer opens it without being asked anything', () => {
       tossupCount: 20,
       maximumTossupCount: 24,
     });
+  });
+});
+
+describe('the published-content fingerprint', () => {
+  const fingerprintOf = (assignment: PreparedAssignment): string =>
+    assignmentFingerprint(assignment.document);
+
+  test('is stable for the same game and ignores the issue number', () => {
+    const tournament = loadedFixture();
+    const first = prepare(tournament);
+    expect(fingerprintOf(prepare(tournament))).toBe(fingerprintOf(first));
+
+    // Republishing the unchanged game moves only the revision, which is normalized away.
+    const reissued = buildAssignment({
+      tournament,
+      round: tournament.rounds[3],
+      roomId: 'room-1',
+      roomName: 'Room 101',
+      left: teamNamed(tournament, 'Cony'),
+      right: teamNamed(tournament, 'Deering'),
+      assignmentRevision: 4,
+    });
+    if (!reissued.ok) throw new Error(reissued.error);
+    expect(fingerprintOf(reissued.assignment)).toBe(fingerprintOf(first));
+  });
+
+  test('moves with the room location', () => {
+    const tournament = loadedFixture();
+    expect(fingerprintOf(prepare(tournament, { roomName: 'Auditorium' }))).not.toBe(
+      fingerprintOf(prepare(tournament)),
+    );
+  });
+
+  test('moves with team, registration, and roster names', () => {
+    const tournament = loadedFixture();
+    const renamed = structuredClone(tournament);
+    const cony = renamed.teams.find((team) => team.name === 'Cony')!;
+    cony.name = 'Cony Renamed';
+    cony.registrationName = 'Cony School Renamed';
+    cony.players[0].name = 'Renamed Player';
+    expect(fingerprintOf(prepare(renamed, { left: 'Cony Renamed' }))).not.toBe(
+      fingerprintOf(prepare(tournament)),
+    );
+  });
+
+  test('moves with scoring rules, tournament name, phase, and the timed flag', () => {
+    const tournament = loadedFixture();
+    const base = fingerprintOf(prepare(tournament));
+    const rescored = prepare({
+      ...tournament,
+      rules: { ...tournament.rules, maximum_regulation_tossup_count: 24 },
+    });
+    expect(fingerprintOf(rescored)).not.toBe(base);
+    expect(fingerprintOf(prepare({ ...tournament, name: 'A Different Tournament' }))).not.toBe(base);
+    const round = tournament.rounds[3];
+    const moved = structuredClone(tournament);
+    moved.rounds[3] = { ...round, phaseName: 'Finals' };
+    expect(fingerprintOf(prepare(moved))).not.toBe(base);
+    expect(fingerprintOf(prepare({ ...tournament, timed: true }))).not.toBe(base);
+  });
+
+  test('moves when the matchup changes', () => {
+    const tournament = loadedFixture();
+    expect(fingerprintOf(prepare(tournament, { right: 'Wells' }))).not.toBe(
+      fingerprintOf(prepare(tournament)),
+    );
+  });
+
+  test('the planned fingerprint matches a fresh build and is null when unbuildable', () => {
+    const tournament = loadedFixture();
+    const round = tournament.rounds[3];
+    const cony = teamNamed(tournament, 'Cony').id;
+    const deering = teamNamed(tournament, 'Deering').id;
+    expect(
+      plannedAssignmentFingerprint({
+        tournament,
+        round,
+        roomId: 'room-1',
+        roomName: 'Room 101',
+        pairing: { roomId: 'room-1', leftTeamId: cony, rightTeamId: deering },
+      }),
+    ).toBe(fingerprintOf(prepare(tournament)));
+
+    const base = {
+      tournament,
+      round,
+      roomId: 'room-1',
+      roomName: 'Room 101',
+    } as const;
+    // Incomplete, mirrored, unknown-team, and unbuildable plans can never read as live.
+    expect(
+      plannedAssignmentFingerprint({
+        ...base,
+        pairing: { roomId: 'room-1', leftTeamId: cony, rightTeamId: null },
+      }),
+    ).toBeNull();
+    expect(plannedAssignmentFingerprint({ ...base, pairing: undefined })).toBeNull();
+    expect(
+      plannedAssignmentFingerprint({
+        ...base,
+        pairing: { roomId: 'room-1', leftTeamId: cony, rightTeamId: cony },
+      }),
+    ).toBeNull();
+    expect(
+      plannedAssignmentFingerprint({
+        ...base,
+        pairing: { roomId: 'room-1', leftTeamId: cony, rightTeamId: 'Team_Deleted' },
+      }),
+    ).toBeNull();
+    expect(
+      plannedAssignmentFingerprint({
+        ...base,
+        tournament: { ...tournament, timed: null },
+        pairing: { roomId: 'room-1', leftTeamId: cony, rightTeamId: deering },
+      }),
+    ).toBeNull();
   });
 });
 

@@ -38,6 +38,14 @@ export interface Room {
   publishedMatchId: string | null;
   /** The round last published for this room. */
   publishedRoundId: string | null;
+  /**
+   * What the relay accepted, as a comparable identity over the exact assignment payload.
+   *
+   * Game identity (`publishedMatchId`) says *which* game a result belongs to; this says whether
+   * the relay is serving the assignment QBBridge would build now. Null when the room holds no
+   * assignment, and for publications that predate the fingerprint. See `assignment.ts`.
+   */
+  publishedAssignmentFingerprint: string | null;
   /** Per-room issue number. Advances on every successful publish; the match id does not. */
   assignmentRevision: number;
 }
@@ -66,6 +74,7 @@ export function newRoom(id: string, name: string, pairingCode: string): Room {
     relayPublished: false,
     publishedMatchId: null,
     publishedRoundId: null,
+    publishedAssignmentFingerprint: null,
     assignmentRevision: 0,
   };
 }
@@ -88,6 +97,7 @@ export function resetRelayPublication(room: Room): Room {
     relayPublished: false,
     publishedMatchId: null,
     publishedRoundId: null,
+    publishedAssignmentFingerprint: null,
     assignmentRevision: 0,
   };
 }

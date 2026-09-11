@@ -154,6 +154,8 @@ describe('migrating a version 1 state', () => {
       relayPublished: true,
       publishedMatchId: 'qbbridge-match-abc123',
       publishedRoundId: 'Phase_Prelims__round_4',
+      // A v1 state carries no content truth; the fingerprint starts empty rather than guessed.
+      publishedAssignmentFingerprint: null,
       assignmentRevision: 3,
     });
     expect(rooms[1].relayPublished).toBe(true);
@@ -364,5 +366,32 @@ describe('reading a version 2 state', () => {
     const state = loadState();
     expect(state.roundPlans).toHaveLength(1);
     expect(state.roundPlans[0].pairings.filter((entry) => entry.roomId === 'room-1')).toHaveLength(1);
+  });
+
+  test('a published assignment fingerprint restores with the room', () => {
+    globalThis.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...v1,
+        version: 2,
+        roundPlans: [],
+        rooms: [{ ...v1.rooms[0], publishedAssignmentFingerprint: 'fingerprint-live' }],
+      }),
+    );
+    expect(loadState().rooms[0].publishedAssignmentFingerprint).toBe('fingerprint-live');
+  });
+
+  test('a malformed fingerprint restores as no content truth', () => {
+    globalThis.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        ...v1,
+        version: 2,
+        roundPlans: [],
+        rooms: [{ ...v1.rooms[0], publishedAssignmentFingerprint: 42 }],
+      }),
+    );
+    // Null reads as `edited`, never `live`: the next publish records what the relay accepted.
+    expect(loadState().rooms[0].publishedAssignmentFingerprint).toBeNull();
   });
 });

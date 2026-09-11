@@ -22,10 +22,12 @@
  * already has one, and the copy is the one that goes stale — a team renamed in YellowFruit, a room
  * renamed locally, a republish that moved a revision.
  *
- * Whether a planned game is live on the relay is likewise *derived*, never stored: `pairingMatchId`
- * is a pure function of the pairing, so comparing it against what the room says it published
- * answers the question exactly. A persisted `published` flag would be a fourth thing to keep in
- * sync and the first thing to be wrong after a failed publish.
+ * Whether a planned game is live on the relay is likewise *derived*, never stored: the room
+ * records the fingerprint of the assignment the relay accepted, and comparing it against the
+ * fingerprint of the assignment the current plan would build answers the question exactly. Match
+ * identity alone cannot, because room names, rosters, and scoring rules all move without moving
+ * the match id. A persisted `published` flag would be a fourth thing to keep in sync and the
+ * first thing to be wrong after a failed publish.
  *
  * # Sparse on purpose
  *
@@ -384,24 +386,37 @@ export function plannedMatchId(input: {
   });
 }
 
+/**
+ * How one room's planned game compares with what the relay accepted.
+ *
+ * Game identity and content identity are compared separately, because they answer different
+ * questions. The match id says *which* game the relay holds — it is stable across republishes
+ * and is what results reconcile against. The assignment fingerprint says whether the relay is
+ * serving the assignment the current plan would build now. `live` requires both to agree: the
+ * same matchup under a renamed room, an edited roster, or changed scoring rules is `edited`,
+ * never `live`.
+ *
+ * A room whose stored fingerprint is null (nothing published, a cleared room, or a publication
+ * that predates the fingerprint) can never read as `live`. That errs toward republishing rather
+ * than toward claiming the relay serves a document that was never compared.
+ */
 export function planPublicationStatus(input: {
-  tournamentId: string;
   roundId: string | null;
-  room: Pick<Room, 'id' | 'publishedMatchId' | 'publishedRoundId'>;
+  room: Pick<Room, 'id' | 'publishedMatchId' | 'publishedRoundId' | 'publishedAssignmentFingerprint'>;
   pairing: PlannedPairing | undefined;
+  /** The match id the current plan would publish under. Null when the plan has no game here. */
+  plannedMatchId: string | null;
+  /** The assignment the current plan would publish now. Null when no assignment can be built. */
+  plannedFingerprint: string | null;
 }): PlanPublicationStatus {
-  const expected =
-    input.roundId === null
-      ? null
-      : plannedMatchId({
-          tournamentId: input.tournamentId,
-          roundId: input.roundId,
-          pairing: input.pairing,
-        });
   const live = input.room.publishedMatchId;
-  if (live === null) return expected === null ? 'no-game' : 'planned';
+  if (live === null) return input.plannedMatchId === null ? 'no-game' : 'planned';
   if (input.room.publishedRoundId !== input.roundId) return 'other-round';
-  return expected === live ? 'live' : 'edited';
+  if (input.plannedMatchId !== live) return 'edited';
+  if (input.plannedFingerprint === null || input.room.publishedAssignmentFingerprint === null) {
+    return 'edited';
+  }
+  return input.plannedFingerprint === input.room.publishedAssignmentFingerprint ? 'live' : 'edited';
 }
 
 /** The complete pairings of one round, in the configured rooms' order. Input to a publish. */

@@ -154,6 +154,10 @@ function normalizeRoom(value: unknown): Room | null {
         : publishedMatchId !== null || assignmentRevision > 0,
     publishedMatchId,
     publishedRoundId: typeof value.publishedRoundId === 'string' ? value.publishedRoundId : null,
+    // States written before the fingerprint existed restore as null, which reads as `edited`
+    // rather than `live` until the next successful publish records what the relay accepted.
+    publishedAssignmentFingerprint:
+      typeof value.publishedAssignmentFingerprint === 'string' ? value.publishedAssignmentFingerprint : null,
     assignmentRevision,
   };
 }
