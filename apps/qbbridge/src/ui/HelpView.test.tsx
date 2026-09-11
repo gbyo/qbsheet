@@ -88,6 +88,7 @@ describe('the help page', () => {
     const page = document.body.textContent ?? '';
     expect(page).toContain('Import Games Only');
     expect(page).toContain('Reload YellowFruit File');
+    expect(page).toContain('Publish Room Setup');
     expect(page).toContain('Publish Round');
     // The honest-status rule, restated where an operator will look for it.
     expect(page).toMatch(/never claims a result was imported, accepted or applied to standings/);

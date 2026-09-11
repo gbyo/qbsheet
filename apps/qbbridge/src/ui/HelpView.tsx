@@ -153,6 +153,11 @@ YellowFruit → Import Games Only`}</pre>
           On <strong>Rooms</strong>, click <strong>+ Room</strong> once per room in use and name them the way
           the signs on the doors do.
         </li>
+        <li>
+          Click <strong>Publish Room Setup</strong> before entering Round 1 pairings. This activates each
+          room&rsquo;s code so its scorer can pair once; the room token remains valid for the rest of the
+          tournament.
+        </li>
       </ol>
     ),
   },
@@ -188,6 +193,10 @@ YellowFruit → Import Games Only`}</pre>
           Pairing survives a round change. A device paired in round 1 is still paired in round 8 — you do not
           re-pair between rounds, and publishing a new round does not disturb a game somebody is in the middle
           of scoring.
+        </p>
+        <p>
+          If you use <strong>New code</strong>, the old code and QR remain active until a successful room
+          setup or round publish activates the replacement.
         </p>
       </>
     ),
@@ -248,8 +257,10 @@ YellowFruit → Import Games Only`}</pre>
         <dt>A room cannot pair</dt>
         <dd>
           Almost always <code>RELAY_ALLOWED_ORIGINS</code>, from step 3 above. Otherwise check that the
-          scorekeeper is typing the code for the right room, and that the round has actually been published —
-          a room with no assignment refuses to start a game.
+          scorekeeper is typing the active code for the right room, and that{' '}
+          <strong>Publish Room Setup</strong>
+          has succeeded. A room-only setup is enough to pair before Round 1; it does not need an assignment
+          yet.
         </dd>
 
         <dt>A team is missing after editing YellowFruit</dt>

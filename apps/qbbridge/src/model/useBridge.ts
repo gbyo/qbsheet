@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chooseResultFolder, isNativeHost, openYellowFruitFile, writeResultFile } from './native';
 import { generatePairingCode } from './pairing';
-import { planRound, publishRound } from './publish';
+import { planRoomSetup, planRound, publishRound, type PublishOutcome, type PublishPlan } from './publish';
 import {
   relayAcknowledgeResults,
   relayClaim,
@@ -20,7 +20,7 @@ import {
 } from './relay';
 import { resultFileContents, resultFileName, resultSummary } from './results';
 import { nextRoomId } from './identity';
-import { newRoom, pairingWarnings, type Room, type RoomStatus } from './rooms';
+import { newRoom, pairingWarnings, roomTombstone, type Room, type RoomStatus } from './rooms';
 import { loadState, saveState, type BridgeState, type StoredResult } from './persistence';
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 
@@ -71,6 +71,8 @@ export interface BridgeApi {
   /** True when changing rounds would discard team selections the operator has entered. */
   roundChangeDiscardsSelections: boolean;
   publish(): Promise<void>;
+  /** Publish room identities and pairing hashes without sending any match assignments. */
+  publishRoomSetup(): Promise<void>;
   roomStatus(room: Room): RoomStatus;
   warnings: ReturnType<typeof pairingWarnings>;
 
@@ -221,7 +223,11 @@ export function useBridge(): BridgeApi {
 
   const addRoom = useCallback(() => {
     commit((current) => {
-      const id = nextRoomId(current.rooms);
+      const id = nextRoomId([
+        ...current.rooms,
+        ...current.pendingRoomRemovals,
+        ...current.retiredRoomIds.map((roomId) => ({ id: roomId })),
+      ]);
       const name = `Room ${current.rooms.length + 1}`;
       return { ...current, rooms: [...current.rooms, newRoom(id, name, generatePairingCode())] };
     });
@@ -244,7 +250,29 @@ export function useBridge(): BridgeApi {
 
   const removeRoom = useCallback(
     (roomId: string) => {
-      commit((current) => ({ ...current, rooms: current.rooms.filter((room) => room.id !== roomId) }));
+      const room = stateRef.current.rooms.find((entry) => entry.id === roomId);
+      if (!room) return;
+      const tombstone = room.relayPublished ? roomTombstone(room) : null;
+      commit((current) => ({
+        ...current,
+        rooms: current.rooms.filter((entry) => entry.id !== roomId),
+        pendingRoomRemovals:
+          tombstone && !current.pendingRoomRemovals.some((entry) => entry.id === roomId)
+            ? [...current.pendingRoomRemovals, tombstone]
+            : current.pendingRoomRemovals,
+        retiredRoomIds:
+          tombstone && !current.retiredRoomIds.includes(roomId)
+            ? [...current.retiredRoomIds, roomId]
+            : current.retiredRoomIds,
+      }));
+      setNotice(
+        tombstone
+          ? {
+              kind: 'warn',
+              message: `${room.name} was removed locally and will be cleared from the relay on the next successful publish.`,
+            }
+          : { kind: 'good', message: `${room.name} was removed.` },
+      );
     },
     [commit],
   );
@@ -259,7 +287,8 @@ export function useBridge(): BridgeApi {
   );
 
   const regeneratePairingCode = useCallback(
-    (roomId: string) => updateRoom(roomId, (room) => ({ ...room, pairingCode: generatePairingCode() })),
+    (roomId: string) =>
+      updateRoom(roomId, (room) => ({ ...room, pendingPairingCode: generatePairingCode() })),
     [updateRoom],
   );
 
@@ -293,73 +322,153 @@ export function useBridge(): BridgeApi {
     [commit],
   );
 
-  const publish = useCallback(async () => {
-    const current = stateRef.current;
-    const connection = connectionOf(current);
-    const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
-    if (!tournament || !round) {
-      setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
-      return;
-    }
-    if (!connection) {
-      setNotice({ kind: 'bad', message: 'Connect the relay before publishing a round.' });
-      return;
-    }
-    setBusy(true);
-    try {
-      const plan = planRound(tournament, round, current.rooms);
-      const outcome = await publishRound(connection, {
-        epoch: current.relay?.epoch ?? 1,
-        lastRevision: current.relay?.revision ?? 0,
-        tournamentName: tournament.name,
-        plan,
-        rooms: current.rooms,
-      });
+  /** Apply a successful mirror without activating a code changed while the request was in flight. */
+  const applyPublication = useCallback(
+    (
+      outcome: PublishOutcome,
+      pendingCodes: ReadonlyMap<string, string | null>,
+      tombstoneIds: ReadonlySet<string>,
+    ) => {
       const byRoom = new Map(outcome.assignments.map((entry) => [entry.roomId, entry]));
       const cleared = new Set(outcome.clearedRoomIds);
       commit((current) => ({
         ...current,
         relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
         rooms: current.rooms.map((room) => {
+          const wasMirrored = pendingCodes.has(room.id);
+          if (!wasMirrored) return room;
+          const sentPendingCode = pendingCodes.get(room.id) ?? null;
+          const pendingStillCurrent = room.pendingPairingCode === sentPendingCode;
+          const published = {
+            ...room,
+            pairingCode: pendingStillCurrent && sentPendingCode !== null ? sentPendingCode : room.pairingCode,
+            pendingPairingCode: pendingStillCurrent ? null : room.pendingPairingCode,
+            relayPublished: true,
+          };
           const assignment = byRoom.get(room.id);
           if (assignment) {
             return {
-              ...room,
+              ...published,
               publishedMatchId: assignment.matchId,
               publishedRoundId: assignment.roundId,
               assignmentRevision: assignment.assignmentRevision,
             };
           }
-          if (!cleared.has(room.id)) return room;
+          if (!cleared.has(room.id)) return published;
           // The relay just cleared this room. Local state says so too, or the room table would
           // keep reporting a game that is no longer on the relay.
           return {
-            ...room,
+            ...published,
             publishedMatchId: null,
             publishedRoundId: null,
             assignmentRevision: room.assignmentRevision + 1,
           };
         }),
+        pendingRoomRemovals: current.pendingRoomRemovals.filter((room) => !tombstoneIds.has(room.id)),
+        retiredRoomIds: [...new Set([...current.retiredRoomIds, ...tombstoneIds])],
       }));
-      setRelayReachable(true);
-      const clearedNote =
-        plan.cleared.length > 0
-          ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
-          : '';
-      setNotice({
-        kind: plan.cleared.length > 0 ? 'warn' : 'good',
-        message: `Published round ${round.qbjName} to ${outcome.assignments.length} room(s).${clearedNote}`,
-      });
-    } catch (error) {
-      if (error instanceof RelayError) setRelayReachable(false);
+    },
+    [commit],
+  );
+
+  const publishPlan = useCallback(
+    async (input: {
+      plan: PublishPlan;
+      tournamentName: string;
+      successKind: 'good' | 'warn';
+      successMessage: (outcome: PublishOutcome) => string;
+      failureMessage: string;
+      missingRelayMessage: string;
+    }): Promise<PublishOutcome | null> => {
+      const current = stateRef.current;
+      const connection = connectionOf(current);
+      if (!connection) {
+        setNotice({ kind: 'bad', message: input.missingRelayMessage });
+        return null;
+      }
+      if (input.plan.publications.length === 0) {
+        setNotice({ kind: 'bad', message: 'There are no rooms to publish. Add a room first.' });
+        return null;
+      }
+      setBusy(true);
+      const pendingCodes = new Map(current.rooms.map((room) => [room.id, room.pendingPairingCode]));
+      const tombstoneIds = new Set(current.pendingRoomRemovals.map((room) => room.id));
+      try {
+        const outcome = await publishRound(connection, {
+          epoch: current.relay?.epoch ?? 1,
+          lastRevision: current.relay?.revision ?? 0,
+          tournamentName: input.tournamentName,
+          plan: input.plan,
+          rooms: current.rooms,
+          tombstones: current.pendingRoomRemovals,
+        });
+        applyPublication(outcome, pendingCodes, tombstoneIds);
+        setRelayReachable(true);
+        setNotice({ kind: input.successKind, message: input.successMessage(outcome) });
+        return outcome;
+      } catch (error) {
+        if (error instanceof RelayError) setRelayReachable(false);
+        setNotice({ kind: 'bad', message: `${input.failureMessage} ${(error as Error).message}` });
+        return null;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [applyPublication],
+  );
+
+  const publish = useCallback(async () => {
+    const current = stateRef.current;
+    const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
+    if (!tournament || !round) {
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
+      return;
+    }
+    const plan = planRound(tournament, round, current.rooms, current.pendingRoomRemovals);
+    if (plan.assignments.length === 0) {
       setNotice({
         kind: 'bad',
-        message: `Round not published — the rooms still have whatever they had before. ${(error as Error).message}`,
+        message:
+          'No room in this round has two teams chosen. Use “Publish Room Setup” to publish room codes or clear assignments.',
       });
-    } finally {
-      setBusy(false);
+      return;
     }
-  }, [commit, tournament]);
+    await publishPlan({
+      plan,
+      tournamentName: tournament.name,
+      successKind: plan.cleared.length > 0 ? 'warn' : 'good',
+      successMessage: (outcome) => {
+        const clearedNote =
+          plan.cleared.length > 0
+            ? ` ${plan.cleared.length} room(s) were cleared and can no longer open a game.`
+            : '';
+        return `Published round ${round.qbjName} to ${outcome.assignments.length} room(s).${clearedNote}`;
+      },
+      failureMessage: 'Round not published — the rooms still have whatever they had before.',
+      missingRelayMessage: 'Connect the relay before publishing a round.',
+    });
+  }, [publishPlan, tournament]);
+
+  const publishRoomSetup = useCallback(async () => {
+    const current = stateRef.current;
+    if (!current.tournamentName) {
+      setNotice({ kind: 'bad', message: 'Load a YellowFruit file before publishing room setup.' });
+      return;
+    }
+    const plan = planRoomSetup(current.rooms, current.pendingRoomRemovals);
+    await publishPlan({
+      plan,
+      tournamentName: current.tournamentName,
+      successKind: 'good',
+      successMessage: () => {
+        const removed = plan.publications.length - current.rooms.length;
+        const removedNote = removed > 0 ? ` Cleared ${removed} removed room(s) from the relay.` : '';
+        return `Published room setup for ${current.rooms.length} room(s). Pairing codes are now active and room tokens remain valid.${removedNote}`;
+      },
+      failureMessage: 'Room setup not published — the relay and local active codes are unchanged.',
+      missingRelayMessage: 'Connect the relay before publishing room setup.',
+    });
+  }, [publishPlan]);
 
   const pollResults = useCallback(async () => {
     const current = stateRef.current;
@@ -568,6 +677,7 @@ export function useBridge(): BridgeApi {
     selectRound,
     roundChangeDiscardsSelections,
     publish,
+    publishRoomSetup,
     roomStatus,
     warnings,
     chooseFolder,

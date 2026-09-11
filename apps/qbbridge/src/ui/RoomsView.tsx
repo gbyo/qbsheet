@@ -108,6 +108,13 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
         </select>
         <Button onPress={bridge.addRoom}>+ Room</Button>
         <Button
+          variant="quiet"
+          isDisabled={bridge.busy || !state.relay || state.rooms.length === 0}
+          onPress={() => void bridge.publishRoomSetup()}
+        >
+          Publish Room Setup
+        </Button>
+        <Button
           variant="primary"
           style={{ marginLeft: 'auto' }}
           isDisabled={bridge.busy || !state.relay || !round}
@@ -116,6 +123,11 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
           {round ? `Publish Round ${round.qbjName}` : 'Publish'}
         </Button>
       </div>
+
+      <p className="faint room-setup-hint">
+        Publish Room Setup once before Round 1 to activate the room codes and pair scorers. It clears any
+        active assignment without revoking room tokens; later rounds use the same pairing.
+      </p>
 
       {state.rooms.length === 0 ? (
         <p className="muted">No rooms yet. Add one for each room the tournament is using.</p>
@@ -168,9 +180,27 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                   </td>
                   <td>
                     <div className="row">
-                      <span className="code">{room.pairingCode}</span>
-                      {link ? <Qr url={link} roomName={room.name} /> : null}
-                      <Button size="sm" variant="quiet" onPress={() => bridge.regeneratePairingCode(room.id)}>
+                      <div>
+                        <div className="row">
+                          <span className="code">{room.pairingCode}</span>
+                          <StatusBadge tone={room.relayPublished ? 'success' : 'neutral'}>
+                            {room.relayPublished ? 'Active' : 'Not published'}
+                          </StatusBadge>
+                        </div>
+                        {room.pendingPairingCode ? (
+                          <div className="faint">
+                            Pending — publish to activate:{' '}
+                            <span className="code">{room.pendingPairingCode}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                      {room.relayPublished && link ? <Qr url={link} roomName={room.name} /> : null}
+                      <Button
+                        size="sm"
+                        variant="quiet"
+                        isDisabled={bridge.busy}
+                        onPress={() => bridge.regeneratePairingCode(room.id)}
+                      >
                         New code
                       </Button>
                     </div>
@@ -179,7 +209,12 @@ export default function RoomsView({ bridge }: { bridge: BridgeApi }) {
                     <StatusBadge tone={state_.tone}>{state_.label}</StatusBadge>
                   </td>
                   <td>
-                    <Button size="sm" variant="quiet" onPress={() => bridge.removeRoom(room.id)}>
+                    <Button
+                      size="sm"
+                      variant="quiet"
+                      isDisabled={bridge.busy}
+                      onPress={() => bridge.removeRoom(room.id)}
+                    >
                       Remove
                     </Button>
                   </td>
