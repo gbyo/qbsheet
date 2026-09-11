@@ -2731,9 +2731,10 @@ describe('publication critical section', () => {
     expect(rendered.result.current.auditLog.some((entry) => entry.action === 'publication-confirmed')).toBe(
       false,
     );
-    // The only mirror went to the replaced relay; nothing was adopted from it.
+    // The only mirror went to the replaced relay; nothing was adopted from it. Origin
+    // comparison, not a substring prefix: a prefix would also match a lookalike host.
     expect(mirrorCalls()).toHaveLength(1);
-    expect(String(mirrorCalls()[0]?.args.url).startsWith(relayBase)).toBe(true);
+    expect(new URL(String(mirrorCalls()[0]?.args.url)).origin).toBe(relayBase);
     rendered.unmount();
   });
 });
