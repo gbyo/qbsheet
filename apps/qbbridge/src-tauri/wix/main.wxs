@@ -21,12 +21,16 @@
 
   Divergence from stock, kept minimal on purpose:
   1. Single-package dual scope (Standard all-users vs Current-user, no admin) following the
-     WiX v3 single-package pattern: Package stays InstallScope="perMachine" with
-     InstallerVersion 500, ALLUSERS=2 by default, and MSIINSTALLPERUSER selecting the context.
-     Windows Installer prompts for elevation only when the per-machine context needs it.
-  2. An InstallScopeDlg dialog (wired into the no-license WixUI_InstallDir chain; QBBridge
+     WiX v3 single-package pattern: InstallerVersion 500, ALLUSERS=2 by default, and
+     MSIINSTALLPERUSER selecting the context. InstallScope is omitted from Package on
+     purpose (candle turns InstallScope="perMachine" into ALLUSERS=1, duplicating the
+     required ALLUSERS=2 row). Windows Installer prompts for elevation only when the
+     per-machine context needs it.
+  2. A QbbInstallScopeDlg dialog (wired into the no-license WixUI_InstallDir chain; QBBridge
      ships no license file, and a repo test guards that assumption) offering the two scopes
-     with Standard preselected. Silent installs take the Standard default.
+     with Standard preselected. The name avoids the stock QbbInstallScopeDlg dialog the
+     WixUIExtension ships, which would collide at link time (LGHT0091). Silent installs
+     take the Standard default.
   3. A per-machine HKLM marker component plus AppSearch searches and launch conditions that
      refuse a fresh install when a conflicting copy exists in another context or an NSIS copy
      is registered, with carve-outs for same-context upgrades (UPGRADINGPRODUCTCODE) and
@@ -55,16 +59,18 @@
 
         <!--
           Dual-scope single package (see header comment): MSI 5.0 is required for the
-          ALLUSERS=2 / MSIINSTALLPERUSER model. InstallScope stays perMachine so an elevated
-          context is available; the properties below select the actual context, and Windows
-          Installer prompts for elevation only when the per-machine context needs it.
+          ALLUSERS=2 / MSIINSTALLPERUSER model. InstallScope is deliberately OMITTED
+          from Package: candle synthesizes Property ALLUSERS=1 from
+          InstallScope="perMachine", which collides at link time (LGHT0091) with the
+          ALLUSERS=2 row the single-package pattern requires. With no InstallScope,
+          the ALLUSERS property alone selects the context, and Windows Installer
+          prompts for elevation only when the per-machine context needs it.
         -->
         <Package Id="*"
                  Keywords="Installer"
                  InstallerVersion="500"
                  Languages="0"
                  Compressed="yes"
-                 InstallScope="perMachine"
                  SummaryCodepage="!(loc.TauriCodepage)"/>
 
         <!-- https://docs.microsoft.com/en-us/windows/win32/msi/reinstallmode -->
@@ -183,12 +189,12 @@
             <Publish Dialog="WelcomeDlg"
                      Control="Next"
                      Event="NewDialog"
-                     Value="InstallScopeDlg"
+                     Value="QbbInstallScopeDlg"
                      Order="3">1</Publish>
             <Publish Dialog="InstallDirDlg"
                      Control="Back"
                      Event="NewDialog"
-                     Value="InstallScopeDlg"
+                     Value="QbbInstallScopeDlg"
                      Order="3">1</Publish>
             {{/unless}}
 
@@ -199,7 +205,7 @@
               CostInitialize in both sequences, so the directory page already shows the
               context-correct default folder.
             -->
-            <Dialog Id="InstallScopeDlg" Width="370" Height="270" Title="{{product_name}} Setup">
+            <Dialog Id="QbbInstallScopeDlg" Width="370" Height="270" Title="{{product_name}} Setup">
                 <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
                 <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
                 <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />

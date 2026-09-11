@@ -93,11 +93,13 @@ describe('QBSheet Bridge dual-scope Windows installer', () => {
 
   it('stays a dual-scope single package defaulting to Standard', () => {
     const text = template();
-    // MSI 5.0 is required for the ALLUSERS=2 / MSIINSTALLPERUSER model; the single-package
-    // pattern keeps InstallScope perMachine while the properties select the real context.
+    // MSI 5.0 is required for the ALLUSERS=2 / MSIINSTALLPERUSER model. InstallScope stays
+    // OFF Package entirely: candle synthesizes Property ALLUSERS=1 from
+    // InstallScope="perMachine", which collides at link time (LGHT0091) with the
+    // ALLUSERS=2 row the single-package pattern requires.
     expect(text).toContain('InstallerVersion="500"');
-    expect(text).toContain('InstallScope="perMachine"');
-    expect(text).not.toContain('InstallScope="perUser"');
+    const pkg = text.match(/<Package[\s\S]*?\/>/)?.[0] ?? '';
+    expect(pkg).not.toContain('InstallScope');
     expect(text).toContain('<Property Id="ALLUSERS" Value="2" Secure="yes" />');
     // MSIINSTALLPERUSER must be declared with NO Value attribute: candle rejects
     // Value="" with CNDL0006, while an unset property still means per-machine.
@@ -109,8 +111,11 @@ describe('QBSheet Bridge dual-scope Windows installer', () => {
 
   it('wires the scope dialog into the no-license installer chain', () => {
     const text = template();
-    expect(text).toContain('Id="InstallScopeDlg"');
-    expect(text).toContain('Value="InstallScopeDlg"');
+    // The dialog must not reuse the stock InstallScopeDlg name the WixUIExtension ships;
+    // that symbol collides at link time (LGHT0091).
+    expect(text).not.toMatch(/Id="InstallScopeDlg"/);
+    expect(text).toContain('Id="QbbInstallScopeDlg"');
+    expect(text).toContain('Value="QbbInstallScopeDlg"');
     expect(text).toContain('Value="perMachine"');
     expect(text).toContain('Value="perUser"');
   });
