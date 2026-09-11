@@ -136,7 +136,7 @@ export default {
     }
 
     const manageMatch =
-      /^\/qbtcp\/v1\/manage\/tournaments\/([^/]+)(?:\/(mirror|events|sessions|results|help|acks|revoke|rotate|close|chaos|health|scorer-readiness|help\/[^/]+\/resolve))?$/.exec(
+      /^\/qbtcp\/v1\/manage\/tournaments\/([^/]+)(?:\/(mirror|events|sessions|results|help|acks|revoke|rotate|close|chaos|health|scorer-readiness|backup\/(?:provision|rotate|revoke)|takeover|transfer|help\/[^/]+\/resolve))?$/.exec(
         url.pathname,
       );
     if (manageMatch) {

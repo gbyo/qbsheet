@@ -45,10 +45,10 @@ The relay implements the streaming contract from #770 without extending it:
    Paste any long random string. Director asks for it once and then never needs it again.
 
 3. Copy the deployed Worker URL (`https://qbtcp-relay-backend.<subdomain>.workers.dev`).
-4. In Director, paste the URL and the setup token.
+4. In QBBridge, paste the URL and the setup token.
 
-Director exchanges the setup token for a durable management credential, stores that credential in
-the operating system keychain, and the setup token becomes worthless. It cannot be exchanged
+QBBridge exchanges the setup token for a durable management credential, stores that credential in
+the operating system's secure store, and the setup token becomes worthless. It cannot be exchanged
 twice. No QBSheet-operated service or credential is involved at any point.
 
 The full operator path — guided setup, claim security, pairing, validation, failure-budget
@@ -109,6 +109,11 @@ POST   /qbtcp/v1/manage/tournaments/{id}/acks
 POST   /qbtcp/v1/manage/tournaments/{id}/help/{helpId}/resolve
 POST   /qbtcp/v1/manage/tournaments/{id}/revoke
 POST   /qbtcp/v1/manage/tournaments/{id}/rotate
+POST   /qbtcp/v1/manage/tournaments/{id}/backup/provision
+POST   /qbtcp/v1/manage/tournaments/{id}/backup/rotate
+POST   /qbtcp/v1/manage/tournaments/{id}/backup/revoke
+POST   /qbtcp/v1/manage/tournaments/{id}/takeover
+POST   /qbtcp/v1/manage/tournaments/{id}/transfer
 POST   /qbtcp/v1/manage/tournaments/{id}/close
 POST   /qbtcp/v1/manage/tournaments/{id}/chaos      drills only, never production
 DELETE /qbtcp/v1/manage/tournaments/{id}
@@ -140,16 +145,29 @@ collaboration data.
 
 ## Rotating the management credential
 
-`POST manage/rotate` requires the current management credential and returns a fresh one. Only
-the new hash is stored: the old credential stops working immediately, mirrored state, retained
-finals, and the replay cursor are untouched, and the plaintext leaves the relay exactly once, in
-that response. Director stores the new credential in the OS keychain before discarding the old
-one.
+`POST manage/rotate` requires the active primary management credential and returns a fresh one.
+Only the new hash is stored: the old credential stops working immediately, mirrored state,
+retained finals, and the replay cursor are untouched, and the plaintext leaves the relay exactly
+once, in that response. QBBridge stores the new credential in the operating system's secure store
+before discarding the old one.
+
+The primary can provision one named backup controller. Provision and rotation return the backup
+credential exactly once; the relay stores only its hash. QBBridge places that credential in an
+authenticated encrypted recovery package, never alongside the primary credential. A backup
+controller can call `POST manage/takeover` with an idempotency id. Takeover increments the
+`director_epoch`, resets the mirror revision, and makes the backup the only controller allowed to
+mirror, acknowledge, revoke, close, resolve help, destroy, or rotate credentials. The old primary
+can still read health and retained results, but mutating requests get `409 superseded`.
+
+`POST manage/transfer` is the explicit return path. It advances the epoch again and makes the
+selected controller active; `POST manage/backup/revoke` removes backup access without deleting
+rooms or retained results. The full QBBridge handoff procedure is in
+[`docs/QBBRIDGE-RECOVERY.md`](../../docs/QBBRIDGE-RECOVERY.md).
 
 There is deliberately no "recover with the setup token" path — the setup token is consumed by
-the first claim, so a leaked token stays worthless. A Director that has lost its management
-credential recovers by exporting any unacknowledged finals (`GET manage/results?state=unacked`),
-destroying the tournament (`DELETE manage`), and claiming again with the setup token. Director's
+the first claim, so a leaked token stays worthless. If no backup package exists and the primary
+credential is lost, recover by exporting any unacknowledged finals (`GET manage/results?state=unacked`),
+destroying the tournament (`DELETE manage`), and claiming again with the setup token. QBBridge's
 teardown planner refuses a silent destroy while unacknowledged finals remain; see
 `docs/QBTCP-RELAY-DEPLOY.md`.
 

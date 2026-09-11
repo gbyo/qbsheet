@@ -53,6 +53,8 @@ const replacementRelayBase = 'https://qbtcp-replacement-test.workers.dev';
 const relayTournament = 'bcdfghjkmnpqrstvwxyz2345';
 
 let calls: InvokeCall[] = [];
+let secureCredentials = new Map<string, string>();
+let recoveryPackage: { path: string; contents: string } | null = null;
 let relayResults: RelayResultRow[] = [];
 let relayResultsByBase = new Map<string, RelayResultRow[]>();
 let writtenFiles: WrittenFile[] = [];
@@ -85,9 +87,15 @@ let deferWrites = false;
 let pendingWrites: PendingWrite[] = [];
 let scorerCanPair = true;
 let scorerReadinessFails = false;
+let activeController: 'primary' | 'backup' = 'primary';
+let relayEpoch = 1;
+let relayRevision = 0;
+const backupControllerId = 'backup-test-controller';
+const backupToken = 'backup-management-secret';
 
 function installFakeTauri(): void {
   calls = [];
+  secureCredentials = new Map();
   writtenFiles = [];
   writtenAssignmentFiles = [];
   const invoke = async (command: string, args: Record<string, unknown> = {}) => {
@@ -106,6 +114,22 @@ function installFakeTauri(): void {
         writtenAssignmentFiles.push({ ...(args as unknown as WrittenFile), overwrite: false });
         return path;
       }
+      case 'store_relay_credential':
+        secureCredentials.set(String(args.key), String(args.token));
+        return null;
+      case 'load_relay_credential':
+        return secureCredentials.get(String(args.key)) ?? null;
+      case 'delete_relay_credential':
+        secureCredentials.delete(String(args.key));
+        return null;
+      case 'open_recovery_package':
+        return recoveryPackage;
+      case 'write_recovery_package':
+        recoveryPackage = {
+          path: `/tournaments/${String(args.fileName)}`,
+          contents: String(args.contents),
+        };
+        return recoveryPackage.path;
       case 'write_result_file': {
         const path = `${String(args.directory)}/${String(args.fileName)}`;
         // The real command opens with `create_new` unless told to overwrite.
@@ -124,6 +148,7 @@ function installFakeTauri(): void {
       }
       case 'relay_request': {
         const url = String(args.url);
+        const bearer = String(args.bearer ?? '');
         if (url.endsWith('/manage/claim')) {
           if (claimFails) {
             return {
@@ -142,6 +167,51 @@ function installFakeTauri(): void {
             }),
           };
         }
+        if (url.endsWith('/backup/provision')) {
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              controllerId: backupControllerId,
+              label: 'Backup laptop',
+              backupToken,
+            }),
+          };
+        }
+        if (url.endsWith('/health')) {
+          const authenticatedAs = bearer === backupToken ? 'backup' : 'primary';
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              mirror: { director_epoch: relayEpoch, revision: relayRevision },
+              controller: {
+                authenticated_as: authenticatedAs,
+                active: authenticatedAs === activeController,
+                active_controller: activeController,
+                backup_provisioned: true,
+                backup_controller_id: backupControllerId,
+                backup_controller_label: 'Backup laptop',
+              },
+            }),
+          };
+        }
+        if (url.endsWith('/takeover')) {
+          activeController = 'backup';
+          relayEpoch = 2;
+          relayRevision = 0;
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              director_epoch: relayEpoch,
+              revision: relayRevision,
+              active_controller: activeController,
+              idempotent: false,
+            }),
+          };
+        }
+        if (url.endsWith('/backup/revoke')) return { status: 200, body: JSON.stringify({ revoked: true }) };
         if (url.endsWith('/scorer-readiness')) {
           if (scorerReadinessFails) return { status: 503, body: '{}' };
           return {
@@ -193,6 +263,7 @@ function installFakeTauri(): void {
 
 beforeEach(() => {
   relayResults = [];
+  recoveryPackage = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
   claimFails = false;
@@ -209,6 +280,9 @@ beforeEach(() => {
   pendingWrites = [];
   scorerCanPair = true;
   scorerReadinessFails = false;
+  activeController = 'primary';
+  relayEpoch = 1;
+  relayRevision = 0;
   installFakeTauri();
 });
 
@@ -615,6 +689,9 @@ describe('room setup and removal', () => {
     rendered.unmount();
 
     const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
     await act(async () => {
       restarted.result.current.loadFileContents(null, yftFixtureText());
       await restarted.result.current.publishRoomSetup();
@@ -897,6 +974,9 @@ describe('persistence', () => {
 
     // A new window over the same storage: this is what reopening the application does.
     const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
     const after = restarted.result.current.state;
 
     expect(after.relay).toEqual(before.relay);
@@ -960,7 +1040,9 @@ describe('YellowFruit file boundaries', () => {
 
     expect(rendered.result.current.tournament).toBe(beforeTournament);
     expect(rendered.result.current.state).toEqual(beforeState);
-    expect(loadState()).toEqual(beforeState);
+    const persisted = loadState();
+    expect({ ...persisted, relay: null }).toEqual({ ...beforeState, relay: null });
+    expect(persisted.relay?.managementToken).toBeUndefined();
     expect(rendered.result.current.notice?.kind).toBe('bad');
 
     // A later valid same-file reload still works after the failed attempt.
@@ -1340,8 +1422,8 @@ describe('changing the relay', () => {
 
   test('forgetting the credential is a separate, explicit action', async () => {
     const rendered = await setUpTournament();
-    act(() => {
-      rendered.result.current.forgetRelayCredential();
+    await act(async () => {
+      await rendered.result.current.forgetRelayCredential();
     });
     expect(rendered.result.current.state.relay).toBeNull();
     // It says what happened rather than looking like a successful change.
@@ -1407,7 +1489,7 @@ describe('critical relay persistence', () => {
     expect(retried).toBe(true);
     expect(rendered.result.current.relayCredentialSavePending).toBe(false);
     expect(rendered.result.current.state.relay?.managementToken).toBe('management-secret');
-    expect(loadState().relay?.managementToken).toBe('management-secret');
+    expect(loadState().relay?.managementToken).toBeUndefined();
     setItem.mockRestore();
   });
 
@@ -1434,7 +1516,13 @@ describe('critical relay persistence', () => {
 
     expect(accepted).toBe(false);
     expect(rendered.result.current.state.relay).toEqual(oldRelay);
-    expect(loadState().relay).toEqual(oldRelay);
+    expect(loadState().relay).toMatchObject({
+      baseUrl: oldRelay?.baseUrl,
+      tournamentId: oldRelay?.tournamentId,
+      epoch: oldRelay?.epoch,
+      revision: oldRelay?.revision,
+    });
+    expect(loadState().relay?.managementToken).toBeUndefined();
     expect(rendered.result.current.relayCredentialSavePending).toBe(true);
     expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/manage/claim'))).toHaveLength(2);
     setItem.mockRestore();
@@ -1462,6 +1550,66 @@ describe('critical relay persistence', () => {
     });
     expect(rendered.result.current.persistenceSavePending).toBe(false);
     expect(loadState().relay?.revision).toBe(1);
+  });
+});
+
+describe('backup controller recovery', () => {
+  test('encrypts a backup handoff, takes over, then saves and acknowledges retained results', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-recovery', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    const primary = await setUpTournament();
+
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await primary.result.current.createRecoveryPackage(
+        'correct horse battery staple',
+        'Backup laptop',
+      );
+    });
+    expect(created).toBe(true);
+    expect(recoveryPackage?.contents).toBeTruthy();
+    expect(recoveryPackage?.contents).not.toContain('management-secret');
+    expect(recoveryPackage?.contents).not.toContain(backupToken);
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    expect(backup.result.current.state.relay).toMatchObject({
+      controllerRole: 'backup',
+      controllerId: backupControllerId,
+      managementToken: backupToken,
+      epoch: 1,
+      revision: 0,
+    });
+    expect(JSON.stringify(loadState())).not.toContain(backupToken);
+
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    expect(activeController).toBe('backup');
+    expect(backup.result.current.state.relay).toMatchObject({ epoch: 2, revision: 0 });
+
+    await waitFor(() => expect(backup.result.current.state.results).toHaveLength(1));
+    await act(async () => {
+      await backup.result.current.chooseFolder();
+      await backup.result.current.saveNewResults();
+    });
+    expect(writtenFiles).toHaveLength(1);
+    expect(writtenFiles[0].fileName).toMatch(/\.result\.qbj$/);
+    const ack = calls.find(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/acks'),
+    );
+    expect(ack?.args.bearer).toBe(backupToken);
+    expect(backup.result.current.state.results[0].ackPending).toBe(false);
+    backup.unmount();
   });
 });
 
@@ -1505,7 +1653,7 @@ describe('Scorer origin readiness', () => {
     expect(rendered.result.current.state.relay?.managementToken).toBe('management-secret');
     expect(rendered.result.current.scorerReadiness).toMatchObject({ status: 'unknown' });
     expect(rendered.result.current.notice?.message).toMatch(/Do not pair until this check succeeds/);
-    expect(loadState().relay?.managementToken).toBe('management-secret');
+    expect(loadState().relay?.managementToken).toBeUndefined();
     expect(loadState().scorerReadiness).toMatchObject({ status: 'unknown' });
   });
 });
@@ -1672,6 +1820,11 @@ describe('acknowledging saved results', () => {
 
     rendered.unmount();
     const restarted = renderHook(() => useBridge());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret');
     expect(restarted.result.current.state.results[0].savedPath).toBeTruthy();
     expect(restarted.result.current.state.results[0].ackPending).toBe(true);
 

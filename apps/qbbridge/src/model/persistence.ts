@@ -10,11 +10,11 @@
  *
  * # What is and is not in here
  *
- * The relay management credential is. That is a deliberate, narrow choice: a keychain abstraction,
- * an export workflow and a lost-credential recovery flow are the kind of machinery this
- * application is supposed not to have, and the credential authorizes one tournament on a relay the
- * operator deployed themselves. Everything a relay credential must never enter — a QBJ file, a
- * mirror body, a pairing link, a QR code — it still never enters.
+ * The relay management credential is present in memory while the native bridge is running. A
+ * native save omits it after it moves to the operating system's secure store; a profile restored
+ * before that asynchronous load therefore has relay metadata but no bearer and cannot publish.
+ * Everything a relay credential must never enter — a QBJ file, a mirror body, a pairing link, or a
+ * QR code — it still never enters.
  *
  * The loaded tournament is not. It is reread from the `.yft`, which is the authority.
  */
@@ -63,7 +63,8 @@ export interface BridgeState {
   relay: {
     baseUrl: string;
     tournamentId: string;
-    managementToken: string;
+    /** Present in memory; omitted from secure localStorage saves until restored from the keychain. */
+    managementToken?: string;
     /**
      * Bumped once per app installation's lifetime of this tournament, and otherwise left alone.
      *
@@ -74,6 +75,10 @@ export interface BridgeState {
     epoch: number;
     /** The last mirror revision the relay accepted. The next publish is this plus one. */
     revision: number;
+    /** Which independently provisioned controller this local profile uses. */
+    controllerRole?: 'primary' | 'backup';
+    controllerId?: string;
+    controllerLabel?: string;
   } | null;
   /** Last Scorer-origin check; a new app session rechecks it before showing pairing as ready. */
   scorerReadiness: ScorerReadinessSnapshot | null;
@@ -352,23 +357,40 @@ export function loadState(): BridgeState {
   if (!raw) return emptyState();
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed)) return emptyState();
-    const state = parsed as Partial<BridgeState> & Record<string, unknown>;
-    // Exactly the two versions this build understands. A version from the future is not
-    // downgraded — guessing at a shape a later build wrote is how a credential gets dropped.
-    if (state.version === 2) return readV2(state);
-    if (state.version === 1) return migrateV1(state);
-    return emptyState();
+    return normalizeState(parsed) ?? emptyState();
   } catch {
     return emptyState();
   }
 }
 
-export function saveState(state: BridgeState): PersistResult {
+/** Normalize an untrusted serialized state before it reaches the Bridge UI. */
+export function normalizeState(value: unknown): BridgeState | null {
+  if (!isRecord(value)) return null;
+  const state = value as Partial<BridgeState> & Record<string, unknown>;
+  // Exactly the two versions this build understands. A version from the future is not
+  // downgraded — guessing at a shape a later build wrote is how a credential gets dropped.
+  if (state.version === 2) return readV2(state);
+  if (state.version === 1) return migrateV1(state);
+  return null;
+}
+
+export interface SaveStateOptions {
+  /** Omit the bearer credential from the localStorage blob after it has moved to OS secure storage. */
+  secureCredential?: boolean;
+}
+
+function stateForStorage(state: BridgeState, options: SaveStateOptions): BridgeState {
+  if (!options.secureCredential || !state.relay) return state;
+  const relay: Record<string, unknown> = { ...state.relay };
+  delete relay.managementToken;
+  return { ...state, relay: relay as BridgeState['relay'] };
+}
+
+export function saveState(state: BridgeState, options: SaveStateOptions = {}): PersistResult {
   const store = storage();
   if (!store) return { ok: false, error: new Error('local storage is unavailable') };
   try {
-    const serialized = JSON.stringify(state);
+    const serialized = JSON.stringify(stateForStorage(state, options));
     store.setItem(storageKey, serialized);
     if (store.getItem(storageKey) !== serialized) {
       return { ok: false, error: new Error('local storage did not retain the saved state') };

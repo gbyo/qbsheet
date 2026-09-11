@@ -281,6 +281,23 @@ YellowFruit → Import Games Only`}</pre>
           out of that window. QBBridge warns you long before it matters.
         </dd>
 
+        <dt>The primary laptop failed</dt>
+        <dd>
+          If a backup package was prepared, open it on the replacement laptop, reload the authoritative{' '}
+          <code>.yft</code>, review the recovered state, and choose{' '}
+          <strong>Take over tournament control</strong>. Takeover advances the relay epoch and fences the old
+          primary from publishing and acknowledging. Keep the package and its passphrase separate; the full
+          procedure is in <code>docs/QBBRIDGE-RECOVERY.md</code>.
+        </dd>
+
+        <dt>The recovery package or passphrase may have leaked</dt>
+        <dd>
+          From the active primary, choose <strong>Revoke backup access</strong> and create a new encrypted
+          package. A lost passphrase cannot be recovered from the relay. Management credentials are kept in
+          the operating-system secure store and are not placed in QBJ, YFT, room sheets, URLs, logs or
+          diagnostics.
+        </dd>
+
         <dt>A result file would overwrite an existing one</dt>
         <dd>
           QBBridge refuses and says so rather than replacing it. Move or rename whatever is already in the

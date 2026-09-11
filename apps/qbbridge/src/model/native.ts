@@ -1,5 +1,5 @@
 /**
- * The whole native surface: six commands.
+ * The whole native surface: file dialogs/writes, secure relay-credential storage, and HTTP.
  *
  * Tauri is here for the desktop capabilities a browser tab cannot do well on a tournament
  * morning — a real open dialog, a real folder picker, writing a dozen files without a download
@@ -37,6 +37,16 @@ export function resetNativeHost(): void {
   cached = undefined;
 }
 
+/** Stable non-secret key used to name one relay credential in the OS secure store. */
+export function relayCredentialKey(
+  baseUrl: string,
+  tournamentId: string,
+  controllerRole: 'primary' | 'backup' = 'primary',
+  controllerId = '',
+): string {
+  return `${baseUrl.replace(/\/+$/, '')}\u001f${tournamentId}\u001f${controllerRole}\u001f${controllerId}`;
+}
+
 export class NativeUnavailableError extends Error {
   constructor(what: string) {
     super(`${what} needs the QBSheet Bridge desktop application.`);
@@ -69,6 +79,40 @@ export async function chooseResultFolder(): Promise<string | null> {
 export async function chooseAssignmentFolder(): Promise<string | null> {
   requireNative('Choosing an assignment folder');
   return invoke<string | null>('choose_assignment_folder');
+}
+
+/** Native open dialog for the encrypted backup-controller package. */
+export async function openRecoveryPackage(): Promise<OpenedFile | null> {
+  requireNative('Opening a QBSheet recovery package');
+  return invoke<OpenedFile | null>('open_recovery_package');
+}
+
+/** Write one encrypted recovery package. The native writer refuses to replace an existing file. */
+export async function writeRecoveryPackage(
+  directory: string,
+  fileName: string,
+  contents: string,
+): Promise<string> {
+  requireNative('Writing a QBSheet recovery package');
+  return invoke<string>('write_recovery_package', { directory, fileName, contents });
+}
+
+/** Store a relay credential in the operating system's secure credential store. */
+export async function storeRelayCredential(key: string, token: string): Promise<void> {
+  requireNative('Storing a relay credential securely');
+  await invoke('store_relay_credential', { key, token });
+}
+
+/** Load a relay credential from the operating system's secure credential store. */
+export async function loadRelayCredential(key: string): Promise<string | null> {
+  requireNative('Loading a relay credential securely');
+  return invoke<string | null>('load_relay_credential', { key });
+}
+
+/** Delete a relay credential from the operating system's secure credential store. */
+export async function deleteRelayCredential(key: string): Promise<void> {
+  requireNative('Deleting a relay credential securely');
+  await invoke('delete_relay_credential', { key });
 }
 
 /**

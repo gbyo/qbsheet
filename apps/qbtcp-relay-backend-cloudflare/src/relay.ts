@@ -132,6 +132,7 @@ const HELP_CATEGORIES = [
 
 type Lifecycle = 'live' | 'closed';
 type SessionStatus = 'open' | 'final-received' | 'abandoned';
+type ManagementController = 'primary' | 'backup';
 
 interface TournamentRow extends Record<string, SqlStorageValue> {
   id: number;
@@ -144,6 +145,13 @@ interface TournamentRow extends Record<string, SqlStorageValue> {
   tournament_name: string | null;
   lifecycle: Lifecycle;
   management_token_hash: string | null;
+  backup_management_token_hash: string | null;
+  backup_controller_id: string | null;
+  backup_controller_label: string | null;
+  backup_provisioned_at: string | null;
+  active_controller: ManagementController;
+  last_takeover_id: string | null;
+  last_takeover_epoch: number | null;
   setup_consumed_at: string | null;
   created_at: string;
   updated_at: string;
@@ -291,6 +299,13 @@ export class QbtcpRelay extends DurableObject<Env> {
         tournament_name TEXT,
         lifecycle TEXT NOT NULL DEFAULT 'live',
         management_token_hash TEXT,
+        backup_management_token_hash TEXT,
+        backup_controller_id TEXT,
+        backup_controller_label TEXT,
+        backup_provisioned_at TEXT,
+        active_controller TEXT NOT NULL DEFAULT 'primary',
+        last_takeover_id TEXT,
+        last_takeover_epoch INTEGER,
         setup_consumed_at TEXT,
         created_at TEXT NOT NULL DEFAULT '',
         updated_at TEXT NOT NULL DEFAULT ''
@@ -395,6 +410,27 @@ export class QbtcpRelay extends DurableObject<Env> {
         fail_writes INTEGER NOT NULL DEFAULT 0
       );
     `);
+    // These columns were added after the first relay deployments. SQLite has no portable
+    // `ADD COLUMN IF NOT EXISTS`, so each additive migration is deliberately idempotent by
+    // catching only the duplicate-column error at this boundary. Existing retained finals and
+    // mirror positions are never rewritten by the migration.
+    for (const column of [
+      'backup_management_token_hash TEXT',
+      'backup_controller_id TEXT',
+      'backup_controller_label TEXT',
+      'backup_provisioned_at TEXT',
+      "active_controller TEXT NOT NULL DEFAULT 'primary'",
+      'last_takeover_id TEXT',
+      'last_takeover_epoch INTEGER',
+    ]) {
+      try {
+        this.sql.exec(`ALTER TABLE tournament ADD COLUMN ${column}`);
+      } catch (error) {
+        if (!String(error).toLowerCase().includes('duplicate column name')) throw error;
+        // Already present on this Durable Object. Any other schema error is actionable and must
+        // stop the request rather than leave a partially migrated authorization surface running.
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -635,26 +671,68 @@ export class QbtcpRelay extends DurableObject<Env> {
     return { session, cors };
   }
 
-  /** The management credential authorizes Director control state. Scorer tokens never reach here. */
-  private async authorizeManagement(
-    request: Request,
-  ): Promise<{ tournament: TournamentRow; cors: Record<string, string> }> {
+  /**
+   * Authenticate either controller credential without ever returning the secret.
+   *
+   * The primary hash remains in the legacy column so existing Durable Objects migrate without
+   * rotating their one-time claim. The backup hash is a separate, independently revocable
+   * capability. Mutating controller methods call `requireActiveManagement` immediately after
+   * this function; reads may remain available to a stale controller so it can diagnose a takeover
+   * without being able to mirror or acknowledge over the active laptop.
+   */
+  private async authorizeManagement(request: Request): Promise<{
+    tournament: TournamentRow;
+    cors: Record<string, string>;
+    controller: ManagementController;
+    activeController: ManagementController;
+  }> {
     const cors = this.cors(request, true);
     const tournament = this.requireTournament();
     const header = request.headers.get('authorization') ?? '';
     const match = /^Bearer\s+(.+)$/i.exec(header.trim());
     if (!match) throw new RelayError(401, 'invalid_credential', 'A management credential is required.');
-    if (!tournament.management_token_hash) {
-      throw new RelayError(403, 'forbidden', 'This relay has not been claimed yet.');
+    const presented = match[1];
+    let controller: ManagementController | null = null;
+    if (
+      tournament.management_token_hash &&
+      (await this.checkToken(presented, tournament.management_token_hash))
+    ) {
+      controller = 'primary';
+    } else if (
+      tournament.backup_management_token_hash &&
+      (await this.checkToken(presented, tournament.backup_management_token_hash))
+    ) {
+      controller = 'backup';
     }
-    if (!(await this.checkToken(match[1], tournament.management_token_hash))) {
+    if (controller === null) {
       this.bump('auth_failures');
       throw new RelayError(401, 'invalid_credential', 'That management credential is not valid.');
     }
     // Scorer tokens are bearer-shaped too. A room or session token presented as a management
     // credential must fail closed here rather than be tried against the management hash as an
     // oracle: capability confusion is refused, not reinterpreted.
-    return { tournament, cors };
+    const activeController: ManagementController =
+      tournament.active_controller === 'backup' && tournament.backup_management_token_hash
+        ? 'backup'
+        : 'primary';
+    return { tournament, cors, controller, activeController };
+  }
+
+  private requireActiveManagement(auth: {
+    tournament: TournamentRow;
+    controller: ManagementController;
+    activeController: ManagementController;
+  }): void {
+    if (auth.controller === auth.activeController) return;
+    throw new RelayError(
+      409,
+      'superseded',
+      `This ${auth.controller} controller is no longer active. The ${auth.activeController} controller owns relay publication now.`,
+      {
+        active_controller: auth.activeController,
+        director_epoch: auth.tournament.director_epoch,
+      },
+    );
   }
 
   private requireLive(tournament: TournamentRow): void {
@@ -784,6 +862,14 @@ export class QbtcpRelay extends DurableObject<Env> {
     if (method === 'POST' && action === 'manage/claim') return credentialed(() => this.claim(request));
     if (method === 'POST' && action === 'manage/rotate')
       return credentialed(() => this.rotateManagement(request));
+    if (method === 'POST' && action === 'manage/backup/provision')
+      return credentialed(() => this.provisionBackup(request));
+    if (method === 'POST' && action === 'manage/backup/rotate')
+      return credentialed(() => this.rotateBackup(request));
+    if (method === 'POST' && action === 'manage/backup/revoke')
+      return credentialed(() => this.revokeBackup(request));
+    if (method === 'POST' && action === 'manage/takeover') return credentialed(() => this.takeover(request));
+    if (method === 'POST' && action === 'manage/transfer') return credentialed(() => this.transfer(request));
     if (method === 'PUT' && action === 'manage/mirror') return credentialed(() => this.putMirror(request));
     if (method === 'GET' && action === 'manage/events')
       return credentialed(() => this.getEvents(request, url));
@@ -1784,7 +1870,12 @@ export class QbtcpRelay extends DurableObject<Env> {
    * Director refuses a silent destroy while any remain).
    */
   private async rotateManagement(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
+    if (auth.controller !== 'primary') {
+      throw new RelayError(403, 'forbidden', 'Only the primary controller can rotate its own credential.');
+    }
     this.guardWrites();
     await this.readJson(request, MAX_BODY_BYTES).catch(() => ({}));
     const managementToken = randomToken();
@@ -1798,6 +1889,208 @@ export class QbtcpRelay extends DurableObject<Env> {
     return json({ tournamentId: tournament.tournament_id, managementToken }, 200, cors);
   }
 
+  /** Provision one named standby controller. The plaintext backup credential leaves exactly once. */
+  private async provisionBackup(request: Request): Promise<Response> {
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
+    this.guardWrites();
+    const body = (await this.readJson(request, MAX_BODY_BYTES)) as {
+      label?: unknown;
+      replace?: unknown;
+    };
+    const label = cleanBoundedText(body.label, 120);
+    if (!label) throw new RelayError(400, 'invalid_request', 'A backup controller name is required.');
+    if (tournament.backup_management_token_hash && body.replace !== true) {
+      throw new RelayError(
+        409,
+        'conflict',
+        'A backup controller is already provisioned. Rotate or revoke it before provisioning another.',
+      );
+    }
+    const backupToken = randomToken();
+    const controllerId = randomId('backup');
+    const now = nowIso();
+    this.sql.exec(
+      'UPDATE tournament SET backup_management_token_hash = ?, backup_controller_id = ?, backup_controller_label = ?, backup_provisioned_at = ?, updated_at = ? WHERE id = 1',
+      await sha256Hex(backupToken),
+      controllerId,
+      label,
+      now,
+      now,
+    );
+    this.wrote();
+    return json(
+      {
+        tournamentId: tournament.tournament_id,
+        controllerId,
+        label,
+        backupToken,
+      },
+      200,
+      cors,
+    );
+  }
+
+  /** Rotate the standby credential without changing the active mirror owner or epoch. */
+  private async rotateBackup(request: Request): Promise<Response> {
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
+    this.guardWrites();
+    if (!tournament.backup_management_token_hash || !tournament.backup_controller_id) {
+      throw new RelayError(404, 'not_found', 'No backup controller is provisioned.');
+    }
+    const body = (await this.readJson(request, MAX_BODY_BYTES)) as { label?: unknown };
+    const label =
+      body.label === undefined ? tournament.backup_controller_label : cleanBoundedText(body.label, 120);
+    if (!label) throw new RelayError(400, 'invalid_request', 'A backup controller name is required.');
+    const backupToken = randomToken();
+    this.sql.exec(
+      'UPDATE tournament SET backup_management_token_hash = ?, backup_controller_label = ?, backup_provisioned_at = ?, updated_at = ? WHERE id = 1',
+      await sha256Hex(backupToken),
+      label,
+      nowIso(),
+      nowIso(),
+    );
+    this.wrote();
+    return json(
+      {
+        tournamentId: tournament.tournament_id,
+        controllerId: tournament.backup_controller_id,
+        label,
+        backupToken,
+      },
+      200,
+      cors,
+    );
+  }
+
+  /** Revoke standby access without deleting rooms, results, assignments, or the primary credential. */
+  private async revokeBackup(request: Request): Promise<Response> {
+    const auth = await this.authorizeManagement(request);
+    const { cors } = auth;
+    this.requireActiveManagement(auth);
+    this.guardWrites();
+    this.sql.exec(
+      'UPDATE tournament SET backup_management_token_hash = NULL, backup_controller_id = NULL, backup_controller_label = NULL, backup_provisioned_at = NULL, updated_at = ? WHERE id = 1',
+      nowIso(),
+    );
+    this.wrote();
+    return json({ revoked: true }, 200, cors);
+  }
+
+  /**
+   * Make the provisioned backup controller active.
+   *
+   * The epoch increment is the split-brain fence. Every old-primary mirror or ACK is rejected by
+   * `requireActiveManagement`, and even a request that was already in flight is rejected by the
+   * `(director_epoch, revision)` check in `putMirror` after the Durable Object serializes it.
+   * `takeover_id` makes a retry safe if the backup loses the response after the durable update.
+   */
+  private async takeover(request: Request): Promise<Response> {
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    if (auth.controller !== 'backup') {
+      throw new RelayError(403, 'forbidden', 'Only the provisioned backup controller can take over.');
+    }
+    this.guardWrites();
+    const body = (await this.readJson(request, MAX_BODY_BYTES)) as { takeover_id?: unknown };
+    const takeoverId = cleanBoundedText(body.takeover_id, 120);
+    if (!takeoverId) throw new RelayError(400, 'invalid_request', 'A takeover id is required.');
+    if (tournament.last_takeover_id === takeoverId && tournament.last_takeover_epoch !== null) {
+      return json(
+        {
+          tournamentId: tournament.tournament_id,
+          director_epoch: tournament.last_takeover_epoch,
+          revision: 0,
+          active_controller: 'backup',
+          idempotent: true,
+        },
+        200,
+        cors,
+      );
+    }
+    if (auth.activeController === 'backup') {
+      throw new RelayError(
+        409,
+        'conflict',
+        'The backup controller is already active. Use the existing takeover state or transfer control explicitly.',
+      );
+    }
+    const nextEpoch = Math.max(1, tournament.director_epoch + 1);
+    const now = nowIso();
+    this.sql.exec(
+      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = ?, last_takeover_epoch = ?, updated_at = ? WHERE id = 1',
+      'backup',
+      nextEpoch,
+      takeoverId,
+      nextEpoch,
+      now,
+    );
+    this.wrote();
+    return json(
+      {
+        tournamentId: tournament.tournament_id,
+        director_epoch: nextEpoch,
+        revision: 0,
+        active_controller: 'backup',
+        idempotent: false,
+      },
+      200,
+      cors,
+    );
+  }
+
+  /** Transfer active publication authority explicitly, normally back to the primary after an incident. */
+  private async transfer(request: Request): Promise<Response> {
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
+    this.guardWrites();
+    const body = (await this.readJson(request, MAX_BODY_BYTES)) as { controller?: unknown };
+    if (body.controller !== 'primary' && body.controller !== 'backup') {
+      throw new RelayError(400, 'invalid_request', '`controller` must be primary or backup.');
+    }
+    if (body.controller === 'backup' && !tournament.backup_management_token_hash) {
+      throw new RelayError(404, 'not_found', 'No backup controller is provisioned.');
+    }
+    const target = body.controller as ManagementController;
+    if (target === auth.activeController) {
+      return json(
+        {
+          tournamentId: tournament.tournament_id,
+          director_epoch: tournament.director_epoch,
+          revision: tournament.mirror_revision,
+          active_controller: target,
+          idempotent: true,
+        },
+        200,
+        cors,
+      );
+    }
+    const nextEpoch = Math.max(1, tournament.director_epoch + 1);
+    const now = nowIso();
+    this.sql.exec(
+      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = NULL, last_takeover_epoch = NULL, updated_at = ? WHERE id = 1',
+      target,
+      nextEpoch,
+      now,
+    );
+    this.wrote();
+    return json(
+      {
+        tournamentId: tournament.tournament_id,
+        director_epoch: nextEpoch,
+        revision: 0,
+        active_controller: target,
+        idempotent: false,
+      },
+      200,
+      cors,
+    );
+  }
+
   /**
    * Publish Director control state for the relay to mirror.
    *
@@ -1809,7 +2102,9 @@ export class QbtcpRelay extends DurableObject<Env> {
    * how a Director that closed by mistake puts the relay back.
    */
   private async putMirror(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     this.guardWrites();
     const body = (await this.readJson(request, MAX_MIRROR_BYTES)) as {
       director_epoch?: unknown;
@@ -2346,7 +2641,9 @@ export class QbtcpRelay extends DurableObject<Env> {
    * never age out. Unknown ids are ignored so acks stay idempotent across retries.
    */
   private async postAcks(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     void tournament;
     this.guardWrites();
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as { results?: unknown; help?: unknown };
@@ -2418,7 +2715,9 @@ export class QbtcpRelay extends DurableObject<Env> {
 
   /** Resolve a help request with Director authority. Scorers can cancel; only Director resolves. */
   private async postHelpResolve(request: Request, helpId: string): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     this.guardWrites();
     const row = this.sql
       .exec<{
@@ -2461,7 +2760,9 @@ export class QbtcpRelay extends DurableObject<Env> {
    * retained results. Sessions whose tokens are revoked re-pair and rejoin the same session ids.
    */
   private async postRevoke(request: Request): Promise<Response> {
-    const { cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { cors } = auth;
+    this.requireActiveManagement(auth);
     this.guardWrites();
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as {
       room_id?: unknown;
@@ -2497,7 +2798,9 @@ export class QbtcpRelay extends DurableObject<Env> {
 
   /** Close the tournament to new scorer writes. Reads, replay, and the stream keep working. */
   private async postClose(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     this.guardWrites();
     await this.readJson(request, MAX_BODY_BYTES).catch(() => ({}));
     this.sql.exec("UPDATE tournament SET lifecycle = 'closed', updated_at = ? WHERE id = 1", nowIso());
@@ -2526,7 +2829,9 @@ export class QbtcpRelay extends DurableObject<Env> {
    * the drill; the flag survives hibernation by design so the drill is deterministic.
    */
   private async postChaos(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     void tournament;
     const body = (await this.readJson(request, MAX_BODY_BYTES)) as { mode?: unknown };
     if (body.mode !== 'off' && body.mode !== 'fail-writes') {
@@ -2542,7 +2847,9 @@ export class QbtcpRelay extends DurableObject<Env> {
 
   /** Destroy the tournament relay. Closes sockets; nothing survives. */
   private async destroy(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
+    this.requireActiveManagement(auth);
     for (const socket of this.ctx.getWebSockets()) {
       try {
         socket.close(1000, 'deleted');
@@ -2564,7 +2871,8 @@ export class QbtcpRelay extends DurableObject<Env> {
    * pairing codes, and no credentials.
    */
   private async getHealth(request: Request): Promise<Response> {
-    const { tournament, cors } = await this.authorizeManagement(request);
+    const auth = await this.authorizeManagement(request);
+    const { tournament, cors } = auth;
     const counters = this.counters();
     const storage = {
       rooms: countRows(this.sql, 'room'),
@@ -2599,6 +2907,14 @@ export class QbtcpRelay extends DurableObject<Env> {
           director_epoch: tournament.director_epoch,
           revision: tournament.mirror_revision,
           updated_at: tournament.mirror_updated_at,
+        },
+        controller: {
+          authenticated_as: auth.controller,
+          active: auth.controller === auth.activeController,
+          active_controller: auth.activeController,
+          backup_provisioned: tournament.backup_management_token_hash !== null,
+          backup_controller_id: tournament.backup_controller_id,
+          backup_controller_label: tournament.backup_controller_label,
         },
         replay: {
           window: REPLAY_WINDOW,

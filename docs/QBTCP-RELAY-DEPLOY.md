@@ -45,8 +45,14 @@ ready. A bare HTTP 200 never counts.
   file, a URL, a QR code, an export, logs, or diagnostics.
 - After a successful claim the setup secret is worthless, even if it leaks.
 - Rotate with **Rotate credential** (needs the current credential; state is untouched).
-- If the credential is lost: export unacknowledged finals, destroy the relay tournament,
-  and claim again. Director refuses a silent destroy while unacknowledged finals remain.
+- Before play, provision a named backup controller and create an encrypted QBBridge recovery
+  package. Keep the package and its passphrase separate; see
+  [`QBBRIDGE-RECOVERY.md`](QBBRIDGE-RECOVERY.md).
+- If the primary laptop is lost, import the package on the backup and choose takeover explicitly.
+  The relay advances its director epoch and fences the old primary's mutating writes.
+- If no recovery package exists and the credential is lost: export unacknowledged finals, destroy
+  the relay tournament, and claim again. Director refuses a silent destroy while unacknowledged
+  finals remain.
 
 ## Pairing
 

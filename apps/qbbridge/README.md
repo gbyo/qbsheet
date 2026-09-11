@@ -165,7 +165,7 @@ running `parseInt` over that field, so `"4"` is never rewritten to `"Round 4"`.
 
 QBBridge speaks to the relay that already exists
 (`apps/qbtcp-relay-backend-cloudflare`), hosted in the tournament's own Cloudflare account. It
-deploys no Worker, forks no protocol, and makes four calls:
+deploys no Worker and forks no protocol. Its ordinary control and result calls are:
 
 ```text
 POST /qbtcp/v1/manage/claim
@@ -176,6 +176,11 @@ GET  /qbtcp/v1/manage/tournaments/{id}/results?state=unacked
 ```text
 POST /qbtcp/v1/manage/tournaments/{id}/acks
 ```
+
+For incident recovery, the primary may provision, rotate or revoke a named backup controller;
+the backup can explicitly take over or transfer control back. Takeover advances the relay epoch
+and fences the old controller's mutating writes. The complete operator procedure is in
+[`docs/QBBRIDGE-RECOVERY.md`](../../docs/QBBRIDGE-RECOVERY.md).
 
 ### Why results are acknowledged, and exactly when
 
@@ -246,19 +251,26 @@ For practical tournament-day reasons, not because this needs a desktop architect
 dependence on a browser tab surviving, and HTTP to the relay without adding a desktop origin to the
 relay's CORS allowlist.
 
-The native side is four commands and holds no state:
+The native side holds no application state. In addition to the file and HTTP commands, it opens and
+writes encrypted recovery packages and stores the relay bearer in the operating system's secure
+credential store:
 
 ```text
 open_yellowfruit_file()
 choose_result_folder()
 write_result_file(directory, fileName, contents)
 relay_request(method, url, bearer, body)
+open_recovery_package()
+write_recovery_package(directory, fileName, encryptedContents)
+store_relay_credential(key, token)
+load_relay_credential(key)
+delete_relay_credential(key)
 ```
 
-Local state — relay pointer and credential, rooms, pairing codes, current pairings, round
-selection, mirror revision, seen and saved results, results folder — is one `localStorage` key.
-For a single-operator utility that is less code and fewer failure modes than a database, and the
-credential authorizes one tournament on a relay the operator deployed themselves.
+Local state — relay pointer and controller metadata, rooms, pairing codes, current pairings, round
+selection, mirror revision, seen and saved results, results folder — is one `localStorage` key. The
+management bearer is omitted from that JSON after it is moved to secure storage. A legacy profile
+with a bearer is migrated on first native start.
 
 ## How it looks
 
