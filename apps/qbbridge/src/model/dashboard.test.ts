@@ -38,12 +38,11 @@ function session(overrides: Partial<DirectorSession> = {}): DirectorSession {
     roomId: 'room-1',
     matchId: 'match-1',
     status: 'open',
-    writerDevice: 'scorer-ipad',
     updatedAt: iso(2),
     progressSequence: 12,
     progressUpdatedAt: iso(2),
     results: [],
-    presence: [{ deviceId: 'scorer-ipad', updatedAt: iso(1), expiresAt: iso(-5) }],
+    presence: [{ updatedAt: iso(1), expiresAt: iso(-5) }],
     ...overrides,
   };
 }
@@ -70,11 +69,12 @@ function input(overrides: Partial<DashboardInput> = {}): DashboardInput {
 }
 
 describe('room attention', () => {
-  test('an actively scoring room is ok with its writer shown', () => {
+  test('an actively scoring room is ok and names its session match', () => {
     const board = buildOperationsDashboard(input());
     expect(board.rooms[0].level).toBe('ok');
     expect(board.rooms[0].headline).toBe('Scoring now');
-    expect(board.rooms[0].writerDevice).toBe('scorer-ipad');
+    expect(board.rooms[0].sessionMatchIds).toEqual(['match-1']);
+    expect(board.rooms[0].sessionCount).toBe(1);
     expect(board.attentionCount).toBe(0);
   });
 
@@ -84,20 +84,56 @@ describe('room attention', () => {
     expect(board.rooms[0].headline).toBe('Published, no scorer session');
   });
 
-  test('an offline writer is a watch with its last seen time', () => {
+  test('an offline scorer is a watch with its last seen time, never a device', () => {
     const board = buildOperationsDashboard(
       input({
         sessions: [
           session({
-            presence: [{ deviceId: 'scorer-ipad', updatedAt: iso(4), expiresAt: iso(1) }],
+            presence: [{ updatedAt: iso(4), expiresAt: iso(1) }],
             updatedAt: iso(4),
           }),
         ],
       }),
     );
     expect(board.rooms[0].level).toBe('watch');
-    expect(board.rooms[0].headline).toMatch(/Writer offline/);
+    expect(board.rooms[0].headline).toMatch(/Scorer offline/);
     expect(board.rooms[0].headline).toMatch(/4 min ago/);
+    expect(board.rooms[0].headline).not.toMatch(/scorer-ipad/);
+  });
+
+  test('a live heartbeat for another game never reads as scoring now', () => {
+    const board = buildOperationsDashboard(
+      input({
+        sessions: [
+          session({
+            sessionId: 'sess-stale',
+            matchId: 'match-9',
+            presence: [{ updatedAt: iso(0), expiresAt: iso(-5) }],
+            updatedAt: iso(0),
+          }),
+        ],
+      }),
+    );
+    expect(board.rooms[0].level).toBe('watch');
+    expect(board.rooms[0].headline).toBe('Session for a different game');
+    expect(board.rooms[0].headline).not.toBe('Scoring now');
+    expect(board.rooms[0].detail).toMatch(/match-9/);
+    expect(board.rooms[0].detail).toMatch(/match-1/);
+  });
+
+  test('a matching session alongside a stale one still reads as scoring now', () => {
+    const board = buildOperationsDashboard(
+      input({
+        sessions: [
+          session(),
+          session({ sessionId: 'sess-old', matchId: 'match-9', status: 'abandoned', presence: [] }),
+        ],
+      }),
+    );
+    expect(board.rooms[0].level).toBe('ok');
+    expect(board.rooms[0].headline).toBe('Scoring now');
+    expect(board.rooms[0].sessionMatchIds).toEqual(['match-1', 'match-9']);
+    expect(board.rooms[0].sessionCount).toBe(2);
   });
 
   test('an unsaved final and a pending ACK are attention', () => {
@@ -131,7 +167,6 @@ describe('room attention', () => {
       input({
         sessions: [
           session({
-            writerDevice: null,
             presence: [],
             updatedAt: iso(45),
             progressUpdatedAt: null,
@@ -140,9 +175,10 @@ describe('room attention', () => {
         ],
       }),
     );
-    // No writer ever, but the session is stale: quiet wins over paired-no-writer noise.
+    // No heartbeat ever, but the session is stale: quiet wins over unpaired noise.
     expect(board.rooms[0].level).toBe('watch');
     expect(board.rooms[0].silent).toBe(true);
+    expect(board.rooms[0].headline).toBe('Paired, no heartbeat yet');
   });
 
   test('an unreachable relay reads local-only on every room', () => {
@@ -204,10 +240,22 @@ describe('global strip and diagnostics', () => {
               expires_at: iso(-5),
             },
           ],
+          results: [
+            {
+              result_id: 'res-1',
+              match_id: 'match-1',
+              received_at: iso(1),
+              director_ack_at: 'SECRET-ACK-MARKER',
+            },
+          ],
         },
       ],
       200,
     );
+    // Device identity and relay-side ack claims stop at the parse boundary.
+    expect(hostileSessions[0]).not.toHaveProperty('writerDevice');
+    expect(hostileSessions[0]?.presence[0]).not.toHaveProperty('deviceId');
+    expect(hostileSessions[0]?.results[0]).not.toHaveProperty('acked');
     const hostileHelp = parseOpenHelp(
       [
         {
@@ -228,7 +276,17 @@ describe('global strip and diagnostics', () => {
     expect(text).not.toMatch(/SECRET-OPERATOR-MARKER/);
     expect(text).not.toMatch(/SECRET-MESSAGE-MARKER/);
     expect(text).not.toMatch(/SECRET-PLAYER-MARKER/);
-    // Writer presence (device id) is the required operational signal and stays.
-    expect(text).toMatch(/SECRET-DEVICE-MARKER/);
+    // Device identity is dropped at the boundary: liveness without attribution.
+    expect(text).not.toMatch(/SECRET-DEVICE-MARKER/);
+    expect(text).not.toMatch(/SECRET-ACK-MARKER/);
+  });
+
+  test('a snapshot that stopped refreshing reads as stale, not current', () => {
+    expect(buildOperationsDashboard(input()).global.snapshotStale).toBe(false);
+    const stale = buildOperationsDashboard(input({ fetchedAt: iso(30) }));
+    expect(stale.global.snapshotStale).toBe(true);
+    const never = buildOperationsDashboard(input({ fetchedAt: null }));
+    // No snapshot at all is "not yet", not stale.
+    expect(never.global.snapshotStale).toBe(false);
   });
 });

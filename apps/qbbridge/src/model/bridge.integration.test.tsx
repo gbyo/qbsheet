@@ -61,6 +61,8 @@ let relayResultsByBase = new Map<string, RelayResultRow[]>();
 let relaySessions: unknown[] = [];
 /** Open help requests for the operations snapshot. */
 let relayHelp: unknown[] = [];
+/** Set to make the sessions leg of the operations snapshot fail while health/help succeed. */
+let sessionsFail = false;
 let writtenFiles: WrittenFile[] = [];
 let writtenAssignmentFiles: WrittenFile[] = [];
 /** Paths the fake filesystem already holds, so an exclusive write can be refused like the real one. */
@@ -261,6 +263,7 @@ function installFakeTauri(): void {
           return { status: 200, body: JSON.stringify({ results: rows ?? relayResults }) };
         }
         if (url.endsWith('/sessions')) {
+          if (sessionsFail) return { status: 503, body: JSON.stringify({ message: 'sessions down' }) };
           return { status: 200, body: JSON.stringify({ sessions: relaySessions }) };
         }
         if (url.includes('/help?state=open')) {
@@ -280,6 +283,7 @@ beforeEach(() => {
   relayResults = [];
   relaySessions = [];
   relayHelp = [];
+  sessionsFail = false;
   recoveryPackage = null;
   relayResultsByBase = new Map();
   existingPaths = new Set();
@@ -2425,14 +2429,12 @@ describe('operations snapshot', () => {
         roomId: 'Room 1',
         matchId: 'match-1',
         status: 'open',
-        writerDevice: 'ipad-1',
         updatedAt: '2026-09-11T17:59:00Z',
         progressSequence: null,
         progressUpdatedAt: null,
         results: [],
         presence: [
           {
-            deviceId: 'ipad-1',
             updatedAt: '2026-09-11T17:59:00Z',
             expiresAt: '2026-09-11T18:05:00Z',
           },
@@ -2476,6 +2478,47 @@ describe('operations snapshot', () => {
 
       expect(operationsSessionCalls()).toBe(before);
       expect(operationsRefreshMs).toBe(resultPollIntervalMs * 6);
+    } finally {
+      rendered.unmount();
+    }
+  });
+
+  it('clears the operations error when a later snapshot succeeds', async () => {
+    const rendered = await setUpTournament();
+    try {
+      await act(async () => {
+        await rendered.result.current.refreshOperations();
+      });
+      expect(rendered.result.current.operations?.error).toBeNull();
+      const firstFetchedAt = rendered.result.current.operations?.fetchedAt;
+      expect(typeof firstFetchedAt).toBe('string');
+
+      sessionsFail = true;
+      await act(async () => {
+        await rendered.result.current.refreshOperations();
+      });
+      expect(rendered.result.current.operations?.error).toMatch(/sessions/);
+      // The failed refresh keeps the last good snapshot (and its timestamp) behind the error.
+      expect(rendered.result.current.operations?.fetchedAt).toBe(firstFetchedAt);
+
+      // Recovery refetches: a newly staged session appears and the error clears.
+      relaySessions = [
+        {
+          session_id: 'sess-9',
+          room_id: 'Room 9',
+          match_id: 'match-9',
+          status: 'open',
+          updated_at: '2026-09-11T17:59:00Z',
+          presence: [],
+        },
+      ];
+      sessionsFail = false;
+      await act(async () => {
+        await rendered.result.current.refreshOperations();
+      });
+      expect(rendered.result.current.operations?.error).toBeNull();
+      expect(rendered.result.current.operations?.sessions).toHaveLength(1);
+      expect(rendered.result.current.operations?.sessions[0]).toMatchObject({ sessionId: 'sess-9' });
     } finally {
       rendered.unmount();
     }

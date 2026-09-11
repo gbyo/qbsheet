@@ -11,10 +11,13 @@
  * - YellowFruit import state is the operator's local mark, not a verified feed;
  * - free disk space needs a destination probe (needs #1011).
  *
- * Redaction runs at the relay boundary (relay.ts drops operator names and help messages)
- * and the diagnostics bundle carries counts, ids, and statuses only — no credentials,
- * codes, QBJ payloads, or team/player names. `dashboard.test.ts` plants hostile values
- * through every input and asserts none survive.
+ * Redaction runs at the relay boundary (relay.ts drops operator names, help messages,
+ * and device identities) and the diagnostics bundle carries counts, ids, and statuses
+ * only — no credentials, codes, QBJ payloads, or team/player names. `dashboard.test.ts`
+ * plants hostile values through every input and asserts none survive.
+ *
+ * Session data is matched to the published game by match id, never by recency: a live
+ * heartbeat for another game downgrades the room instead of reading as scoring now.
  */
 
 import type { DirectorHelp, DirectorSession, RelayHealth } from './relay';
@@ -45,10 +48,13 @@ export interface RoomAttention {
   headline: string;
   detail: string | null;
   transport: 'internet-relay' | 'local-only';
-  writerDevice: string | null;
-  writerLastSeen: string | null;
+  /** Last presence heartbeat seen for any session in this room, if any. Never a device id. */
+  lastSeen: string | null;
   helpCategories: string[];
   openSession: boolean;
+  /** Distinct relay match ids with sessions in this room — ambiguity is display, not a guess. */
+  sessionMatchIds: string[];
+  sessionCount: number;
   silent: boolean;
 }
 
@@ -59,8 +65,16 @@ export interface DashboardQuota {
   helpOpen: number | null;
 }
 
+/**
+ * A snapshot older than this reads as stale, not current. The refresh cadence is 30s; three
+ * missed intervals means the refresher is wedged or the tab was suspended — either way the
+ * rooms below describe the past, and the screen must say so.
+ */
+export const dashboardSnapshotStaleAfterMs = 90_000;
+
 export interface DashboardGlobal {
   connected: boolean;
+  snapshotStale: boolean;
   reachable: boolean | null;
   epoch: number | null;
   revision: number | null;
@@ -155,14 +169,16 @@ function attendRoom(
   const livePresence = roomSessions
     .flatMap((session) => session.presence)
     .filter((item) => Date.parse(item.expiresAt) > nowMs);
-  const writerDevice =
-    roomSessions.map((session) => session.writerDevice).find((device) => device !== null) ?? null;
-  const writerLastSeen =
+  const lastSeen =
     roomSessions
       .flatMap((session) => session.presence.map((item) => item.updatedAt))
       .filter((at) => !Number.isNaN(Date.parse(at)))
       .sort()
       .at(-1) ?? null;
+  const sessionMatchIds = [...new Set(roomSessions.map((session) => session.matchId))];
+  // A heartbeat for another game must never read as scoring this one: the room's live
+  // presence only speaks for the published match when a session actually names it.
+  const matchesPublished = room.publishedMatchId !== null && sessionMatchIds.includes(room.publishedMatchId);
   const helpCategories = [...new Set(help.map((entry) => entry.category))];
   const matchLedger = room.publishedMatchId
     ? ledger.filter((entry) => entry.matchId === room.publishedMatchId)
@@ -193,19 +209,25 @@ function attendRoom(
     level = 'watch';
     headline = 'Published, no scorer session';
     detail = 'Nobody has paired or scored in this room since the publish.';
-  } else if (writerDevice && livePresence.length === 0) {
+  } else if (room.publishedMatchId !== null && openSession && !matchesPublished) {
+    // The dangerous ambiguity: live heartbeats exist, but every open session names a
+    // different game than the published one. This downgrades 'Scoring now', never feeds it.
     level = 'watch';
-    headline = `Writer offline${writerLastSeen ? ` (last seen ${ageString(nowMs, writerLastSeen)})` : ''}`;
-    detail = 'The game state is safe on the relay; the writer device is not refreshing presence.';
-  } else if (!writerDevice && openSession) {
+    headline = 'Session for a different game';
+    detail =
+      `The relay holds open session(s) for ${sessionMatchIds.join(', ')}, but this room published ` +
+      `${room.publishedMatchId}. Confirm which game the room should score before trusting activity here.`;
+  } else if (openSession && livePresence.length === 0) {
     level = 'watch';
-    headline = 'Paired, no writer yet';
-    detail = 'A session is open but no device has taken the writer role.';
+    headline = lastSeen
+      ? `Scorer offline (last seen ${ageString(nowMs, lastSeen)})`
+      : 'Paired, no heartbeat yet';
+    detail = 'The game state is safe on the relay; no live heartbeat is refreshing presence.';
   } else if (silent) {
     level = 'watch';
     headline = 'Quiet for a while';
     detail = 'An open session with no activity past the quiet threshold.';
-  } else if (livePresence.length > 0) {
+  } else if (livePresence.length > 0 && (room.publishedMatchId === null || matchesPublished)) {
     headline = 'Scoring now';
   } else if (room.status === 'result-received') {
     headline = 'Final received';
@@ -221,10 +243,11 @@ function attendRoom(
     headline,
     detail,
     transport,
-    writerDevice,
-    writerLastSeen,
+    lastSeen,
     helpCategories,
     openSession,
+    sessionMatchIds,
+    sessionCount: roomSessions.length,
     silent,
   };
 }
@@ -266,8 +289,13 @@ export function buildOperationsDashboard(input: DashboardInput): OperationsDashb
       }
     : null;
 
+  const fetchedMs = input.fetchedAt === null ? Number.NaN : Date.parse(input.fetchedAt);
   const global: DashboardGlobal = {
     connected: input.relayConnected,
+    // No snapshot at all is "not yet", not stale — the view already says that.
+    snapshotStale:
+      input.fetchedAt !== null &&
+      (Number.isNaN(fetchedMs) || input.nowMs - fetchedMs > dashboardSnapshotStaleAfterMs),
     reachable: input.relayReachable,
     epoch: input.health?.directorEpoch ?? null,
     revision: input.health?.revision ?? null,

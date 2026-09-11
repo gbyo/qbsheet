@@ -160,8 +160,11 @@ export interface RelayHealth {
   budget: Record<string, unknown> | null;
 }
 
+/**
+ * One presence heartbeat, minus identity. The dashboard needs to know *that* a scorer is
+ * alive and *when* — never *which* device. Device ids stop at this boundary.
+ */
 export interface DirectorSessionPresence {
-  deviceId: string;
   updatedAt: string;
   expiresAt: string;
 }
@@ -170,7 +173,6 @@ export interface DirectorSessionResult {
   resultId: string;
   matchId: string | null;
   receivedAt: string;
-  acked: boolean;
 }
 
 export interface DirectorSession {
@@ -178,7 +180,6 @@ export interface DirectorSession {
   roomId: string;
   matchId: string;
   status: 'open' | 'final-received' | 'abandoned';
-  writerDevice: string | null;
   updatedAt: string;
   progressSequence: number | null;
   progressUpdatedAt: string | null;
@@ -389,9 +390,9 @@ function numberRecord(value: unknown): Record<string, number> | null {
 }
 
 /**
- * The relay's coalesced session state: one entry per scorer session with writer presence.
- * Operator names and help messages are dropped at this boundary — the dashboard needs
- * presence and status, never who typed what.
+ * The relay's coalesced session state: one entry per scorer session with presence liveness.
+ * Operator names, help messages, and device identities are dropped at this boundary — the
+ * dashboard needs presence and status, never who typed what on which device.
  */
 export async function relayFetchDirectorSessions(connection: RelayConnection): Promise<DirectorSession[]> {
   const response = await relayRequest({
@@ -405,8 +406,14 @@ export async function relayFetchDirectorSessions(connection: RelayConnection): P
 }
 
 /**
- * Parse the sessions view. Operator names and help messages never cross this boundary:
- * presence keeps device ids and timestamps, nothing attributable.
+ * Parse the sessions view. Operator names, help messages, and device identities never cross
+ * this boundary: presence keeps liveness timestamps only, nothing attributable. (A past
+ * revision kept `writer_device`/`device_id` for "writer offline" copy; the copy never
+ * needed *which* device, so the fields are dropped rather than carried.)
+ *
+ * The relay's per-result `director_ack_at` is likewise dropped: Bridge cannot verify what
+ * the relay did with a result after acknowledging receipt, and an unverified field invites
+ * the next reader to trust it. Our own unsent ACKs are tracked locally, not inferred here.
  */
 export function parseDirectorSessions(sessions: unknown, status: number | null): DirectorSession[] {
   if (!Array.isArray(sessions)) {
@@ -429,7 +436,6 @@ export function parseDirectorSessions(sessions: unknown, status: number | null):
       roomId: entry.room_id,
       matchId: entry.match_id,
       status,
-      writerDevice: typeof entry.writer_device === 'string' ? entry.writer_device : null,
       updatedAt: typeof entry.updated_at === 'string' ? entry.updated_at : '',
       progressSequence: typeof entry.progress_sequence === 'number' ? entry.progress_sequence : null,
       progressUpdatedAt: typeof entry.progress_updated_at === 'string' ? entry.progress_updated_at : null,
@@ -443,17 +449,12 @@ export function parseDirectorSessions(sessions: unknown, status: number | null):
               resultId: result.result_id as string,
               matchId: typeof result.match_id === 'string' ? result.match_id : null,
               receivedAt: typeof result.received_at === 'string' ? result.received_at : '',
-              acked: typeof result.director_ack_at === 'string',
             }))
         : [],
       presence: Array.isArray(entry.presence)
         ? (entry.presence as Record<string, unknown>[])
-            .filter(
-              (item): item is Record<string, unknown> =>
-                !!item && typeof item === 'object' && typeof item.device_id === 'string',
-            )
+            .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
             .map((item) => ({
-              deviceId: item.device_id as string,
               updatedAt: typeof item.updated_at === 'string' ? item.updated_at : '',
               expiresAt: typeof item.expires_at === 'string' ? item.expires_at : '',
             }))

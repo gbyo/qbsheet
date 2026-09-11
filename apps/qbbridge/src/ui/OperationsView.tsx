@@ -110,6 +110,11 @@ export default function OperationsView({ bridge }: { bridge: BridgeApi }) {
           )}{' '}
           {global.operationsError ? (
             <span className="faint">Last snapshot failed: {global.operationsError}</span>
+          ) : null}{' '}
+          {global.snapshotStale ? (
+            <span className="faint">
+              Snapshot stale — older than expected. Refresh; if it stays stale the refresher is wedged.
+            </span>
           ) : null}
         </p>
       </section>
@@ -166,7 +171,9 @@ export default function OperationsView({ bridge }: { bridge: BridgeApi }) {
               {room.detail ? <span className="muted"> · {room.detail}</span> : null}{' '}
               <span className="faint">
                 ({room.status}; {room.transport === 'internet-relay' ? 'relay' : 'local-only'}
-                {room.writerDevice ? `; writer ${room.writerDevice}` : ''}
+                {room.sessionMatchIds.length > 0
+                  ? `; sessions: ${room.sessionMatchIds.join(', ')} (${room.sessionCount})`
+                  : ''}
                 {room.helpCategories.length > 0 ? `; help: ${room.helpCategories.join(', ')}` : ''})
               </span>
             </li>
