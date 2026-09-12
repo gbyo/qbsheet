@@ -38,6 +38,7 @@ async function loadNormalApplication() {
   await import('./app/motion.css');
   await import('./app/contrast.css');
   await import('./scorer/scorer-interactions.css');
+  await import('./scorer/presubmit-review.css');
   const [{ default: App }, { default: HomepageSecrets }] = await Promise.all([
     import('./app/App'),
     import('./app/HomepageSecrets'),

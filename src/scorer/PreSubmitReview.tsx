@@ -1,16 +1,15 @@
 /**
  * The last look before a result leaves the room, and the halftime score check on the way there.
  *
- * # Why a result needs a check and not just a Submit button
+ * # Review is deliberately not a terminal state
  *
- * Because a paper scoresheet ends with the two teams and the moderator agreeing a final score, and
- * that step is not bureaucracy — it is the only place a transposed bonus or a buzz put on the wrong
- * team gets caught while the people who saw it happen are still in the room. Once the result is with
- * tournament control, the same mistake costs a phone call, a reopened match, and possibly a bracket.
+ * A paper scoresheet ends with the teams and moderator agreeing on the score, but that agreement is
+ * also the last good moment to catch a mistake. The screen therefore stays editable whether this is
+ * the room's first send or a later correction of a result that was already handed off.
  *
- * So the room shows what it is about to send — the score, the tossups, every player's line, and
- * anything still outstanding — and asks for one confirmation. Not a signature, not a second device,
- * not a workflow. One sentence and one button, the way the paper does it.
+ * The score is the visual center. Editing stays beside it. Detailed player lines, exports and other
+ * forensic information remain available without competing with the one decision the room is making:
+ * is this the result we mean to send?
  */
 import { useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
@@ -25,12 +24,7 @@ function signed(value: number): string {
   return value > 0 ? `+${value}` : String(value);
 }
 
-/**
- * Every player's line, as a scoresheet has it.
- *
- * Tossups heard first, because that is the number YellowFruit validates and the one a room is most
- * likely to have got wrong; then the answer counts in the format's own order; then points.
- */
+/** Every player's line, as a scoresheet has it. */
 function TeamLines(props: { format: IScorekeeperFormat; team: IDerivedTeam }) {
   const { format, team } = props;
   const played = team.players.filter((player) => player.tossupsHeard > 0 || player.answerCounts.size > 0);
@@ -81,16 +75,7 @@ function TeamLines(props: { format: IScorekeeperFormat; team: IDerivedTeam }) {
   );
 }
 
-/**
- * The break the room has stopped at.
- *
- * Deliberately the smallest thing that could work: the score, a way to look at the players, and one
- * button that means "the moderator and I agree". Nothing about the scoring engine changes across it.
- *
- * The break's name is passed in rather than written here, because under a configured procedure it is
- * whatever the director called it — "End of set 1", "Break 2" — and "Halftime" is only the right word
- * for the room that takes exactly one break. The accessible name stays generic for the same reason.
- */
+/** The break the room has stopped at. */
 export function HalftimeCheck(props: {
   game: IDerivedGame;
   afterQuestion: number;
@@ -152,7 +137,10 @@ export interface IPreSubmitReviewProps {
   blockers: string[];
   onSubmit: () => void;
   onDownload: () => void;
+  /** Opens the auditable question/event editor. */
   onReview: () => void;
+  /** Reopens a game whose explicit terminal event can safely be undone. */
+  onResume?: () => void;
   /** Canonical spreadsheet copy, when the host has a durable game package to export. */
   spreadsheetTsv?: string;
   spreadsheetGameLabel?: string;
@@ -172,6 +160,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
     onSubmit,
     onDownload,
     onReview,
+    onResume,
     spreadsheetTsv,
     spreadsheetGameLabel,
     spreadsheetSuggestedTabName,
@@ -186,110 +175,217 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
   const openProtests = game.protests.filter((protest) => protest.status === 'open');
   const totalTuh = game.tossupsRead;
   const displayedScore = mapSides({ left: game.left.points, right: game.right.points }, displaySides);
+  const hasAttention =
+    blockers.length > 0 ||
+    warnings.length > 0 ||
+    openProtests.length > 0 ||
+    unsyncedRosterAdditions.length > 0;
+  const reversibleFinish =
+    game.phase.kind === 'complete' && (game.phase.reason === 'forfeit' || game.phase.reason === 'short');
+  const finalScoreLabel =
+    game.phase.kind === 'complete' && game.phase.reason === 'forfeit'
+      ? 'Final score — forfeit'
+      : game.phase.kind === 'complete' && game.phase.reason === 'short'
+        ? 'Final score — game ended early'
+        : 'Final score';
 
   return (
-    <div className="scorer-presubmit">
-      <p className="scorer-complete-title">
-        Final score
-        {game.phase.kind === 'complete' && game.phase.reason === 'forfeit' && <> &mdash; forfeit</>}
-        {game.phase.kind === 'complete' && game.phase.reason === 'short' && <> &mdash; game ended early</>}
-      </p>
-      <p className="scorer-complete-score">
-        <span>
-          {game[displaySides.left].name} <strong>{displayedScore.left}</strong>
+    <div className="scorer-presubmit scorer-review-submit">
+      <header className="scorer-review-submit-head">
+        <div>
+          <p className="scorer-review-submit-eyebrow">Review &amp; submit</p>
+          <h2 className="scorer-review-submit-title">Confirm the result</h2>
+          <p className="scorer-review-submit-state">
+            You can still edit this game here. Submit sends the score shown below; if you opened a result that
+            was already sent, submit again only after making a correction.
+          </p>
+        </div>
+        <p className="scorer-complete-title scorer-review-submit-phase">{finalScoreLabel}</p>
+      </header>
+
+      <section className="scorer-review-score" aria-label="Final score">
+        <div className="scorer-review-score-team">
+          <span className="scorer-review-score-name">{game[displaySides.left].name}</span>
+          <strong className="scorer-review-score-number">{displayedScore.left}</strong>
+        </div>
+        <span className="scorer-review-score-separator" aria-hidden="true">
+          —
         </span>
-        <span>
-          {game[displaySides.right].name} <strong>{displayedScore.right}</strong>
-        </span>
-      </p>
-      <p className="scorer-complete-detail">
+        <div className="scorer-review-score-team is-right">
+          <strong className="scorer-review-score-number">{displayedScore.right}</strong>
+          <span className="scorer-review-score-name">{game[displaySides.right].name}</span>
+        </div>
+      </section>
+
+      <p className="scorer-review-score-detail">
         {totalTuh} tossup{totalTuh === 1 ? '' : 's'} heard
         {game.overtimeTossupsRead > 0 && <>, {game.overtimeTossupsRead} in overtime</>}
         {game.endedEarly && <> · ended early: {game.endedEarly.reason}</>}
       </p>
 
-      <div className="scorer-check-teams">
-        <TeamLines format={format} team={game[displaySides.left]} />
-        <TeamLines format={format} team={game[displaySides.right]} />
-      </div>
-
-      {openProtests.length > 0 && (
-        <div className="scorer-check-outstanding">
-          <h3>Unresolved protests</h3>
-          <ul>
-            {openProtests.map((protest) => (
-              <li key={protest.eventId}>
-                Q{protest.questionNumber} · {protest.teamName} · {protestSubjectLabels[protest.subject]}{' '}
-                &mdash; {protest.description} ({protestStatusLabels[protest.status]})
-              </li>
-            ))}
-          </ul>
-          <p className="scorer-dialog-note">
-            The result can still be sent. Tournament control is told the protest is outstanding and will see
-            it before accepting the game.
-          </p>
-        </div>
-      )}
-
-      {unsyncedRosterAdditions.length > 0 && (
-        <div className="scorer-check-outstanding">
-          <h3>Players added in this room</h3>
-          <ul>
-            {unsyncedRosterAdditions.map((addition) => (
-              <li key={`${addition.team}-${addition.playerName}`}>
-                {addition.playerName} ({game[addition.team].name}) is not on the tournament roster yet.
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {warnings.map((warning) => (
-        <p key={warning} className="scorer-complete-warning">
-          {warning}
-        </p>
-      ))}
-      {blockers.map((blocker) => (
-        <p key={blocker} className="scorer-problem">
-          {blocker}
-        </p>
-      ))}
-
-      <label className="scorer-checkbox scorer-confirm" htmlFor="scorer-final-confirm">
-        <input
-          id="scorer-final-confirm"
-          type="checkbox"
-          checked={confirmed}
-          onChange={(e) => setConfirmedGame(e.target.checked ? game : null)}
-        />
-        Final score confirmed with both teams
-      </label>
-
-      <div className="scorer-complete-actions">
+      <div className="scorer-review-edit-actions">
         <button
           type="button"
-          className="scorer-submit"
-          onClick={onSubmit}
-          disabled={submitting || !confirmed || blockers.length > 0}
+          className="scorer-action scorer-review-edit"
+          onClick={onReview}
+          disabled={submitting}
         >
-          {submitting ? 'Sending…' : 'Submit result'}
+          Edit game
         </button>
-        <button type="button" className="scorer-action" onClick={onReview} disabled={submitting}>
-          Full scoresheet review
-        </button>
-        <button type="button" className="scorer-action" onClick={onDownload}>
-          Download QBJ backup
-        </button>
+        {reversibleFinish && (
+          <button
+            type="button"
+            className="scorer-action"
+            onClick={onResume ?? onReview}
+            disabled={submitting}
+            aria-describedby={onResume ? undefined : 'scorer-review-resume-note'}
+          >
+            {onResume ? 'Resume scoring' : 'Resume scoring…'}
+          </button>
+        )}
+        <span className="scorer-review-edit-note">
+          Corrections recalculate the score and player statistics automatically.
+          {reversibleFinish && !onResume && (
+            <>
+              {' '}
+              <span id="scorer-review-resume-note">
+                To continue play, open the review and remove the game-ending event.
+              </span>
+            </>
+          )}
+        </span>
       </div>
 
-      {spreadsheetTsv !== undefined && spreadsheetGameLabel && (
-        <SpreadsheetCopyPanel
-          tsv={spreadsheetTsv}
-          gameLabel={spreadsheetGameLabel}
-          suggestedTabName={spreadsheetSuggestedTabName}
-          disabled={submitting || blockers.length > 0}
-        />
+      {hasAttention && (
+        <section className="scorer-review-attention" aria-labelledby="scorer-review-attention-title">
+          <div className="scorer-review-attention-head">
+            <h3 id="scorer-review-attention-title">Needs attention</h3>
+            <button type="button" className="scorer-text-action" onClick={onReview} disabled={submitting}>
+              Fix in scoresheet
+            </button>
+          </div>
+
+          {blockers.length > 0 && (
+            <div className="scorer-review-attention-group is-blocking">
+              <p className="scorer-review-attention-label">Must fix before submitting</p>
+              <ul>
+                {blockers.map((blocker) => (
+                  <li key={blocker}>{blocker}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {warnings.length > 0 && (
+            <div className="scorer-review-attention-group">
+              <p className="scorer-review-attention-label">Check before submitting</p>
+              <ul>
+                {warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+              {blockers.length === 0 && (
+                <p className="scorer-review-attention-note">These do not block submission.</p>
+              )}
+            </div>
+          )}
+
+          {openProtests.length > 0 && (
+            <div className="scorer-review-attention-group">
+              <p className="scorer-review-attention-label">Unresolved protests</p>
+              <ul>
+                {openProtests.map((protest) => (
+                  <li key={protest.eventId}>
+                    Q{protest.questionNumber} · {protest.teamName} · {protestSubjectLabels[protest.subject]}{' '}
+                    &mdash; {protest.description} ({protestStatusLabels[protest.status]})
+                  </li>
+                ))}
+              </ul>
+              <p className="scorer-review-attention-note">
+                The result may still be sent. Tournament control will see the open protest before accepting
+                it.
+              </p>
+            </div>
+          )}
+
+          {unsyncedRosterAdditions.length > 0 && (
+            <div className="scorer-review-attention-group">
+              <p className="scorer-review-attention-label">Players added in this room</p>
+              <ul>
+                {unsyncedRosterAdditions.map((addition) => (
+                  <li key={`${addition.team}-${addition.playerName}`}>
+                    {addition.playerName} ({game[addition.team].name}) is not on the tournament roster yet.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       )}
+
+      <details className="scorer-review-section">
+        <summary>Player stats</summary>
+        <p className="scorer-review-section-note">
+          Use these lines to check tossups heard and individual scoring.
+        </p>
+        <div className="scorer-check-teams">
+          <TeamLines format={format} team={game[displaySides.left]} />
+          <TeamLines format={format} team={game[displaySides.right]} />
+        </div>
+      </details>
+
+      <details className="scorer-review-section scorer-review-export">
+        <summary>Backup &amp; export</summary>
+        <p className="scorer-review-section-note">
+          These are recovery and spreadsheet tools. They do not submit the result to tournament control.
+        </p>
+        <div className="scorer-review-export-actions">
+          <button type="button" className="scorer-action" onClick={onDownload}>
+            Download QBJ backup
+          </button>
+        </div>
+        {spreadsheetTsv !== undefined && spreadsheetGameLabel && (
+          <SpreadsheetCopyPanel
+            tsv={spreadsheetTsv}
+            gameLabel={spreadsheetGameLabel}
+            suggestedTabName={spreadsheetSuggestedTabName}
+            disabled={submitting || blockers.length > 0}
+          />
+        )}
+      </details>
+
+      <section className="scorer-review-submit-final" aria-label="Submit result">
+        <label
+          className="scorer-checkbox scorer-confirm scorer-review-confirm"
+          htmlFor="scorer-final-confirm"
+        >
+          <input
+            id="scorer-final-confirm"
+            type="checkbox"
+            checked={confirmed}
+            onChange={(e) => setConfirmedGame(e.target.checked ? game : null)}
+          />
+          Final score confirmed with both teams
+        </label>
+        <div className="scorer-review-submit-buttons">
+          <button type="button" className="scorer-action" onClick={onReview} disabled={submitting}>
+            Edit game
+          </button>
+          <button
+            type="button"
+            className="scorer-submit"
+            onClick={onSubmit}
+            disabled={submitting || !confirmed || blockers.length > 0}
+          >
+            {submitting ? 'Sending…' : 'Submit result'}
+          </button>
+        </div>
+        {blockers.length > 0 && (
+          <p className="scorer-review-submit-blocked">
+            Fix the blocking scoresheet problem above before submitting.
+          </p>
+        )}
+      </section>
     </div>
   );
 }
