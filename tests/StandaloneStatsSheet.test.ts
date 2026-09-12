@@ -205,7 +205,7 @@ describe('the numbers are the derived game', () => {
     const format = noNegFormat();
     const game = deriveGame(format, setup, [
       ...playedEvents(format),
-      event({ type: 'adjustment', team: 'left', points: -10, reason: 'Protest' }),
+      event({ type: 'adjustment', questionNumber: 4, team: 'left', points: -10, reason: 'Protest' }),
     ]);
 
     const heading = derivedStatsGrid(format, game).find((row) => row[1] === 'Points');

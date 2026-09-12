@@ -74,6 +74,13 @@ function teamColumns(game: IDerivedGame): StatsTeamColumn[] {
   return columns;
 }
 
+function overtimeAnswerCountRow(format: IScorekeeperFormat, team: IDerivedTeam): string[] {
+  return [
+    statsCell(team.name),
+    ...format.answerTypes.map((answerType) => String(team.overtimeBuzzes.get(answerType.index) ?? 0)),
+  ];
+}
+
 export interface IStatsSheetOptions {
   /** What the room calls this game — "R1 · 315". Omitted entirely when there is nothing to say. */
   gameLabel?: string;
@@ -112,6 +119,17 @@ export function derivedStatsGrid(
   grid.push(teamSummaryRow(game.left, columns));
   grid.push(teamSummaryRow(game.right, columns));
   grid.push([]);
+
+  if (game.overtimeTossupsRead > 0) {
+    // Player answer counts include overtime, matching the aggregate shape used by QBJ/YellowFruit.
+    // Keep the team-level overtime counts too so a no-bonus overtime conversion can be excluded from
+    // bonuses heard instead of looking like an ordinary regulation conversion after transcription.
+    grid.push(['Overtime answer counts']);
+    grid.push(['Team', ...format.answerTypes.map((answerType) => signedAnswerValue(answerType.value))]);
+    grid.push(overtimeAnswerCountRow(format, game.left));
+    grid.push(overtimeAnswerCountRow(format, game.right));
+    grid.push([]);
+  }
 
   grid.push([
     'Team',
