@@ -261,8 +261,8 @@ YellowFruit → Import Games Only`}</pre>
 
         <dt>A room cannot pair</dt>
         <dd>
-          Almost always <code>RELAY_ALLOWED_ORIGINS</code>, from step 3 above. Otherwise check that the
-          scorekeeper is typing the active code for the right room, and that{' '}
+          Almost always <code>RELAY_ALLOWED_ORIGINS</code>; see <strong>Deploy the Worker and enter its secrets</strong>{' '}
+          above. Otherwise check that the scorekeeper is typing the active code for the right room, and that{' '}
           <strong>Publish Room Setup</strong>
           has succeeded. A room-only setup is enough to pair before Round 1; it does not need an assignment
           yet.
