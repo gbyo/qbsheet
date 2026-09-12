@@ -111,3 +111,49 @@ export function uniqueFileName(candidate: string, taken: ReadonlySet<string>): s
 export function safeFolderName(value: string, fallback = 'Tournament'): string {
   return sanitizeFileSegment(value, fallback);
 }
+
+export interface ValidatedRooms {
+  rooms: { slotId: string; displayName: string; folderName: string }[];
+}
+
+/**
+ * Validate setup room names before any folder exists.
+ *
+ * Names are trimmed, rejected when empty, and sanitized to exactly one safe folder segment
+ * (separators, `.`/`..`, and reserved device names can never reach the disk). Two slots must
+ * not collapse into one folder, compared case-insensitively. The stable slot id — the only
+ * thing Match identity depends on — passes through untouched.
+ */
+export function validateRoomNames(
+  input: Readonly<Record<string, string>>,
+  slotIds: readonly string[],
+): { ok: true; value: ValidatedRooms } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const rooms: { slotId: string; displayName: string; folderName: string }[] = [];
+  for (const slotId of slotIds) {
+    const typed = (input[slotId] ?? '').trim();
+    if (!typed) {
+      errors.push(`One room has no name. Every room needs a name for its folder.`);
+      continue;
+    }
+    if (typed === '.' || typed === '..') {
+      errors.push(`“${typed}” cannot be a room folder name.`);
+      continue;
+    }
+    rooms.push({ slotId, displayName: typed, folderName: sanitizeFileSegment(typed, slotId) });
+  }
+  const seen = new Map<string, string>();
+  for (const room of rooms) {
+    const key = room.folderName.toLowerCase();
+    const clash = seen.get(key);
+    if (clash !== undefined && clash !== room.slotId) {
+      errors.push(
+        `Two rooms would share the “${room.folderName}” folder. Give every room its own folder name.`,
+      );
+    } else {
+      seen.set(key, room.slotId);
+    }
+  }
+  if (errors.length > 0) return { ok: false, errors: [...new Set(errors)] };
+  return { ok: true, value: { rooms } };
+}

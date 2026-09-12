@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import { assignSlotLabels, countDecidedPrelimGames, orderPrelimPool, verifyPlayoffPools } from './playoffs';
-import { validateWildcatCompatibility } from './schedule';
+import { assignSlotLabels, countDecidedPrelimGames, orderPrelimPool, verifyExpectedPrelimGames, verifyPlayoffPools } from './playoffs';
+import { planPrelims, validateWildcatCompatibility } from './schedule';
 import { loadedSynthetic, syntheticTeams, syntheticYftText } from '../tests/helpers';
 import { loadShuttleTournament, tournamentIdentityFingerprint, type ShuttleTournament } from './tournament';
 
@@ -250,6 +250,80 @@ describe('playoff pool verification', () => {
     });
     expect(verified.ok).toBe(false);
     if (!verified.ok) expect(verified.error).toMatch(/Confirm advancement in YellowFruit first/);
+  });
+});
+
+describe('expected prelim verification', () => {
+  function expectedOf(tournament: ShuttleTournament) {
+    const compat = validateWildcatCompatibility(tournament);
+    if (!compat.ok) throw new Error(compat.errors.join(' '));
+    return planPrelims(compat.compat).map((game) => ({
+      roundNumber: game.roundNumber,
+      slotId: game.slotId,
+      leftTeamId: game.leftTeamId,
+      rightTeamId: game.rightTeamId,
+    }));
+  }
+
+  function fullResults() {
+    // Every prelim pairing decided once, round by round, using the real pairings.
+    const tournament = loadedSynthetic();
+    const compat = validateWildcatCompatibility(tournament);
+    if (!compat.ok) throw new Error(compat.errors.join(' '));
+    const seedOf = new Map(tournament.teams.map((team) => [team.id, team.seed!]));
+    const results: { round: number; leftSeed: number; rightSeed: number; leftPoints: number; rightPoints: number }[] = [];
+    for (const game of planPrelims(compat.compat)) {
+      results.push({
+        round: game.roundNumber,
+        leftSeed: seedOf.get(game.leftTeamId)!,
+        rightSeed: seedOf.get(game.rightTeamId)!,
+        leftPoints: 300,
+        rightPoints: 200,
+      });
+    }
+    return results;
+  }
+
+  test('30 of 30 expected games pass the gate', () => {
+    const tournament = loadedSynthetic({ prelimResults: fullResults() });
+    const compat = validateWildcatCompatibility(tournament);
+    if (!compat.ok) throw new Error(compat.errors.join(' '));
+    const gate = verifyExpectedPrelimGames({
+      tournament,
+      prelimPhaseId: compat.compat.prelimPhaseId,
+      expected: expectedOf(tournament),
+    });
+    expect(gate.present).toBe(30);
+    expect(gate.missing).toEqual([]);
+    expect(gate.duplicated).toEqual([]);
+    expect(gate.unexpected).toEqual([]);
+  });
+
+  test('a missing game names its round and room slot', () => {
+    const all = fullResults().filter(
+      (result) => !(result.round === 4 && result.leftSeed === 5 && result.rightSeed === 12),
+    );
+    const tournament = loadedSynthetic({ prelimResults: all });
+    const gate = verifyExpectedPrelimGames({
+      tournament,
+      prelimPhaseId: prelimPhaseIdOf(tournament),
+      expected: expectedOf(tournament),
+    });
+    expect(gate.present).toBe(29);
+    expect(gate.missing).toEqual([{ roundNumber: 4, slotId: 'slot-gold-2' }]);
+  });
+
+  test('a doubled matchup does not substitute for a missing game', () => {
+    const all = fullResults();
+    const extra = { ...all[0] };
+    const tournament = loadedSynthetic({ prelimResults: [...all, extra] });
+    const gate = verifyExpectedPrelimGames({
+      tournament,
+      prelimPhaseId: prelimPhaseIdOf(tournament),
+      expected: expectedOf(tournament),
+    });
+    expect(gate.duplicated).toHaveLength(1);
+    expect(gate.duplicated[0].roundNumber).toBe(1);
   });
 });
 

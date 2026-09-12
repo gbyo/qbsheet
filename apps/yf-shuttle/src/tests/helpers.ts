@@ -89,6 +89,11 @@ interface SyntheticOptions {
   /** Playoff pool membership as team ids; defaults to empty pools. */
   playoffPools?: { name: string; position: number; teamIds: string[] }[];
   timed?: boolean;
+  /**
+   * Real scheduled-but-unplayed Match objects in prelim rounds, as a director-added schedule
+   * would hold them: id, teams, room, no score.
+   */
+  scheduledBlanks?: { round: number; leftSeed: number; rightSeed: number; location: string; id: string }[];
 }
 
 /**
@@ -96,6 +101,21 @@ interface SyntheticOptions {
  * two prelim pools on the A/B seed split, rounds 1–8 with number sidecars, and whatever
  * prelim results and playoff pools the test needs.
  */
+
+/** One Match in the synthetic document: scored results and unplayed blanks share it. */
+interface SyntheticMatchSide {
+  team: { $ref: string };
+  points?: number;
+  forfeit_loss?: boolean;
+}
+
+interface SyntheticMatch {
+  id: string;
+  location?: string;
+  tossups_read: number;
+  overtime_tossups_read?: number;
+  match_teams: SyntheticMatchSide[];
+}
 export function syntheticYftText(options: SyntheticOptions = {}): string {
   const teams = syntheticTeams();
   const bySeed = new Map(teams.map((team) => [team.seed, team]));
@@ -112,31 +132,54 @@ export function syntheticYftText(options: SyntheticOptions = {}): string {
     resultsByRound.set(result.round, list);
   }
 
+  const blanksByRound = new Map<
+    number,
+    { round: number; leftSeed: number; rightSeed: number; location: string; id: string }[]
+  >();
+  for (const blank of options.scheduledBlanks ?? []) {
+    const list = blanksByRound.get(blank.round) ?? [];
+    list.push(blank);
+    blanksByRound.set(blank.round, list);
+  }
+
   const rounds = (numbers: number[]) =>
     numbers.map((number) => ({
       name: String(number),
       YfData: { number },
-      matches: (resultsByRound.get(number) ?? []).map((result, index) => {
-        const left = bySeed.get(result.leftSeed)!;
-        const right = bySeed.get(result.rightSeed)!;
-        return {
-          id: `Match_R${number}_${index}`,
-          tossups_read: 20,
-          ...(result.overtimeTossups ? { overtime_tossups_read: result.overtimeTossups } : {}),
-          match_teams: [
-            {
-              team: { $ref: left.id },
-              points: result.leftPoints,
-              ...(result.forfeit === 'left' ? { forfeit_loss: true } : {}),
-            },
-            {
-              team: { $ref: right.id },
-              points: result.rightPoints,
-              ...(result.forfeit === 'right' ? { forfeit_loss: true } : {}),
-            },
-          ],
-        };
-      }),
+      matches: (resultsByRound.get(number) ?? [])
+        .map((result, index): SyntheticMatch => {
+          const left = bySeed.get(result.leftSeed)!;
+          const right = bySeed.get(result.rightSeed)!;
+          return {
+            id: `Match_R${number}_${index}`,
+            tossups_read: 20,
+            ...(result.overtimeTossups ? { overtime_tossups_read: result.overtimeTossups } : {}),
+            match_teams: [
+              {
+                team: { $ref: left.id },
+                points: result.leftPoints,
+                ...(result.forfeit === 'left' ? { forfeit_loss: true } : {}),
+              },
+              {
+                team: { $ref: right.id },
+                points: result.rightPoints,
+                ...(result.forfeit === 'right' ? { forfeit_loss: true } : {}),
+              },
+            ],
+          };
+        })
+        .concat(
+          (blanksByRound.get(number) ?? []).map((blank) => {
+            const left = bySeed.get(blank.leftSeed)!;
+            const right = bySeed.get(blank.rightSeed)!;
+            return {
+              id: blank.id,
+              location: blank.location,
+              tossups_read: 0,
+              match_teams: [{ team: { $ref: left.id } }, { team: { $ref: right.id } }],
+            };
+          }),
+        ),
     }));
 
   // A fresh file carries both playoff pools (empty of teams until the rebracket).
@@ -285,30 +328,37 @@ export interface ScoredShuttleGame {
  * The returned result is what a room produces from the assignment — same ids, filled in —
  * not a hand-written document that resembles one.
  */
-export function scorePrelimGame(
-  tournament: ShuttleTournament,
-  roundNumber: number,
-  slotId: string,
-): ScoredShuttleGame {
-  const compat = validateWildcatCompatibility(tournament);
-  if (!compat.ok) throw new Error(`not compatible: ${compat.errors.join(' ')}`);
-  const planned = planPrelims(compat.compat).find(
-    (game) => game.roundNumber === roundNumber && game.slotId === slotId,
-  );
-  if (!planned) throw new Error(`no planned game for round ${roundNumber} slot ${slotId}`);
-  const round = compat.compat.roundsByNumber.get(roundNumber)!;
+export interface CustomGameSpec {
+  roundId: string;
+  roundQbjName: string;
+  roundNumber: number;
+  phaseId: string;
+  phaseName: string;
+  slotId: string;
+  roomName: string;
+  leftTeamId: string;
+  rightTeamId: string;
+  existingMatchId?: string;
+  partial?: boolean;
+}
+
+export function scoreCustomGame(tournament: ShuttleTournament, spec: CustomGameSpec): ScoredShuttleGame {
   const teams = new Map(tournament.teams.map((team) => [team.id, team]));
+  const left = teams.get(spec.leftTeamId);
+  const right = teams.get(spec.rightTeamId);
+  if (!left || !right) throw new Error('unknown team in custom game');
   const built = buildAssignment({
     tournament,
-    roundId: round.id,
-    roundQbjName: round.qbjName,
-    roundNumber,
-    phaseId: round.phaseId,
-    phaseName: round.phaseName,
-    slotId,
-    roomName: slotId,
-    left: teams.get(planned.leftTeamId)!,
-    right: teams.get(planned.rightTeamId)!,
+    roundId: spec.roundId,
+    roundQbjName: spec.roundQbjName,
+    roundNumber: spec.roundNumber,
+    phaseId: spec.phaseId,
+    phaseName: spec.phaseName,
+    slotId: spec.slotId,
+    roomName: spec.roomName,
+    left,
+    right,
+    ...(spec.existingMatchId ? { existingMatchId: spec.existingMatchId } : {}),
   });
   if (!built.ok) throw new Error(built.error);
 
@@ -323,7 +373,14 @@ export function scorePrelimGame(
     right: { name: definition.right.name, players: definition.right.players.map((entry) => entry.name) },
   };
   const game = deriveGame(format, setup, playedEvents(format, setup.left.players, setup.right.players));
-  const resultObject = buildResultDocument({ definition, format, game }) as {
+  // The mid-game download is this same builder with a game still being played: the only
+  // difference in the document is the declared `partial` lifecycle state.
+  const resultObject = buildResultDocument({
+    definition,
+    format,
+    game,
+    ...(spec.partial ? { partial: true as const } : {}),
+  }) as {
     version: string;
     objects: Record<string, unknown>[];
   };
@@ -331,7 +388,48 @@ export function scorePrelimGame(
     resultText: `${JSON.stringify(resultObject, null, 2)}\n`,
     resultObject,
     matchId: built.assignment.matchId,
-    roundNumber,
-    slotId,
+    roundNumber: spec.roundNumber,
+    slotId: spec.slotId,
   };
+}
+
+export function scorePrelimGame(
+  tournament: ShuttleTournament,
+  roundNumber: number,
+  slotId: string,
+  options: { partial?: boolean } = {},
+): ScoredShuttleGame {
+  const compat = validateWildcatCompatibility(tournament);
+  if (!compat.ok) throw new Error(`not compatible: ${compat.errors.join(' ')}`);
+  const planned = planPrelims(compat.compat).find(
+    (game) => game.roundNumber === roundNumber && game.slotId === slotId,
+  );
+  if (!planned) throw new Error(`no planned game for round ${roundNumber} slot ${slotId}`);
+  const round = compat.compat.roundsByNumber.get(roundNumber)!;
+  return scoreCustomGame(tournament, {
+    roundId: round.id,
+    roundQbjName: round.qbjName,
+    roundNumber,
+    phaseId: round.phaseId,
+    phaseName: round.phaseName,
+    slotId,
+    roomName: slotId,
+    leftTeamId: planned.leftTeamId,
+    rightTeamId: planned.rightTeamId,
+    ...(options.partial ? { partial: true as const } : {}),
+  });
+}
+
+/**
+ * A mid-game copy of one planned prelim game, through QBSheet's real partial path.
+ *
+ * Carries scoring content but declares `partial` — the file a room downloads as a lifeboat,
+ * which must never read as a finished result.
+ */
+export function scorePartialGame(
+  tournament: ShuttleTournament,
+  roundNumber: number,
+  slotId: string,
+): ScoredShuttleGame {
+  return scorePrelimGame(tournament, roundNumber, slotId, { partial: true });
 }

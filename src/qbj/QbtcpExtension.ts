@@ -104,8 +104,21 @@ export interface IQbtcpExtension {
   unsupportedProcedureVersion?: number;
   /** What the room should do with the finished file, in the tournament's own words. */
   handoffInstruction?: string;
+  /**
+   * What this file is: an unplayed assignment, a mid-game copy, or a finished result.
+   *
+   * Declared by the writer at the moment of writing — never inferred from the score by the
+   * reader. A forfeit or a game ended early is still `complete` when it leaves through the
+   * finished path, and a blowout is still `partial` when it leaves through the mid-game path.
+   * Consumers that cannot see a state they understand treat the file as not-a-result rather
+   * than guessing.
+   */
+  fileState?: FileState;
   scorekeeper?: IQbtcpScorekeeper;
 }
+
+/** The lifecycle state of a file-handoff document. Novel key, like the rest of this block. */
+export type FileState = 'assignment' | 'partial' | 'complete';
 
 /**
  * Read the extension from any QBJ object that might carry one.
@@ -167,8 +180,45 @@ export function readQbtcpExtension(value: unknown): IQbtcpExtension | null {
   if (isPlainObject(raw.scorekeeper) && typeof raw.scorekeeper.timed === 'boolean') {
     extension.scorekeeper = { timed: raw.scorekeeper.timed };
   }
+  if (raw.file_state === 'assignment' || raw.file_state === 'partial' || raw.file_state === 'complete') {
+    extension.fileState = raw.file_state;
+  }
 
   return extension;
+}
+
+/**
+ * Stamp a completion state onto a Match or a whole QBJ document's matches.
+ *
+ * Merges into any `_qbtcp` already present, preserving every other key, so stamping the
+ * finished path never drops the room, revision, or handoff context the assignment carried.
+ * Anything that is not a match-shaped object passes through untouched.
+ */
+export function withFileState(value: unknown, state: FileState): unknown {
+  if (Array.isArray(value)) return value.map((entry) => withFileState(entry, state));
+  if (!isPlainObject(value)) return value;
+  if (Array.isArray((value as QbjObject).objects)) {
+    return {
+      ...(value as QbjObject),
+      objects: withFileState((value as QbjObject).objects, state),
+    };
+  }
+  if (!Array.isArray((value as QbjObject).match_teams)) return value;
+  const raw: QbjObject = isPlainObject((value as QbjObject)[qbtcpExtensionKey])
+    ? { ...((value as QbjObject)[qbtcpExtensionKey] as QbjObject) }
+    : { version: qbtcpExtensionVersion };
+  raw.file_state = state;
+  if (typeof raw.version !== 'number') raw.version = qbtcpExtensionVersion;
+  return { ...(value as QbjObject), [qbtcpExtensionKey]: raw };
+}
+
+/** Read the declared lifecycle state of a Match, if it states a known one. */
+export function readFileState(match: unknown): FileState | null {
+  if (!isPlainObject(match)) return null;
+  const raw = match[qbtcpExtensionKey];
+  if (!isPlainObject(raw)) return null;
+  const state = (raw as QbjObject).file_state;
+  return state === 'assignment' || state === 'partial' || state === 'complete' ? state : null;
 }
 
 /**
@@ -235,6 +285,14 @@ export function buildQbtcpExtension(extension: Omit<IQbtcpExtension, 'version'>)
   }
   if (nonBlankString(extension.handoffInstruction, maxHandoffInstructionLength)) {
     block.handoff_instruction = extension.handoffInstruction;
+    carriesSomething = true;
+  }
+  if (
+    extension.fileState === 'assignment' ||
+    extension.fileState === 'partial' ||
+    extension.fileState === 'complete'
+  ) {
+    block.file_state = extension.fileState;
     carriesSomething = true;
   }
   if (extension.scorekeeper?.timed !== undefined) {

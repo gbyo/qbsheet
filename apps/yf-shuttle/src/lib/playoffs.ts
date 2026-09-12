@@ -381,6 +381,96 @@ export function countDecidedPrelimGames(input: {
   return decided;
 }
 
+/**
+ * One expected prelim game, identified the way the schedule knows it: round number, room
+ * slot, and the two team ids. Filenames never enter this check.
+ */
+export interface ExpectedPrelimGame {
+  roundNumber: number;
+  slotId: string;
+  leftTeamId: string;
+  rightTeamId: string;
+}
+
+export interface PrelimCompleteness {
+  present: number;
+  expected: number;
+  missing: { roundNumber: number; slotId: string }[];
+  duplicated: { roundNumber: number; leftTeamId: string; rightTeamId: string }[];
+  unexpected: { roundNumber: number; leftTeamId: string; rightTeamId: string }[];
+}
+
+/**
+ * Verify the reloaded file holds exactly the 30 expected prelim results — no missing game,
+ * no doubled matchup standing in for one, nothing decided that the schedule never planned.
+ *
+ * Team ids plus round identity decide everything. A decided game is one both sides finished
+ * (points on both sides) or a forfeit — the same rule the standings use, so a game cannot
+ * count here and vanish there.
+ */
+export function verifyExpectedPrelimGames(input: {
+  tournament: ShuttleTournament;
+  prelimPhaseId: string;
+  expected: readonly ExpectedPrelimGame[];
+  prelimRoundNumbers?: readonly number[];
+}): PrelimCompleteness {
+  const roundNumbers = input.prelimRoundNumbers ?? [1, 2, 3, 4, 5];
+  const { tournament, prelimPhaseId } = input;
+  const phase = rawPhases(tournament.rawTournament).find((entry) => entry.id === prelimPhaseId);
+
+  const pairKey = (a: string, b: string): string => (a < b ? `${a}::${b}` : `${b}::${a}`);
+  const decidedByRound = new Map<number, Map<string, number>>();
+  if (phase) {
+    for (const round of rawRounds(phase)) {
+      const number = roundNumberOf(round);
+      if (number === undefined || !roundNumbers.includes(number)) continue;
+      for (const match of rawMatches(round)) {
+        const sides = (
+          Array.isArray((match as RawMatch).match_teams) ? (match.match_teams as unknown[]) : []
+        ).filter(isRecord);
+        if (sides.length !== 2) continue;
+        const ids = sides.map((side) => refId(side.team));
+        if (ids.some((id) => !id)) continue;
+        const decided = isForfeitMatch(sides)
+          ? true
+          : sides.every((side) => finiteNumber(side.points) !== undefined);
+        if (!decided) continue;
+        const table = decidedByRound.get(number) ?? new Map<string, number>();
+        const key = pairKey(ids[0]!, ids[1]!);
+        table.set(key, (table.get(key) ?? 0) + 1);
+        decidedByRound.set(number, table);
+      }
+    }
+  }
+
+  const missing: PrelimCompleteness['missing'] = [];
+  const duplicated: PrelimCompleteness['duplicated'] = [];
+  const seen = new Set<string>();
+  for (const game of input.expected) {
+    const key = `${game.roundNumber}::${pairKey(game.leftTeamId, game.rightTeamId)}`;
+    seen.add(key);
+    const count = decidedByRound.get(game.roundNumber)?.get(pairKey(game.leftTeamId, game.rightTeamId)) ?? 0;
+    if (count === 0) missing.push({ roundNumber: game.roundNumber, slotId: game.slotId });
+    else if (count > 1) {
+      duplicated.push({
+        roundNumber: game.roundNumber,
+        leftTeamId: game.leftTeamId,
+        rightTeamId: game.rightTeamId,
+      });
+    }
+  }
+  const unexpected: PrelimCompleteness['unexpected'] = [];
+  for (const [roundNumber, table] of decidedByRound) {
+    for (const key of table.keys()) {
+      if (seen.has(`${roundNumber}::${key}`)) continue;
+      const [leftTeamId, rightTeamId] = key.split('::');
+      unexpected.push({ roundNumber, leftTeamId, rightTeamId });
+    }
+  }
+  const present = input.expected.length - missing.length;
+  return { present, expected: input.expected.length, missing, duplicated, unexpected };
+}
+
 export type SlotLetter = 'F' | 'B';
 
 /**

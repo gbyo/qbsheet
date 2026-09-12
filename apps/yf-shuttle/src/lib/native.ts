@@ -114,3 +114,15 @@ export async function copyFile(src: string, dst: string, overwrite = false): Pro
   requireNative('Copying a file');
   await invoke('copy_file', { src, dst, overwrite });
 }
+
+/**
+ * Remove one derived result file from inside the project's `YellowFruit Import` tree.
+ *
+ * `relativePath` must be exactly `Round N/<file>`; the command refuses anything else, and
+ * refuses targets outside the import root. This is the one narrow eraser the derived batch
+ * planner uses to drop its own stale copies — never a general delete.
+ */
+export async function removeImportFile(importRoot: string, relativePath: string): Promise<void> {
+  requireNative('Removing a derived file');
+  await invoke('remove_import_file', { importRoot, relativePath });
+}

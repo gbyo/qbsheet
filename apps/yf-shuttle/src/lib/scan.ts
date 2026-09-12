@@ -11,15 +11,46 @@
  * # What is (and is not) checked here
  *
  * Checked: supported QBJ envelope, same tournament, known Match id, matching round and teams,
- * real scoring content (an untouched assignment copied to OUT is not a result). Not checked:
+ * and a declared finished state. Only a file whose `_qbtcp.file_state` says `complete` is a
+ * returned result. A mid-game copy (`partial`), an untouched assignment (`assignment`), and a
+ * file with no declared state are never results — the last case is conservative on purpose: a
+ * file this build cannot prove finished must not reach YellowFruit as one. Not checked:
  * YellowFruit's statistical validity — YellowFruit itself parses, validates, warns, and imports
  * the batch. A forfeit (`forfeit_loss` on a side) counts as a decided game even with no points
- * on the board.
+ * on the board, provided it left through the finished path.
  */
 
+import { fnv1a64 } from './fnv';
 import type { ManifestAssignment, ShuttleManifest } from './manifest';
 
 export type PlayState = 'unplayed' | 'partial' | 'complete';
+
+/** The declared lifecycle state in `_qbtcp.file_state`, when the file states a known one. */
+export type FileState = 'assignment' | 'partial' | 'complete' | 'unknown';
+
+/**
+ * Read the declared lifecycle state of a Match.
+ *
+ * Mirrors `readFileState` in `src/qbj/QbtcpExtension.ts` without importing the scorer, which
+ * would drag the scoring engine into this small utility's bundle.
+ */
+export function fileStateOf(match: Record<string, unknown>): FileState {
+  const block = match._qbtcp;
+  if (typeof block !== 'object' || block === null || Array.isArray(block)) return 'unknown';
+  const state = (block as Record<string, unknown>).file_state;
+  return state === 'assignment' || state === 'partial' || state === 'complete' ? state : 'unknown';
+}
+
+/**
+ * The stable identity of one physical returned file: where it was found plus a content hash.
+ *
+ * The hash is an equality aid only — which exact file the operator chose — never an
+ * authenticity claim. Two files with the same basename in different OUT folders, or the same
+ * file corrected and re-saved, always have different identities.
+ */
+export function candidateIdFor(folderName: string, fileName: string, bytes: string): string {
+  return `${folderName}/${fileName}#${fnv1a64(bytes)}`;
+}
 
 export interface ScannedInputFile {
   /** Room folder the file was found in (an OUT folder's parent room name). */
@@ -33,8 +64,12 @@ export interface ScannedInputFile {
 export interface ParsedResult {
   folderName: string;
   fileName: string;
+  /** Stable identity of this physical file: folder, name, and content hash. */
+  candidateId: string;
   modifiedMs?: number;
   matchId: string;
+  /** Declared lifecycle state (`assignment`, `partial`, `complete`, or `unknown`). */
+  fileState: FileState;
   tournamentId: string;
   roundId?: string;
   roundName?: string;
@@ -64,8 +99,10 @@ export interface ProblemFile {
 
 export interface AssignmentScan {
   assignment: ManifestAssignment;
-  /** Scored candidates for this game (partial or complete, forfeit included). */
+  /** Finished results for this game: declared `complete`, forfeit included. */
   candidates: ParsedResult[];
+  /** Mid-game copies and unmarked files carrying this Match id. Never results. */
+  partialCopies: ParsedResult[];
   /** Files carrying this Match id but no scoring content. Never results. */
   untouchedCopies: ParsedResult[];
   /** The operator's choice among duplicates, when it still points at a file on disk. */
@@ -314,7 +351,9 @@ export function parseResultFile(
     result: {
       folderName: file.folderName,
       fileName: file.fileName,
+      candidateId: candidateIdFor(file.folderName, file.fileName, file.bytes),
       ...(file.modifiedMs !== undefined ? { modifiedMs: file.modifiedMs } : {}),
+      fileState: fileStateOf(match),
       matchId,
       tournamentId,
       ...(spine.roundId ? { roundId: spine.roundId } : {}),
@@ -342,13 +381,14 @@ export function reconcileScan(manifest: ShuttleManifest, files: ScannedInputFile
   for (const assignment of manifest.assignments) byMatchId.set(assignment.matchId, assignment);
 
   const roomOfFolder = new Map<string, string>();
-  for (const room of manifest.rooms) roomOfFolder.set(room.displayName, room.slotId);
+  // Folders on disk are the sanitized segment, not the typed display name.
+  for (const room of manifest.rooms) roomOfFolder.set(room.folderName, room.slotId);
 
   const scans = new Map<string, AssignmentScan>();
   const scanFor = (assignment: ManifestAssignment): AssignmentScan => {
     let scan = scans.get(assignment.matchId);
     if (!scan) {
-      scan = { assignment, candidates: [], untouchedCopies: [], needsChoice: false };
+      scan = { assignment, candidates: [], partialCopies: [], untouchedCopies: [], needsChoice: false };
       scans.set(assignment.matchId, scan);
     }
     return scan;
@@ -419,8 +459,12 @@ export function reconcileScan(manifest: ShuttleManifest, files: ScannedInputFile
     const scan = scanFor(assignment);
     if (result.playState === 'unplayed') {
       scan.untouchedCopies.push(result);
-    } else {
+    } else if (result.fileState === 'complete') {
       scan.candidates.push(result);
+    } else {
+      // A mid-game copy, an untouched assignment with stray content, or a file that states
+      // nothing at all. Displayed so the room can finish and re-export; never batched.
+      scan.partialCopies.push(result);
     }
   }
 
@@ -441,9 +485,22 @@ export function reconcileScan(manifest: ShuttleManifest, files: ScannedInputFile
         break;
       }
     }
-    const chosenName = manifest.selectedResults[scan.assignment.matchId];
+    const stored = manifest.selectedResults[scan.assignment.matchId];
+    const resolveStored = (): ParsedResult | undefined => {
+      if (!stored) return undefined;
+      const exact = scan.candidates.find((entry) => entry.candidateId === stored);
+      if (exact) return exact;
+      // Manifests written before candidate identities point at a bare basename. Honor one only
+      // when it still names exactly one file on disk; the ambiguous case reopens the choice
+      // rather than guessing between two same-named files.
+      if (!stored.includes('#')) {
+        const named = scan.candidates.filter((entry) => entry.fileName === stored);
+        if (named.length === 1) return named[0];
+      }
+      return undefined;
+    };
     if (scan.candidates.length > 1) {
-      const chosen = chosenName ? scan.candidates.find((entry) => entry.fileName === chosenName) : undefined;
+      const chosen = resolveStored();
       if (chosen) {
         scan.selectedFileName = chosen.fileName;
         scan.chosen = chosen;

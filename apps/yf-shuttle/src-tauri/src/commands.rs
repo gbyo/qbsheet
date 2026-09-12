@@ -250,6 +250,53 @@ pub async fn write_text_file(path: String, contents: String, overwrite: bool) ->
     Ok(())
 }
 
+/// Remove one derived file from inside a project's `YellowFruit Import` tree.
+///
+/// The scope is structural, not a convention: the relative path must be exactly
+/// `Round N/<file>`, the resolved target must stay inside the given import root, and the
+/// target must be a file. Anything else — an operator's hand-placed file outside this tree,
+/// a directory, an absolute path, traversal — is refused. There is deliberately no
+/// recursive delete and no general file removal: this is the one narrow eraser the derived
+/// batch planner needs to replace its own stale copies.
+#[tauri::command]
+pub async fn remove_import_file(import_root: String, relative_path: String) -> CommandResult<()> {
+    let root = PathBuf::from(import_root);
+    if !root.is_dir() {
+        return Err(CommandError::new(
+            "no_such_folder",
+            "The YellowFruit Import folder no longer exists.",
+        ));
+    }
+    let mut segments = relative_path.split('/');
+    let (round_folder, file_name, end) = (segments.next(), segments.next(), segments.next());
+    let (Some(round_folder), Some(file_name), None) = (round_folder, file_name, end) else {
+        return Err(CommandError::new(
+            "invalid_path",
+            "Only files directly inside a Round folder can be removed.",
+        ));
+    };
+    if !round_folder.starts_with("Round ") {
+        return Err(CommandError::new(
+            "invalid_path",
+            "Only files directly inside a Round folder can be removed.",
+        ));
+    }
+    if !file_name.ends_with(".qbj") && !file_name.ends_with(".json") {
+        return Err(CommandError::new(
+            "invalid_path",
+            "Only result files can be removed.",
+        ));
+    }
+    let target = root
+        .join(safe_segment(round_folder)?)
+        .join(safe_segment(file_name)?);
+    if !target.is_file() {
+        return Err(CommandError::new("no_such_file", "That derived file is already gone."));
+    }
+    std::fs::remove_file(&target).map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+    Ok(())
+}
+
 /// Copy one file byte-for-byte. The bytes are never parsed, reserialized, or altered.
 #[tauri::command]
 pub async fn copy_file(src: String, dst: String, overwrite: bool) -> CommandResult<()> {
@@ -292,5 +339,27 @@ mod tests {
         assert!(safe_segment("a/b").is_err());
         assert!(safe_segment("").is_err());
         assert!(safe_segment(".hidden").is_err());
+    }
+
+    #[test]
+    fn import_removal_shape_is_narrow() {
+        fn shape_ok(relative: &str) -> bool {
+            let mut segments = relative.split('/');
+            let (round_folder, file_name, end) = (segments.next(), segments.next(), segments.next());
+            let (Some(round_folder), Some(file_name), None) = (round_folder, file_name, end) else {
+                return false;
+            };
+            if !round_folder.starts_with("Round ") {
+                return false;
+            }
+            file_name.ends_with(".qbj") || file_name.ends_with(".json")
+        }
+
+        assert!(shape_ok("Round 1/R01 - 319 - A vs B.qbj"));
+        assert!(!shape_ok("Round 1/nested/evil.qbj"));
+        assert!(!shape_ok("Round 1"));
+        assert!(!shape_ok("Notes/plan.qbj"));
+        assert!(!shape_ok("../outside.qbj"));
+        assert!(!shape_ok("Round 1/notes.txt"));
     }
 }

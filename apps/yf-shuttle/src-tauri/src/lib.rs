@@ -22,6 +22,7 @@ pub fn run() {
             commands::read_text_file,
             commands::write_text_file,
             commands::copy_file,
+            commands::remove_import_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running YF Shuttle");

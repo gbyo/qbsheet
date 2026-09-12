@@ -9,4 +9,5 @@ commands.allow = [
   "read_text_file",
   "write_text_file",
   "copy_file",
+  "remove_import_file",
 ]

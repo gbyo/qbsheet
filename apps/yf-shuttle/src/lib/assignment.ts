@@ -26,6 +26,13 @@ export const qbjSerializationVersion = '2.1.1';
 
 export interface AssignmentInput {
   tournament: ShuttleTournament;
+  /**
+   * Preserve a real scheduled Match id from the file instead of deriving one.
+   *
+   * Used only for file-sourced schedules, where the `.yft` already holds this exact game as
+   * a blank and the completed result must fill that same id. Preset games always derive.
+   */
+  existingMatchId?: string;
   roundId: string;
   roundQbjName: string;
   roundNumber?: number;
@@ -142,13 +149,15 @@ export function buildAssignment(input: AssignmentInput): AssignmentResult {
     };
   }
 
-  const matchId = shuttleMatchId({
-    tournamentId: tournament.id,
-    roundId: input.roundId,
-    slotId: input.slotId,
-    leftTeamId: left.id,
-    rightTeamId: right.id,
-  });
+  const matchId =
+    input.existingMatchId ??
+    shuttleMatchId({
+      tournamentId: tournament.id,
+      roundId: input.roundId,
+      slotId: input.slotId,
+      leftTeamId: left.id,
+      rightTeamId: right.id,
+    });
 
   const match: Record<string, unknown> = {
     type: 'Match',
@@ -158,6 +167,9 @@ export function buildAssignment(input: AssignmentInput): AssignmentResult {
     _qbtcp: {
       version: 1,
       room_id: input.slotId,
+      // The lifecycle marker consumers read: this file is an unplayed assignment, never a
+      // result. QBSheet's finished and mid-game exports restamp it on the way out.
+      file_state: 'assignment',
       handoff_instruction: `When the game is finished, download the completed QBJ and place it in ${input.roomName} → OUT.`,
       // The one scoring semantic QBJ has no field for. No duration travels with it: stock
       // YellowFruit stores none, so none is invented, and the moderator calls time.

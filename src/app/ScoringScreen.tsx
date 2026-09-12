@@ -64,7 +64,7 @@ import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
 import { correctionSentence, GameCorrectionRefusal, IGameCorrection } from '../scoring/gameCorrection';
 import { IGameSessionHistory } from '../scorer/GameSession';
-import { procedureOverrideMessage } from '../qbj/QbtcpExtension';
+import { procedureOverrideMessage, withFileState } from '../qbj/QbtcpExtension';
 
 /** The two totals, read back out of the payload rather than derived a second time. */
 export function scoreFromQbj(qbj: object): { left: number; right: number } | undefined {
@@ -376,7 +376,10 @@ export default function ScoringScreen(props: {
           durablySaved: false,
         };
       }
-      const portable = portableQbj(qbj, record.package);
+      // The finished path declares the result finished, whatever the score says. Forfeits and
+      // games ended early are complete results too; mid-game copies take the partial path in
+      // `downloadForm` instead and are never stamped here.
+      const portable = withFileState(portableQbj(qbj, record.package), 'complete') as object;
       const completedAt = new Date().toISOString();
       const saved = await store.update(record.id, {
         completedAt,

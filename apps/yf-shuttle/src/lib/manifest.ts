@@ -8,6 +8,7 @@
  * state, or results-as-truth may be stored in this file.
  */
 
+import { sanitizeFileSegment } from './project';
 import { PRESET_ID } from './schedule';
 
 export const MANIFEST_VERSION = 1;
@@ -16,6 +17,12 @@ export const MANIFEST_FILE_NAME = '.yf-shuttle.json';
 export interface ManifestRoom {
   slotId: string;
   displayName: string;
+  /**
+   * The sanitized single path segment used for this room's folders. The display name is
+   * what the operator typed; the folder is what reached the disk. Match identity keys on
+   * the slot id, never on either name.
+   */
+  folderName: string;
 }
 
 export interface ManifestAssignment {
@@ -26,6 +33,13 @@ export interface ManifestAssignment {
   leftTeamId: string;
   rightTeamId: string;
   fileName: string;
+  /**
+   * Where the game came from: a real scheduled Match in the file (`yft`), or the printed
+   * preset (absent). Decides the return path: file-sourced games fill a YellowFruit copy,
+   * preset games batch for Games → Import — because stock YellowFruit appends imports and
+   * must never see a completed game whose blank already sits in the file.
+   */
+  source?: string;
 }
 
 export interface ShuttleManifest {
@@ -39,8 +53,17 @@ export interface ShuttleManifest {
   assignments: ManifestAssignment[];
   /** Confirmed F1–F6 / B1–B6 team ids, once the operator confirms playoff slots. */
   playoffSlots?: Record<string, string>;
-  /** Match id → chosen OUT file name, when duplicate results exist for one game. */
+  /**
+   * Match id → chosen result candidate identity (`folder/file#content-hash`), when duplicate
+   * results exist for one game. Points at the physical file, never a bare basename.
+   */
   selectedResults: Record<string, string>;
+  /**
+   * Match id → derived filename YF Shuttle wrote under `YellowFruit Import`. The ownership
+   * record that lets a re-prepare overwrite its own copies and remove stale ones without
+   * touching files the operator placed by hand.
+   */
+  derivedFiles: Record<string, string>;
   /** Round numbers whose import batch was prepared (derived files exist under YellowFruit Import). */
   preparedRounds: number[];
 }
@@ -60,6 +83,7 @@ export function createManifest(input: {
     rooms: input.rooms,
     assignments: [],
     selectedResults: {},
+    derivedFiles: {},
     preparedRounds: [],
   };
 }
@@ -95,15 +119,35 @@ export function parseManifest(
       tournamentFingerprint:
         typeof value.tournamentFingerprint === 'string' ? value.tournamentFingerprint : '',
       preset: PRESET_ID,
-      rooms: (value.rooms as ManifestRoom[]).filter(
-        (room) => typeof room?.slotId === 'string' && typeof room?.displayName === 'string',
-      ),
-      assignments: (value.assignments as ManifestAssignment[]).filter(
-        (entry) =>
-          typeof entry?.matchId === 'string' &&
-          typeof entry?.roundNumber === 'number' &&
-          typeof entry?.slotId === 'string',
-      ),
+      rooms: (value.rooms as ManifestRoom[])
+        .filter((room) => typeof room?.slotId === 'string' && typeof room?.displayName === 'string')
+        .map((room) => ({
+          slotId: room.slotId,
+          displayName: room.displayName,
+          // Projects written before folder names were tracked used the display name on disk.
+          // Sanitize it into a safe segment rather than trusting it as a path.
+          folderName:
+            typeof room.folderName === 'string' && room.folderName
+              ? room.folderName
+              : sanitizeFileSegment(room.displayName, room.slotId),
+        })),
+      assignments: (value.assignments as ManifestAssignment[])
+        .filter(
+          (entry) =>
+            typeof entry?.matchId === 'string' &&
+            typeof entry?.roundNumber === 'number' &&
+            typeof entry?.slotId === 'string',
+        )
+        .map((entry) => ({
+          matchId: entry.matchId,
+          roundNumber: entry.roundNumber,
+          roundId: typeof entry.roundId === 'string' ? entry.roundId : '',
+          slotId: entry.slotId,
+          leftTeamId: typeof entry.leftTeamId === 'string' ? entry.leftTeamId : '',
+          rightTeamId: typeof entry.rightTeamId === 'string' ? entry.rightTeamId : '',
+          fileName: typeof entry.fileName === 'string' ? entry.fileName : '',
+          ...(entry.source === 'yft' ? { source: 'yft' as const } : {}),
+        })),
       ...(value.playoffSlots && typeof value.playoffSlots === 'object'
         ? { playoffSlots: value.playoffSlots as Record<string, string> }
         : {}),
@@ -112,6 +156,10 @@ export function parseManifest(
         typeof value.selectedResults === 'object' &&
         !Array.isArray(value.selectedResults)
           ? (value.selectedResults as Record<string, string>)
+          : {},
+      derivedFiles:
+        value.derivedFiles && typeof value.derivedFiles === 'object' && !Array.isArray(value.derivedFiles)
+          ? (value.derivedFiles as Record<string, string>)
           : {},
       preparedRounds: Array.isArray(value.preparedRounds)
         ? (value.preparedRounds as unknown[]).filter(
@@ -152,4 +200,68 @@ export function assignmentByMatchId(
 /** Display name for a slot, falling back to the slot id when the project renamed nothing. */
 export function roomDisplayName(manifest: ShuttleManifest, slotId: string): string {
   return manifest.rooms.find((room) => room.slotId === slotId)?.displayName ?? slotId;
+}
+
+export type WriteOutcome = 'written' | 'identical' | 'conflicted';
+
+export interface WrittenGame {
+  matchId: string;
+  roundNumber: number;
+  roundId: string;
+  slotId: string;
+  leftTeamId: string;
+  rightTeamId: string;
+  fileName: string;
+}
+
+/**
+ * Decide which planned games enter the manifest after an assignment-writing pass.
+ *
+ * Keyed by Match id throughout — never by display text, round substrings, or filenames. A game
+ * joins the manifest only when its IN file was written or an identical file was already there.
+ * A differing file is reported as exactly that game (round + room) and stays out, so the app
+ * never expects a result for a Match file that never reached the room.
+ */
+export function partitionWrittenGames(
+  planned: readonly WrittenGame[],
+  outcomes: Readonly<Record<string, WriteOutcome>>,
+): { entries: ManifestAssignment[]; conflicts: { roundNumber: number; slotId: string; matchId: string }[] } {
+  const entries: ManifestAssignment[] = [];
+  const conflicts: { roundNumber: number; slotId: string; matchId: string }[] = [];
+  for (const game of planned) {
+    const outcome = outcomes[game.matchId];
+    if (outcome === 'written' || outcome === 'identical') {
+      entries.push({ ...game });
+    } else {
+      conflicts.push({ roundNumber: game.roundNumber, slotId: game.slotId, matchId: game.matchId });
+    }
+  }
+  return { entries, conflicts };
+}
+
+/**
+ * Reopen a project from its manifest file with no session state at all.
+ *
+ * Pure so the recovery workflow is testable without storage: the caller supplies the manifest
+ * bytes and, when available, the tournament id of an already-loaded `.yft`. A moved folder
+ * works because nothing in the manifest is an absolute path — room folders resolve against
+ * whichever project directory the operator chose.
+ */
+export function openProjectFromManifest(
+  manifestText: string,
+  loadedTournamentId?: string,
+):
+  | { ok: true; manifest: ShuttleManifest; needsYft: boolean }
+  | { ok: false; error: string; needsYft: boolean } {
+  const parsed = parseManifest(manifestText);
+  if (!parsed.ok) return { ok: false, error: parsed.error, needsYft: false };
+  if (loadedTournamentId === undefined) return { ok: true, manifest: parsed.manifest, needsYft: true };
+  if (loadedTournamentId !== parsed.manifest.tournamentId) {
+    return {
+      ok: false,
+      error: `That project belongs to a different tournament (“${parsed.manifest.tournamentName || parsed.manifest.tournamentId}”). Open its own YellowFruit file instead.`,
+      needsYft: true,
+    };
+  }
+  return { ok: true, manifest: parsed.manifest, needsYft: false };
 }

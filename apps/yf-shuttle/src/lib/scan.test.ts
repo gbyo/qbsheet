@@ -12,7 +12,7 @@ import { createManifest } from './manifest';
 import { planPrelims, ROOM_SLOTS, validateWildcatCompatibility } from './schedule';
 import { parseResultFile, playStateOf, reconcileScan, type ScannedInputFile } from './scan';
 import { tournamentIdentityFingerprint } from './tournament';
-import { loadedSynthetic, scorePrelimGame } from '../tests/helpers';
+import { loadedSynthetic, scorePartialGame, scorePrelimGame } from '../tests/helpers';
 
 const ROOM_NAMES: Record<string, string> = {
   'slot-gold-1': '319',
@@ -33,7 +33,11 @@ function project() {
     tournamentId: tournament.id,
     tournamentName: tournament.name,
     tournamentFingerprint: tournamentIdentityFingerprint(tournament),
-    rooms: ROOM_SLOTS.map((slot) => ({ slotId: slot.id, displayName: ROOM_NAMES[slot.id] })),
+    rooms: ROOM_SLOTS.map((slot) => ({
+      slotId: slot.id,
+      displayName: ROOM_NAMES[slot.id],
+      folderName: ROOM_NAMES[slot.id],
+    })),
   });
   for (const game of planned) {
     const round = compat.compat.roundsByNumber.get(game.roundNumber)!;
@@ -97,16 +101,39 @@ describe('play-state detection', () => {
     expect(assignmentFileContents(built.assignment)).toContain(entry.matchId);
   });
 
-  test('a scored game reads as complete with a score line', () => {
+  test('a finished export reads as a complete result with a score line', () => {
     const tournament = loadedSynthetic();
     const scored = scorePrelimGame(tournament, 1, 'slot-gold-1');
     const parsed = parseResultFile(outFile('319', 'result.qbj', scored.resultText));
     if (!parsed.ok) throw new Error('should parse');
-    // A real scorer result carries per-question detail, so it reads as partial —
-    // what matters is that it is scoring content, not an untouched assignment.
-    expect(parsed.result.playState).not.toBe('unplayed');
+    expect(parsed.result.fileState).toBe('complete');
     expect(parsed.result.matchId).toBe(scored.matchId);
     expect(parsed.result.scoreLine).toMatch(/ – /);
+    expect(parsed.result.candidateId).toContain('319/result.qbj#');
+  });
+
+  test('a mid-game copy is parsed but never a result', () => {
+    const tournament = loadedSynthetic();
+    const partial = scorePartialGame(tournament, 1, 'slot-gold-1');
+    const parsed = parseResultFile(outFile('319', 'game.partial.qbj', partial.resultText));
+    if (!parsed.ok) throw new Error('should parse');
+    expect(parsed.result.fileState).toBe('partial');
+    // Scoring content is present — the marker alone keeps it out of the batch.
+    expect(parsed.result.playState).not.toBe('unplayed');
+  });
+
+  test('an unmarked file with scoring content is treated as not-ready, never finished', () => {
+    const tournament = loadedSynthetic();
+    const scored = scorePrelimGame(tournament, 1, 'slot-gold-1');
+    const rewritten = JSON.parse(scored.resultText) as { objects: Record<string, unknown>[] };
+    for (const object of rewritten.objects) {
+      if (object.type === 'Match' && typeof object._qbtcp === 'object' && object._qbtcp !== null) {
+        delete (object._qbtcp as Record<string, unknown>).file_state;
+      }
+    }
+    const parsed = parseResultFile(outFile('319', 'old-build.qbj', JSON.stringify(rewritten)));
+    if (!parsed.ok) throw new Error('should parse');
+    expect(parsed.result.fileState).toBe('unknown');
   });
 });
 
@@ -198,6 +225,45 @@ describe('reconciliation', () => {
     manifest.selectedResults[first.matchId] = 'gone.qbj';
     const reopened = reconcileScan(manifest, files);
     expect(reopened.scans[0].needsChoice).toBe(true);
+  });
+
+  test('a partial copy is shown as not-ready and never batched', () => {
+    const { manifest } = project();
+    const tournament = loadedSynthetic();
+    const partial = scorePartialGame(tournament, 1, 'slot-gold-1');
+    const report = reconcileScan(manifest, [outFile('319', 'game.partial.qbj', partial.resultText)]);
+    expect(report.problems).toEqual([]);
+    expect(report.scans).toHaveLength(1);
+    expect(report.scans[0].candidates).toHaveLength(0);
+    expect(report.scans[0].partialCopies).toHaveLength(1);
+    expect(report.scans[0].chosen).toBeUndefined();
+  });
+
+  test('same basename in two OUT folders needs a choice resolved by candidate identity', () => {
+    const { manifest } = project();
+    const tournament = loadedSynthetic();
+    const first = scorePrelimGame(tournament, 1, 'slot-maroon-2');
+    const second = scorePrelimGame(tournament, 1, 'slot-maroon-2');
+    // Same Match, same basename, different rooms (a misdrop plus a correction).
+    const files = [
+      outFile('317', 'result.qbj', first.resultText, 1000),
+      outFile('318', 'result.qbj', second.resultText, 2000),
+    ];
+    const undecided = reconcileScan(manifest, files);
+    expect(undecided.scans[0].candidates).toHaveLength(2);
+    expect(undecided.scans[0].needsChoice).toBe(true);
+    const [a, b] = undecided.scans[0].candidates;
+    expect(a.candidateId).not.toBe(b.candidateId);
+
+    // A bare basename no longer resolves an ambiguous pair.
+    manifest.selectedResults[first.matchId] = 'result.qbj';
+    expect(reconcileScan(manifest, files).scans[0].needsChoice).toBe(true);
+
+    manifest.selectedResults[first.matchId] = b.candidateId;
+    const decided = reconcileScan(manifest, files);
+    expect(decided.scans[0].needsChoice).toBe(false);
+    expect(decided.scans[0].chosen?.candidateId).toBe(b.candidateId);
+    expect(decided.scans[0].chosen?.folderName).toBe('318');
   });
 
   test("another tournament's QBJ is rejected with a specific message", () => {
