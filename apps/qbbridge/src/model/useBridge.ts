@@ -1241,11 +1241,27 @@ export function useBridge(): BridgeApi {
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const outcome = await relayTakeover(connection, takeoverId);
+      // Package-time pairing codes must never reach the relay again: the primary may have
+      // rotated codes after the package was created, and pairing codes never appear in the
+      // relay assignment log, so no drift report can prove them current. Mint fresh pending
+      // codes for every room now, in the same commit as the new epoch: the first
+      // post-takeover publish then carries hashes no printed sheet has ever seen, and old
+      // sheets die with this rotation even when the drift review below looks clean. One
+      // commit keeps the two durable together — a failed save leaves the epoch stale, and
+      // the import position check keeps refusing publication until a retry records both.
+      // (Shared rule: accepting control back from a backup must rotate the same way.)
+      const freshCodes = new Map(
+        stateRef.current.rooms.map((room) => [room.id, generatePairingCode()] as const),
+      );
       const persisted = commit((stateAtCommit) =>
         stateAtCommit.relay
           ? {
               ...stateAtCommit,
               relay: { ...stateAtCommit.relay, epoch: outcome.directorEpoch, revision: outcome.revision },
+              rooms: stateAtCommit.rooms.map((room) => {
+                const fresh = freshCodes.get(room.id);
+                return fresh === undefined ? room : { ...room, pendingPairingCode: fresh };
+              }),
             }
           : stateAtCommit,
       ).persisted;
@@ -1253,7 +1269,7 @@ export function useBridge(): BridgeApi {
         setNotice({
           kind: 'bad',
           message:
-            'The relay takeover succeeded, but the new epoch could not be saved locally. Keep this window open and retry local persistence before publishing.',
+            'The relay takeover succeeded, but the new epoch and rotated pairing codes could not be saved locally. Keep this window open and retry local persistence before publishing.',
         });
         return false;
       }
@@ -1277,6 +1293,7 @@ export function useBridge(): BridgeApi {
         kind: 'warn',
         message:
           'This backup is now the active relay controller. The old primary is fenced from publishing and acknowledging; ' +
+          `every room pairing code was rotated at takeover (${freshCodes.size} room${freshCodes.size === 1 ? '' : 's'}), so pairing sheets printed before this moment no longer work — reprint them from Rooms before play. ` +
           (drift.unknown
             ? 'the relay changes since the package could not be fully determined, so every room is suspect. '
             : driftCount === 0

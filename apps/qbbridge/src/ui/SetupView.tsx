@@ -245,29 +245,38 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                     <h4>Relay changes since the package</h4>
                     {state.takeoverReview.unknown ? (
                       <p className="shell-warning" role="alert">
-                        The relay change history could not be fully determined, so every room is suspect —
-                        including pairing codes, which never appear in the relay log. Compare every room
-                        against the live tournament before publishing.
+                        The relay change history could not be fully determined, so every room is suspect.
+                        Compare every room against the live tournament before publishing. Pairing codes are
+                        safe regardless: every code was rotated at takeover, so sheets printed before the
+                        takeover no longer work — reprint them from Rooms before play.
                       </p>
                     ) : state.takeoverReview.rooms.length === 0 ? (
                       <p className="muted">
-                        No room on the relay moved past the package snapshot. Pairing codes are not observable
-                        in the relay log, so they are covered by policy: re-check them anyway before
-                        publishing.
+                        No room on the relay moved past the package snapshot. Pairing codes were still rotated
+                        at takeover as a rule — pairing codes never appear in the relay log, so no report can
+                        prove them current. Sheets printed before the takeover no longer work; reprint them
+                        from Rooms before play.
                       </p>
                     ) : (
-                      <dl className="facts">
-                        {state.takeoverReview.rooms.map((room) => (
-                          <div key={room.roomId}>
-                            <dt>{room.roomName}</dt>
-                            <dd>
-                              package held {room.packageMatchId ?? 'nothing'} (issue{' '}
-                              {room.packageAssignmentRevision}); relay holds {room.liveMatchId ?? 'nothing'}{' '}
-                              (issue {room.liveAssignmentRevision})
-                            </dd>
-                          </div>
-                        ))}
-                      </dl>
+                      <>
+                        <dl className="facts">
+                          {state.takeoverReview.rooms.map((room) => (
+                            <div key={room.roomId}>
+                              <dt>{room.roomName}</dt>
+                              <dd>
+                                package held {room.packageMatchId ?? 'nothing'} (issue{' '}
+                                {room.packageAssignmentRevision}); relay holds {room.liveMatchId ?? 'nothing'}{' '}
+                                (issue {room.liveAssignmentRevision})
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                        <p className="muted">
+                          Pairing codes are not in this list — they never appear in the relay log — and
+                          were rotated at takeover as a rule. Sheets printed before the takeover no
+                          longer work; reprint them from Rooms before play.
+                        </p>
+                      </>
                     )}
                     <div className="row">
                       <Button

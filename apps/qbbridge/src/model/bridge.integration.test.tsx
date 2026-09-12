@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
+import { pairingCodeHash } from './pairing';
 import { describeRecoveryFreshness, encryptRecoveryPackage, recoveryPackageState } from './recovery';
 import type { BackupProvisionResult } from './relay';
 import { emptyState, loadState, storageKey } from './persistence';
@@ -91,7 +92,10 @@ let scorerCanPair = true;
 let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
 /** What the fake relay holds per room, learned from mirror PUTs, served back as events. */
-let relayRoomAssignments = new Map<string, { matchId: string | null; assignmentRevision: number }>();
+let relayRoomAssignments = new Map<
+  string,
+  { matchId: string | null; assignmentRevision: number; pairingCodeHash: string | null }
+>();
 let relayEpoch = 1;
 let relayRevision = 0;
 const backupControllerId = 'backup-test-controller';
@@ -255,6 +259,10 @@ function installFakeTauri(): void {
                   matchId: typeof entry.match_id === 'string' ? entry.match_id : null,
                   assignmentRevision:
                     typeof entry.assignment_revision === 'number' ? entry.assignment_revision : 0,
+                  // The real relay stores the hash and pairs against it; the fake keeps it so
+                  // tests can prove which credential a publish actually activated.
+                  pairingCodeHash:
+                    typeof entry.pairing_code_hash === 'string' ? entry.pairing_code_hash : null,
                 });
               }
             }
@@ -1828,6 +1836,127 @@ describe('backup controller recovery', () => {
       calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
     ).toHaveLength(2);
     backup.unmount();
+  });
+
+  test('takeover rotates every pairing code so a stale package cannot reactivate an old sheet', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.publishRoomSetup();
+    });
+    // The pairing sheets in the wild carry these package-time codes.
+    const packageCodes = new Map(
+      primary.result.current.state.rooms.map((room) => [room.id, room.pairingCode] as const),
+    );
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    // The old primary rotates one room's code after the package and publishes: the relay now
+    // holds a hash the package predates, with no assignment event to show for it.
+    const rotatedRoom = primary.result.current.state.rooms[0];
+    act(() => primary.result.current.regeneratePairingCode(rotatedRoom.id));
+    await act(async () => {
+      await primary.result.current.publishRoomSetup();
+    });
+    const liveCodes = new Map(
+      primary.result.current.state.rooms.map((room) => [room.id, room.pairingCode] as const),
+    );
+    expect(liveCodes.get(rotatedRoom.id)).not.toBe(packageCodes.get(rotatedRoom.id));
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    expect(backup.result.current.notice?.message).toMatch(/pairing code was rotated at takeover/);
+
+    // Every room carries a fresh pending code the package never held — including rooms the
+    // primary never touched, whose package codes are equally unprovable against the relay log.
+    for (const room of backup.result.current.state.rooms) {
+      expect(room.pendingPairingCode).toBeTruthy();
+      expect(room.pendingPairingCode).not.toBe(packageCodes.get(room.id));
+      expect(room.pendingPairingCode).not.toBe(liveCodes.get(room.id));
+    }
+
+    act(() => {
+      expect(backup.result.current.confirmTakeoverReviewed()).toBe(true);
+    });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+
+    // The relay now holds the takeover hashes: neither the package-time codes nor the
+    // rotated-live codes validate against them, so no sheet printed before the takeover
+    // can pair again.
+    for (const room of backup.result.current.state.rooms) {
+      const live = relayRoomAssignments.get(room.id);
+      expect(live?.pairingCodeHash).toBeTruthy();
+      expect(live?.pairingCodeHash).not.toBe(await pairingCodeHash(packageCodes.get(room.id)!));
+      expect(live?.pairingCodeHash).not.toBe(await pairingCodeHash(liveCodes.get(room.id)!));
+      expect(live?.pairingCodeHash).toBe(await pairingCodeHash(room.pairingCode));
+    }
+    backup.unmount();
+  });
+
+  test('takeover rotation survives a restart before the first publish', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.publishRoomSetup();
+    });
+    const packageCodes = new Map(
+      primary.result.current.state.rooms.map((room) => [room.id, room.pairingCode] as const),
+    );
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    const rotatedPending = new Map(
+      backup.result.current.state.rooms.map((room) => [room.id, room.pendingPairingCode] as const),
+    );
+    backup.unmount();
+
+    // Restart before publishing: the pending takeover codes and the review lock persist.
+    const restarted = renderHook(() => useBridge());
+    expect(restarted.result.current.state.rooms.map((room) => room.pendingPairingCode)).toEqual(
+      restarted.result.current.state.rooms.map((room) => rotatedPending.get(room.id)),
+    );
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      await restarted.result.current.publishRoomSetup();
+    });
+    expect(restarted.result.current.notice?.message).toMatch(/takeover drift/);
+    act(() => {
+      expect(restarted.result.current.confirmTakeoverReviewed()).toBe(true);
+    });
+    await act(async () => {
+      await restarted.result.current.publishRoomSetup();
+    });
+    for (const room of restarted.result.current.state.rooms) {
+      const live = relayRoomAssignments.get(room.id);
+      expect(live?.pairingCodeHash).toBeTruthy();
+      expect(live?.pairingCodeHash).not.toBe(await pairingCodeHash(packageCodes.get(room.id)!));
+    }
+    restarted.unmount();
   });
 
   test('a legacy package without source proof cannot publish until a reload establishes it', async () => {
