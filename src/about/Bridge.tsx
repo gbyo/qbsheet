@@ -106,7 +106,7 @@ const stages: { number: string; name: string; idea: string; detail: ReactNode }[
     name: 'Import',
     idea: 'Bring the games back.',
     detail:
-      'Completed games appear in Bridge as they arrive. Save them with Save New Results, then choose File \u2192 Import Games Only in YellowFruit, select the files, and review YellowFruit’s normal import validation.',
+      'Completed games appear in Bridge as they arrive. Save them with Save New Results, then choose File → Import Games Only in YellowFruit, select the files, and review YellowFruit’s normal import validation. After the handoff, Mark imported can remember your local confirmation that YellowFruit handled the files.',
   },
 ];
 
@@ -298,8 +298,9 @@ function FileSection() {
           </p>
           <p>
             YellowFruit performs its normal import validation on whatever it is given. Bridge reports only
-            what it can see: a result is new until it is written, then saved. It never claims a result was
-            imported, accepted, or applied to standings.
+            what it can see: a result is new until it is written, then saved. Afterward, you can mark the saved
+            result imported as a local handoff reminder. Bridge does not inspect YellowFruit to verify that the
+            game was accepted or applied to standings.
           </p>
         </div>
       </section>
