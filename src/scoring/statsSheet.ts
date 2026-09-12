@@ -51,15 +51,15 @@ interface StatsTeamColumn {
 /**
  * The team columns worth printing for this game.
  *
- * Points, tossups and bonuses always; bouncebacks, lightning and adjustments only when the game
- * actually has any. An empty "Bouncebacks" column in a format with no bouncebacks is a question the
- * person transcribing this has to stop and answer.
+ * Points, tossup points and bonus points always; bouncebacks, lightning and adjustments only when
+ * the game actually has any. An empty "Bouncebacks" column in a format with no bouncebacks is a
+ * question the person transcribing this has to stop and answer.
  */
 function teamColumns(game: IDerivedGame): StatsTeamColumn[] {
   const columns: StatsTeamColumn[] = [
     { heading: 'Points', value: (team) => team.points },
-    { heading: 'Tossups', value: (team) => team.tossupPoints },
-    { heading: 'Bonuses', value: (team) => team.bonusPoints },
+    { heading: 'Tossup points', value: (team) => team.tossupPoints },
+    { heading: 'Bonus points', value: (team) => team.bonusPoints },
   ];
   const either = (read: (team: IDerivedTeam) => number) => read(game.left) !== 0 || read(game.right) !== 0;
   if (either((team) => team.bonusBouncebackPoints)) {

@@ -54,7 +54,7 @@ export default function TeamStatLines(props: { format: IScorekeeperFormat; team:
         </tbody>
       </table>
       <p className="scorer-check-breakdown">
-        Tossups {team.tossupPoints} · Bonuses {team.bonusPoints}
+        Tossup points {team.tossupPoints} · Bonus points {team.bonusPoints}
         {team.bonusBouncebackPoints > 0 && <> · Bouncebacks {team.bonusBouncebackPoints}</>}
         {team.lightningPoints > 0 && <> · Lightning {team.lightningPoints}</>}
         {team.adjustmentPoints !== 0 && <> · Adjustment {signed(team.adjustmentPoints)}</>}
