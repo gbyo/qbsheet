@@ -193,6 +193,7 @@ export function RelayPanel({
         if (reason instanceof RelayHealthError) {
           if (reason.code === 'credential-invalid') setConnection('credential-invalid');
           else if (reason.code === 'unsupported') setConnection('unsupported');
+          else if (reason.code === 'unclaimed') setConnection('unclaimed');
           else setConnection('unreachable');
           setLastSyncError(reason.message);
         } else {
@@ -574,6 +575,8 @@ function warningTitle(code: string): string {
       return 'Unsupported relay version';
     case 'credential-invalid':
       return 'Relay credential invalid';
+    case 'relay-unclaimed':
+      return 'Relay tournament unknown';
     case 'publication-failing':
       return 'State publication failing';
     case 'quota-warning':

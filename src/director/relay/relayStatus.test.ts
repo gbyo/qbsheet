@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   deriveRelayStatus,
+  fetchRelayManagementHealth,
   formatRelayLastSync,
   quotaWarningFor,
+  RelayHealthError,
   type RelayStatusInput,
 } from './relayStatus';
 
@@ -63,6 +65,14 @@ describe('relay warnings', () => {
     expect(publication.warnings[0]?.message).toContain('mirror 503');
   });
 
+  it('names an unknown tournament instead of blaming the network', () => {
+    const view = deriveRelayStatus({ ...base, relay: 'unclaimed' });
+    expect(view.relay).toBe('Not claimed');
+    const warning = view.warnings.find((warning) => warning.code === 'relay-unclaimed');
+    expect(warning?.message).toMatch(/no tournament with this id/);
+    expect(view.warnings.map((warning) => warning.code)).not.toContain('relay-unreachable');
+  });
+
   it('warns on quota pressure from the relay estimates', () => {
     expect(quotaWarningFor(base.relayHealth)).toBeNull();
     const pressured = deriveRelayStatus({
@@ -111,6 +121,41 @@ describe('relay warnings', () => {
     const view = deriveRelayStatus({ ...base, baseUrl: null, relay: 'unconfigured' });
     expect(view.primaryAddress).toBe('Not configured');
     expect(view.warnings).toEqual([]);
+  });
+});
+
+describe('management health failures', () => {
+  const call = (status: number, body: unknown) =>
+    fetchRelayManagementHealth(
+      'https://example.workers.dev',
+      'tournament-id',
+      'management-credential',
+      (async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'content-type': 'application/json' },
+        })) as unknown as typeof fetch,
+    ).then(
+      () => {
+        throw new Error('expected the health check to fail');
+      },
+      (reason: unknown) => reason,
+    );
+
+  it('maps an unknown tournament to unclaimed, not unreachable', async () => {
+    // The health route gates on the tournament before the credential, so a typo'd id arrives
+    // as 404 `not-found` — the status the old code folded into `unexpected` → `unreachable`.
+    const failure = await call(404, { error: 'not-found', message: 'No such tournament.' });
+    expect(failure).toBeInstanceOf(RelayHealthError);
+    expect((failure as RelayHealthError).code).toBe('unclaimed');
+    expect((failure as RelayHealthError).message).toMatch(/no tournament with this id/);
+  });
+
+  it('keeps genuine outages and refused credentials on their own codes', async () => {
+    const refused = await call(401, { error: 'invalid_credential', message: 'Nope.' });
+    expect((refused as RelayHealthError).code).toBe('credential-invalid');
+    const broken = await call(503, { error: 'storage-unavailable', message: 'Down.' });
+    expect((broken as RelayHealthError).code).toBe('unexpected');
   });
 });
 

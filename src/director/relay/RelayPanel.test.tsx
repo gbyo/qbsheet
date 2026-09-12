@@ -251,6 +251,28 @@ describe('Internet QBTCP status and disable', () => {
     expect(screen.getByTestId('relay-panel-status').textContent).toContain('Available · 192.168.1.24:3000');
   });
 
+  it('names an unknown tournament instead of reporting the relay unreachable', async () => {
+    const { secrets } = installKeychain();
+    secrets.set(tournamentId, 'stored-management-credential');
+    vi.stubGlobal(
+      'fetch',
+      relayFetch({
+        [`${baseUrl}/qbtcp/v1/manage/tournaments/${tournamentId}/health`]: jsonResponse(404, {
+          error: 'not-found',
+          message: 'No such tournament.',
+        }),
+      }),
+    );
+    renderPanel({ store: memoryStore(configured) });
+
+    await waitFor(() => {
+      expect(screen.getByText(/relay tournament unknown/i)).toBeInTheDocument();
+    });
+    // Twice: once as the status warning, once as the last-sync error line. Neither blames the network.
+    expect(screen.getAllByText(/no tournament with this id/i)).toHaveLength(2);
+    expect(screen.queryByText(/relay unreachable/i)).toBeNull();
+  });
+
   it('warns when LAN fallback is down and when a QBLive Worker shares the account', async () => {
     installKeychain();
     vi.stubGlobal('fetch', relayFetch());
