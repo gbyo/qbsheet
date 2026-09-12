@@ -85,6 +85,8 @@ describe('the help page', () => {
     expect(relayFile('../../src/director/relay/relayConfig.ts')).toContain('https://qbsheet.com');
     expect(page).toContain('403 origin_not_allowed');
     expect(page).toContain('https://qbsheet.com');
+    // Troubleshooting names the relevant setup subsection instead of a step number that can go stale.
+    expect(page).toMatch(/RELAY_ALLOWED_ORIGINS; see Deploy the Worker and enter its secrets above/);
   });
 
   test('describes the workflow at both ends, and the limits QBBridge keeps to', () => {
@@ -128,7 +130,6 @@ describe('the generators', () => {
   test('a tournament ID matches the rule the relay enforces', async () => {
     const user = userEvent.setup();
     render(<HelpView />);
-
     await user.click(screen.getByRole('button', { name: 'Generate tournament ID' }));
     const value = (screen.getByRole('textbox', { name: 'tournament ID' }) as HTMLInputElement).value;
 
