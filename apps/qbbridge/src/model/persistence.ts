@@ -22,6 +22,8 @@
 import type { Room, RoomTombstone } from './rooms';
 import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
+import { readRecoveryDigests } from './recovery';
+import type { RecoveryBaseline, RecoverySource } from './recovery';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /**
@@ -84,6 +86,43 @@ export interface BridgeState {
   scorerReadiness: ScorerReadinessSnapshot | null;
   /** Where the `.yft` was last read from, so the panel can name it after a restart. */
   yftPath: string | null;
+  /**
+   * Identity hash of the loaded `.yft` bytes, or null when no file is loaded. YellowFruit is
+   * the authority, so the hash is what ties this profile — and any recovery package it
+   * creates or imports — to the exact tournament document in use.
+   */
+  yftFingerprint: string | null;
+  /**
+   * SHA-256 over the exact loaded `.yft` bytes, or null when no file is loaded. The fast
+   * identity hash answers "same file?"; this answers "which exact bytes?" for publication
+   * records and incident recovery.
+   */
+  yftSha256: string | null;
+  /**
+   * On-disk baseline of the loaded source file: byte length plus last-modified time. The
+   * change poller compares live metadata against this; a mismatch triggers a byte re-read
+   * rather than a verdict, so a no-op save never reads as an edit. Null for path-less
+   * loads and non-native hosts, where on-disk detection is unavailable.
+   */
+  yftSource: { byteLength: number; modifiedMs: number } | null;
+  /**
+   * True once the source file provably differs from the loaded bytes. Set by the change
+   * poller or the pre-publish check; only an explicit reload clears it. Publication is
+   * refused while set.
+   */
+  yftChangedOnDisk: boolean;
+  /**
+   * What the world looked like when this profile last created a recovery package. Compared
+   * against live state to show package age per category. Null when no package was created
+   * here; a backup that only imports never carries one.
+   */
+  lastRecoveryPackage: RecoveryBaseline | null;
+  /**
+   * Provenance of the recovery package this profile imported, or null for ordinary primary
+   * state. Gates publication until the authoritative `.yft` is proven loaded; see
+   * `recoverySource` verification at file load.
+   */
+  recoverySource: RecoverySource | null;
   tournamentName: string | null;
   rooms: Room[];
   /** Rooms removed locally whose assignments still need a clear publication. */
@@ -101,6 +140,12 @@ export interface BridgeState {
   roundPlans: RoundPlan[];
   resultFolder: string | null;
   results: StoredResult[];
+  /**
+   * Which source produced the last accepted publication: relay revision, the SHA-256 of the
+   * `.yft` it was built from, and when. Incident recovery can prove which source state
+   * produced an assignment; a new load or publication supersedes it.
+   */
+  lastPublication: { revision: number; yftSha256: string | null; at: string } | null;
 }
 
 export type PersistResult = { ok: true } | { ok: false; error: unknown };
@@ -111,6 +156,13 @@ export function emptyState(): BridgeState {
     relay: null,
     scorerReadiness: null,
     yftPath: null,
+    yftFingerprint: null,
+    yftSha256: null,
+    yftSource: null,
+    yftChangedOnDisk: false,
+    lastRecoveryPackage: null,
+    recoverySource: null,
+    lastPublication: null,
     tournamentName: null,
     rooms: [],
     pendingRoomRemovals: [],
@@ -227,6 +279,104 @@ function normalizeTombstone(value: unknown): RoomTombstone | null {
   };
 }
 
+function readYftFingerprint(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{16}$/.test(value) ? value : null;
+}
+
+function readYftSha256(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value) ? value : null;
+}
+
+/**
+ * Read the on-disk baseline. Malformed baselines are dropped, never repaired: without a
+ * trustworthy baseline the poller simply cannot judge the file, which reads as "unknown"
+ * rather than "current".
+ */
+function readYftSourceBaseline(value: unknown): { byteLength: number; modifiedMs: number } | null {
+  if (!isRecord(value)) return null;
+  const { byteLength, modifiedMs } = value;
+  if (
+    typeof byteLength !== 'number' ||
+    !Number.isInteger(byteLength) ||
+    byteLength < 0 ||
+    typeof modifiedMs !== 'number' ||
+    !Number.isFinite(modifiedMs)
+  ) {
+    return null;
+  }
+  return { byteLength, modifiedMs };
+}
+
+/**
+ * Read the last-publication provenance. A malformed record is dropped: the worst case is a
+ * Setup panel with no source to name until the next publication, never a wrong revision
+ * attributed to the wrong bytes.
+ */
+function readLastPublication(
+  value: unknown,
+): { revision: number; yftSha256: string | null; at: string } | null {
+  if (!isRecord(value)) return null;
+  const { revision, yftSha256, at } = value;
+  if (typeof revision !== 'number' || !Number.isInteger(revision) || typeof at !== 'string') {
+    return null;
+  }
+  return { revision, yftSha256: readYftSha256(yftSha256), at };
+}
+
+/**
+ * Read a package-creation baseline. Stored by this profile, so a malformed one is dropped
+ * rather than repaired: the worst case is a freshness panel with no opinion until the next
+ * package is created, never a stale baseline misread as fresh.
+ */
+function readRecoveryBaseline(value: unknown): RecoveryBaseline | null {
+  if (!isRecord(value)) return null;
+  const digests = readRecoveryDigests(value.digests);
+  const { createdAt, yftFingerprint, relayEpoch, relayRevision } = value;
+  if (
+    typeof createdAt !== 'string' ||
+    !digests ||
+    typeof relayEpoch !== 'number' ||
+    !Number.isInteger(relayEpoch) ||
+    typeof relayRevision !== 'number' ||
+    !Number.isInteger(relayRevision)
+  ) {
+    return null;
+  }
+  return {
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
+    digests,
+    relayEpoch,
+    relayRevision,
+  };
+}
+
+/**
+ * Read import provenance. Verification is session-bound — startup re-locks publication until
+ * the authoritative `.yft` is loaded again — so a stored `verified: true` only ever reflects
+ * a file proven loaded in an earlier session, never a license to publish now.
+ */
+function readRecoverySource(value: unknown): RecoverySource | null {
+  if (!isRecord(value)) return null;
+  const { createdAt, yftFingerprint, packageRelayEpoch, packageRelayRevision, verified } = value;
+  if (
+    typeof createdAt !== 'string' ||
+    typeof packageRelayEpoch !== 'number' ||
+    !Number.isInteger(packageRelayEpoch) ||
+    typeof packageRelayRevision !== 'number' ||
+    !Number.isInteger(packageRelayRevision)
+  ) {
+    return null;
+  }
+  return {
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
+    packageRelayEpoch,
+    packageRelayRevision,
+    verified: verified === true,
+  };
+}
+
 function readScorerReadiness(value: unknown): ScorerReadinessSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -326,6 +476,13 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     relay: state.relay ?? null,
     scorerReadiness: readScorerReadiness(state.scorerReadiness),
     yftPath: typeof state.yftPath === 'string' ? state.yftPath : null,
+    yftFingerprint: readYftFingerprint(state.yftFingerprint),
+    yftSha256: readYftSha256(state.yftSha256),
+    yftSource: readYftSourceBaseline(state.yftSource),
+    yftChangedOnDisk: state.yftChangedOnDisk === true,
+    lastRecoveryPackage: readRecoveryBaseline(state.lastRecoveryPackage),
+    recoverySource: readRecoverySource(state.recoverySource),
+    lastPublication: readLastPublication(state.lastPublication),
     tournamentName: typeof state.tournamentName === 'string' ? state.tournamentName : null,
     rooms,
     pendingRoomRemovals,

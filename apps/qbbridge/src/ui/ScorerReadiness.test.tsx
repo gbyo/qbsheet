@@ -89,6 +89,8 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     saveNewResults: async () => {},
     saveResult: async () => {},
     markResultImported: noop,
+    correctionGroups: [],
+    resultVerification: () => 'unknown' as const,
     unmarkResultImported: noop,
     needsImportCount: 0,
     resultBusy: () => false,

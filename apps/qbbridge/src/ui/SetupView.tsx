@@ -21,8 +21,66 @@ import {
   scoresheetOrigin,
 } from '../../../../src/director/relay/relayConfig';
 import { generateTournamentId } from '../model/relay';
+import { describeRecoveryFreshness, type RecoveryFreshness } from '../model/recovery';
 import { formatSummary } from '../model/tournament';
 import type { BridgeApi } from '../model/useBridge';
+import type { BridgeState } from '../model/persistence';
+
+function formatPackageAge(ageMs: number): string {
+  const minutes = Math.floor(ageMs / 60000);
+  if (minutes < 1) return 'less than a minute ago';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+function freshnessChanges(freshness: RecoveryFreshness): string[] {
+  const changes: string[] = [];
+  const changed = freshness.changed;
+  if (changed.rooms) changes.push('rooms were added, removed, or renamed');
+  if (changed.codes) changes.push('pairing codes changed');
+  if (changed.plans) changes.push('round plans changed');
+  if (changed.yft) changes.push('the YellowFruit file changed');
+  if (changed.relay)
+    changes.push(
+      `the relay advanced (package: epoch ${freshness.baselineRelay.epoch}, revision ${freshness.baselineRelay.revision}; now: epoch ${freshness.currentRelay.epoch}, revision ${freshness.currentRelay.revision})`,
+    );
+  if (changed.results) changes.push('results arrived or were saved');
+  return changes;
+}
+
+function RecoveryFreshnessPanel({ state }: { state: BridgeState }) {
+  const freshness = describeRecoveryFreshness(state);
+  if (!freshness) {
+    return (
+      <p className="faint">
+        No recovery package has been created from this profile yet. Create one before play so a backup laptop
+        can take over.
+      </p>
+    );
+  }
+  const changes = freshnessChanges(freshness);
+  return (
+    <div aria-live="polite">
+      <dl className="facts">
+        <dt>Package age</dt>
+        <dd>Created {formatPackageAge(freshness.ageMs)}</dd>
+        <dt>Freshness</dt>
+        <dd>{freshness.stale ? 'Stale — regenerate before play' : 'Current'}</dd>
+      </dl>
+      {changes.length > 0 ? (
+        <p className="muted">
+          Since the package was created: {changes.join('; ')}. A backup taking over from this package would
+          rebuild from old rooms, plans, or codes — create a fresh package before play.
+        </p>
+      ) : (
+        <p className="muted">Nothing material changed since the package was created.</p>
+      )}
+    </div>
+  );
+}
 
 export default function SetupView({ bridge }: { bridge: BridgeApi }) {
   const { tournament, state } = bridge;
@@ -145,6 +203,17 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               <dd className="code">{state.relay.tournamentId}</dd>
               <dt>Last publication</dt>
               <dd>{state.relay.revision === 0 ? 'None yet' : `Revision ${state.relay.revision}`}</dd>
+              <dt>Publication source</dt>
+              <dd>
+                {state.lastPublication
+                  ? `Revision ${state.lastPublication.revision} built from source #${(state.lastPublication.yftSha256 ?? 'unknown').slice(0, 12)}`
+                  : 'None yet'}
+              </dd>
+              <dt>Source file</dt>
+              <dd>
+                {state.yftPath ?? 'No file loaded'}
+                {state.yftChangedOnDisk ? ' — changed on disk, reload before publishing' : ''}
+              </dd>
             </dl>
             <p className="muted">
               The management credential is kept in this computer&rsquo;s operating-system secure storage. It
@@ -223,6 +292,8 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                     Revoke backup access…
                   </Button>
                 </div>
+                <h4>Package freshness</h4>
+                <RecoveryFreshnessPanel state={state} />
               </div>
             )}
             {!showForm ? (

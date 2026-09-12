@@ -87,6 +87,31 @@ export async function openRecoveryPackage(): Promise<OpenedFile | null> {
   return invoke<OpenedFile | null>('open_recovery_package');
 }
 
+export interface YftSourceMetadata {
+  byteLength: number;
+  modifiedMs: number;
+}
+
+/**
+ * Filesystem metadata for the loaded YellowFruit source file: byte length plus
+ * last-modified time. Metadata only, never contents — the cheap poll behind on-disk
+ * change detection. A mismatch means "re-read and compare", never "the file changed".
+ */
+export async function readYftSourceMetadata(path: string): Promise<YftSourceMetadata> {
+  requireNative('Checking the YellowFruit source file');
+  return invoke<YftSourceMetadata>('yellowfruit_source_metadata', { path });
+}
+
+/**
+ * Silently re-read a YellowFruit source file by path, size-guarded like the open dialog.
+ * Only ever called with the path the operator already opened, to confirm whether a
+ * metadata mismatch is a real edit or a no-op save.
+ */
+export async function readYftSourceContents(path: string): Promise<string> {
+  requireNative('Re-reading the YellowFruit source file');
+  return invoke<string>('read_yellowfruit_source', { path });
+}
+
 /** Write one encrypted recovery package. The native writer refuses to replace an existing file. */
 export async function writeRecoveryPackage(
   directory: string,

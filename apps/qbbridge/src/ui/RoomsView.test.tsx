@@ -126,6 +126,8 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     saveNewResults: vi.fn(async () => undefined),
     saveResult: vi.fn(async () => undefined),
     markResultImported: noop,
+    correctionGroups: [],
+    resultVerification: () => 'unknown' as const,
     unmarkResultImported: noop,
     needsImportCount: 0,
     resultBusy: vi.fn(() => false),

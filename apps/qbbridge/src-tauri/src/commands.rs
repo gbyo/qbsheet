@@ -146,6 +146,60 @@ pub async fn open_recovery_package(app: AppHandle) -> CommandResult<Option<Opene
     }))
 }
 
+/// On-disk identity of a YellowFruit source file: byte length plus last-modified time.
+///
+/// Metadata only — never contents — so the change poller can ask "did the file move?" every
+/// few seconds without re-reading megabytes. A mismatch means "re-read and compare hashes",
+/// never "the file changed": a no-op save bumps mtime while leaving identical bytes behind.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct YftSourceMetadata {
+    pub byte_length: u64,
+    pub modified_ms: u64,
+}
+
+fn yft_source_metadata_inner(path: &str) -> CommandResult<YftSourceMetadata> {
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    let modified_ms = metadata
+        .modified()
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?
+        .as_millis();
+    let modified_ms = u64::try_from(modified_ms)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    Ok(YftSourceMetadata {
+        byte_length: metadata.len(),
+        modified_ms,
+    })
+}
+
+/// Metadata for the loaded YellowFruit source file, so the app notices on-disk edits.
+#[tauri::command]
+pub async fn yellowfruit_source_metadata(path: String) -> CommandResult<YftSourceMetadata> {
+    yft_source_metadata_inner(&path)
+}
+
+/// Re-read a YellowFruit source file by path, size-guarded like the open dialog.
+///
+/// Silent by design — no dialog — so the change poller can confirm whether a metadata
+/// mismatch is a real edit or a no-op save. The path is the one the operator already
+/// opened; nothing here browses anywhere new.
+#[tauri::command]
+pub async fn read_yellowfruit_source(path: String) -> CommandResult<String> {
+    let metadata = std::fs::metadata(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+    if metadata.len() > MAX_YFT_BYTES {
+        return Err(CommandError::new(
+            "file_too_large",
+            "That file is larger than the 8 MiB YellowFruit import limit.",
+        ));
+    }
+    std::fs::read_to_string(&path)
+        .map_err(|error| CommandError::new("read_failed", error.to_string()))
+}
+
 /// Choose a folder and write one encrypted recovery package exclusively into it.
 #[tauri::command]
 pub async fn write_recovery_package(
@@ -473,7 +527,8 @@ pub async fn relay_request(
 #[cfg(test)]
 mod tests {
     use super::{
-        append_relay_response_chunk, safe_file_name, write_result_file, MAX_RELAY_RESPONSE_BYTES,
+        append_relay_response_chunk, read_yellowfruit_source, safe_file_name, write_result_file,
+        yft_source_metadata_inner, MAX_RELAY_RESPONSE_BYTES,
     };
 
     #[test]
@@ -584,6 +639,65 @@ mod tests {
             "{\"second\":true}"
         );
 
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    fn yft_probe_file(contents: &str) -> (std::path::PathBuf, String) {
+        let directory = std::env::temp_dir().join(format!(
+            "qbbridge-yft-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("morning.yft");
+        std::fs::write(&path, contents).unwrap();
+        (directory, path.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn source_metadata_reports_length_and_mtime_without_contents() {
+        let (directory, path) = yft_probe_file("{\"tournament\":1}");
+        let metadata = yft_source_metadata_inner(&path).expect("metadata should read");
+        assert_eq!(metadata.byte_length, 16);
+        assert!(metadata.modified_ms > 0);
+
+        // A no-op save changes mtime but not length; the caller re-reads rather than judging.
+        std::fs::write(&path, "{\"tournament\":1}").unwrap();
+        let again = yft_source_metadata_inner(&path).expect("metadata should re-read");
+        assert_eq!(again.byte_length, 16);
+
+        let missing = yft_source_metadata_inner(&directory.join("gone.yft").to_string_lossy());
+        assert_eq!(
+            missing.expect_err("a missing file should fail").code,
+            "read_failed"
+        );
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn source_read_returns_bytes_and_refuses_oversize() {
+        let (directory, path) = yft_probe_file("{\"tournament\":1}");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        assert_eq!(
+            runtime
+                .block_on(read_yellowfruit_source(path.clone()))
+                .expect("a small file should read"),
+            "{\"tournament\":1}"
+        );
+        assert_eq!(
+            runtime
+                .block_on(read_yellowfruit_source(
+                    directory.join("gone.yft").to_string_lossy().into_owned()
+                ))
+                .expect_err("a missing file should fail")
+                .code,
+            "read_failed"
+        );
         std::fs::remove_dir_all(&directory).ok();
     }
 }

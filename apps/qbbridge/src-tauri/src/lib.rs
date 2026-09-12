@@ -24,6 +24,8 @@ pub fn run() {
             commands::choose_result_folder,
             commands::choose_assignment_folder,
             commands::open_recovery_package,
+            commands::yellowfruit_source_metadata,
+            commands::read_yellowfruit_source,
             commands::write_recovery_package,
             commands::store_relay_credential,
             commands::load_relay_credential,

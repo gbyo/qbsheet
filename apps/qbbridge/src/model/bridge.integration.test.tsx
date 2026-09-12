@@ -11,10 +11,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
+import { describeRecoveryFreshness } from './recovery';
+import { loadYellowFruitTournament } from './tournament';
+import type { YftGame } from './yftSource';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
-import { yftFixtureText } from '../tests/fixture';
+import { timedFixtureText, yftFixtureText } from '../tests/fixture';
 import { useBridge } from './useBridge';
 
 interface InvokeCall {
@@ -85,6 +88,19 @@ let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reas
   [];
 let deferWrites = false;
 let pendingWrites: PendingWrite[] = [];
+/**
+ * The fake on-disk identity of the loaded `.yft`. Tests move `yftSourceMetadata` to simulate
+ * an external save; the bytes behind it only change when `yftSourceContents` does, which is
+ * what distinguishes a no-op save from a real edit.
+ */
+let yftSourceMetadata: { byteLength: number; modifiedMs: number } = {
+  byteLength: 4242,
+  modifiedMs: 1000,
+};
+/** Null means the source file cannot be re-read, as a deleted file would be. */
+let yftSourceContents: string | null = null;
+/** When set, even the metadata read fails, as a deleted file reports. */
+let yftSourceMetadataThrows = false;
 let scorerCanPair = true;
 let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
@@ -130,6 +146,14 @@ function installFakeTauri(): void {
           contents: String(args.contents),
         };
         return recoveryPackage.path;
+      case 'yellowfruit_source_metadata': {
+        if (yftSourceMetadataThrows) throw new Error('source file is gone (fake missing metadata).');
+        return { ...yftSourceMetadata };
+      }
+      case 'read_yellowfruit_source': {
+        if (yftSourceContents === null) throw new Error('source file is gone (fake missing).');
+        return yftSourceContents;
+      }
       case 'write_result_file': {
         const path = `${String(args.directory)}/${String(args.fileName)}`;
         // The real command opens with `create_new` unless told to overwrite.
@@ -278,6 +302,9 @@ beforeEach(() => {
   pendingResultRequests = [];
   deferWrites = false;
   pendingWrites = [];
+  yftSourceMetadata = { byteLength: 4242, modifiedMs: 1000 };
+  yftSourceMetadataThrows = false;
+  yftSourceContents = yftFixtureText();
   scorerCanPair = true;
   scorerReadinessFails = false;
   activeController = 'primary';
@@ -434,6 +461,13 @@ describe('a round, published and returned', () => {
       value: {
         invoke: async (command: string) => {
           if (command === 'relay_request') throw new Error('relay_unreachable');
+          // The disk is fine; only the relay is dead. The failure below must prove the
+          // relay refusal, not a source refusal.
+          if (command === 'yellowfruit_source_metadata') return { ...yftSourceMetadata };
+          if (command === 'read_yellowfruit_source') {
+            if (yftSourceContents === null) throw new Error('source file is gone (fake missing).');
+            return yftSourceContents;
+          }
           throw new Error(command);
         },
       },
@@ -1005,6 +1039,13 @@ describe('persistence', () => {
       relay: null,
       scorerReadiness: null,
       yftPath: null,
+      yftFingerprint: null,
+      yftSha256: null,
+      yftSource: null,
+      yftChangedOnDisk: false,
+      lastRecoveryPackage: null,
+      recoverySource: null,
+      lastPublication: null,
       tournamentName: null,
       rooms: [],
       pendingRoomRemovals: [],
@@ -1609,6 +1650,530 @@ describe('backup controller recovery', () => {
     );
     expect(ack?.args.bearer).toBe(backupToken);
     expect(backup.result.current.state.results[0].ackPending).toBe(false);
+    backup.unmount();
+  });
+
+  test('creating a package records a baseline that later changes age', async () => {
+    const primary = await setUpTournament();
+    expect(primary.result.current.state.lastRecoveryPackage).toBeNull();
+
+    await act(async () => {
+      expect(
+        await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop'),
+      ).toBe(true);
+    });
+    const baseline = primary.result.current.state.lastRecoveryPackage;
+    expect(baseline).toMatchObject({
+      yftFingerprint: primary.result.current.state.yftFingerprint,
+      relayEpoch: 1,
+      relayRevision: 0,
+    });
+    expect(describeRecoveryFreshness(primary.result.current.state)?.stale).toBe(false);
+
+    act(() => {
+      primary.result.current.addRoom();
+    });
+    const aged = describeRecoveryFreshness(primary.result.current.state);
+    expect(aged?.stale).toBe(true);
+    // A new room brings a new pairing code with it, so both categories move; plans do not.
+    expect(aged?.changed).toMatchObject({ rooms: true, codes: true, plans: false });
+    primary.unmount();
+  });
+
+  test('an imported package cannot publish before its source file is verified', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({ verified: false });
+
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(/source file has not been verified/);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    // Loading the exact bytes the package was created from unlocks publication.
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({ verified: true });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
+    backup.unmount();
+  });
+
+  test('an imported profile refuses to publish past a relay that moved since import', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    // The old primary kept playing after the package: the relay moved on.
+    relayRevision = 2;
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(
+      /relay moved since this recovery profile last synced/,
+    );
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    // Taking over re-syncs to the live position, so publication can proceed.
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
+    backup.unmount();
+  });
+});
+
+describe('YellowFruit source and result reconciliation', () => {
+  interface ScoredFixtureGame {
+    game: YftGame;
+    left: string;
+    right: string;
+    lp: number;
+    rp: number;
+    tossups: number | null;
+  }
+
+  /** A real scored game from the real fixture file, so verification is proved on real bytes. */
+  function scoredFixtureGame(): ScoredFixtureGame {
+    const report = loadYellowFruitTournament(yftFixtureText());
+    if (!report.ok) throw new Error(`fixture failed to load: ${report.errors.join(' ')}`);
+    const game = report.games.find((entry) => entry.leftPoints !== null && entry.matchId !== null);
+    if (
+      !game ||
+      game.leftTeamId === null ||
+      game.rightTeamId === null ||
+      game.roundNumber === null ||
+      game.leftPoints === null ||
+      game.rightPoints === null
+    ) {
+      throw new Error('the fixture has no scored game to verify against');
+    }
+    return {
+      game,
+      left: game.leftTeamId,
+      right: game.rightTeamId,
+      lp: game.leftPoints,
+      rp: game.rightPoints,
+      tossups: game.tossupsRead,
+    };
+  }
+
+  /** A result document holding one game, shaped the way a scorer result holds its match. */
+  function syntheticResultQbj(
+    scored: ScoredFixtureGame,
+    matchId: string,
+    leftPoints: number,
+    rightPoints: number,
+  ): unknown {
+    return {
+      version: '2.1.1',
+      objects: [
+        {
+          type: 'Tournament',
+          id: 'Tournament_Synthetic',
+          phases: [
+            {
+              id: 'Phase_Synthetic',
+              rounds: [{ id: 'Round_Synthetic', name: scored.game.roundName, matches: [{ $ref: matchId }] }],
+            },
+          ],
+        },
+        {
+          type: 'Match',
+          id: matchId,
+          tossups_read: scored.tossups,
+          match_teams: [
+            { team: { $ref: scored.left }, points: leftPoints },
+            { team: { $ref: scored.right }, points: rightPoints },
+          ],
+        },
+      ],
+    };
+  }
+
+  function relayRow(resultId: string, receivedAt: string, qbj: unknown): RelayResultRow {
+    return { result_id: resultId, room_id: 'room-1', received_at: receivedAt, qbj };
+  }
+
+  function mirrorCalls(): number {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+  }
+
+  function rawFixture(): { objects: Record<string, unknown>[] } {
+    return JSON.parse(yftFixtureText()) as { objects: Record<string, unknown>[] };
+  }
+
+  function rawRounds(parsed: { objects: Record<string, unknown>[] }): Record<string, unknown>[] {
+    const tournament = parsed.objects.find((entry) => entry.type === 'Tournament') ?? parsed.objects[0];
+    const phases = (Array.isArray(tournament?.phases) ? tournament.phases : []).filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+    );
+    const rounds = Array.isArray(phases[0]?.rounds) ? phases[0].rounds : [];
+    return rounds.filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+    );
+  }
+
+  test('a result already in the file verifies, and a rules-only reload keeps it verified', async () => {
+    const scored = scoredFixtureGame();
+    relayResults = [
+      relayRow(
+        'res-v',
+        '2026-09-11T15:00:00Z',
+        syntheticResultQbj(scored, 'Match_probe', scored.lp, scored.rp),
+      ),
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+
+    expect(rendered.result.current.resultVerification('res-v')).toBe('verified');
+    expect(rendered.result.current.resultVerification('no-such-result')).toBe('unknown');
+
+    // A YellowFruit rules edit re-resolves the same teams and scores: still proven.
+    await act(async () => {
+      rendered.result.current.loadFileContents(null, timedFixtureText());
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('verified');
+    rendered.unmount();
+  });
+
+  test('a renamed team makes proof impossible, never a false verification', async () => {
+    const scored = scoredFixtureGame();
+    relayResults = [
+      relayRow(
+        'res-v',
+        '2026-09-11T15:00:00Z',
+        syntheticResultQbj(scored, 'Match_probe', scored.lp, scored.rp),
+      ),
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('verified');
+
+    // YellowFruit renamed one side after the game: the stored team id resolves nowhere.
+    const renamedName = 'Renamed Academy';
+    const renamed = yftFixtureText().split(scored.left).join(renamedName);
+    expect(renamed).not.toBe(yftFixtureText());
+    await act(async () => {
+      rendered.result.current.loadFileContents(null, renamed);
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('conflict');
+    rendered.unmount();
+  });
+
+  test('a deleted game returns to needs-import instead of staying verified', async () => {
+    const scored = scoredFixtureGame();
+    relayResults = [
+      relayRow(
+        'res-v',
+        '2026-09-11T15:00:00Z',
+        syntheticResultQbj(scored, 'Match_probe', scored.lp, scored.rp),
+      ),
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('verified');
+
+    // YellowFruit deleted the round holding the game — the team rename case above already
+    // proves an unresolvable roster reads as conflict. Here the roster still resolves but
+    // the game is gone, so the honest answer is needs-import, not verified.
+    const parsedWhole = rawFixture();
+    const wholeRounds = rawRounds(parsedWhole);
+    const withoutFirst = wholeRounds.slice(1);
+    expect(withoutFirst.length).toBeGreaterThan(0);
+    const tournament =
+      parsedWhole.objects.find((entry) => entry.type === 'Tournament') ?? parsedWhole.objects[0];
+    const phases = tournament?.phases as Record<string, unknown>[];
+    phases[0].rounds = withoutFirst;
+    await act(async () => {
+      rendered.result.current.loadFileContents(null, JSON.stringify(parsedWhole));
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('needs-import');
+    rendered.unmount();
+  });
+
+  test('a correction supersedes its original, then verifies once YellowFruit holds it', async () => {
+    const scored = scoredFixtureGame();
+    const original = syntheticResultQbj(scored, 'Match_corr', scored.lp, scored.rp);
+    relayResults = [relayRow('res-orig', '2026-09-11T15:00:00Z', original)];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.resultVerification('res-orig')).toBe('verified');
+
+    const corrected = syntheticResultQbj(scored, 'Match_corr', scored.lp + 5, scored.rp);
+    relayResults = [
+      relayRow('res-orig', '2026-09-11T15:00:00Z', original),
+      relayRow('res-corr', '2026-09-11T15:20:00Z', corrected),
+    ];
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.correctionGroups).toHaveLength(1);
+    expect(rendered.result.current.correctionGroups[0].latestResultId).toBe('res-corr');
+    expect(rendered.result.current.resultVerification('res-orig')).toBe('superseded');
+    expect(rendered.result.current.resultVerification('res-corr')).toBe('needs-import');
+
+    // YellowFruit imports the correction: the stored game now carries the new score.
+    const parsed = rawFixture();
+    let edited = false;
+    for (const round of rawRounds(parsed)) {
+      const matches = (Array.isArray(round.matches) ? round.matches : []).filter(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+      );
+      for (const match of matches) {
+        const sides = (Array.isArray(match.match_teams) ? match.match_teams : []).filter(
+          (entry): entry is Record<string, unknown> =>
+            typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+        );
+        const team = sides[0]?.team as Record<string, unknown> | undefined;
+        if (team?.['$ref'] === scored.left && sides[0]?.points === scored.lp) {
+          sides[0].points = scored.lp + 5;
+          edited = true;
+        }
+      }
+    }
+    expect(edited).toBe(true);
+    await act(async () => {
+      rendered.result.current.loadFileContents(null, JSON.stringify(parsed));
+    });
+    expect(rendered.result.current.resultVerification('res-corr')).toBe('verified');
+    expect(rendered.result.current.resultVerification('res-orig')).toBe('superseded');
+    rendered.unmount();
+  });
+
+  test('duplicate games in the file are the file’s own ambiguity', async () => {
+    const scored = scoredFixtureGame();
+    relayResults = [
+      relayRow(
+        'res-v',
+        '2026-09-11T15:00:00Z',
+        syntheticResultQbj(scored, 'Match_probe', scored.lp, scored.rp),
+      ),
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('verified');
+
+    const parsed = rawFixture();
+    const rounds = rawRounds(parsed);
+    const matches = (Array.isArray(rounds[0]?.matches) ? rounds[0].matches : []).filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === 'object' && entry !== null && !Array.isArray(entry),
+    );
+    expect(matches.length).toBeGreaterThan(0);
+    matches.push({ ...matches[0], id: `${String(matches[0].id)}~dup` });
+    rounds[0].matches = matches;
+    await act(async () => {
+      rendered.result.current.loadFileContents(null, JSON.stringify(parsed));
+    });
+    expect(rendered.result.current.resultVerification('res-v')).toBe('conflict');
+    rendered.unmount();
+  });
+
+  test('an on-disk edit blocks publishing until reload; a same-content save stays silent', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+    expect(rendered.result.current.state.yftSha256).toMatch(/^[0-9a-f]{64}$/);
+
+    // YellowFruit saved real edits while Bridge was open.
+    const edited = yftFixtureText().replace('Hebron Academy', 'Hebron Academy North');
+    yftSourceContents = edited;
+    yftSourceMetadata = { byteLength: 9999, modifiedMs: 2000 };
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(rendered.result.current.notice?.message).toMatch(/changed on disk/);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(true);
+    expect(mirrorCalls()).toBe(0);
+
+    // Reloading is transactional and explicit — plans survive — and publishing proceeds.
+    await act(async () => {
+      rendered.result.current.loadFileContents('/tournaments/spring.yft', edited);
+    });
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    await waitFor(() => expect(rendered.result.current.state.yftSource?.modifiedMs).toBe(2000));
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(1);
+    expect(rendered.result.current.state.lastPublication).toMatchObject({ revision: 1 });
+    expect(rendered.result.current.state.lastPublication?.yftSha256).toBe(
+      rendered.result.current.state.yftSha256,
+    );
+    rendered.unmount();
+  });
+
+  test('a same-content save adopts the new baseline without refusing', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    yftSourceContents = yftFixtureText();
+    yftSourceMetadata = { byteLength: 4242, modifiedMs: 2000 };
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(1);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    expect(rendered.result.current.state.yftSource?.modifiedMs).toBe(2000);
+    rendered.unmount();
+  });
+  test('a missing source file refuses publication without latching', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // The file disappears, as in the transient window of an atomic editor save: even the
+    // metadata read fails now.
+    yftSourceMetadataThrows = true;
+    yftSourceContents = null;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/could not be verified on disk/);
+    // A transient gap is not a change: nothing latches, so the next publish re-proves.
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+
+    yftSourceMetadataThrows = false;
+    yftSourceContents = yftFixtureText();
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(1);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    rendered.unmount();
+  });
+
+  test('an unreadable file with matching metadata refuses publication', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // Metadata still matches the baseline, but the bytes cannot be re-read. The pre-publish
+    // proof hashes unconditionally, so it cannot mistake this for current.
+    yftSourceContents = null;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.message).toMatch(/could not be verified on disk/);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a same-tick edit with unchanged metadata is caught by the pre-publish hash', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // Same size, same timestamp tick, different bytes: the metadata shortcut would call
+    // this current, so only the unconditional hash can catch it.
+    const edited = yftFixtureText().replace('Hebron Academy', 'Hebron AcademX');
+    expect(edited).not.toBe(yftFixtureText());
+    expect(edited.length).toBe(yftFixtureText().length);
+    yftSourceContents = edited;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.message).toMatch(/changed on disk/);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(true);
+    rendered.unmount();
+  });
+
+  test('the source poller flags an edit while the app is open', async () => {
+    vi.useFakeTimers();
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rendered.result.current.state.yftSource).not.toBeNull();
+
+    const edited = yftFixtureText().replace('Hebron Academy', 'Hebron Academy North');
+    yftSourceContents = edited;
+    yftSourceMetadata = { byteLength: 9999, modifiedMs: 2000 };
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(true);
+    expect(rendered.result.current.notice?.message).toMatch(/changed on disk/);
+    rendered.unmount();
+  });
+
+  test('the recovery package carries the source hash for incident recovery', async () => {
+    const primary = await setUpTournament();
+    const sha = primary.result.current.state.yftSha256;
+    expect(sha).toMatch(/^[0-9a-f]{64}$/);
+    await act(async () => {
+      expect(
+        await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop'),
+      ).toBe(true);
+    });
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    expect(backup.result.current.state.yftSha256).toBe(sha);
     backup.unmount();
   });
 });

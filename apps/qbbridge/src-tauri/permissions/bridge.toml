@@ -6,6 +6,8 @@ commands.allow = [
   "choose_result_folder",
   "choose_assignment_folder",
   "open_recovery_package",
+  "yellowfruit_source_metadata",
+  "read_yellowfruit_source",
   "write_recovery_package",
   "store_relay_credential",
   "load_relay_credential",

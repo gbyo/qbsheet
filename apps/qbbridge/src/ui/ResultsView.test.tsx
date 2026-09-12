@@ -12,6 +12,13 @@ function bridgeWhileBatchSaving(): BridgeApi {
     relay: null,
     scorerReadiness: null,
     yftPath: null,
+    yftFingerprint: null,
+    yftSha256: null,
+    yftSource: null,
+    yftChangedOnDisk: false,
+    lastRecoveryPackage: null,
+    recoverySource: null,
+    lastPublication: null,
     tournamentName: null,
     rooms: [],
     selectedRoundId: null,
@@ -78,6 +85,8 @@ function bridgeWhileBatchSaving(): BridgeApi {
     saveNewResults: vi.fn(async () => undefined),
     saveResult: vi.fn(async () => undefined),
     markResultImported: vi.fn(),
+    correctionGroups: [],
+    resultVerification: () => 'unknown' as const,
     unmarkResultImported: vi.fn(),
     needsImportCount: 0,
     pollResults: vi.fn(async () => undefined),
@@ -170,5 +179,30 @@ describe('ResultsView save controls', () => {
     await user.selectOptions(screen.getByLabelText('Show'), 'needs-import');
     expect(screen.getByText('/results/saved.qbj')).toBeInTheDocument();
     expect(screen.queryByText('/results/imported.qbj')).not.toBeInTheDocument();
+  });
+
+  test('shows verification per result and warns against importing a group twice', () => {
+    const { result } = scoredResultDocument();
+    const correction = JSON.parse(JSON.stringify(result)) as typeof result;
+    const bridge = bridgeForResults([
+      {
+        resultId: 'orig',
+        qbj: result,
+        receivedAt: '2026-09-11T15:01:00Z',
+        savedPath: '/results/orig.qbj',
+      },
+      {
+        resultId: 'corr',
+        qbj: correction,
+        receivedAt: '2026-09-11T15:02:00Z',
+        savedPath: '/results/corr.qbj',
+      },
+    ]);
+    bridge.correctionGroups = [{ key: 'match-1', resultIds: ['orig', 'corr'], latestResultId: 'corr' }];
+    bridge.resultVerification = (resultId: string) => (resultId === 'orig' ? 'superseded' : 'unknown');
+
+    render(<ResultsView bridge={bridge} />);
+    expect(screen.getAllByText('Superseded by correction').length).toBeGreaterThan(0);
+    expect(screen.getByText(/only the newest file per game/)).toBeInTheDocument();
   });
 });
