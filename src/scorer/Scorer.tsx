@@ -2292,6 +2292,29 @@ export default function Scorer(props: IScorerProps) {
     setDialog('procedure');
   };
 
+  /**
+   * Whether the engine would accept a timeout right now, asked before the menu offers one.
+   *
+   * The same guard the dialog's record goes through, probed per team the way the dialog records:
+   * the dialog already disables an exhausted team, but only the engine knows the phase is wrong
+   * or the tossup already answered — and a refused tap there used to close the dialog as if the
+   * timeout were running.
+   */
+  const timeoutAvailable = (['left', 'right'] as const).some(
+    (team) =>
+      canApplyScoreEvent(
+        { format, setup, procedure },
+        events.events,
+        {
+          id: 'timeout-availability-probe',
+          type: 'timeout-start',
+          questionNumber: currentQuestion,
+          team,
+        },
+        game,
+      ).ok,
+  );
+
   // `onRedo` intentionally closes over the scorer's event/motion refs; it is invoked by the menu,
   // never during this render. The hooks linter cannot see that boundary through the pure menu
   // factory, so keep the call explicit rather than weakening the feedback path.
@@ -2305,6 +2328,7 @@ export default function Scorer(props: IScorerProps) {
     lastPlayed: lastPlayedQuestion(game),
     keyboardEnabled,
     submitting,
+    timeoutAvailable,
     canRedo: events.canRedo,
     onRedo: redoWithFeedback,
     canDownloadForms: onDownloadForm !== undefined,
