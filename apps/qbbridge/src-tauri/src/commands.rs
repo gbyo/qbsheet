@@ -399,15 +399,18 @@ pub async fn write_result_file_durable(
     }
     let safe_name = safe_file_name(&file_name)?;
     let final_path = directory.join(&safe_name);
-    if !overwrite && final_path.exists() {
-        return Err(CommandError::new(
+    let exists_error = || {
+        CommandError::new(
             "result_file_exists",
             format!(
                 "{} already exists in that folder and was not replaced. \
                  Move or rename it, or choose another output folder.",
                 final_path.file_name().unwrap_or_default().to_string_lossy()
             ),
-        ));
+        )
+    };
+    if !overwrite && final_path.exists() {
+        return Err(exists_error());
     }
     // Same folder, so the rename below is atomic: no copy across filesystems, no partial final.
     // The suffix keeps the temporary name a plain file name that can never collide with a real
@@ -461,8 +464,20 @@ pub async fn write_result_file_durable(
                 }
             }
         } else {
-            std::fs::rename(&temporary_path, &final_path)
-                .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+            // Atomic no-replace publish: link(2) fails when the final name exists instead
+            // of replacing it, closing the check-then-rename race between concurrent saves.
+            // Same folder, so always the same filesystem on every platform; the upfront
+            // exists() check above stays as the friendly fast path.
+            std::fs::hard_link(&temporary_path, &final_path).map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    exists_error()
+                } else {
+                    CommandError::new("write_failed", error.to_string())
+                }
+            })?;
+            // The temporary name served its purpose; the final name holds the only link
+            // now. The outer error path removes the temporary name on failure either way.
+            let _ = std::fs::remove_file(&temporary_path);
         }
         sync_directory(&directory)?;
         Ok(())
@@ -506,21 +521,27 @@ pub async fn read_result_file(path: String) -> CommandResult<String> {
             "That result file is larger than any result QBBridge writes. It was left unsaved.",
         )
     };
-    // Bound the read before allocating: metadata is cheap, and a racing grower is caught by
-    // the second check after the read.
-    if std::fs::metadata(&path)
-        .map(|metadata| metadata.len())
-        .unwrap_or(0)
-        > MAX_RESULT_BYTES as u64
-    {
-        return Err(oversize());
-    }
-    let bytes = std::fs::read(&path).map_err(|_| {
+    // Bound the read before allocating: take at most one byte past the limit, so a racing
+    // grower can cost no more than the limit plus one no matter how large the file becomes
+    // between the open and the read. A metadata pre-check alone could not do that — the
+    // file may grow after the metadata is read but before the bytes are allocated.
+    let mut file = std::fs::File::open(&path).map_err(|_| {
         CommandError::new(
             "result_unreadable",
             "That result file could not be read back. It was left unsaved.",
         )
     })?;
+    let mut bytes = Vec::new();
+    use std::io::Read as _;
+    file.by_ref()
+        .take(MAX_RESULT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            CommandError::new(
+                "result_unreadable",
+                "That result file could not be read back. It was left unsaved.",
+            )
+        })?;
     if bytes.len() > MAX_RESULT_BYTES {
         return Err(oversize());
     }
@@ -865,6 +886,55 @@ mod tests {
                 true,
             ))
             .expect("an explicit durable overwrite should succeed");
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn concurrent_exclusive_writes_publish_exactly_once() {
+        use super::write_result_file_durable;
+        let (directory, _runtime) = durable_test_dir("concurrent");
+        let folder = directory.to_string_lossy().into_owned();
+        let name = "R04_Room-101_A_vs_B_a81f3c.result.qbj".to_owned();
+        // Hammer the same final name from several threads at once: the losers must be
+        // refused with result_file_exists, never silently replace the winner. Each thread
+        // drives its own runtime because the publish fence lives in the filesystem, not
+        // in any await point.
+        let outcomes: Vec<_> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|index| {
+                    let folder = folder.clone();
+                    let name = name.clone();
+                    scope.spawn(move || {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .build()
+                            .unwrap();
+                        runtime.block_on(write_result_file_durable(
+                            folder,
+                            name,
+                            format!("{{\"writer\":{index}}}"),
+                            false,
+                        ))
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("a writer thread must not panic"))
+                .collect()
+        });
+        let succeeded = outcomes.iter().filter(|outcome| outcome.is_ok()).count();
+        assert_eq!(succeeded, 1, "exactly one concurrent writer must win");
+        for outcome in &outcomes {
+            if let Err(error) = outcome {
+                assert_eq!(error.code, "result_file_exists");
+            }
+        }
+        let bytes = std::fs::read(directory.join(&name)).unwrap();
+        assert!(
+            bytes.starts_with(b"{\"writer\":"),
+            "the winner's bytes must survive intact"
+        );
 
         std::fs::remove_dir_all(&directory).ok();
     }
