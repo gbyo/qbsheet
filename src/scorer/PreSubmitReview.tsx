@@ -14,66 +14,11 @@
 import { useState } from 'react';
 import { LeftOrRight } from '../scoring/types';
 import { IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
-import { IDerivedGame, IDerivedTeam } from '../scoring/deriveGame';
+import { IDerivedGame } from '../scoring/deriveGame';
 import { protestStatusLabels, protestSubjectLabels } from './ProcedureDialogs';
 import SpreadsheetCopyPanel from './SpreadsheetCopyPanel';
 import { DisplaySideMapping, identityDisplaySideMapping, mapSides } from './DisplaySideMapping';
-
-/** "+15" / "-5". */
-function signed(value: number): string {
-  return value > 0 ? `+${value}` : String(value);
-}
-
-/** Every player's line, as a scoresheet has it. */
-function TeamLines(props: { format: IScorekeeperFormat; team: IDerivedTeam }) {
-  const { format, team } = props;
-  const played = team.players.filter((player) => player.tossupsHeard > 0 || player.answerCounts.size > 0);
-
-  return (
-    <section className="scorer-check-team" aria-label={`${team.name} players`}>
-      <h3 className="scorer-check-team-name">
-        {team.name} <span className="scorer-check-team-score">{team.points}</span>
-      </h3>
-      <table className="scorer-check-table">
-        <thead>
-          <tr>
-            <th scope="col">Player</th>
-            <th scope="col">TUH</th>
-            {format.answerTypes.map((answerType) => (
-              <th key={answerType.index} scope="col">
-                {signed(answerType.value)}
-              </th>
-            ))}
-            <th scope="col">Pts</th>
-          </tr>
-        </thead>
-        <tbody>
-          {played.map((player) => (
-            <tr key={player.name}>
-              <th scope="row">{player.name}</th>
-              <td>{player.tossupsHeard}</td>
-              {format.answerTypes.map((answerType) => (
-                <td key={answerType.index}>{player.answerCounts.get(answerType.index) ?? 0}</td>
-              ))}
-              <td>{player.points}</td>
-            </tr>
-          ))}
-          {played.length === 0 && (
-            <tr>
-              <td colSpan={format.answerTypes.length + 3}>Nobody on this team heard a tossup.</td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-      <p className="scorer-check-breakdown">
-        Tossups {team.tossupPoints} · Bonuses {team.bonusPoints}
-        {team.bonusBouncebackPoints > 0 && <> · Bouncebacks {team.bonusBouncebackPoints}</>}
-        {team.lightningPoints > 0 && <> · Lightning {team.lightningPoints}</>}
-        {team.adjustmentPoints !== 0 && <> · Adjustment {signed(team.adjustmentPoints)}</>}
-      </p>
-    </section>
-  );
-}
+import TeamStatLines from './TeamStatLines';
 
 /** The break the room has stopped at. */
 export function HalftimeCheck(props: {
@@ -145,6 +90,22 @@ export interface IPreSubmitReviewProps {
   spreadsheetTsv?: string;
   spreadsheetGameLabel?: string;
   spreadsheetSuggestedTabName?: string;
+  /**
+   * Plain-text stat sheet for a room transcribing this result by hand. See `serializeDerivedStats`.
+   *
+   * A presentation of the same derived game the tables above draw, offered next to the canonical
+   * spreadsheet copy rather than in place of it.
+   */
+  statsTsv?: string;
+  /**
+   * Show the player lines rather than leaving them behind a disclosure.
+   *
+   * True for a game this device created on its own, where this screen *is* the stat sheet: there is
+   * no tournament control to submit to and no other place the room will see these numbers. A
+   * connected room is deciding whether to send a score it already agreed on, and keeps the quieter
+   * screen it had.
+   */
+  statsExpanded?: boolean;
   /** Screen order only; canonical event and result semantics are unchanged. */
   displaySides?: DisplaySideMapping;
 }
@@ -164,6 +125,8 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
     spreadsheetTsv,
     spreadsheetGameLabel,
     spreadsheetSuggestedTabName,
+    statsTsv,
+    statsExpanded = false,
     displaySides = identityDisplaySideMapping,
   } = props;
   // Confirmation belongs to the exact derived result shown here. A correction, undo, or redo
@@ -323,15 +286,25 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
         </section>
       )}
 
-      <details className="scorer-review-section">
+      <details className="scorer-review-section" open={statsExpanded}>
         <summary>Player stats</summary>
         <p className="scorer-review-section-note">
           Use these lines to check tossups heard and individual scoring.
         </p>
         <div className="scorer-check-teams">
-          <TeamLines format={format} team={game[displaySides.left]} />
-          <TeamLines format={format} team={game[displaySides.right]} />
+          <TeamStatLines format={format} team={game[displaySides.left]} />
+          <TeamStatLines format={format} team={game[displaySides.right]} />
         </div>
+        {statsTsv !== undefined && (
+          <SpreadsheetCopyPanel
+            tsv={statsTsv}
+            gameLabel={spreadsheetGameLabel ?? `${game.left.name} v ${game.right.name}`}
+            idPrefix="scorer-stats"
+            actionLabel="Copy stats"
+            guidance="plain"
+            panelLabel="Stat sheet copy"
+          />
+        )}
       </details>
 
       <details className="scorer-review-section scorer-review-export">

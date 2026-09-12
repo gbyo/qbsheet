@@ -7,9 +7,11 @@ import {
 } from '../game/ManualGame';
 import {
   IScoringRulesInput,
+  basicRulesInput,
   readScoringRulesInput,
   scoringRulesInputDefaults,
 } from '../qbj/ScoringRulesInput';
+import { basicScoringRulesDefaults } from '../qbj/BasicScoringRules';
 
 export type DraftSaveState = 'not-saved' | 'saved' | 'failed';
 
@@ -127,6 +129,57 @@ export function hasMeaningfulAdvancedOptions(options: IManualRoundOptions): bool
     options.substitutionPolicy !== manualRoundOptionDefaults.substitutionPolicy ||
     (options.breaks?.length ?? 0) > 0
   );
+}
+
+/**
+ * Rule sets common enough to be worth one press, stated as numbers.
+ *
+ * These are entries in the same preset list a scorekeeper's own saved setups appear in: choosing one
+ * fills the rules fields, which remain editable, and nothing downstream knows a preset was used.
+ * They change no default — a fresh form still opens on `scoringRulesInputDefaults` — and they name
+ * no tournament, for the reason `BasicScoringRulesEditor` gives: a format is what its numbers say,
+ * and a preset called after an organization would be wrong the first time that organization edited
+ * its rules.
+ *
+ * They exist because the alternative, on the morning a tournament's scoring system has gone down, is
+ * six rooms each typing four numbers into a form under time pressure.
+ */
+export interface IBuiltInRulePreset {
+  id: string;
+  label: string;
+  rules: IScoringRulesInput;
+  options: IManualRoundOptions;
+}
+
+export function builtInManualRulePresets(): IBuiltInRulePreset[] {
+  return [
+    {
+      id: 'builtin-powers-15-10-no-negs-20',
+      label: '15/10, bonuses, no negs, 20 tossups',
+      rules: basicRulesInput({
+        ...basicScoringRulesDefaults,
+        tossupValue: 10,
+        powerValue: 15,
+        negValue: undefined,
+        useBonuses: true,
+        tossupCount: 20,
+      }),
+      options: { ...manualRoundOptionDefaults },
+    },
+    {
+      id: 'builtin-10-negs-20',
+      label: '10 with negs, bonuses, 20 tossups',
+      rules: basicRulesInput({
+        ...basicScoringRulesDefaults,
+        tossupValue: 10,
+        powerValue: undefined,
+        negValue: -5,
+        useBonuses: true,
+        tossupCount: 20,
+      }),
+      options: { ...manualRoundOptionDefaults },
+    },
+  ];
 }
 
 export interface IManualGamePreset {

@@ -46,12 +46,16 @@
  * time carries the primary treatment. Everything else — reviewing the score, a rematch, exports —
  * sits quietly underneath.
  */
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { IStoredGameRecord, gameRequiresHandoff, isDelivered, needsHandoff } from '../game/GameStore';
 import { isManualGame } from '../game/GameDefinition';
 import { gamePackageLabel } from '../game/GamePackage';
 import { downloadExcelScoresheet } from '../integrations/file/ExcelDownload';
 import { downloadFile, qbjFileContents, qbjFileName } from '../integrations/file/QbjDownload';
+import deriveGame from '../scoring/deriveGame';
+import { serializeDerivedStats } from '../scoring/statsSheet';
+import SpreadsheetCopyPanel from '../scorer/SpreadsheetCopyPanel';
+import TeamStatLines from '../scorer/TeamStatLines';
 
 function timeOfDay(iso: string | undefined): string {
   if (!iso) return '';
@@ -108,6 +112,31 @@ export default function CompletionScreen(props: {
   const [rematching, setRematching] = useState(false);
   const rematchInFlight = useRef(false);
   const score = record.finalScore;
+  /**
+   * The finished game, for a result nobody is waiting for.
+   *
+   * A standalone game's last screen is the room's stat sheet: there is no tournament control that
+   * will publish these numbers, so the player lines are on it rather than in a file somebody has to
+   * open. Derived through the ordinary pipeline from the record's own setup and events — the same
+   * call `progressLabel` makes — so nothing here is a second calculation. A record the engine
+   * cannot read still gets the rest of the screen.
+   */
+  const standalone = isManualGame(record.package);
+  const statSheet = useMemo(() => {
+    if (!standalone) return null;
+    try {
+      const format = record.package.scorekeeperFormat;
+      if (!format) return null;
+      const game = deriveGame(format, record.setup, record.events);
+      return {
+        format,
+        game,
+        tsv: serializeDerivedStats(format, game, { gameLabel: gamePackageLabel(record.package) }),
+      };
+    } catch {
+      return null;
+    }
+  }, [record.events, record.package, record.setup, standalone]);
   const connected = record.serverDelivery !== 'none';
   /** Tournament control has it, and did not ask for anything else. */
   const delivered = isDelivered(record);
@@ -448,6 +477,42 @@ export default function CompletionScreen(props: {
       </div>
 
       {handoffStep}
+
+      {statSheet && (
+        <section className="shell-section completion-stats" aria-label="Final statistics">
+          <h2 className="shell-heading">Final statistics</h2>
+          <p className="shell-hint">
+            {statSheet.game.tossupsRead} tossup{statSheet.game.tossupsRead === 1 ? '' : 's'} heard. These are
+            the lines to read out or transcribe; copying them puts the same table on the clipboard.
+          </p>
+          <div className="scorer-check-teams">
+            <TeamStatLines format={statSheet.format} team={statSheet.game.left} />
+            <TeamStatLines format={statSheet.format} team={statSheet.game.right} />
+          </div>
+          <div className="shell-actions completion-stats-actions">
+            <SpreadsheetCopyPanel
+              tsv={statSheet.tsv}
+              gameLabel={gamePackageLabel(record.package)}
+              idPrefix="completion-stats"
+              actionLabel="Copy stats"
+              guidance="plain"
+              panelLabel="Stat sheet copy"
+            />
+          </div>
+          {/*
+            The portable file, beside the numbers it contains.
+
+            Files & exports stays the quiet disclosure it is for a game nobody is waiting for, and
+            this is not a second export path — it is the same `download`. It is named for what it is
+            here, a backup of the stat sheet on screen, rather than duplicating the name of the
+            button inside the disclosure: two buttons reading "Download QBJ copy" on one screen is a
+            scorekeeper deciding which one is the real one.
+          */}
+          <button type="button" className="shell-button" onClick={download}>
+            Download QBJ backup
+          </button>
+        </section>
+      )}
 
       <div className="completion-secondary">
         <button
