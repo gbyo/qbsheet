@@ -502,7 +502,7 @@ function RoundRow({ shuttle, roundNumber }: { shuttle: Shuttle; roundNumber: num
                         room={room}
                         roundNumber={game.roundNumber}
                         candidates={scan.candidates}
-                        selectedFileName={scan.selectedFileName}
+                        selectedCandidateId={scan.selectedCandidateId}
                       />
                     ) : null}
                     {scan && !scan.chosen && scan.untouchedCopies.length > 0 ? (
@@ -528,13 +528,14 @@ function RoundRow({ shuttle, roundNumber }: { shuttle: Shuttle; roundNumber: num
   );
 }
 
-function DuplicateChooser({
+/** Exported for tests only; the app renders it through the round table above. */
+export function DuplicateChooser({
   shuttle,
   matchId,
   room,
   roundNumber,
   candidates,
-  selectedFileName,
+  selectedCandidateId,
 }: {
   shuttle: Shuttle;
   matchId: string;
@@ -547,7 +548,7 @@ function DuplicateChooser({
     scoreLine: string;
     modifiedMs?: number;
   }[];
-  selectedFileName?: string;
+  selectedCandidateId?: string;
 }) {
   return (
     <div className="duplicate-box">
@@ -558,7 +559,7 @@ function DuplicateChooser({
             <input
               type="radio"
               name={`choice-${matchId}`}
-              checked={candidate.fileName === selectedFileName}
+              checked={candidate.candidateId === selectedCandidateId}
               onChange={() => void shuttle.chooseResult(matchId, candidate.candidateId)}
             />{' '}
             <span className="mono">{candidate.fileName}</span> · {candidate.scoreLine} · in{' '}

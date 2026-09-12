@@ -331,15 +331,19 @@ export function orderPrelimPool(input: {
     previousNaN = Number.isNaN(standing.winShare);
   });
 
-  // Consecutive teams sharing a rank label cannot be ordered by this data.
+  // Consecutive teams sharing one rank label cannot be ordered by this data. The label —
+  // not the `=` suffix — delimits the group: `1= A, 1= B, 3= C, 3= D` is two manual ties.
   const tiedGroups: string[][] = [];
   let group: string[] = [];
+  let groupLabel = '';
   for (const standing of standings) {
-    if (standing.rankLabel.endsWith('=')) {
+    const tied = standing.rankLabel.endsWith('=');
+    if (tied && standing.rankLabel === groupLabel) {
       group.push(standing.teamId);
     } else {
       if (group.length > 1) tiedGroups.push(group);
-      group = [];
+      group = tied ? [standing.teamId] : [];
+      groupLabel = tied ? standing.rankLabel : '';
     }
   }
   if (group.length > 1) tiedGroups.push(group);
@@ -489,7 +493,8 @@ export function assignSlotLabels(
   if (manualOrder && manualOrder.length > 0) {
     const remaining = [...manualOrder];
     for (const group of order.tiedGroups) {
-      const taken = group.filter((teamId) => remaining.includes(teamId));
+      // In the operator's order, not the file's: this is the whole point of the manual list.
+      const taken = remaining.filter((teamId) => group.includes(teamId));
       if (taken.length === 0) continue;
       if (taken.length !== group.length) {
         return {

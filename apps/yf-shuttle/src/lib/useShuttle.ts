@@ -283,7 +283,7 @@ export function useShuttle() {
 
   const writeManifestToDisk = useCallback(async (path: string, next: ShuttleManifest): Promise<boolean> => {
     try {
-      await writeTextFile(joinPath(path, MANIFEST_FILE_NAME), manifestFileContents(next), {
+      await writeTextFile(path, MANIFEST_FILE_NAME, manifestFileContents(next), {
         overwrite: true,
       });
       return true;
@@ -352,6 +352,16 @@ export function useShuttle() {
           return;
         }
         const fingerprint = tournamentIdentityFingerprint(loaded.tournament);
+        if (fingerprint !== pendingRecovery.manifest.tournamentFingerprint) {
+          // Same event id, different teams or seeds: the recovered assignments were built
+          // for another shape. Refuse to activate them; the pending project stays parked so
+          // the operator can open the matching file instead.
+          setNotice({
+            kind: 'bad',
+            message: `“${loaded.tournament.name}” has the same event id, but its teams or seeds differ from the reopened project — its ${pendingRecovery.manifest.assignments.length} assignments were generated for the old shape and will not activate. Open the matching YellowFruit file, or recreate the project.`,
+          });
+          return;
+        }
         setSession({
           yftPath: opened.path,
           yftText: opened.contents,
@@ -361,24 +371,28 @@ export function useShuttle() {
         setPendingRecovery(null);
         setReport(null);
         setPlayoffs(null);
-        const drifted = fingerprint !== pendingRecovery.manifest.tournamentFingerprint;
         setNotice({
-          kind: drifted ? 'warn' : 'good',
-          message: drifted
-            ? `Reopened the project at “${pendingRecovery.path}”. The roster or seeds changed since it was created, so verify the assignments before scoring — then rescan the OUT folders.`
-            : `Reopened the project at “${pendingRecovery.path}” with ${pendingRecovery.manifest.assignments.length} games. Rescan the OUT folders to pick up where the rooms left off.`,
+          kind: 'good',
+          message: `Reopened the project at “${pendingRecovery.path}” with ${pendingRecovery.manifest.assignments.length} games. Rescan the OUT folders to pick up where the rooms left off.`,
         });
         return;
       }
       const existing = readSession().manifest;
-      const adoption = resolveManifestOnLoad(existing, loaded.tournament.id);
+      const adoption = resolveManifestOnLoad(
+        existing,
+        loaded.tournament.id,
+        tournamentIdentityFingerprint(loaded.tournament),
+      );
       if (!adoption.keep) {
         setSession({ yftPath: opened.path, yftText: opened.contents });
         setReport(null);
         setPlayoffs(null);
         setNotice({
           kind: 'warn',
-          message: `“${loaded.tournament.name}” is a different tournament, so the previous project was set aside. Create its folders to begin.`,
+          message:
+            adoption.reason === 'drifted'
+              ? `“${loaded.tournament.name}” carries the same event id, but its teams or seeds changed — the previous project's assignments were built for the old shape, so it was set aside. Create the folders again to regenerate them.`
+              : `“${loaded.tournament.name}” is a different tournament, so the previous project was set aside. Create its folders to begin.`,
         });
         return;
       }
@@ -542,9 +556,10 @@ export function useShuttle() {
         let identical = 0;
         for (const entry of built) {
           const room = rooms.find((candidate) => candidate.slotId === entry.game.slotId)!;
-          const target = joinPath(path, room.folderName, IN_DIR_NAME, entry.fileName);
+          const relative = joinPath(room.folderName, IN_DIR_NAME, entry.fileName);
+          const target = joinPath(path, relative);
           try {
-            await writeTextFile(target, entry.bytes);
+            await writeTextFile(path, relative, entry.bytes);
             outcomes[entry.matchId] = 'written';
           } catch (error) {
             if (!String(messageOf(error)).includes('already exists')) throw error;
@@ -723,8 +738,9 @@ export function useShuttle() {
         for (const write of plan.writes) {
           const chosen = byMatchId.get(write.matchId)!;
           await copyFile(
-            joinPath(projectPath, chosen.folderName, OUT_DIR_NAME, chosen.fileName),
-            joinPath(folder, write.destName),
+            projectPath,
+            joinPath(chosen.folderName, OUT_DIR_NAME, chosen.fileName),
+            joinPath(IMPORT_ROOT_NAME, importFolderName(roundNumber), write.destName),
             true,
           );
         }
@@ -807,7 +823,7 @@ export function useShuttle() {
         const filled = fillScheduledMatches(yftText, fills);
         if (!filled.ok) throw new Error(filled.error);
         const copyName = `${safeFolderName(tournament.name, 'Tournament')} - Round ${roundNumber} updated.yft`;
-        await writeTextFile(joinPath(projectPath, copyName), filled.text, { overwrite: true });
+        await writeTextFile(projectPath, copyName, filled.text, { overwrite: true });
         const parts = [
           `Wrote “${copyName}” with ${filled.filled.length} filled game${filled.filled.length === 1 ? '' : 's'}. Open the copy in YellowFruit and verify it — the original file is untouched.`,
         ];
@@ -1058,9 +1074,10 @@ export function useShuttle() {
       let identical = 0;
       for (const entry of built) {
         const room = manifest.rooms.find((candidate) => candidate.slotId === entry.game.slotId)!;
-        const target = joinPath(projectPath, room.folderName, IN_DIR_NAME, entry.fileName);
+        const relative = joinPath(room.folderName, IN_DIR_NAME, entry.fileName);
+        const target = joinPath(projectPath, relative);
         try {
-          await writeTextFile(target, entry.bytes);
+          await writeTextFile(projectPath, relative, entry.bytes);
           outcomes[entry.matchId] = 'written';
           written += 1;
         } catch (error) {

@@ -110,6 +110,44 @@ export function parseManifest(
   if (!Array.isArray(value.rooms) || !Array.isArray(value.assignments)) {
     return { ok: false, error: 'The project file is missing its rooms or assignments.' };
   }
+  // Every assignment must be whole: a record missing its round, teams, or filename would
+  // reconcile results against empty strings and report valid files as mismatches. Reject
+  // the project with the exact record named rather than running on a corrupt one.
+  const assignments: ManifestAssignment[] = [];
+  for (const [index, entry] of (value.assignments as unknown[]).entries()) {
+    const problems: string[] = [];
+    const record = (entry ?? {}) as Record<string, unknown>;
+    if (typeof record.matchId !== 'string' || !record.matchId) problems.push('matchId');
+    if (
+      typeof record.roundNumber !== 'number' ||
+      !Number.isSafeInteger(record.roundNumber) ||
+      record.roundNumber <= 0
+    ) {
+      problems.push('roundNumber');
+    }
+    if (typeof record.roundId !== 'string' || !record.roundId) problems.push('roundId');
+    if (typeof record.slotId !== 'string' || !record.slotId) problems.push('slotId');
+    if (typeof record.leftTeamId !== 'string' || !record.leftTeamId) problems.push('leftTeamId');
+    if (typeof record.rightTeamId !== 'string' || !record.rightTeamId) problems.push('rightTeamId');
+    if (typeof record.fileName !== 'string' || !record.fileName) problems.push('fileName');
+    if (record.source !== undefined && record.source !== 'yft') problems.push('source');
+    if (problems.length > 0) {
+      return {
+        ok: false,
+        error: `The project file's assignment ${index + 1} is corrupt (bad ${problems.join(', ')}). Restore ${MANIFEST_FILE_NAME} from a copy, or recreate the project.`,
+      };
+    }
+    assignments.push({
+      matchId: record.matchId as string,
+      roundNumber: record.roundNumber as number,
+      roundId: record.roundId as string,
+      slotId: record.slotId as string,
+      leftTeamId: record.leftTeamId as string,
+      rightTeamId: record.rightTeamId as string,
+      fileName: record.fileName as string,
+      ...(record.source === 'yft' ? { source: 'yft' as const } : {}),
+    });
+  }
   return {
     ok: true,
     manifest: {
@@ -131,23 +169,7 @@ export function parseManifest(
               ? room.folderName
               : sanitizeFileSegment(room.displayName, room.slotId),
         })),
-      assignments: (value.assignments as ManifestAssignment[])
-        .filter(
-          (entry) =>
-            typeof entry?.matchId === 'string' &&
-            typeof entry?.roundNumber === 'number' &&
-            typeof entry?.slotId === 'string',
-        )
-        .map((entry) => ({
-          matchId: entry.matchId,
-          roundNumber: entry.roundNumber,
-          roundId: typeof entry.roundId === 'string' ? entry.roundId : '',
-          slotId: entry.slotId,
-          leftTeamId: typeof entry.leftTeamId === 'string' ? entry.leftTeamId : '',
-          rightTeamId: typeof entry.rightTeamId === 'string' ? entry.rightTeamId : '',
-          fileName: typeof entry.fileName === 'string' ? entry.fileName : '',
-          ...(entry.source === 'yft' ? { source: 'yft' as const } : {}),
-        })),
+      assignments,
       ...(value.playoffSlots && typeof value.playoffSlots === 'object'
         ? { playoffSlots: value.playoffSlots as Record<string, string> }
         : {}),
@@ -178,16 +200,20 @@ export function manifestFileContents(manifest: ShuttleManifest): string {
 /**
  * Decide what happens to the working project when a (possibly different) file is opened.
  *
- * The same tournament keeps its project: rooms, assignments, duplicate choices, and confirmed
- * playoff slots all still name real games. A different tournament never inherits them — the
- * caller starts fresh and says so, rather than silently reusing another event's project.
+ * The same event keeps its project only when the identity fingerprint still matches: rooms,
+ * assignments, duplicate choices, and confirmed playoff slots all name real games of that
+ * shape. A different tournament — or the same id with changed teams or seeds — never
+ * inherits them, because the assignments were generated for another shape. The caller
+ * starts fresh and says so.
  */
 export function resolveManifestOnLoad(
   existing: ShuttleManifest | null | undefined,
   tournamentId: string,
-): { keep: true; manifest: ShuttleManifest } | { keep: false } {
-  if (existing && existing.tournamentId === tournamentId) return { keep: true, manifest: existing };
-  return { keep: false };
+  tournamentFingerprint: string,
+): { keep: true; manifest: ShuttleManifest } | { keep: false; reason: 'different' | 'drifted' } {
+  if (!existing || existing.tournamentId !== tournamentId) return { keep: false, reason: 'different' };
+  if (existing.tournamentFingerprint !== tournamentFingerprint) return { keep: false, reason: 'drifted' };
+  return { keep: true, manifest: existing };
 }
 
 export function assignmentByMatchId(

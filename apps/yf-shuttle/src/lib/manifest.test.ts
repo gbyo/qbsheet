@@ -60,7 +60,60 @@ describe('the manifest', () => {
     expect(empty.ok).toBe(false);
   });
 
-  test('reloading the same tournament keeps the project; a different one starts fresh', () => {
+  test('a corrupt assignment rejects the project instead of loading half a game', () => {
+    const good = {
+      matchId: 'm1',
+      roundNumber: 1,
+      roundId: 'r1',
+      slotId: 'slot-gold-1',
+      leftTeamId: 'a',
+      rightTeamId: 'b',
+      fileName: 'R01.qbj',
+    };
+    const manifest = createManifest({
+      tournamentId: 'Tournament_X',
+      tournamentName: 'Wildcat',
+      tournamentFingerprint: 'abc123',
+      rooms: [],
+    });
+    const withAssignments = (assignments: unknown[]) =>
+      parseManifest(
+        JSON.stringify({ ...JSON.parse(manifestFileContents(manifest)), assignments }),
+      );
+    // The whole record parses.
+    expect(withAssignments([good]).ok).toBe(true);
+    // Each required field, missing or mistyped, names the record and the field.
+    const { slotId: _noSlot, ...noSlot } = good;
+    const { rightTeamId: _noRight, ...noRight } = good;
+    void _noSlot;
+    void _noRight;
+    const cases: [string, unknown][] = [
+      ['matchId', { ...good, matchId: '' }],
+      ['roundNumber', { ...good, roundNumber: 0 }],
+      ['roundNumber', { ...good, roundNumber: 1.5 }],
+      ['roundNumber', { ...good, roundNumber: '1' }],
+      ['roundId', { ...good, roundId: '' }],
+      ['slotId', noSlot],
+      ['leftTeamId', { ...good, leftTeamId: '' }],
+      ['rightTeamId', noRight],
+      ['fileName', { ...good, fileName: '' }],
+      ['source', { ...good, source: 'preset' }],
+    ];
+    for (const [field, broken] of cases) {
+      const parsed = withAssignments([broken]);
+      expect(parsed.ok, field).toBe(false);
+      if (!parsed.ok) {
+        expect(parsed.error).toMatch(/assignment 1 is corrupt/);
+        expect(parsed.error).toMatch(new RegExp(field));
+      }
+    }
+    // The record index points at the bad one, not the first.
+    const parsed = withAssignments([good, { ...good, matchId: 'm2', fileName: '' }]);
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error).toMatch(/assignment 2 is corrupt/);
+  });
+
+  test('retention needs the event id and the team/seed fingerprint', () => {
     const manifest = createManifest({
       tournamentId: 'Tournament_X',
       tournamentName: 'Wildcat',
@@ -68,11 +121,23 @@ describe('the manifest', () => {
       rooms: [],
     });
     manifest.selectedResults['m1'] = 'game-b.qbj';
-    const kept = resolveManifestOnLoad(manifest, 'Tournament_X');
+    const kept = resolveManifestOnLoad(manifest, 'Tournament_X', 'abc123');
     expect(kept.keep).toBe(true);
     if (kept.keep) expect(kept.manifest.selectedResults['m1']).toBe('game-b.qbj');
-    expect(resolveManifestOnLoad(manifest, 'Tournament_Other')).toEqual({ keep: false });
-    expect(resolveManifestOnLoad(null, 'Tournament_X')).toEqual({ keep: false });
+    // A different tournament never inherits the project.
+    expect(resolveManifestOnLoad(manifest, 'Tournament_Other', 'abc123')).toEqual({
+      keep: false,
+      reason: 'different',
+    });
+    expect(resolveManifestOnLoad(null, 'Tournament_X', 'abc123')).toEqual({
+      keep: false,
+      reason: 'different',
+    });
+    // Same id but changed teams/seeds: the assignments were built for another shape.
+    expect(resolveManifestOnLoad(manifest, 'Tournament_X', 'changed')).toEqual({
+      keep: false,
+      reason: 'drifted',
+    });
   });
 
   test('only written-or-identical games enter the manifest, keyed by Match id', () => {

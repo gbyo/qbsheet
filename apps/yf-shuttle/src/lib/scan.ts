@@ -105,8 +105,11 @@ export interface AssignmentScan {
   partialCopies: ParsedResult[];
   /** Files carrying this Match id but no scoring content. Never results. */
   untouchedCopies: ParsedResult[];
-  /** The operator's choice among duplicates, when it still points at a file on disk. */
-  selectedFileName?: string;
+  /**
+   * The operator's duplicate choice as a physical candidate identity (`folder/file#hash`),
+   * when it still points at a file on disk. Display uses the candidate's own fileName.
+   */
+  selectedCandidateId?: string;
   /** Whether the current selection resolves to exactly one candidate on disk. */
   needsChoice: boolean;
   /** Non-blocking: the game was found outside its own room's OUT folder. */
@@ -502,16 +505,16 @@ export function reconcileScan(manifest: ShuttleManifest, files: ScannedInputFile
     if (scan.candidates.length > 1) {
       const chosen = resolveStored();
       if (chosen) {
-        scan.selectedFileName = chosen.fileName;
+        scan.selectedCandidateId = chosen.candidateId;
         scan.chosen = chosen;
         scan.needsChoice = false;
       } else {
-        scan.selectedFileName = undefined;
+        scan.selectedCandidateId = undefined;
         scan.chosen = undefined;
         scan.needsChoice = true;
       }
     } else if (scan.candidates.length === 1) {
-      scan.selectedFileName = scan.candidates[0].fileName;
+      scan.selectedCandidateId = scan.candidates[0].candidateId;
       scan.chosen = scan.candidates[0];
       scan.needsChoice = false;
     }

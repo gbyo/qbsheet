@@ -123,14 +123,63 @@ describe('prelim ordering', () => {
     const reversed = [...group].reverse();
     const resolved = assignSlotLabels(order, 'F', reversed);
     if (!resolved.ok) throw new Error(resolved.error);
-    const positions = group.map(
-      (teamId) => Object.entries(resolved.slots).find(([, id]) => id === teamId)![0],
-    );
-    // The reversed group occupies the same label positions, in the operator's order.
-    const reordered = [...positions].sort();
-    expect(reordered).toEqual(positions);
+    // The operator's order fills the tied label positions exactly: F1 takes the first name
+    // given, F2 the second — not whatever the file happened to list first.
+    expect(resolved.slots.F1).toBe(reversed[0]);
+    expect(resolved.slots.F2).toBe(reversed[1]);
     const partial = assignSlotLabels(order, 'F', [group[0]]);
     expect(partial.ok).toBe(false);
+  });
+
+  test('adjacent ties at different ranks stay separate groups', () => {
+    // Seeds 1 and 4 go 2–0, seeds 5 and 8 go 1–1, seeds 9 and 12 go 0–2: three rank
+    // labels, three manual ties. Keying groups on the `=` suffix alone would merge all
+    // six into one; the rank label keeps 1=/3=/5= apart.
+    const results = [
+      { round: 1, leftSeed: 1, rightSeed: 9, leftPoints: 300, rightPoints: 200 },
+      { round: 1, leftSeed: 1, rightSeed: 5, leftPoints: 300, rightPoints: 200 },
+      { round: 1, leftSeed: 4, rightSeed: 12, leftPoints: 300, rightPoints: 200 },
+      { round: 1, leftSeed: 4, rightSeed: 8, leftPoints: 300, rightPoints: 200 },
+      { round: 1, leftSeed: 5, rightSeed: 12, leftPoints: 300, rightPoints: 200 },
+      { round: 1, leftSeed: 8, rightSeed: 9, leftPoints: 300, rightPoints: 200 },
+    ];
+    const tournament = loadedSynthetic({ prelimResults: results });
+    const order = orderPrelimPool({
+      tournament,
+      prelimPhaseId: prelimPhaseIdOf(tournament),
+      poolId: poolIdOf(tournament, 'FuzzyWuzzy'),
+    });
+    expect(order.standings.map((standing) => standing.rankLabel)).toEqual([
+      '1=',
+      '1=',
+      '3=',
+      '3=',
+      '5=',
+      '5=',
+    ]);
+    expect(order.tiedGroups.map((group) => [...group].sort())).toEqual([
+      ['Team_Seed1', 'Team_Seed4'],
+      ['Team_Seed5', 'Team_Seed8'],
+      ['Team_Seed12', 'Team_Seed9'],
+    ]);
+    // Each group resolves to its own label positions: F1/F2, then F3/F4, then F5/F6.
+    const resolved = assignSlotLabels(order, 'F', [
+      'Team_Seed4',
+      'Team_Seed1',
+      'Team_Seed8',
+      'Team_Seed5',
+      'Team_Seed12',
+      'Team_Seed9',
+    ]);
+    if (!resolved.ok) throw new Error(resolved.error);
+    expect(resolved.slots).toMatchObject({
+      F1: 'Team_Seed4',
+      F2: 'Team_Seed1',
+      F3: 'Team_Seed8',
+      F4: 'Team_Seed5',
+      F5: 'Team_Seed12',
+      F6: 'Team_Seed9',
+    });
   });
 
   test('a forfeit decides the game without feeding tossup numbers', () => {

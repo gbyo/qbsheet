@@ -202,7 +202,7 @@ export function loadShuttleTournament(contents: string): LoadTournamentResult {
     const parsed: unknown = JSON.parse(contents);
     const root = parsed as JsonObject;
     const objects = Array.isArray(root.objects) ? (root.objects as JsonObject[]) : [];
-    const found = objects.find((entry) => entry?.type === 'Tournament') ?? objects[0];
+    const found = objects.find((entry) => entry?.type === 'Tournament');
     if (!found || typeof found !== 'object')
       return { ok: false, errors: ['That file has no tournament in it.'] };
     rawTournament = found;

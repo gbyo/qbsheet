@@ -99,20 +99,40 @@ export interface WriteOptions {
   overwrite?: boolean;
 }
 
-/** Write one text file. Exclusive unless `overwrite` says otherwise. */
+/**
+ * Write one text file inside the project. Exclusive unless `overwrite` says otherwise.
+ *
+ * The write is scoped: `projectRoot` is the tournament folder and `relativePath` is the
+ * path inside it (for example `Rooms/IN/game.qbj`). The native side canonicalizes the
+ * root and refuses anything that would land outside it.
+ */
 export async function writeTextFile(
-  path: string,
+  projectRoot: string,
+  relativePath: string,
   contents: string,
   options: WriteOptions = {},
 ): Promise<void> {
   requireNative('Writing a file');
-  await invoke('write_text_file', { path, contents, overwrite: options.overwrite ?? false });
+  await invoke('write_text_file', {
+    projectRoot,
+    relativePath,
+    contents,
+    overwrite: options.overwrite ?? false,
+  });
 }
 
-/** Copy one file byte-for-byte. The bytes are never parsed, reserialized, or altered. */
-export async function copyFile(src: string, dst: string, overwrite = false): Promise<void> {
+/**
+ * Copy one file byte-for-byte inside the project. The bytes are never parsed, reserialized,
+ * or altered. Both ends are project-relative and must resolve inside `projectRoot`.
+ */
+export async function copyFile(
+  projectRoot: string,
+  relativeSrc: string,
+  relativeDst: string,
+  overwrite = false,
+): Promise<void> {
   requireNative('Copying a file');
-  await invoke('copy_file', { src, dst, overwrite });
+  await invoke('copy_file', { projectRoot, relativeSrc, relativeDst, overwrite });
 }
 
 /**

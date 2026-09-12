@@ -1,9 +1,10 @@
 //! Dumb filesystem operations for YF Shuttle.
 //!
 //! Every command takes explicit paths and bytes and reports what happened. Nothing here parses
-//! QBJ, plans a schedule, or remembers anything between calls. Path traversal is refused at
-//! the two points where a composed name meets the disk: directory creation joins each entry
-//! under the chosen base, and file writes join one file name under an existing directory.
+//! QBJ, plans a schedule, or remembers anything between calls. Mutating commands are scoped
+//! to an explicit project root: the root is canonicalized, every relative segment is checked,
+//! and the canonicalized parent must still sit inside the root — so `..`, absolute paths,
+//! and symlink escapes are refused, and an existing symlink at the target is never followed.
 
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -128,13 +129,9 @@ fn safe_segment(name: &str) -> CommandResult<PathBuf> {
 /// directories are left alone. Never deletes anything.
 #[tauri::command]
 pub async fn create_directories(base: String, dirs: Vec<String>) -> CommandResult<()> {
-    let base = PathBuf::from(base);
-    if !base.is_dir() {
-        return Err(CommandError::new(
-            "no_such_folder",
-            "That project folder no longer exists. Choose it again.",
-        ));
-    }
+    // Canonicalized like every other root: a symlinked parent cannot redirect the new
+    // project tree somewhere the operator did not pick.
+    let base = canonical_root(&base)?;
     if dirs.len() > 64 {
         return Err(CommandError::new(
             "too_many_folders",
@@ -194,35 +191,106 @@ pub async fn read_text_file(path: String) -> CommandResult<String> {
     read_text_file_inner(Path::new(&path)).map_err(|error| CommandError::new("read_failed", error))
 }
 
-/// Write one text file into an existing directory.
+/// Canonicalize a root folder, refusing when it is missing or not a directory.
+///
+/// Canonicalizing first means a symlinked project folder still bounds correctly: every
+/// later `starts_with` check compares against where the root really is.
+fn canonical_root(root: &str) -> CommandResult<PathBuf> {
+    let canonical = PathBuf::from(root).canonicalize().map_err(|_| {
+        CommandError::new(
+            "no_such_folder",
+            "That project folder no longer exists. Choose it again.",
+        )
+    })?;
+    if !canonical.is_dir() {
+        return Err(CommandError::new(
+            "no_such_folder",
+            "That project folder no longer exists. Choose it again.",
+        ));
+    }
+    Ok(canonical)
+}
+
+/// Join project-relative segments onto a canonical root without touching the filesystem.
+///
+/// Every segment passes [`safe_segment`], so `.`, empty parts, absolute paths, and
+/// traversal fail closed here. The result may point at a file that does not exist yet;
+/// callers canonicalize the parent (or the target) before trusting it.
+fn resolve_inside(root: &Path, relative_path: &str) -> CommandResult<PathBuf> {
+    if relative_path.is_empty() {
+        return Err(CommandError::new(
+            "invalid_path",
+            "That project path is not a plain folder or file name.",
+        ));
+    }
+    let mut target = root.to_path_buf();
+    for segment in relative_path.split('/') {
+        target = target.join(safe_segment(segment)?);
+    }
+    Ok(target)
+}
+
+/// Resolve a project-relative path to an absolute target inside the project.
+///
+/// The root is canonicalized first, so a symlinked project folder still bounds correctly.
+/// Every segment passes [`safe_segment`], the parent must already exist (callers create
+/// project folders before writing), and the canonicalized parent must still sit inside the
+/// root. An existing symlink at the target is refused rather than followed, whether or not
+/// this call would overwrite.
+fn scoped_target(project_root: &str, relative_path: &str) -> CommandResult<PathBuf> {
+    scoped_target_in(&canonical_root(project_root)?, relative_path)
+}
+
+/// [`scoped_target`] against an already-canonical root, for commands that resolved it once
+/// and scope several paths against it.
+fn scoped_target_in(root: &Path, relative_path: &str) -> CommandResult<PathBuf> {
+    let target = resolve_inside(root, relative_path)?;
+    let parent = target.parent().ok_or_else(|| {
+        CommandError::new("invalid_path", "That project path has no parent folder.")
+    })?;
+    let canonical_parent = parent.canonicalize().map_err(|_| {
+        CommandError::new(
+            "no_such_folder",
+            "That folder no longer exists. Create the project folders again.",
+        )
+    })?;
+    if !canonical_parent.starts_with(root) {
+        return Err(CommandError::new(
+            "invalid_path",
+            "That file is outside the tournament project folder.",
+        ));
+    }
+    if let Ok(meta) = std::fs::symlink_metadata(&target) {
+        if meta.file_type().is_symlink() {
+            return Err(CommandError::new(
+                "invalid_path",
+                "That file is a link, and links are never followed here.",
+            ));
+        }
+    }
+    Ok(target)
+}
+
+/// Write one text file inside the project, into an existing directory.
 ///
 /// Exclusive unless `overwrite` says otherwise. Assignments are always written exclusively:
 /// a file already in a room's IN folder may be in a scorekeeper's hands, and replacing it
 /// because the bytes differ would swap the game under them. The manifest and the derived
 /// YellowFruit import batches are the only files written with overwrite, on explicit action.
 #[tauri::command]
-pub async fn write_text_file(path: String, contents: String, overwrite: bool) -> CommandResult<()> {
+pub async fn write_text_file(
+    project_root: String,
+    relative_path: String,
+    contents: String,
+    overwrite: bool,
+) -> CommandResult<()> {
     if contents.len() > MAX_WRITE_BYTES {
         return Err(CommandError::new(
             "file_too_large",
             "That document is implausibly large.",
         ));
     }
-    let path = PathBuf::from(path);
-    let parent = path.parent().ok_or_else(|| {
-        CommandError::new("invalid_path", "That project path has no parent folder.")
-    })?;
-    if !parent.is_dir() {
-        return Err(CommandError::new(
-            "no_such_folder",
-            "That folder no longer exists. Create the project folders again.",
-        ));
-    }
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| CommandError::new("invalid_path", "That file name is not usable."))?;
-    let target = parent.join(safe_segment(file_name)?);
+    let target = scoped_target(&project_root, &relative_path)?;
 
     let mut options = std::fs::OpenOptions::new();
     options.write(true);
@@ -260,13 +328,7 @@ pub async fn write_text_file(path: String, contents: String, overwrite: bool) ->
 /// batch planner needs to replace its own stale copies.
 #[tauri::command]
 pub async fn remove_import_file(import_root: String, relative_path: String) -> CommandResult<()> {
-    let root = PathBuf::from(import_root);
-    if !root.is_dir() {
-        return Err(CommandError::new(
-            "no_such_folder",
-            "The YellowFruit Import folder no longer exists.",
-        ));
-    }
+    let root = canonical_root(&import_root)?;
     let mut segments = relative_path.split('/');
     let (round_folder, file_name, end) = (segments.next(), segments.next(), segments.next());
     let (Some(round_folder), Some(file_name), None) = (round_folder, file_name, end) else {
@@ -287,38 +349,96 @@ pub async fn remove_import_file(import_root: String, relative_path: String) -> C
             "Only result files can be removed.",
         ));
     }
-    let target = root
-        .join(safe_segment(round_folder)?)
-        .join(safe_segment(file_name)?);
-    if !target.is_file() {
-        return Err(CommandError::new("no_such_file", "That derived file is already gone."));
+    let round_dir = root.join(safe_segment(round_folder)?);
+    let canonical_round = round_dir.canonicalize().map_err(|_| {
+        CommandError::new(
+            "no_such_folder",
+            "The YellowFruit Import folder no longer exists.",
+        )
+    })?;
+    if !canonical_round.starts_with(root.as_path()) {
+        return Err(CommandError::new(
+            "invalid_path",
+            "Only files inside the YellowFruit Import tree can be removed.",
+        ));
     }
-    std::fs::remove_file(&target).map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+    let target = canonical_round.join(safe_segment(file_name)?);
+    // A link at the target is refused, never followed — and a missing file reports the goal
+    // state ("already gone") rather than an error the caller must untangle.
+    match std::fs::symlink_metadata(&target) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            return Err(CommandError::new(
+                "invalid_path",
+                "That file is a link, and links are never followed here.",
+            ));
+        }
+        Ok(meta) if meta.is_file() => {}
+        _ => {
+            return Err(CommandError::new(
+                "no_such_file",
+                "That derived file is already gone.",
+            ))
+        }
+    }
+    std::fs::remove_file(&target)
+        .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
     Ok(())
 }
 
-/// Copy one file byte-for-byte. The bytes are never parsed, reserialized, or altered.
+/// Copy one file byte-for-byte inside the project. The bytes are never parsed, reserialized,
+/// or altered.
+///
+/// Both ends are project-relative and both must resolve inside the root, so a copy can
+/// neither pull bytes from outside the project nor spill them outside it. The exclusive
+/// case is atomic: the destination is created with `create_new`, so two racing copies
+/// cannot both believe they won.
 #[tauri::command]
-pub async fn copy_file(src: String, dst: String, overwrite: bool) -> CommandResult<()> {
-    let dst = PathBuf::from(dst);
-    if dst.exists() && !overwrite {
+pub async fn copy_file(
+    project_root: String,
+    relative_src: String,
+    relative_dst: String,
+    overwrite: bool,
+) -> CommandResult<()> {
+    let root = canonical_root(&project_root)?;
+    let src = resolve_inside(&root, &relative_src)?;
+    let canonical_src = src.canonicalize().map_err(|_| {
+        CommandError::new(
+            "no_such_file",
+            "That result file is no longer in its OUT folder.",
+        )
+    })?;
+    if !canonical_src.starts_with(root.as_path()) || !canonical_src.is_file() {
         return Err(CommandError::new(
-            "file_exists",
-            format!(
-                "{} already exists and was not replaced.",
-                dst.file_name().unwrap_or_default().to_string_lossy()
-            ),
+            "invalid_path",
+            "Results can only be copied from inside the tournament project folder.",
         ));
     }
-    if let Some(parent) = dst.parent() {
-        if !parent.is_dir() {
-            return Err(CommandError::new(
-                "no_such_folder",
-                "That folder no longer exists. Prepare the batch again.",
-            ));
-        }
+    let dst = scoped_target_in(&root, &relative_dst)?;
+    if !overwrite {
+        let mut reader = std::fs::File::open(&canonical_src)
+            .map_err(|error| CommandError::new("read_failed", error.to_string()))?;
+        let mut writer = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&dst)
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    CommandError::new(
+                        "file_exists",
+                        format!(
+                            "{} already exists and was not replaced.",
+                            dst.file_name().unwrap_or_default().to_string_lossy()
+                        ),
+                    )
+                } else {
+                    CommandError::new("write_failed", error.to_string())
+                }
+            })?;
+        std::io::copy(&mut reader, &mut writer)
+            .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+        return Ok(());
     }
-    std::fs::copy(&src, &dst)
+    std::fs::copy(&canonical_src, &dst)
         .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
     Ok(())
 }
@@ -345,7 +465,8 @@ mod tests {
     fn import_removal_shape_is_narrow() {
         fn shape_ok(relative: &str) -> bool {
             let mut segments = relative.split('/');
-            let (round_folder, file_name, end) = (segments.next(), segments.next(), segments.next());
+            let (round_folder, file_name, end) =
+                (segments.next(), segments.next(), segments.next());
             let (Some(round_folder), Some(file_name), None) = (round_folder, file_name, end) else {
                 return false;
             };
@@ -361,5 +482,29 @@ mod tests {
         assert!(!shape_ok("Notes/plan.qbj"));
         assert!(!shape_ok("../outside.qbj"));
         assert!(!shape_ok("Round 1/notes.txt"));
+    }
+
+    #[test]
+    fn scoped_target_keeps_safe_paths_and_refuses_escape() {
+        use super::{resolve_inside, scoped_target, scoped_target_in};
+        let dir = std::env::temp_dir().join(format!("yf-shuttle-scope-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("YellowFruit Import/Round 1")).unwrap();
+        let root = dir.canonicalize().unwrap();
+
+        // A derived result under the import tree is accepted, through either entry point.
+        let target =
+            scoped_target_in(&root, "YellowFruit Import/Round 1/R01 - 319 - A vs B.qbj").unwrap();
+        assert!(target.starts_with(root.as_path()));
+        let same = scoped_target(root.to_str().unwrap(), "YellowFruit Import/Round 1/out.qbj");
+        assert!(same.is_ok());
+
+        // Traversal, absolute paths, and links all fail closed. (resolve_inside only
+        // scopes the path; the caller checks the file shape separately.)
+        assert!(scoped_target_in(&root, "../outside.qbj").is_err());
+        assert!(scoped_target_in(&root, "/etc/passwd").is_err());
+        assert!(resolve_inside(&root, "YellowFruit Import/./Round 1/x.qbj").is_err());
+        assert!(resolve_inside(&root, "YellowFruit Import/Round 1").is_ok());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

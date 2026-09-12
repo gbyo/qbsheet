@@ -67,12 +67,22 @@ vi.mock('./native', async () => {
         throw missing(target);
       }
     },
-    writeTextFile: async (target: string, contents: string, options?: { overwrite?: boolean }) => {
+    writeTextFile: async (
+      projectRoot: string,
+      relativePath: string,
+      contents: string,
+      options?: { overwrite?: boolean },
+    ) => {
+      const target = path.join(projectRoot, relativePath);
+      if (!target.startsWith(projectRoot)) throw new Error('That file is outside the project folder.');
       if (!options?.overwrite && fs.existsSync(target)) throw alreadyExists(target);
       fs.mkdirSync(path.dirname(target), { recursive: true });
       fs.writeFileSync(target, contents);
     },
-    copyFile: async (src: string, dst: string, overwrite = false) => {
+    copyFile: async (projectRoot: string, relativeSrc: string, relativeDst: string, overwrite = false) => {
+      const src = path.join(projectRoot, relativeSrc);
+      const dst = path.join(projectRoot, relativeDst);
+      if (!dst.startsWith(projectRoot)) throw new Error('That file is outside the project folder.');
       if (!overwrite && fs.existsSync(dst)) throw alreadyExists(dst);
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.copyFileSync(src, dst);
@@ -380,6 +390,19 @@ describe('tournament-day rehearsal', () => {
     });
     expect(revived.result.current.notice?.kind).toBe('bad');
     expect(revived.result.current.pendingRecovery?.path).toBe(projectPath);
+
+    // Same event id but a renamed team: the shape drifted, so the recovered assignments
+    // stay parked instead of activating against the wrong teams.
+    const driftedText = baseText.replaceAll('Team_Seed12', 'Team_Seed12X');
+    expect(driftedText).not.toBe(baseText);
+    scripted.files.push({ path: '/wildcat-drifted.yft', contents: driftedText });
+    await act(async () => {
+      await revived.result.current.openYellowFruit();
+    });
+    expect(revived.result.current.notice?.kind).toBe('bad');
+    expect(revived.result.current.notice?.message).toContain('teams or seeds differ');
+    expect(revived.result.current.pendingRecovery?.path).toBe(projectPath);
+    expect(revived.result.current.manifest).toBeNull();
 
     // The matching file activates the full project: rooms, games, choices, prepared rounds.
     scripted.files.push({ path: '/wildcat-updated.yft', contents: updatedFullText });
