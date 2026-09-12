@@ -18,12 +18,13 @@
  */
 
 export type RelayConnection =
-  'connected' | 'unreachable' | 'credential-invalid' | 'unsupported' | 'unconfigured';
+  'connected' | 'unreachable' | 'credential-invalid' | 'unsupported' | 'unclaimed' | 'unconfigured';
 
 export type RelayWarningCode =
   | 'relay-unreachable'
   | 'unsupported-version'
   | 'credential-invalid'
+  | 'relay-unclaimed'
   | 'publication-failing'
   | 'quota-warning'
   | 'lan-unavailable'
@@ -139,6 +140,15 @@ export async function fetchRelayManagementHealth(
   }
   if (response.status === 403) {
     throw new RelayHealthError('unclaimed', 'That relay has not been claimed yet.');
+  }
+  // The management health route gates on the tournament before the credential, so an unknown
+  // id — or a relay that was never claimed — arrives here as 404, not 403. Calling that a
+  // network outage would send the director to wait on LAN fallback when the fix is the id.
+  if (response.status === 404) {
+    throw new RelayHealthError(
+      'unclaimed',
+      'That relay has no tournament with this id. Check the tournament id, or claim the relay first.',
+    );
   }
   if (!response.ok) {
     throw new RelayHealthError('unexpected', `The relay health check failed (${response.status}).`);
@@ -260,6 +270,14 @@ export function deriveRelayStatus(input: RelayStatusInput): RelayStatusView {
       warnings.push({
         code: 'credential-invalid',
         message: 'The stored relay credential was refused. Re-claim or rotate it before the next round.',
+      });
+      break;
+    case 'unclaimed':
+      relayLabel = 'Not claimed';
+      warnings.push({
+        code: 'relay-unclaimed',
+        message:
+          'That relay has no tournament with this id. Check the tournament id, or claim the relay — waiting on the network cannot fix it.',
       });
       break;
     case 'unsupported':
