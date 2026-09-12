@@ -18,6 +18,7 @@ const nodeTestFiles = [
   'tests/PortableQbj.test.ts',
   'tests/PracticeScenario.test.ts',
   'tests/QbjAssignment.test.ts',
+  'tests/QbtcpFileState.test.ts',
   'tests/QbjScoringRulesMalformed.test.ts',
   'tests/Qbtcp.test.ts',
   'tests/QbtcpPreferredTransport.test.ts',

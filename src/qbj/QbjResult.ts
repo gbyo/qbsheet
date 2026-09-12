@@ -23,11 +23,13 @@
  * named `"4"`, not `"Round 4"` — the human string lives in the definition and is used for filenames
  * and display. Getting this wrong produces a file that looks right and imports as an error.
  *
- * # Partial is the same document
+ * # Partial is the same document, marked
  *
- * A mid-game download is this function with a game that is not over. Nothing is special-cased:
- * `toQbjMatch` is explicitly safe on a game in progress, and a partial document is a truthful
- * description of a partial game. What a partial file is *not* is a recovery journal — see
+ * A mid-game download is this function with a game that is not over. Nothing structural is
+ * special-cased: `toQbjMatch` is explicitly safe on a game in progress, and a partial document
+ * is a truthful description of a partial game. The one difference is the declared lifecycle
+ * state in `_qbtcp.file_state` (`partial` vs `complete`), so a mid-game copy is never mistaken
+ * for a finished result downstream. What a partial file is *not* is a recovery journal — see
  * `PortableQbj` and `docs/QBJ_ASSIGNMENT_PROFILE.md` for that boundary.
  */
 import { IGameDefinition, playerIdentityKey } from '../game/GameDefinition';
@@ -37,7 +39,7 @@ import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
 import { LeftOrRight } from '../scoring/types';
 import { IQbjDocument, QbjObject, buildQbjDocument, isPlainObject } from './QbjSerialization';
 import { writeQbjScoringRules } from './QbjScoringRules';
-import { withQbtcpExtension } from './QbtcpExtension';
+import { withFileState, withQbtcpExtension } from './QbtcpExtension';
 
 /** A stable id when the source had none. Derived from content, never random, so exports are stable. */
 function fallbackId(prefix: string, ...parts: string[]): string {
@@ -94,7 +96,11 @@ export interface IQbjResultOptions {
   format: IScorekeeperFormat;
   game: IDerivedGame;
   meta?: IQbjMatchMeta;
-  /** A game still being played. Only affects nothing structural; kept for the caller's clarity. */
+  /**
+   * A game still being played. Marks the document's `_qbtcp.file_state` as `partial` rather
+   * than `complete`, so a mid-game copy is never mistaken for a finished result downstream.
+   * Nothing structural changes: a partial document is a truthful description of a partial game.
+   */
   partial?: boolean;
 }
 
@@ -183,7 +189,12 @@ export function buildResultDocument(options: IQbjResultOptions): IQbjDocument {
   const { definition, format } = options;
   const identity = definition.qbjIdentity;
 
-  const match = buildResultMatch(options);
+  // The lifecycle state is declared here, at the moment of writing — the one place that knows
+  // whether this document left through the finished path or the mid-game path.
+  const match = withFileState(
+    buildResultMatch(options),
+    options.partial ? 'partial' : 'complete',
+  ) as QbjObject;
 
   const teamObjects: QbjObject[] = [];
   /*

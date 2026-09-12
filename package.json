@@ -7,7 +7,8 @@
     "apps/director",
     "apps/live-web",
     "apps/qbbridge",
-    "packages/*"
+    "packages/*",
+    "apps/yf-shuttle"
   ],
   "repository": {
     "type": "git",
@@ -71,7 +72,12 @@
     "qblive:demo": "node scripts/qblive-demo/server.mjs",
     "qblive:fixtures": "npm run fixtures --workspace=@qbsheet/qblive-protocol",
     "qblive:conformance": "npm run conformance --workspace=@qbsheet/qblive-conformance --",
-    "qblive:load": "npm run load --workspace=@qbsheet/qblive-conformance --"
+    "qblive:load": "npm run load --workspace=@qbsheet/qblive-conformance --",
+    "yf-shuttle:dev": "npm run dev --workspace=@qbsheet/yf-shuttle",
+    "yf-shuttle:build": "npm run build --workspace=@qbsheet/yf-shuttle",
+    "yf-shuttle:test": "npm run test --workspace=@qbsheet/yf-shuttle",
+    "yf-shuttle:tauri:dev": "npm run tauri:dev --workspace=@qbsheet/yf-shuttle",
+    "yf-shuttle:tauri:build": "npm run tauri:build --workspace=@qbsheet/yf-shuttle"
   },
   "dependencies": {
     "@fontsource/ibm-plex-sans": "^5.2.5",

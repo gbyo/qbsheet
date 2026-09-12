@@ -1,0 +1,13 @@
+[[permission]]
+identifier = "shuttle-operations"
+description = "Allow the YF Shuttle window to use native file and folder operations."
+commands.allow = [
+  "open_yellowfruit_file",
+  "choose_project_parent",
+  "create_directories",
+  "list_directory",
+  "read_text_file",
+  "write_text_file",
+  "copy_file",
+  "remove_import_file",
+]

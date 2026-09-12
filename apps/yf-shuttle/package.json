@@ -1,0 +1,45 @@
+{
+  "name": "@qbsheet/yf-shuttle",
+  "version": "0.1.0",
+  "private": true,
+  "description": "YF Shuttle: a small offline desktop helper that carries YellowFruit games to QBSheet Scorer as files and brings the completed QBJs back for YellowFruit import",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1426",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:check": "tauri info"
+  },
+  "dependencies": {
+    "@qbsheet/tournament-formats": "0.1.0",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-opener": "^2.5.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "@qbsheet/ui": "0.1.0",
+    "react-aria-components": "^1.21.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^26.4.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitejs/plugin-react": "^6.1.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^8.0.0",
+    "vitest": "^4.1.11"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

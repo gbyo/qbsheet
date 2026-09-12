@@ -1,0 +1,286 @@
+/*
+ * YF Shuttle: the layout one small utility needs, and nothing else.
+ *
+ * Every value comes from `@qbsheet/ui` tokens. Controls, notices, badges and dialogs are the
+ * shared components; what is left here is page rhythm — the header, the sections, the dense
+ * round list, the room rows. No sidebar, no cards, no gradients, no decorative anything.
+ */
+
+@import '@qbsheet/ui/tokens.css';
+@import '@qbsheet/ui/components.css';
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--qbs-surface-page);
+  color: var(--qbs-text);
+  font-family: var(--qbs-font-sans);
+  font-size: var(--qbs-text-body);
+  line-height: var(--qbs-leading-normal);
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ Header */
+
+.titlebar {
+  display: flex;
+  align-items: baseline;
+  gap: var(--qbs-space-3);
+  padding: var(--qbs-space-3) var(--qbs-space-4);
+  background: var(--qbs-surface);
+  border-bottom: 1px solid var(--qbs-border);
+}
+
+.titlebar h1 {
+  margin: 0;
+  font-size: var(--qbs-text-title);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.titlebar .subtle {
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
+}
+
+.titlebar .titlebar-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--qbs-space-2);
+}
+
+/* -------------------------------------------------------------------- Page */
+
+main {
+  flex: 1;
+  padding: var(--qbs-space-4);
+  max-width: 880px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.page-notices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--qbs-space-2);
+  margin-bottom: var(--qbs-space-4);
+}
+
+section.panel {
+  background: var(--qbs-surface);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  padding: var(--qbs-space-4) var(--qbs-space-5);
+  margin-bottom: var(--qbs-space-4);
+}
+
+section.panel h2 {
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-meta);
+  font-weight: var(--qbs-weight-semibold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--qbs-text-muted);
+}
+
+section.panel p {
+  margin: 0 0 var(--qbs-space-3);
+}
+
+section.panel p:last-child {
+  margin-bottom: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--qbs-space-2);
+  flex-wrap: wrap;
+}
+
+.row + .row {
+  margin-top: var(--qbs-space-2);
+}
+
+.muted {
+  color: var(--qbs-text-muted);
+}
+
+.mono {
+  font-family: var(--qbs-font-mono);
+  font-size: var(--qbs-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--qbs-space-2);
+  margin-bottom: var(--qbs-space-3);
+}
+
+.field-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.side-label {
+  margin: var(--qbs-space-3) 0 var(--qbs-space-2);
+  font-size: var(--qbs-text-secondary);
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-muted);
+}
+
+/* -------------------------------------------------------------- Round list */
+
+.round-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--qbs-border);
+}
+
+.round-list > li {
+  border-bottom: 1px solid var(--qbs-border);
+}
+
+.round-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--qbs-space-3);
+  width: 100%;
+  padding: var(--qbs-space-2) 0;
+  background: none;
+  border: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.round-summary .round-name {
+  min-width: 5.5em;
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.round-summary .round-progress {
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
+  min-width: 9em;
+}
+
+.round-summary .round-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--qbs-space-2);
+  align-items: center;
+}
+
+.game-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0 0 var(--qbs-space-3);
+  font-size: var(--qbs-text-secondary);
+}
+
+.game-table th,
+.game-table td {
+  text-align: left;
+  padding: var(--qbs-space-1) var(--qbs-space-2);
+  border-top: 1px solid var(--qbs-border);
+  vertical-align: top;
+}
+
+.game-table th {
+  font-weight: var(--qbs-weight-semibold);
+  color: var(--qbs-text-muted);
+}
+
+.game-table .state-returned {
+  color: var(--qbs-text);
+}
+
+.game-table .state-waiting {
+  color: var(--qbs-text-muted);
+}
+
+.warning-line {
+  color: var(--qbs-text-muted);
+  font-size: var(--qbs-text-secondary);
+}
+
+.duplicate-box {
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  padding: var(--qbs-space-2) var(--qbs-space-3);
+  margin-top: var(--qbs-space-2);
+}
+
+.duplicate-box fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.duplicate-box legend {
+  font-weight: var(--qbs-weight-semibold);
+  padding: 0;
+  margin-bottom: var(--qbs-space-1);
+}
+
+.duplicate-box label {
+  display: block;
+  padding: var(--qbs-space-1) 0;
+}
+
+/* ----------------------------------------------------------------- Playoffs */
+
+.slot-table {
+  border-collapse: collapse;
+  margin: 0 var(--qbs-space-4) var(--qbs-space-3) 0;
+  font-size: var(--qbs-text-secondary);
+}
+
+.slot-table th,
+.slot-table td {
+  text-align: left;
+  padding: var(--qbs-space-1) var(--qbs-space-2);
+  border-top: 1px solid var(--qbs-border);
+}
+
+.slot-table th {
+  color: var(--qbs-text-muted);
+  font-weight: var(--qbs-weight-semibold);
+}
+
+.slot-columns {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.slot-columns select {
+  font: inherit;
+  max-width: 12em;
+}
+
+details.details {
+  margin-top: var(--qbs-space-3);
+  font-size: var(--qbs-text-secondary);
+  color: var(--qbs-text-muted);
+}
+
+details.details pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--qbs-surface-page);
+  border: 1px solid var(--qbs-border);
+  border-radius: var(--qbs-radius);
+  padding: var(--qbs-space-2);
+}
