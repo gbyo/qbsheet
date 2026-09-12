@@ -18,6 +18,7 @@ function bridgeWhileBatchSaving(): BridgeApi {
     roundPlans: [],
     pendingRoomRemovals: [],
     retiredRoomIds: [],
+    mirrorReviewPending: false,
     resultFolder: '/tournaments/results',
     results: [{ resultId: 'result-1', qbj: {}, receivedAt: '2026-09-11T15:00:00Z' }],
   };
@@ -53,6 +54,7 @@ function bridgeWhileBatchSaving(): BridgeApi {
     takeOverRelay: vi.fn(async () => false),
     transferRelayToPrimary: vi.fn(async () => false),
     reconcileRelayPosition: vi.fn(async () => false),
+    confirmMirrorReviewed: vi.fn(() => true),
     relayCredentialSavePending: false,
     retryRelayCredentialSave: vi.fn(async () => false),
     persistenceSavePending: false,

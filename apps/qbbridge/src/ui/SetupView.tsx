@@ -178,6 +178,25 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                     Refresh relay position
                   </Button>
                 </div>
+                {state.mirrorReviewPending ? (
+                  <div className="room-recovery" aria-label="Mirror review lock">
+                    <p className="shell-warning" role="alert">
+                      Publishing is locked: the relay position moved while this profile was away, so its rooms
+                      and plans may predate another controller&rsquo;s publications. Compare the room table
+                      against the current tournament state, reload the YellowFruit file if anything changed
+                      there, and only then confirm.
+                    </p>
+                    <div className="row">
+                      <Button
+                        variant="quiet"
+                        onPress={() => void bridge.confirmMirrorReviewed()}
+                        isDisabled={bridge.busy}
+                      >
+                        Room state reviewed — unlock publishing
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {state.relay.controllerRole === 'backup' ? (

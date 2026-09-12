@@ -47,9 +47,13 @@ When the primary laptop is available again, the active backup chooses **Transfer
 primary**. This advances the epoch again and makes the backup read-only. The original primary
 profile must then choose **Refresh relay position** in **Tournament → Relay → Primary recovery**
 before publishing: the refresh reads relay health, transactionally updates only the local epoch
-and revision, and requires the operator to review the recovered room state. It never overwrites
-rooms, plans, results, or the tournament file, and a still-superseded primary is told it cannot
-publish yet rather than being handed write authority.
+and revision, and locks publishing until the operator reviews the recovered room state and
+confirms with **Room state reviewed — unlock publishing**. The lock engages even when the
+refresh happens while still superseded, and it survives restarts, so a stale pre-takeover room
+snapshot can never silently overwrite the backup's newer mirror on handback. The refresh never
+overwrites rooms, plans, results, or the tournament file, and a still-superseded primary is
+told it cannot publish yet rather than being handed write authority. A health response that
+arrives after the relay was replaced is discarded, never committed.
 
 From the active primary, **Revoke backup access…** invalidates the backup credential without
 deleting rooms, assignments, retained results, or the primary credential. If a package was lost,

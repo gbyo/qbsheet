@@ -198,6 +198,11 @@ export interface BridgeApi {
    * transferred back.
    */
   reconcileRelayPosition(): Promise<boolean>;
+  /**
+   * Clear the post-handback publication lock after the operator reviewed the recovered room
+   * state. Returns false when local persistence fails, leaving the lock in place.
+   */
+  confirmMirrorReviewed(): boolean;
   /** True when a claimed credential is held in memory until local persistence succeeds. */
   relayCredentialSavePending: boolean;
   retryRelayCredentialSave(): Promise<boolean>;
@@ -1129,12 +1134,24 @@ export function useBridge(): BridgeApi {
     setBusy(true);
     try {
       const health = await relayHealth(connection);
+      // Fence the stale response: the active relay may have been replaced, or this profile
+      // re-imported/recovered, while the health read was in flight. Committing another
+      // relay's epoch/revision into the new relay's state is the corruption this refresh
+      // exists to repair, so discard with an actionable notice instead.
+      if (!sameRelayConnection(connection, connectionOf(stateRef.current))) {
+        setNotice({
+          kind: 'warn',
+          message:
+            'The relay changed while its position was being read. That response was discarded; refresh the relay position again.',
+        });
+        return false;
+      }
       const localEpoch = current.relay?.epoch ?? 1;
       const localRevision = current.relay?.revision ?? 0;
       const changed = health.directorEpoch !== localEpoch || health.revision !== localRevision;
       if (changed) {
         const persisted = commit((stateAtCommit) =>
-          stateAtCommit.relay
+          stateAtCommit.relay && sameRelayConnection(connection, connectionOf(stateAtCommit))
             ? {
                 ...stateAtCommit,
                 relay: { ...stateAtCommit.relay, epoch: health.directorEpoch, revision: health.revision },
@@ -1151,9 +1168,18 @@ export function useBridge(): BridgeApi {
         }
       }
       setRelayReachable(true);
-      const ourRole = current.relay?.controllerRole ?? 'primary';
+      const ourRole = stateRef.current.relay?.controllerRole ?? 'primary';
       const active =
         health.controllerActive && health.activeController === ourRole && health.authenticatedAs === ourRole;
+      if (!active || changed) {
+        // Adopting a moved position (or a position read while superseded) must not restore
+        // write readiness on its own: another controller may have published room state this
+        // profile predates, and the next mirror would silently overwrite it with this stale
+        // snapshot. Publishing stays locked until the recovered room state is reviewed.
+        // Locked even while superseded: the later handback refresh may observe no further
+        // movement and would otherwise clear a danger it cannot see.
+        commit((stateAtCommit) => ({ ...stateAtCommit, mirrorReviewPending: true }));
+      }
       if (!active) {
         setNotice({
           kind: 'warn',
@@ -1178,6 +1204,25 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
+  }, [commit]);
+
+  const confirmMirrorReviewed = useCallback((): boolean => {
+    const persisted = commit((current) =>
+      current.mirrorReviewPending ? { ...current, mirrorReviewPending: false } : current,
+    ).persisted;
+    if (!persisted.ok) {
+      setNotice({
+        kind: 'bad',
+        message:
+          'The review confirmation could not be saved locally. Publishing stays locked until local state saves again.',
+      });
+      return false;
+    }
+    setNotice({
+      kind: 'good',
+      message: 'Recovered room state marked as reviewed. Publishing is unlocked.',
+    });
+    return true;
   }, [commit]);
 
   const beginRelayChange = useCallback(() => setChangingRelay(true), []);
@@ -1449,6 +1494,14 @@ export function useBridge(): BridgeApi {
         });
         return null;
       }
+      if (stateRef.current.mirrorReviewPending) {
+        setNotice({
+          kind: 'bad',
+          message:
+            'Round not published because the relay position moved while this profile was away. Review the recovered room state in Tournament → Relay → Primary recovery, then confirm the review to unlock publishing.',
+        });
+        return null;
+      }
       if (input.plan.publications.length === 0) {
         setNotice({ kind: 'bad', message: 'There are no rooms to publish. Add a room first.' });
         return null;
@@ -1551,6 +1604,14 @@ export function useBridge(): BridgeApi {
     const round = tournament?.rounds.find((entry) => entry.id === current.selectedRoundId);
     if (!tournament || !round) {
       setNotice({ kind: 'bad', message: 'Load a YellowFruit file and choose a round first.' });
+      return;
+    }
+    if (current.mirrorReviewPending) {
+      setNotice({
+        kind: 'bad',
+        message:
+          'Round not published because the relay position moved while this profile was away. Review the recovered room state in Tournament → Relay → Primary recovery, then confirm the review to unlock publishing.',
+      });
       return;
     }
     const pairings = pairingsForRound(current.roundPlans, round.id);
@@ -2154,6 +2215,7 @@ export function useBridge(): BridgeApi {
     takeOverRelay,
     transferRelayToPrimary,
     reconcileRelayPosition,
+    confirmMirrorReviewed,
     relayCredentialSavePending,
     retryRelayCredentialSave,
     persistenceSavePending,

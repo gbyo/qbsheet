@@ -101,6 +101,13 @@ export interface BridgeState {
   roundPlans: RoundPlan[];
   resultFolder: string | null;
   results: StoredResult[];
+  /**
+   * Set when the relay position moved while this profile was away or superseded. Room and plan
+   * state may predate another controller's publications, so publishing stays locked until the
+   * operator explicitly confirms the recovered room state was reviewed. Survives restarts: the
+   * stale working state does too.
+   */
+  mirrorReviewPending: boolean;
 }
 
 export type PersistResult = { ok: true } | { ok: false; error: unknown };
@@ -119,6 +126,7 @@ export function emptyState(): BridgeState {
     roundPlans: [],
     resultFolder: null,
     results: [],
+    mirrorReviewPending: false,
   };
 }
 
@@ -336,6 +344,7 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     ),
     resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
     results: restoreResults(state.results),
+    mirrorReviewPending: state.mirrorReviewPending === true,
   };
 }
 
