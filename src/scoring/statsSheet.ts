@@ -74,10 +74,7 @@ function teamColumns(game: IDerivedGame): StatsTeamColumn[] {
   return columns;
 }
 
-function overtimeAnswerCountRow(
-  format: IScorekeeperFormat,
-  team: IDerivedTeam,
-): string[] {
+function overtimeAnswerCountRow(format: IScorekeeperFormat, team: IDerivedTeam): string[] {
   return [
     statsCell(team.name),
     ...format.answerTypes.map((answerType) => String(team.overtimeBuzzes.get(answerType.index) ?? 0)),
