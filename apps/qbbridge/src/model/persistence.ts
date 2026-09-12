@@ -22,8 +22,8 @@
 import type { Room, RoomTombstone } from './rooms';
 import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
-import { readRecoveryDigests } from './recovery';
-import type { RecoveryBaseline, RecoverySource } from './recovery';
+import { readRecoveryDigests, readTakeoverReview } from './recovery';
+import type { RecoveryBaseline, RecoverySource, TakeoverReview } from './recovery';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /**
@@ -104,6 +104,12 @@ export interface BridgeState {
    * `recoverySource` verification at file load.
    */
   recoverySource: RecoverySource | null;
+  /**
+   * The relay-changes review owed after this profile took over control, or null when no
+   * review is outstanding. Publishing stays locked until the drift report is explicitly
+   * confirmed; the lock survives restarts like the stale rooms do.
+   */
+  takeoverReview: TakeoverReview | null;
   tournamentName: string | null;
   rooms: Room[];
   /** Rooms removed locally whose assignments still need a clear publication. */
@@ -134,6 +140,7 @@ export function emptyState(): BridgeState {
     yftFingerprint: null,
     lastRecoveryPackage: null,
     recoverySource: null,
+    takeoverReview: null,
     tournamentName: null,
     rooms: [],
     pendingRoomRemovals: [],
@@ -410,6 +417,7 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     yftFingerprint: readYftFingerprint(state.yftFingerprint),
     lastRecoveryPackage: readRecoveryBaseline(state.lastRecoveryPackage),
     recoverySource: readRecoverySource(state.recoverySource),
+    takeoverReview: readTakeoverReview(state.takeoverReview),
     tournamentName: typeof state.tournamentName === 'string' ? state.tournamentName : null,
     rooms,
     pendingRoomRemovals,

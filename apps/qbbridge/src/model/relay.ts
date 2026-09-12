@@ -496,6 +496,62 @@ export async function relayFetchResults(connection: RelayConnection): Promise<Re
 }
 
 /**
+ * One assignment change the relay recorded, for the takeover drift review.
+ *
+ * Read-only and bounded: the newest assignment events only, newest-wins per room downstream.
+ * Anything the trimmed window no longer holds reads as `resyncRequired`, never as silence.
+ */
+export interface RelayAssignmentEvent {
+  roomId: string;
+  matchId: string | null;
+  assignmentRevision: number | null;
+}
+
+export interface RelayAssignmentLog {
+  events: RelayAssignmentEvent[];
+  resyncRequired: boolean;
+}
+
+/**
+ * Read the relay's recent assignment events for the takeover drift review.
+ *
+ * A fresh controller compares these against its package-time rooms to learn what the relay
+ * holds that the package predates — match identity and issue numbers, never full QBJs or
+ * pairing codes. Throws when the log cannot be read: an unknown drift blocks the first
+ * publication, it never waves it through.
+ */
+export async function relayFetchAssignmentEvents(connection: RelayConnection): Promise<RelayAssignmentLog> {
+  const response = await relayRequest({
+    method: 'GET',
+    url: `${manageBase(connection.baseUrl, connection.tournamentId)}/events?after=0&kinds=assignment&limit=128`,
+    bearer: connection.managementToken,
+  });
+  if (response.status !== 200) throw fail(response, 'The relay did not answer with its assignment log.');
+  const body = parseBody(response);
+  const rows = Array.isArray(body.events) ? body.events : [];
+  const events: RelayAssignmentEvent[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+    const entry = row as Record<string, unknown>;
+    if (entry.kind !== 'assignment' || typeof entry.entity_id !== 'string') continue;
+    const payload =
+      entry.body && typeof entry.body === 'object' && !Array.isArray(entry.body)
+        ? (entry.body as Record<string, unknown>)
+        : {};
+    const assignmentRevision =
+      typeof payload.assignment_revision === 'number' && Number.isInteger(payload.assignment_revision)
+        ? payload.assignment_revision
+        : null;
+    events.push({
+      roomId: entry.entity_id,
+      matchId: typeof payload.match_id === 'string' ? payload.match_id : null,
+      assignmentRevision,
+    });
+  }
+  return { events, resyncRequired: body.resyncRequired === true };
+}
+
+/**
  * The most unacknowledged results the relay will return in one page.
  *
  * `clampPage(limit, 1, 128)` in `getDirectorResults`, over

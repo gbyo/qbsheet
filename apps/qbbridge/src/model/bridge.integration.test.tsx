@@ -11,7 +11,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignment';
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
-import { describeRecoveryFreshness } from './recovery';
+import { describeRecoveryFreshness, encryptRecoveryPackage, recoveryPackageState } from './recovery';
+import type { BackupProvisionResult } from './relay';
 import { emptyState, loadState, storageKey } from './persistence';
 import { resultFileSuffix } from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
@@ -89,6 +90,8 @@ let pendingWrites: PendingWrite[] = [];
 let scorerCanPair = true;
 let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
+/** What the fake relay holds per room, learned from mirror PUTs, served back as events. */
+let relayRoomAssignments = new Map<string, { matchId: string | null; assignmentRevision: number }>();
 let relayEpoch = 1;
 let relayRevision = 0;
 const backupControllerId = 'backup-test-controller';
@@ -241,7 +244,42 @@ function installFakeTauri(): void {
             deferredMirrorStarted = true;
             await deferMirror;
           }
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as { rooms?: unknown };
+            if (Array.isArray(parsed.rooms)) {
+              for (const room of parsed.rooms) {
+                if (!room || typeof room !== 'object' || Array.isArray(room)) continue;
+                const entry = room as Record<string, unknown>;
+                if (typeof entry.room_id !== 'string') continue;
+                relayRoomAssignments.set(entry.room_id, {
+                  matchId: typeof entry.match_id === 'string' ? entry.match_id : null,
+                  assignmentRevision:
+                    typeof entry.assignment_revision === 'number' ? entry.assignment_revision : 0,
+                });
+              }
+            }
+          } catch {
+            // A body the fake cannot parse still counts as sent.
+          }
           return { status: 200, body: '{}' };
+        }
+        if (url.includes('/events')) {
+          let revision = 0;
+          const events = [...relayRoomAssignments.entries()].map(([roomId, held]) => ({
+            revision: (revision += 1),
+            kind: 'assignment',
+            entity_id: roomId,
+            body: {
+              match_id: held.matchId,
+              assignment_revision: held.assignmentRevision,
+              assigned: held.matchId !== null,
+            },
+            created_at: '2026-09-11T15:00:00Z',
+          }));
+          return {
+            status: 200,
+            body: JSON.stringify({ tournamentId: relayTournament, currentRevision: revision, events }),
+          };
         }
         if (url.includes('/results')) {
           if (deferResultRequests) {
@@ -284,6 +322,7 @@ beforeEach(() => {
   activeController = 'primary';
   relayEpoch = 1;
   relayRevision = 0;
+  relayRoomAssignments = new Map();
   installFakeTauri();
 });
 
@@ -1009,6 +1048,7 @@ describe('persistence', () => {
       yftFingerprint: null,
       lastRecoveryPackage: null,
       recoverySource: null,
+      takeoverReview: null,
       tournamentName: null,
       rooms: [],
       pendingRoomRemovals: [],
@@ -1707,9 +1747,21 @@ describe('backup controller recovery', () => {
       calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
     ).toHaveLength(0);
 
-    // Taking over re-syncs to the live position, so publication can proceed.
+    // Taking over re-syncs to the live position, but the first publication still owes the
+    // drift review: the rooms below are package-time until confirmed against the live relay.
     await act(async () => {
       expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(/takeover drift/);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    act(() => {
+      expect(backup.result.current.confirmTakeoverReviewed()).toBe(true);
     });
     await act(async () => {
       await backup.result.current.publishRoomSetup();
@@ -1718,6 +1770,146 @@ describe('backup controller recovery', () => {
       calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
     ).toHaveLength(1);
     backup.unmount();
+  });
+
+  test('a takeover names what the relay holds past the package and locks the first publish', async () => {
+    const primary = await setUpTournament();
+    await act(async () => {
+      await primary.result.current.createRecoveryPackage('correct horse battery staple', 'Backup laptop');
+    });
+    // The old primary keeps playing after the package: a newer assignment reaches the relay.
+    await publishReviewed(primary);
+    const liveMatch = primary.result.current.state.rooms.find(
+      (room) => room.publishedMatchId !== null,
+    )?.publishedMatchId;
+    expect(liveMatch).toBeTruthy();
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+
+    // The drift report names the rooms the relay moved: the package held nothing published
+    // while the relay holds the primary's newer assignments. Publication stays locked until
+    // that is reviewed.
+    const liveMatches = new Set(primary.result.current.state.rooms.map((room) => room.publishedMatchId));
+    const review = backup.result.current.state.takeoverReview;
+    expect(review?.reviewed).toBe(false);
+    expect(review?.unknown).toBe(false);
+    expect(review?.rooms.length).toBeGreaterThan(0);
+    for (const room of review?.rooms ?? []) {
+      expect(room.packageMatchId).toBeNull();
+      expect(liveMatches.has(room.liveMatchId)).toBe(true);
+    }
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(/relay changes since the recovery package/);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
+
+    // The stale package-time snapshot never reaches the relay: only the reviewed publish does.
+    act(() => {
+      expect(backup.result.current.confirmTakeoverReviewed()).toBe(true);
+    });
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(2);
+    backup.unmount();
+  });
+
+  test('a legacy package without source proof cannot publish until a reload establishes it', async () => {
+    const primary = await setUpTournament();
+    let provisioned: BackupProvisionResult | null = null;
+    await act(async () => {
+      provisioned = await primary.result.current.provisionBackup('Backup laptop');
+    });
+    expect(provisioned).not.toBeNull();
+    const payload = recoveryPackageState(primary.result.current.state, provisioned!);
+    recoveryPackage = {
+      path: '/tournaments/legacy.qbr',
+      contents: await encryptRecoveryPackage(
+        { ...payload, sourceYftFingerprint: null, digests: null },
+        'correct horse battery staple',
+      ),
+    };
+    primary.unmount();
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({
+      yftFingerprint: null,
+      verified: false,
+    });
+
+    // Fail closed: the least verifiable format gets the strongest gate.
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(backup.result.current.notice?.message).toMatch(/legacy.*no source proof/);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(0);
+
+    // An explicit reload establishes provenance loudly and unlocks.
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    expect(backup.result.current.state.recoverySource).toMatchObject({ verified: true });
+    expect(backup.result.current.state.recoverySource?.yftFingerprint).toBe(
+      backup.result.current.state.yftFingerprint,
+    );
+    expect(backup.result.current.notice?.message).toMatch(/legacy package carried no source proof/);
+    await act(async () => {
+      await backup.result.current.publishRoomSetup();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(1);
+    backup.unmount();
+  });
+
+  test('a package whose baseline cannot be recorded says so instead of claiming success', async () => {
+    const rendered = await setUpTournament();
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('disk is full');
+    });
+
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await rendered.result.current.createRecoveryPackage(
+        'correct horse battery staple',
+        'Backup laptop',
+      );
+    });
+    expect(created).toBe(true);
+    // The file is valid for takeover; only the freshness baseline missed its write.
+    expect(rendered.result.current.notice?.kind).toBe('warn');
+    expect(rendered.result.current.notice?.message).toMatch(/baseline could not be recorded/);
+    expect(rendered.result.current.state.lastRecoveryPackage).not.toBeNull();
+    expect(loadState().lastRecoveryPackage).toBeNull();
+
+    setItem.mockRestore();
+    act(() => {
+      expect(rendered.result.current.retryStatePersistence()).toBe(true);
+    });
+    expect(loadState().lastRecoveryPackage).not.toBeNull();
+    rendered.unmount();
   });
 });
 

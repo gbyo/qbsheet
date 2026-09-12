@@ -3,8 +3,10 @@ import { emptyState, type BridgeState } from './persistence';
 import {
   decryptRecoveryPackage,
   describeRecoveryFreshness,
+  describeTakeoverDrift,
   encryptRecoveryPackage,
   readRecoveryDigests,
+  readTakeoverReview,
   recoveryDigests,
   recoveryPackageState,
   yftFingerprint,
@@ -187,6 +189,19 @@ describe('recovery freshness', () => {
       results: state.results.map((entry) => ({ ...entry, savedPath: '/tournaments/results/r.qbj' })),
     };
     expect(recoveryDigests(saved).results).not.toBe(before.results);
+
+    // ACK state, import markers, and saves are all operational result state: a package that
+    // predates any of them must read as stale, never current.
+    const acked = {
+      ...state,
+      results: state.results.map((entry) => ({ ...entry, ackPending: false as const })),
+    };
+    expect(recoveryDigests(acked).results).not.toBe(before.results);
+    const imported = {
+      ...state,
+      results: state.results.map((entry) => ({ ...entry, importStatus: 'imported' as const })),
+    };
+    expect(recoveryDigests(imported).results).not.toBe(before.results);
   });
 
   test('a package-time state reads as current, and every category ages independently', () => {
@@ -235,5 +250,70 @@ describe('recovery freshness', () => {
     expect(readRecoveryDigests(null)).toBeNull();
     expect(readRecoveryDigests({})).toBeNull();
     expect(readRecoveryDigests({ ...recoveryDigests(state), plans: 'xyz' })).toBeNull();
+  });
+});
+
+describe('takeover drift', () => {
+  const packaged = [
+    { id: 'room-1', name: 'Room 101', publishedMatchId: null as string | null, assignmentRevision: 0 },
+    { id: 'room-2', name: 'Room 102', publishedMatchId: 'match-old', assignmentRevision: 3 },
+  ];
+
+  test('only strictly newer relay proof counts as drift', () => {
+    expect(describeTakeoverDrift(packaged, [])).toEqual([]);
+    // Same revision is the package's own past, not an alarm.
+    expect(
+      describeTakeoverDrift(packaged, [{ roomId: 'room-2', matchId: 'match-old', assignmentRevision: 3 }]),
+    ).toEqual([]);
+    // Older events are history the package already survived.
+    expect(
+      describeTakeoverDrift(packaged, [{ roomId: 'room-2', matchId: 'match-older', assignmentRevision: 2 }]),
+    ).toEqual([]);
+    // Newer proof names both sides for the review.
+    expect(
+      describeTakeoverDrift(packaged, [{ roomId: 'room-2', matchId: 'match-new', assignmentRevision: 4 }]),
+    ).toEqual([
+      {
+        roomId: 'room-2',
+        roomName: 'Room 102',
+        packageMatchId: 'match-old',
+        liveMatchId: 'match-new',
+        packageAssignmentRevision: 3,
+        liveAssignmentRevision: 4,
+      },
+    ]);
+  });
+
+  test('rooms the package never held are always drift, and revision-less events prove nothing', () => {
+    const drift = describeTakeoverDrift(packaged, [
+      { roomId: 'room-9', matchId: 'match-new', assignmentRevision: 1 },
+      { roomId: 'room-1', matchId: 'match-x', assignmentRevision: null },
+    ]);
+    expect(drift).toHaveLength(1);
+    expect(drift[0]).toMatchObject({ roomId: 'room-9', packageMatchId: null, liveMatchId: 'match-new' });
+  });
+
+  test('stored reviews are validated, never trusted', () => {
+    expect(readTakeoverReview(null)).toBeNull();
+    expect(readTakeoverReview({ checkedAt: 'x', unknown: false, rooms: [], reviewed: 'yes' })).toBeNull();
+    expect(
+      readTakeoverReview({ checkedAt: 'x', unknown: false, rooms: [{ roomId: 'r' }], reviewed: false }),
+    ).toBeNull();
+    const review = {
+      checkedAt: '2026-09-11T16:00:00.000Z',
+      unknown: false,
+      rooms: [
+        {
+          roomId: 'room-1',
+          roomName: 'Room 101',
+          packageMatchId: null,
+          liveMatchId: 'match-1',
+          packageAssignmentRevision: 0,
+          liveAssignmentRevision: 1,
+        },
+      ],
+      reviewed: false,
+    };
+    expect(readTakeoverReview(review)).toEqual(review);
   });
 });

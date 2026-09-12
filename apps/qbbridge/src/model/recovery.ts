@@ -110,7 +110,16 @@ export function recoveryDigests(state: BridgeState): RecoveryDigests {
         .sort(),
     }))
     .sort((a, b) => (a.roundId < b.roundId ? -1 : a.roundId > b.roundId ? 1 : 0));
-  const results = [...state.results].map((entry) => [entry.resultId, entry.savedPath ?? null]).sort();
+  // Identity plus every operational field recovery restores: a package created before a
+  // result was ACKed, marked imported, or saved must read as stale, not current.
+  const results = [...state.results]
+    .map((entry) => [
+      entry.resultId,
+      entry.savedPath ?? null,
+      entry.ackPending ?? null,
+      entry.importStatus ?? null,
+    ])
+    .sort();
   return {
     roomIdentity: fnv1a64(JSON.stringify([roomIds.map((id) => [id, byId.get(id)?.name ?? '']), tombstones])),
     pairingCodes: fnv1a64(
@@ -412,4 +421,141 @@ export async function decryptRecoveryPackage(
     digests,
     state: { ...state, relay: safeRelay },
   };
+}
+
+/**
+ * What the relay holds for one room, learned from the assignment event log after takeover.
+ * Events carry match identity and issue numbers, not full QBJs or pairing codes: enough to
+ * name what moved, never a silent hydration.
+ */
+export interface RelayRoomEvent {
+  roomId: string;
+  matchId: string | null;
+  assignmentRevision: number | null;
+}
+
+/** One room whose relay state provably moved past the package-time snapshot. */
+export interface TakeoverRoomDrift {
+  roomId: string;
+  roomName: string;
+  packageMatchId: string | null;
+  liveMatchId: string | null;
+  packageAssignmentRevision: number;
+  liveAssignmentRevision: number;
+}
+
+/**
+ * The relay-changes review a fresh controller owes before its first publication. `unknown`
+ * means the event history was incomplete or unreadable: every room is suspect, not just the
+ * listed ones. Pairing-code drift is not observable here — codes never appear in events —
+ * so the review always covers codes by policy, not by proof.
+ */
+export interface TakeoverDriftReport {
+  checkedAt: string;
+  unknown: boolean;
+  rooms: TakeoverRoomDrift[];
+}
+
+/**
+ * Compare package-time rooms against the relay's assignment events.
+ *
+ * Only strictly newer proof counts: a room is drifted when the relay's latest event carries
+ * an assignment revision past the package's. Older or equal revisions are the package's own
+ * past, never an alarm; events without an issue number cannot prove newness either way and
+ * are ignored for that room. Rooms the relay knows that the package never held are always
+ * drift — something was published outside this profile's history.
+ */
+export function describeTakeoverDrift(
+  packageRooms: readonly {
+    id: string;
+    name: string;
+    publishedMatchId: string | null;
+    assignmentRevision: number;
+  }[],
+  events: readonly RelayRoomEvent[],
+): TakeoverRoomDrift[] {
+  const latest = new Map<string, RelayRoomEvent>();
+  for (const event of events) {
+    const prior = latest.get(event.roomId);
+    if (!prior || (event.assignmentRevision ?? -1) >= (prior.assignmentRevision ?? -1)) {
+      latest.set(event.roomId, event);
+    }
+  }
+  const drift: TakeoverRoomDrift[] = [];
+  const packaged = new Map(packageRooms.map((room) => [room.id, room]));
+  for (const [roomId, event] of latest) {
+    const baseline = packaged.get(roomId);
+    if (!baseline) {
+      drift.push({
+        roomId,
+        roomName: roomId,
+        packageMatchId: null,
+        liveMatchId: event.matchId,
+        packageAssignmentRevision: 0,
+        liveAssignmentRevision: event.assignmentRevision ?? 0,
+      });
+      continue;
+    }
+    if (event.assignmentRevision === null || event.assignmentRevision <= baseline.assignmentRevision) {
+      continue;
+    }
+    drift.push({
+      roomId,
+      roomName: baseline.name,
+      packageMatchId: baseline.publishedMatchId,
+      liveMatchId: event.matchId,
+      packageAssignmentRevision: baseline.assignmentRevision,
+      liveAssignmentRevision: event.assignmentRevision,
+    });
+  }
+  return drift.sort((a, b) => (a.roomId < b.roomId ? -1 : a.roomId > b.roomId ? 1 : 0));
+}
+
+/**
+ * The persisted takeover review: the drift report plus whether the operator confirmed it.
+ * `reviewed: false` locks publication; only an explicit confirmation clears it.
+ */
+export interface TakeoverReview {
+  checkedAt: string;
+  unknown: boolean;
+  rooms: TakeoverRoomDrift[];
+  reviewed: boolean;
+}
+
+/** Read an untrusted takeover review; anything malformed is no review at all. */
+export function readTakeoverReview(value: unknown): TakeoverReview | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const { checkedAt, unknown, rooms, reviewed } = record;
+  if (typeof checkedAt !== 'string' || typeof unknown !== 'boolean' || typeof reviewed !== 'boolean') {
+    return null;
+  }
+  if (!Array.isArray(rooms)) return null;
+  const clean: TakeoverRoomDrift[] = [];
+  for (const entry of rooms) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return null;
+    const room = entry as Record<string, unknown>;
+    if (
+      typeof room.roomId !== 'string' ||
+      typeof room.roomName !== 'string' ||
+      (room.packageMatchId !== null && typeof room.packageMatchId !== 'string') ||
+      (room.liveMatchId !== null && typeof room.liveMatchId !== 'string') ||
+      typeof room.packageAssignmentRevision !== 'number' ||
+      !Number.isInteger(room.packageAssignmentRevision) ||
+      typeof room.liveAssignmentRevision !== 'number' ||
+      !Number.isInteger(room.liveAssignmentRevision)
+    ) {
+      return null;
+    }
+    clean.push({
+      roomId: room.roomId,
+      roomName: room.roomName,
+      packageMatchId: room.packageMatchId,
+      liveMatchId: room.liveMatchId,
+      packageAssignmentRevision: room.packageAssignmentRevision,
+      liveAssignmentRevision: room.liveAssignmentRevision,
+    });
+  }
+  return { checkedAt, unknown, rooms: clean, reviewed };
 }

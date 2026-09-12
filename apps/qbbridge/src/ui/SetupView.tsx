@@ -240,6 +240,55 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
                     Transfer control back to primary
                   </Button>
                 </div>
+                {state.takeoverReview ? (
+                  <div className="room-recovery" aria-label="Takeover drift review">
+                    <h4>Relay changes since the package</h4>
+                    {state.takeoverReview.unknown ? (
+                      <p className="shell-warning" role="alert">
+                        The relay change history could not be fully determined, so every room is suspect —
+                        including pairing codes, which never appear in the relay log. Compare every room
+                        against the live tournament before publishing.
+                      </p>
+                    ) : state.takeoverReview.rooms.length === 0 ? (
+                      <p className="muted">
+                        No room on the relay moved past the package snapshot. Pairing codes are not observable
+                        in the relay log, so they are covered by policy: re-check them anyway before
+                        publishing.
+                      </p>
+                    ) : (
+                      <dl className="facts">
+                        {state.takeoverReview.rooms.map((room) => (
+                          <div key={room.roomId}>
+                            <dt>{room.roomName}</dt>
+                            <dd>
+                              package held {room.packageMatchId ?? 'nothing'} (issue{' '}
+                              {room.packageAssignmentRevision}); relay holds {room.liveMatchId ?? 'nothing'}{' '}
+                              (issue {room.liveAssignmentRevision})
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                    <div className="row">
+                      <Button
+                        variant="quiet"
+                        onPress={() => void bridge.refreshTakeoverDrift()}
+                        isDisabled={bridge.busy}
+                      >
+                        Re-check the relay now
+                      </Button>
+                      <Button
+                        variant="primary"
+                        onPress={() => void bridge.confirmTakeoverReviewed()}
+                        isDisabled={bridge.busy || state.takeoverReview.reviewed}
+                      >
+                        {state.takeoverReview.reviewed
+                          ? 'Drift reviewed'
+                          : 'Drift reviewed — unlock publishing'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <div className="scorer-readiness" aria-live="polite">

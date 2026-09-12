@@ -41,6 +41,7 @@ import {
   relayAcknowledgeResults,
   relayClaim,
   relayCheckScorerReadiness,
+  relayFetchAssignmentEvents,
   relayFetchResults,
   relayHealth,
   relayProvisionBackup,
@@ -98,12 +99,15 @@ import {
 import { loadYellowFruitTournament, type BridgeTournament } from './tournament';
 import {
   decryptRecoveryPackage,
+  describeTakeoverDrift,
   encryptRecoveryPackage,
   recoveryDigests,
   recoveryPackageFileName,
   recoveryPackageState,
   yftFingerprint,
   type RecoveryBaseline,
+  type TakeoverDriftReport,
+  type TakeoverReview,
 } from './recovery';
 import { schedulePairingWarnings } from './schedule';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
@@ -191,6 +195,17 @@ export interface BridgeApi {
   revokeBackup(): Promise<boolean>;
   takeOverRelay(): Promise<boolean>;
   transferRelayToPrimary(): Promise<boolean>;
+  /**
+   * Re-read the relay's assignment log and rebuild the takeover drift report. Returns false
+   * only when there is no takeover to review; an unreadable log refreshes to unknown, which
+   * keeps the lock.
+   */
+  refreshTakeoverDrift(): Promise<boolean>;
+  /**
+   * Confirm the takeover drift report was reviewed against the live tournament. Unlocks the
+   * first publication after takeover. Returns false when local persistence fails.
+   */
+  confirmTakeoverReviewed(): boolean;
   /** True when a claimed credential is held in memory until local persistence succeeds. */
   relayCredentialSavePending: boolean;
   retryRelayCredentialSave(): Promise<boolean>;
@@ -666,15 +681,25 @@ export function useBridge(): BridgeApi {
           });
           // Verification is recomputed on every load, never inherited: only the exact bytes
           // the package was created from unlock publication, and any other file re-locks it.
+          // A legacy package carries no fingerprint to compare, so an explicit operator
+          // reload establishes provenance instead — loudly, once, with the loaded file
+          // named as the trust root rather than any package proof.
           const source = currentState.recoverySource;
-          const verified =
-            source !== null && source.yftFingerprint !== null && fingerprint === source.yftFingerprint;
+          const legacyAdopted = source !== null && source.yftFingerprint === null;
+          const verified = source !== null && (legacyAdopted || fingerprint === source.yftFingerprint);
           if (source !== null && !source.verified && verified) recoveryUnlocked = true;
           return {
             ...currentState,
             yftPath: path,
             yftFingerprint: fingerprint,
-            recoverySource: source ? { ...source, verified } : null,
+            recoverySource: source
+              ? {
+                  ...source,
+                  // A legacy adoption names the reloaded file as the new provenance.
+                  yftFingerprint: source.yftFingerprint ?? fingerprint,
+                  verified,
+                }
+              : null,
             tournamentName: report.tournament.name,
             roundPlans: reconciliationReport.plans,
             selectedRoundId:
@@ -691,9 +716,11 @@ export function useBridge(): BridgeApi {
         reconciliationReport !== null && reconciliationChangedAnything(reconciliationReport)
           ? ` ${describeReconciliation(reconciliationReport)}`
           : '';
-      const recoveryNote = recoveryUnlocked
-        ? ' This file matches the recovery package, so publication is unlocked.'
-        : '';
+      const recoveryNote = !recoveryUnlocked
+        ? ''
+        : current.recoverySource?.yftFingerprint === null
+          ? ` Publication unlocked by operator reload: the legacy package carried no source proof, so ${report.tournament.name} as just loaded is now the trusted source by your review.`
+          : ' This file matches the recovery package, so publication is unlocked.';
       setNotice({
         kind: reconciliationNote === '' ? 'good' : 'warn',
         message: `${startNew ? 'Started a new QBBridge tournament for' : 'Loaded'} ${report.tournament.name}: ${report.tournament.teams.length} teams, ${report.tournament.playerCount} players.${reconciliationNote}${recoveryNote}`,
@@ -990,7 +1017,21 @@ export function useBridge(): BridgeApi {
           relayEpoch: current.relay?.epoch ?? 0,
           relayRevision: current.relay?.revision ?? 0,
         };
-        commit((baselineState) => ({ ...baselineState, lastRecoveryPackage: baseline }));
+        const baselinePersisted = commit((baselineState) => ({
+          ...baselineState,
+          lastRecoveryPackage: baseline,
+        })).persisted;
+        if (!baselinePersisted.ok) {
+          // The package file is valid and usable for authorization, but without the baseline
+          // this profile cannot report that package going stale after a restart. The baseline
+          // stays in memory and the save banner offers a retry; claiming full success here
+          // would silently drop exactly the safety property this creates.
+          setNotice({
+            kind: 'warn',
+            message: `Encrypted backup control package saved to ${path}, but its freshness baseline could not be recorded locally. The package works for takeover, but staleness reporting is unavailable until local state saves again — use Retry saving local state above, then recreate the package if anything changed meanwhile.`,
+          });
+          return true;
+        }
         setNotice({
           kind: 'good',
           message: `Encrypted backup control package saved to ${path}. Keep the file and passphrase separate; the package contains no primary credential.`,
@@ -1107,6 +1148,85 @@ export function useBridge(): BridgeApi {
     [activateState, refreshScorerReadiness],
   );
 
+  /**
+   * Read what the relay holds that the given rooms predate, for the takeover review.
+   *
+   * Never throws: an unreadable or incomplete log is itself the report (`unknown: true`),
+   * and an unknown drift locks the first publication exactly like a proven one.
+   */
+  const readTakeoverDrift = useCallback(
+    async (
+      connection: RelayConnection,
+      packageRooms: readonly {
+        id: string;
+        name: string;
+        publishedMatchId: string | null;
+        assignmentRevision: number;
+      }[],
+    ): Promise<Omit<TakeoverDriftReport, 'checkedAt'>> => {
+      try {
+        const log = await relayFetchAssignmentEvents(connection);
+        return {
+          unknown: log.resyncRequired,
+          rooms: describeTakeoverDrift(packageRooms, log.events),
+        };
+      } catch {
+        return { unknown: true, rooms: [] };
+      }
+    },
+    [],
+  );
+
+  const refreshTakeoverDrift = useCallback(async (): Promise<boolean> => {
+    const current = stateRef.current;
+    const connection = connectionOf(current);
+    if (!connection || !current.takeoverReview) {
+      setNotice({ kind: 'bad', message: 'There is no takeover review to refresh.' });
+      return false;
+    }
+    setBusy(true);
+    try {
+      const drift = await readTakeoverDrift(connection, current.rooms);
+      const refreshed: TakeoverReview = {
+        checkedAt: new Date().toISOString(),
+        unknown: drift.unknown,
+        rooms: drift.rooms,
+        reviewed: false,
+      };
+      // A refresh re-opens the question deliberately: the relay may have moved again while
+      // the operator was reading, and the confirmation must cover the newest report.
+      commit((pending) => ({ ...pending, takeoverReview: refreshed }));
+      setNotice({
+        kind: 'good',
+        message: 'Takeover drift report refreshed against the live relay. Review it before publishing.',
+      });
+      return true;
+    } finally {
+      setBusy(false);
+    }
+  }, [commit, readTakeoverDrift]);
+
+  const confirmTakeoverReviewed = useCallback((): boolean => {
+    const persisted = commit((current) =>
+      current.takeoverReview && !current.takeoverReview.reviewed
+        ? { ...current, takeoverReview: { ...current.takeoverReview, reviewed: true } }
+        : current,
+    ).persisted;
+    if (!persisted.ok) {
+      setNotice({
+        kind: 'bad',
+        message:
+          'The takeover review confirmation could not be saved locally. Publishing stays locked until local state saves again.',
+      });
+      return false;
+    }
+    setNotice({
+      kind: 'good',
+      message: 'Takeover drift marked as reviewed. Publishing is unlocked.',
+    });
+    return true;
+  }, [commit]);
+
   const takeOverRelay = useCallback(async (): Promise<boolean> => {
     const current = stateRef.current;
     const connection = connectionOf(current);
@@ -1138,10 +1258,31 @@ export function useBridge(): BridgeApi {
         return false;
       }
       setRelayReachable(true);
+      // The package rooms may predate publications the relay accepted since the package was
+      // created. Read the assignment log now and lock the first publication until the drift
+      // report is reviewed: without this, the package-time snapshot would silently overwrite
+      // the newer relay state. Unknown drift locks exactly like proven drift.
+      const drift = await readTakeoverDrift(connection, stateRef.current.rooms);
+      const driftCount = drift.rooms.length;
+      commit((pending) => ({
+        ...pending,
+        takeoverReview: {
+          checkedAt: new Date().toISOString(),
+          unknown: drift.unknown,
+          rooms: drift.rooms,
+          reviewed: false,
+        },
+      }));
       setNotice({
         kind: 'warn',
         message:
-          'This backup is now the active relay controller. The old primary is fenced from publishing and acknowledging; reload the .yft and review the recovered room state before publishing the next round.',
+          'This backup is now the active relay controller. The old primary is fenced from publishing and acknowledging; ' +
+          (drift.unknown
+            ? 'the relay changes since the package could not be fully determined, so every room is suspect. '
+            : driftCount === 0
+              ? 'no room on the relay moved past the package snapshot. '
+              : `${driftCount} room${driftCount === 1 ? '' : 's'} on the relay moved past the package snapshot. `) +
+          'Reload the .yft, review the takeover drift in Setup, and confirm it before publishing the next round.',
       });
       return true;
     } catch (error) {
@@ -1151,7 +1292,7 @@ export function useBridge(): BridgeApi {
     } finally {
       setBusy(false);
     }
-  }, [commit]);
+  }, [commit, readTakeoverDrift]);
 
   const transferRelayToPrimary = useCallback(async (): Promise<boolean> => {
     const connection = connectionOf(stateRef.current);
@@ -1454,14 +1595,33 @@ export function useBridge(): BridgeApi {
       // A recovery import carries rooms and plans from package time. Publication stays locked
       // until the exact `.yft` bytes the package was created from are loaded and verified —
       // publishing a stale snapshot as current truth is precisely what this gate prevents.
-      // Packages that predate fingerprints record nothing to compare, so there is nothing to
-      // enforce and the gate stays open.
+      // Packages that predate fingerprints fail closed too: with nothing to compare, the
+      // only recovery is an explicit operator reload, which establishes provenance (see
+      // file load). The least verifiable package format gets the strongest gate, not the
+      // weakest.
       const source = current.recoverySource;
-      if (source !== null && source.yftFingerprint !== null && !source.verified) {
+      if (source !== null && !source.verified) {
         setNotice({
           kind: 'bad',
           message:
-            'Round not published because this profile is running on an imported recovery package whose source file has not been verified. Reload the authoritative .yft that matches the recovery package, then publish again.',
+            source.yftFingerprint === null
+              ? 'Round not published because this profile is running on a legacy imported recovery package that carries no source proof. Reload the authoritative .yft to establish provenance by your review, then publish again.'
+              : 'Round not published because this profile is running on an imported recovery package whose source file has not been verified. Reload the authoritative .yft that matches the recovery package, then publish again.',
+        });
+        return null;
+      }
+      // A takeover with unreviewed relay drift locks publication even when the source file
+      // verifies: the rooms may predate publications the relay accepted since the package
+      // was created, and the next mirror would silently overwrite them. Only an explicit
+      // review of the drift report in Setup unlocks it; the lock survives restarts.
+      const takeover = stateRef.current.takeoverReview;
+      if (takeover && !takeover.reviewed) {
+        setNotice({
+          kind: 'bad',
+          message:
+            takeover.unknown || takeover.rooms.length > 0
+              ? 'Round not published because relay changes since the recovery package are unreviewed. Review the takeover drift in Setup — every room is suspect when the drift is unknown — and confirm it before publishing.'
+              : 'Round not published because the takeover drift report is unreviewed. Confirm it in Setup before publishing.',
         });
         return null;
       }
@@ -2203,6 +2363,8 @@ export function useBridge(): BridgeApi {
     revokeBackup,
     takeOverRelay,
     transferRelayToPrimary,
+    refreshTakeoverDrift,
+    confirmTakeoverReviewed,
     relayCredentialSavePending,
     retryRelayCredentialSave,
     persistenceSavePending,
