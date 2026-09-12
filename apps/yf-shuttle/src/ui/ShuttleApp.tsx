@@ -29,7 +29,12 @@ export default function ShuttleApp() {
         </span>
         <span className="titlebar-actions">
           {shuttle.tournament ? (
-            <Button size="sm" variant="quiet" onPress={shuttle.changeYellowFruitFile} isDisabled={shuttle.busy}>
+            <Button
+              size="sm"
+              variant="quiet"
+              onPress={shuttle.changeYellowFruitFile}
+              isDisabled={shuttle.busy}
+            >
               Change YellowFruit file
             </Button>
           ) : null}
@@ -40,12 +45,15 @@ export default function ShuttleApp() {
         <div className="page-notices">
           {!shuttle.native ? (
             <Notice tone="neutral">
-              File and folder access needs the YF Shuttle desktop application. This browser view
-              can stay open for reference, but every button below runs on the desktop.
+              File and folder access needs the YF Shuttle desktop application. This browser view can stay open
+              for reference, but every button below runs on the desktop.
             </Notice>
           ) : null}
           {shuttle.notice ? (
-            <Notice tone={noticeTone[shuttle.notice.kind]} live={shuttle.notice.kind === 'bad' ? 'assertive' : 'polite'}>
+            <Notice
+              tone={noticeTone[shuttle.notice.kind]}
+              live={shuttle.notice.kind === 'bad' ? 'assertive' : 'polite'}
+            >
               <span>{shuttle.notice.message}</span>
             </Notice>
           ) : null}
@@ -78,8 +86,8 @@ function FileSection({ shuttle }: { shuttle: Shuttle }) {
     <section className="panel">
       <h2>YellowFruit file</h2>
       <p className="muted">
-        Open the tournament <span className="mono">.yft</span>. It is only ever read — YF Shuttle
-        never writes to it.
+        Open the tournament <span className="mono">.yft</span>. It is only ever read — YF Shuttle never writes
+        to it.
       </p>
       <div className="row">
         <Button variant="primary" onPress={() => void shuttle.openYellowFruit()} isDisabled={shuttle.busy}>
@@ -175,8 +183,8 @@ function SetupSection({ shuttle }: { shuttle: Shuttle }) {
         }}
         onCancel={() => setConfirming(false)}
       >
-        This creates six room folders with IN and OUT, eight YellowFruit import folders, and
-        writes the 30 prelim assignments. Nothing is uploaded anywhere.
+        This creates six room folders with IN and OUT, eight YellowFruit import folders, and writes the 30
+        prelim assignments. Nothing is uploaded anywhere.
       </ConfirmDialog>
     </section>
   );
@@ -195,12 +203,17 @@ function ProjectSection({ shuttle }: { shuttle: Shuttle }) {
         <Button size="sm" onPress={() => void shuttle.openPath(shuttle.projectPath!)}>
           Open Folder
         </Button>
-        <Button size="sm" variant="quiet" onPress={() => void shuttle.rescanOutFolders()} isDisabled={shuttle.busy}>
+        <Button
+          size="sm"
+          variant="quiet"
+          onPress={() => void shuttle.rescanOutFolders()}
+          isDisabled={shuttle.busy}
+        >
           Rescan OUT folders
         </Button>
         <span className="muted">
-          {rooms.map((room) => room.displayName).join(' · ')} · {shuttle.manifest.assignments.length}{' '}
-          games generated
+          {rooms.map((room) => room.displayName).join(' · ')} · {shuttle.manifest.assignments.length} games
+          generated
         </span>
       </div>
     </section>
@@ -213,9 +226,7 @@ function teamNameOf(shuttle: Shuttle, teamId: string): string {
 
 function RoundsSection({ shuttle }: { shuttle: Shuttle }) {
   const manifest = shuttle.manifest!;
-  const rounds = [...new Set(manifest.assignments.map((entry) => entry.roundNumber))].sort(
-    (a, b) => a - b,
-  );
+  const rounds = [...new Set(manifest.assignments.map((entry) => entry.roundNumber))].sort((a, b) => a - b);
   return (
     <section className="panel">
       <h2>{rounds.some((round) => round >= 6) ? 'Tournament progress' : 'Prelims'}</h2>
@@ -298,8 +309,7 @@ function RoundRow({ shuttle, roundNumber }: { shuttle: Shuttle; roundNumber: num
       </div>
       {prepared ? (
         <p className="muted">
-          Batch prepared. In YellowFruit, open Games → Import and select the Round {roundNumber}{' '}
-          files.
+          Batch prepared. In YellowFruit, open Games → Import and select the Round {roundNumber} files.
         </p>
       ) : null}
       {expanded ? (
@@ -315,8 +325,7 @@ function RoundRow({ shuttle, roundNumber }: { shuttle: Shuttle; roundNumber: num
             {games.map((game) => {
               const scan = shuttle.scanByMatchId.get(game.matchId);
               const room =
-                manifest.rooms.find((entry) => entry.slotId === game.slotId)?.displayName ??
-                game.slotId;
+                manifest.rooms.find((entry) => entry.slotId === game.slotId)?.displayName ?? game.slotId;
               const matchup = `${teamNameOf(shuttle, game.leftTeamId)} vs ${teamNameOf(shuttle, game.rightTeamId)}`;
               return (
                 <tr key={game.matchId}>
@@ -325,8 +334,8 @@ function RoundRow({ shuttle, roundNumber }: { shuttle: Shuttle; roundNumber: num
                     {matchup}
                     {scan?.wrongFolder ? (
                       <div className="warning-line">
-                        Round {scan.wrongFolder.roundNumber} / Room {scan.wrongFolder.expectedRoom}{' '}
-                        was found in Room {scan.wrongFolder.foundIn}’s OUT folder.
+                        Round {scan.wrongFolder.roundNumber} / Room {scan.wrongFolder.expectedRoom} was found
+                        in Room {scan.wrongFolder.foundIn}’s OUT folder.
                       </div>
                     ) : null}
                     {scan && scan.needsChoice ? (
@@ -373,9 +382,7 @@ function DuplicateChooser({
   return (
     <div className="duplicate-box">
       <fieldset>
-        <legend>
-          {candidates.length} results found — choose which one goes to YellowFruit
-        </legend>
+        <legend>{candidates.length} results found — choose which one goes to YellowFruit</legend>
         {candidates.map((candidate) => (
           <label key={candidate.fileName}>
             <input
@@ -392,8 +399,8 @@ function DuplicateChooser({
         ))}
       </fieldset>
       <p className="warning-line">
-        Round {roundNumber} / Room {room} has {candidates.length} completed results. Both originals
-        stay untouched; only the chosen one is batched.
+        Round {roundNumber} / Room {room} has {candidates.length} completed results. Both originals stay
+        untouched; only the chosen one is batched.
       </p>
     </div>
   );
@@ -408,8 +415,8 @@ function PlayoffSection({ shuttle }: { shuttle: Shuttle }) {
       <section className="panel">
         <h2>Playoffs</h2>
         <p className="muted">
-          Waiting for preliminary standings. Import Rounds 1–5 into YellowFruit, confirm
-          advancement, save the file, then load it here.
+          Waiting for preliminary standings. Import Rounds 1–5 into YellowFruit, confirm advancement, save the
+          file, then load it here.
         </p>
         <div className="row">
           <Button onPress={() => void shuttle.loadUpdatedYellowFruit()} isDisabled={shuttle.busy}>
@@ -431,7 +438,11 @@ function PlayoffSection({ shuttle }: { shuttle: Shuttle }) {
           </p>
         ) : (
           <div className="row">
-            <Button variant="primary" onPress={() => void shuttle.generatePlayoffs()} isDisabled={shuttle.busy}>
+            <Button
+              variant="primary"
+              onPress={() => void shuttle.generatePlayoffs()}
+              isDisabled={shuttle.busy}
+            >
               Generate playoff games
             </Button>
           </div>
@@ -449,13 +460,13 @@ function PlayoffSection({ shuttle }: { shuttle: Shuttle }) {
     <section className="panel">
       <h2>Playoffs</h2>
       <p className="muted">
-        {playoffs.decidedGames} of 30 prelim games decided in the reloaded file. These slots only
-        label the printed schedule — standings stay YellowFruit’s.
+        {playoffs.decidedGames} of 30 prelim games decided in the reloaded file. These slots only label the
+        printed schedule — standings stay YellowFruit’s.
       </p>
       {playoffs.decidedGames < 30 ? (
         <Notice tone="warning">
-          Only {playoffs.decidedGames} of 30 prelim games are decided in this file. Import every
-          prelim result into YellowFruit and save it before trusting these slots.
+          Only {playoffs.decidedGames} of 30 prelim games are decided in this file. Import every prelim result
+          into YellowFruit and save it before trusting these slots.
         </Notice>
       ) : null}
       <div className="slot-columns">
@@ -476,8 +487,8 @@ function PlayoffSection({ shuttle }: { shuttle: Shuttle }) {
       </div>
       {tied ? (
         <Notice tone="warning">
-          Some teams share a record, so the file cannot separate them. Prefer resolving advancement
-          in YellowFruit first; ordering here only labels the schedule.
+          Some teams share a record, so the file cannot separate them. Prefer resolving advancement in
+          YellowFruit first; ordering here only labels the schedule.
         </Notice>
       ) : null}
       {playoffs.verificationError ? <Notice tone="danger">{playoffs.verificationError}</Notice> : null}
@@ -494,11 +505,18 @@ function PlayoffSection({ shuttle }: { shuttle: Shuttle }) {
         >
           Confirm slots
         </Button>
-        <Button variant="quiet" onPress={() => void shuttle.loadUpdatedYellowFruit()} isDisabled={shuttle.busy}>
+        <Button
+          variant="quiet"
+          onPress={() => void shuttle.loadUpdatedYellowFruit()}
+          isDisabled={shuttle.busy}
+        >
           Reload file
         </Button>
         {manifest.playoffSlots ? (
-          <Button onPress={() => void shuttle.generatePlayoffs()} isDisabled={shuttle.busy || hasPlayoffGames}>
+          <Button
+            onPress={() => void shuttle.generatePlayoffs()}
+            isDisabled={shuttle.busy || hasPlayoffGames}
+          >
             {hasPlayoffGames ? 'Playoff games written' : 'Generate playoff games'}
           </Button>
         ) : null}
@@ -517,7 +535,18 @@ function PoolSlots({
   shuttle: Shuttle;
   poolKey: 'A' | 'B';
   letter: 'F' | 'B';
-  order: { poolName: string; standings: { teamId: string; teamName: string; wins: number; losses: number; ties: number; rankLabel: string }[]; tiedGroups: string[][] };
+  order: {
+    poolName: string;
+    standings: {
+      teamId: string;
+      teamName: string;
+      wins: number;
+      losses: number;
+      ties: number;
+      rankLabel: string;
+    }[];
+    tiedGroups: string[][];
+  };
   resolved: Record<string, string> | null;
 }) {
   const groupOf = (teamId: string): string[] | null =>

@@ -135,9 +135,7 @@ describe('reconciliation', () => {
     const tournament = loadedSynthetic();
     // The 319 game (slot-gold-1), dropped into 321's OUT folder under a misleading name.
     const scored = scorePrelimGame(tournament, 2, 'slot-gold-1');
-    const report = reconcileScan(manifest, [
-      outFile('321', 'R02 - 321 - whatever.qbj', scored.resultText),
-    ]);
+    const report = reconcileScan(manifest, [outFile('321', 'R02 - 321 - whatever.qbj', scored.resultText)]);
     expect(report.problems).toEqual([]);
     expect(report.scans).toHaveLength(1);
     const [scan] = report.scans;
@@ -205,7 +203,11 @@ describe('reconciliation', () => {
   test("another tournament's QBJ is rejected with a specific message", () => {
     const { manifest } = project();
     const foreign = loadedSynthetic();
-    const scored = scorePrelimGame({ ...foreign, id: 'Tournament_Other' } as typeof foreign, 1, 'slot-gold-1');
+    const scored = scorePrelimGame(
+      { ...foreign, id: 'Tournament_Other' } as typeof foreign,
+      1,
+      'slot-gold-1',
+    );
     const report = reconcileScan(manifest, [outFile('319', 'foreign.qbj', scored.resultText)]);
     expect(report.scans).toHaveLength(0);
     expect(report.problems).toHaveLength(1);

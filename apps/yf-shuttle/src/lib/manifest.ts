@@ -64,7 +64,9 @@ export function createManifest(input: {
   };
 }
 
-export function parseManifest(text: string): { ok: true; manifest: ShuttleManifest } | { ok: false; error: string } {
+export function parseManifest(
+  text: string,
+): { ok: true; manifest: ShuttleManifest } | { ok: false; error: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -90,7 +92,8 @@ export function parseManifest(text: string): { ok: true; manifest: ShuttleManife
       version: MANIFEST_VERSION,
       tournamentId: value.tournamentId,
       tournamentName: typeof value.tournamentName === 'string' ? value.tournamentName : '',
-      tournamentFingerprint: typeof value.tournamentFingerprint === 'string' ? value.tournamentFingerprint : '',
+      tournamentFingerprint:
+        typeof value.tournamentFingerprint === 'string' ? value.tournamentFingerprint : '',
       preset: PRESET_ID,
       rooms: (value.rooms as ManifestRoom[]).filter(
         (room) => typeof room?.slotId === 'string' && typeof room?.displayName === 'string',
@@ -105,7 +108,9 @@ export function parseManifest(text: string): { ok: true; manifest: ShuttleManife
         ? { playoffSlots: value.playoffSlots as Record<string, string> }
         : {}),
       selectedResults:
-        value.selectedResults && typeof value.selectedResults === 'object' && !Array.isArray(value.selectedResults)
+        value.selectedResults &&
+        typeof value.selectedResults === 'object' &&
+        !Array.isArray(value.selectedResults)
           ? (value.selectedResults as Record<string, string>)
           : {},
       preparedRounds: Array.isArray(value.preparedRounds)

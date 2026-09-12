@@ -102,8 +102,7 @@ export interface ShuttleTournament {
 }
 
 export type LoadTournamentResult =
-  | { ok: true; tournament: ShuttleTournament; warnings: string[] }
-  | { ok: false; errors: string[] };
+  { ok: true; tournament: ShuttleTournament; warnings: string[] } | { ok: false; errors: string[] };
 
 const scoringRulesId = 'ScoringRules_YFShuttle';
 
@@ -181,11 +180,7 @@ const shuttleWarningCodes = new Set([
 /** Keep identity/scoring hazards; omit metadata this app intentionally leaves with YellowFruit. */
 export function shuttleRelevantWarnings(entries: readonly FormatWarning[]): string[] {
   return [
-    ...new Set(
-      entries
-        .filter((entry) => shuttleWarningCodes.has(entry.code))
-        .map((entry) => entry.message),
-    ),
+    ...new Set(entries.filter((entry) => shuttleWarningCodes.has(entry.code)).map((entry) => entry.message)),
   ];
 }
 
@@ -208,7 +203,8 @@ export function loadShuttleTournament(contents: string): LoadTournamentResult {
     const root = parsed as JsonObject;
     const objects = Array.isArray(root.objects) ? (root.objects as JsonObject[]) : [];
     const found = objects.find((entry) => entry?.type === 'Tournament') ?? objects[0];
-    if (!found || typeof found !== 'object') return { ok: false, errors: ['That file has no tournament in it.'] };
+    if (!found || typeof found !== 'object')
+      return { ok: false, errors: ['That file has no tournament in it.'] };
     rawTournament = found;
   } catch {
     return { ok: false, errors: ['That file is not valid JSON.'] };

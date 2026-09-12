@@ -100,7 +100,11 @@ export interface WriteOptions {
 }
 
 /** Write one text file. Exclusive unless `overwrite` says otherwise. */
-export async function writeTextFile(path: string, contents: string, options: WriteOptions = {}): Promise<void> {
+export async function writeTextFile(
+  path: string,
+  contents: string,
+  options: WriteOptions = {},
+): Promise<void> {
   requireNative('Writing a file');
   await invoke('write_text_file', { path, contents, overwrite: options.overwrite ?? false });
 }

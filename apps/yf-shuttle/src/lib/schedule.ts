@@ -95,9 +95,7 @@ const PRELIM_TABLE: Readonly<Record<number, Readonly<Record<string, SeedPair>>>>
   },
 };
 
-export type PlayoffLabel =
-  | 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6'
-  | 'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6';
+export type PlayoffLabel = 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6' | 'B1' | 'B2' | 'B3' | 'B4' | 'B5' | 'B6';
 
 type LabelPair = readonly [PlayoffLabel, PlayoffLabel];
 
@@ -169,9 +167,7 @@ export function validateWildcatCompatibility(
   const errors: string[] = [];
 
   if (tournament.teams.length !== 12) {
-    errors.push(
-      `The Wildcat preset needs exactly 12 teams, but this file has ${tournament.teams.length}.`,
-    );
+    errors.push(`The Wildcat preset needs exactly 12 teams, but this file has ${tournament.teams.length}.`);
   }
 
   const teamsBySeed = new Map<number, string>();
@@ -197,10 +193,12 @@ export function validateWildcatCompatibility(
 
   const roundsByNumber = new Map<number, ShuttleRound>();
   for (const round of tournament.rounds) {
-    if (round.number !== undefined && !roundsByNumber.has(round.number)) roundsByNumber.set(round.number, round);
+    if (round.number !== undefined && !roundsByNumber.has(round.number))
+      roundsByNumber.set(round.number, round);
   }
   for (let number = 1; number <= 8; number += 1) {
-    if (!roundsByNumber.has(number)) errors.push(`This file has no round ${number}; the preset needs rounds 1–8.`);
+    if (!roundsByNumber.has(number))
+      errors.push(`This file has no round ${number}; the preset needs rounds 1–8.`);
   }
 
   let prelimPhaseId = '';
@@ -225,13 +223,13 @@ export function validateWildcatCompatibility(
   if (errors.length === 0) {
     const prelimPools = tournament.pools.filter((pool) => pool.phaseId === prelimPhaseId);
     if (prelimPools.length !== 2) {
-      errors.push(
-        `The prelim phase needs exactly two pools, but this file has ${prelimPools.length}.`,
-      );
+      errors.push(`The prelim phase needs exactly two pools, but this file has ${prelimPools.length}.`);
     } else {
       for (const pool of prelimPools) {
         if (pool.teamIds.length !== 6) {
-          errors.push(`Pool “${pool.name}” has ${pool.teamIds.length} teams; the preset needs two pools of six.`);
+          errors.push(
+            `Pool “${pool.name}” has ${pool.teamIds.length} teams; the preset needs two pools of six.`,
+          );
           continue;
         }
         const seeds = new Set<number>();
@@ -254,9 +252,7 @@ export function validateWildcatCompatibility(
     }
     const playoffPools = tournament.pools.filter((pool) => pool.phaseId === playoffPhaseId);
     if (playoffPools.length !== 2) {
-      errors.push(
-        `The playoff phase needs exactly two pools, but this file has ${playoffPools.length}.`,
-      );
+      errors.push(`The playoff phase needs exactly two pools, but this file has ${playoffPools.length}.`);
     }
   }
 

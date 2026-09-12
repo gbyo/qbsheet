@@ -148,10 +148,7 @@ function isForfeitMatch(sides: Record<string, unknown>[]): boolean {
  * Overtime tossup points for one side, from `YfData.overTimeBuzzes` answer counts valued
  * against the tournament's own answer types — the data `MatchTeam.getOvertimePoints` sums.
  */
-function overtimePoints(
-  side: Record<string, unknown>,
-  answerValueById: ReadonlyMap<string, number>,
-): number {
+function overtimePoints(side: Record<string, unknown>, answerValueById: ReadonlyMap<string, number>): number {
   const data = isRecord(side.YfData) ? side.YfData : null;
   const buzzes = data && Array.isArray(data.overTimeBuzzes) ? data.overTimeBuzzes : [];
   let total = 0;
@@ -445,16 +442,10 @@ export function verifyPlayoffPools(input: {
   tournament: ShuttleTournament;
   playoffPhaseId: string;
   slots: Record<PlayoffLabel | string, string>;
-}):
-  | { ok: true; goldPoolName: string; maroonPoolName: string }
-  | { ok: false; error: string } {
+}): { ok: true; goldPoolName: string; maroonPoolName: string } | { ok: false; error: string } {
   const { tournament, playoffPhaseId, slots } = input;
-  const gold = new Set(
-    ['F1', 'F2', 'F3', 'B1', 'B2', 'B3'].map((label) => slots[label]).filter(Boolean),
-  );
-  const maroon = new Set(
-    ['F4', 'F5', 'F6', 'B4', 'B5', 'B6'].map((label) => slots[label]).filter(Boolean),
-  );
+  const gold = new Set(['F1', 'F2', 'F3', 'B1', 'B2', 'B3'].map((label) => slots[label]).filter(Boolean));
+  const maroon = new Set(['F4', 'F5', 'F6', 'B4', 'B5', 'B6'].map((label) => slots[label]).filter(Boolean));
   if (gold.size !== 6 || maroon.size !== 6) {
     return { ok: false, error: 'The playoff slots are incomplete; confirm all twelve F/B labels first.' };
   }
@@ -486,7 +477,7 @@ export function verifyPlayoffPools(input: {
         'YellowFruit’s playoff pools do not match the confirmed slots. ' +
         'Confirm advancement in YellowFruit first — F1–F3 and B1–B3 belong in one pool, ' +
         'F4–F6 and B4–B6 in the other. ' +
-        pools.map(describe).join(' ')
+        pools.map(describe).join(' '),
     };
   }
   return { ok: true, goldPoolName, maroonPoolName };

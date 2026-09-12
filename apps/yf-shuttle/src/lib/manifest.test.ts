@@ -103,7 +103,12 @@ describe('project layout', () => {
 
   test('filenames are readable, safe, and never load-bearing', () => {
     expect(
-      assignmentFileName({ roundNumber: 1, roomName: '319', leftTeamName: 'Clinton', rightTeamName: 'Wren B' }),
+      assignmentFileName({
+        roundNumber: 1,
+        roomName: '319',
+        leftTeamName: 'Clinton',
+        rightTeamName: 'Wren B',
+      }),
     ).toBe('R01 - 319 - Clinton vs Wren B.qbj');
     // A separator in a team name becomes a hyphen, never a directory.
     const tricky = assignmentFileName({

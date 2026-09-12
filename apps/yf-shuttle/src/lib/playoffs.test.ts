@@ -8,12 +8,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import {
-  assignSlotLabels,
-  countDecidedPrelimGames,
-  orderPrelimPool,
-  verifyPlayoffPools,
-} from './playoffs';
+import { assignSlotLabels, countDecidedPrelimGames, orderPrelimPool, verifyPlayoffPools } from './playoffs';
 import { validateWildcatCompatibility } from './schedule';
 import { loadedSynthetic, syntheticTeams, syntheticYftText } from '../tests/helpers';
 import { loadShuttleTournament, tournamentIdentityFingerprint, type ShuttleTournament } from './tournament';
@@ -116,9 +111,7 @@ describe('prelim ordering', () => {
   });
 
   test('the operator resolves a tie explicitly, and only inside the tied group', () => {
-    const results = [
-      { round: 1, leftSeed: 4, rightSeed: 5, leftPoints: 320, rightPoints: 320 },
-    ];
+    const results = [{ round: 1, leftSeed: 4, rightSeed: 5, leftPoints: 320, rightPoints: 320 }];
     const tournament = loadedSynthetic({ prelimResults: results });
     const order = orderPrelimPool({
       tournament,
@@ -130,8 +123,8 @@ describe('prelim ordering', () => {
     const reversed = [...group].reverse();
     const resolved = assignSlotLabels(order, 'F', reversed);
     if (!resolved.ok) throw new Error(resolved.error);
-    const positions = group.map((teamId) =>
-      Object.entries(resolved.slots).find(([, id]) => id === teamId)![0],
+    const positions = group.map(
+      (teamId) => Object.entries(resolved.slots).find(([, id]) => id === teamId)![0],
     );
     // The reversed group occupies the same label positions, in the operator's order.
     const reordered = [...positions].sort();
@@ -155,10 +148,12 @@ describe('prelim ordering', () => {
     expect(seed1.wins).toBe(1);
     expect(seed12.losses).toBe(1);
     expect(seed1.tossupsHeard).toBe(0);
-    expect(countDecidedPrelimGames({
-      tournament,
-      prelimPhaseId: prelimPhaseIdOf(tournament),
-    })).toBe(1);
+    expect(
+      countDecidedPrelimGames({
+        tournament,
+        prelimPhaseId: prelimPhaseIdOf(tournament),
+      }),
+    ).toBe(1);
   });
 
   test('overtime points leave the tossup numbers, as YellowFruit scores them', () => {
@@ -190,9 +185,7 @@ describe('playoff pool verification', () => {
     const teams = syntheticTeams();
     const id = (seed: number): string => teams.find((team) => team.seed === seed)!.id;
     const text = syntheticYftText({
-      prelimResults: orderedResults([1, 4, 5, 8, 9, 12], 1).concat(
-        orderedResults([2, 3, 6, 7, 10, 11], 1),
-      ),
+      prelimResults: orderedResults([1, 4, 5, 8, 9, 12], 1).concat(orderedResults([2, 3, 6, 7, 10, 11], 1)),
       playoffPools: [
         { name: 'Gold', position: 1, teamIds: [id(1), id(4), id(5), id(2), id(3), id(6)] },
         { name: 'Maroon', position: 2, teamIds: [id(8), id(9), id(12), id(7), id(10), id(11)] },
@@ -211,10 +204,18 @@ describe('playoff pool verification', () => {
       tournament,
       playoffPhaseId: compat.compat.playoffPhaseId,
       slots: {
-        F1: 'Team_Seed1', F2: 'Team_Seed4', F3: 'Team_Seed5',
-        F4: 'Team_Seed8', F5: 'Team_Seed9', F6: 'Team_Seed12',
-        B1: 'Team_Seed2', B2: 'Team_Seed3', B3: 'Team_Seed6',
-        B4: 'Team_Seed7', B5: 'Team_Seed10', B6: 'Team_Seed11',
+        F1: 'Team_Seed1',
+        F2: 'Team_Seed4',
+        F3: 'Team_Seed5',
+        F4: 'Team_Seed8',
+        F5: 'Team_Seed9',
+        F6: 'Team_Seed12',
+        B1: 'Team_Seed2',
+        B2: 'Team_Seed3',
+        B3: 'Team_Seed6',
+        B4: 'Team_Seed7',
+        B5: 'Team_Seed10',
+        B6: 'Team_Seed11',
       },
     });
     expect(verified.ok).toBe(true);
@@ -233,10 +234,18 @@ describe('playoff pool verification', () => {
       playoffPhaseId: compat.compat.playoffPhaseId,
       // Operator claims seed 8 finished third — YellowFruit's pools disagree.
       slots: {
-        F1: 'Team_Seed1', F2: 'Team_Seed4', F3: 'Team_Seed8',
-        F4: 'Team_Seed5', F5: 'Team_Seed9', F6: 'Team_Seed12',
-        B1: 'Team_Seed2', B2: 'Team_Seed3', B3: 'Team_Seed6',
-        B4: 'Team_Seed7', B5: 'Team_Seed10', B6: 'Team_Seed11',
+        F1: 'Team_Seed1',
+        F2: 'Team_Seed4',
+        F3: 'Team_Seed8',
+        F4: 'Team_Seed5',
+        F5: 'Team_Seed9',
+        F6: 'Team_Seed12',
+        B1: 'Team_Seed2',
+        B2: 'Team_Seed3',
+        B3: 'Team_Seed6',
+        B4: 'Team_Seed7',
+        B5: 'Team_Seed10',
+        B6: 'Team_Seed11',
       },
     });
     expect(verified.ok).toBe(false);

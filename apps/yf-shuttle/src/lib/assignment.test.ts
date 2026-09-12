@@ -236,9 +236,9 @@ describe('Match identity', () => {
   });
 
   test('swapping sides is a different game', () => {
-    expect(
-      shuttleMatchId({ ...inputs, leftTeamId: 'Team_B', rightTeamId: 'Team_A' }),
-    ).not.toBe(shuttleMatchId(inputs));
+    expect(shuttleMatchId({ ...inputs, leftTeamId: 'Team_B', rightTeamId: 'Team_A' })).not.toBe(
+      shuttleMatchId(inputs),
+    );
   });
 
   test('survives a room rename', () => {

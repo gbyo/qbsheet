@@ -63,11 +63,7 @@ import {
   readTextFile,
   writeTextFile,
 } from './native';
-import {
-  loadShuttleTournament,
-  tournamentIdentityFingerprint,
-  type ShuttleTournament,
-} from './tournament';
+import { loadShuttleTournament, tournamentIdentityFingerprint, type ShuttleTournament } from './tournament';
 
 export interface Notice {
   kind: 'good' | 'warn' | 'bad';
@@ -271,9 +267,7 @@ export function useShuttle() {
       const left = teams.get(game.leftTeamId);
       const right = teams.get(game.rightTeamId);
       if (!round || !left || !right) {
-        throw new Error(
-          `Round ${game.roundNumber} can no longer be built: the file changed under it.`,
-        );
+        throw new Error(`Round ${game.roundNumber} can no longer be built: the file changed under it.`);
       }
       const result = buildAssignment({
         tournament: source,
@@ -324,7 +318,10 @@ export function useShuttle() {
         }));
         const roomFolders = rooms.map((room) => room.displayName);
         const rounds = [...PRELIM_ROUNDS, ...PLAYOFF_ROUNDS];
-        await createDirectories(parent, [safeFolder, ...projectDirectories(roomFolders, rounds).map((dir) => joinPath(safeFolder, dir))]);
+        await createDirectories(parent, [
+          safeFolder,
+          ...projectDirectories(roomFolders, rounds).map((dir) => joinPath(safeFolder, dir)),
+        ]);
 
         const games = planPrelims(compat);
         const built = buildGames(games, rooms, tournament);
@@ -409,8 +406,13 @@ export function useShuttle() {
       const chosen = next.scans.filter((scan) => scan.chosen).length;
       const problems = next.problems.length;
       const needsChoice = next.scans.filter((scan) => scan.needsChoice).length;
-      const parts = [`Scanned ${files.length} file${files.length === 1 ? '' : 's'}: ${chosen} result${chosen === 1 ? '' : 's'} returned.`];
-      if (needsChoice > 0) parts.push(`${needsChoice} game${needsChoice === 1 ? ' needs' : 's need'} you to choose between duplicate results.`);
+      const parts = [
+        `Scanned ${files.length} file${files.length === 1 ? '' : 's'}: ${chosen} result${chosen === 1 ? '' : 's'} returned.`,
+      ];
+      if (needsChoice > 0)
+        parts.push(
+          `${needsChoice} game${needsChoice === 1 ? ' needs' : 's need'} you to choose between duplicate results.`,
+        );
       if (problems > 0) parts.push(`${problems} file${problems === 1 ? ' needs' : 's need'} attention.`);
       setNotice({ kind: problems > 0 || needsChoice > 0 ? 'warn' : 'good', message: parts.join(' ') });
     });
@@ -484,7 +486,9 @@ export function useShuttle() {
           `Round ${roundNumber} is ready for YellowFruit: ${copied} file${copied === 1 ? '' : 's'} in “YellowFruit Import / Round ${roundNumber}”. In YellowFruit, open Games → Import and select ${copied === 1 ? 'it' : 'them'}.`,
         ];
         if (pending.length > 0) {
-          parts.push(`${pending.length} game${pending.length === 1 ? ' is' : 's are'} still waiting — the batch can be prepared again later.`);
+          parts.push(
+            `${pending.length} game${pending.length === 1 ? ' is' : 's are'} still waiting — the batch can be prepared again later.`,
+          );
         }
         setNotice({ kind: pending.length > 0 ? 'warn' : 'good', message: parts.join(' ') });
       });
@@ -579,9 +583,7 @@ export function useShuttle() {
         slots,
       });
       if (!verified.ok) {
-        setPlayoffs((previous) =>
-          previous ? { ...previous, verificationError: verified.error } : previous,
-        );
+        setPlayoffs((previous) => (previous ? { ...previous, verificationError: verified.error } : previous));
         setNotice({ kind: 'bad', message: verified.error });
         return;
       }
@@ -651,7 +653,9 @@ export function useShuttle() {
       setExpandedRound(6);
       const parts = [`Wrote ${written} playoff games into the room IN folders.`];
       if (kept.length > 0) {
-        parts.push(`Left untouched (already exist with different content): ${[...new Set(kept)].join('; ')}.`);
+        parts.push(
+          `Left untouched (already exist with different content): ${[...new Set(kept)].join('; ')}.`,
+        );
       }
       setNotice({ kind: kept.length > 0 ? 'warn' : 'good', message: parts.join(' ') });
     });
@@ -668,7 +672,10 @@ export function useShuttle() {
   );
 
   const scanByMatchId = useMemo(() => {
-    const map = new Map<string, (typeof report extends null ? never : NonNullable<typeof report>)['scans'][number]>();
+    const map = new Map<
+      string,
+      (typeof report extends null ? never : NonNullable<typeof report>)['scans'][number]
+    >();
     for (const scan of report?.scans ?? []) map.set(scan.assignment.matchId, scan);
     return map;
   }, [report]);

@@ -159,10 +159,7 @@ interface SpineContext {
  * `FileParsing.findMatches` performs, so a document it can read is a document this can read.
  * Top-level Round objects are a fallback for producers that emit them alongside the spine.
  */
-function spineContextFor(
-  document: Record<string, unknown>[],
-  matchId: string,
-): SpineContext {
+function spineContextFor(document: Record<string, unknown>[], matchId: string): SpineContext {
   const byId = new Map<string, Record<string, unknown>>();
   for (const entry of document) {
     if (isRecord(entry) && typeof entry.id === 'string') byId.set(entry.id, entry);

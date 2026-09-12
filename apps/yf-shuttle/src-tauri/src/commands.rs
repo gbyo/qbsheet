@@ -191,8 +191,7 @@ fn read_text_file_inner(path: &Path) -> Result<String, String> {
 /// Read one text file.
 #[tauri::command]
 pub async fn read_text_file(path: String) -> CommandResult<String> {
-    read_text_file_inner(Path::new(&path))
-        .map_err(|error| CommandError::new("read_failed", error))
+    read_text_file_inner(Path::new(&path)).map_err(|error| CommandError::new("read_failed", error))
 }
 
 /// Write one text file into an existing directory.
@@ -239,10 +238,7 @@ pub async fn write_text_file(path: String, contents: String, overwrite: bool) ->
                 "file_exists",
                 format!(
                     "{} already exists and was not replaced.",
-                    target
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
+                    target.file_name().unwrap_or_default().to_string_lossy()
                 ),
             )
         } else {
@@ -275,7 +271,8 @@ pub async fn copy_file(src: String, dst: String, overwrite: bool) -> CommandResu
             ));
         }
     }
-    std::fs::copy(&src, &dst).map_err(|error| CommandError::new("write_failed", error.to_string()))?;
+    std::fs::copy(&src, &dst)
+        .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
     Ok(())
 }
 

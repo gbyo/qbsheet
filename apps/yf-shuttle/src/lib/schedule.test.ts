@@ -54,8 +54,7 @@ describe('the prelim preset', () => {
     const tournament = loadedFixture();
     const compat = compatOf(tournament);
     const bySeed = new Map(tournament.teams.map((team) => [team.id, team.seed!]));
-    const poolOfSeed = (seed: number): string =>
-      [1, 4, 5, 8, 9, 12].includes(seed) ? 'A' : 'B';
+    const poolOfSeed = (seed: number): string => ([1, 4, 5, 8, 9, 12].includes(seed) ? 'A' : 'B');
     const pairsByPool = new Map<string, Set<string>>();
     for (const game of planPrelims(compat)) {
       const leftSeed = bySeed.get(game.leftTeamId)!;
@@ -109,8 +108,18 @@ describe('the playoff preset', () => {
     const teams = syntheticTeams();
     const id = (seed: number): string => teams.find((team) => team.seed === seed)!.id;
     return {
-      F1: id(1), F2: id(4), F3: id(5), F4: id(8), F5: id(9), F6: id(12),
-      B1: id(2), B2: id(3), B3: id(6), B4: id(7), B5: id(10), B6: id(11),
+      F1: id(1),
+      F2: id(4),
+      F3: id(5),
+      F4: id(8),
+      F5: id(9),
+      F6: id(12),
+      B1: id(2),
+      B2: id(3),
+      B3: id(6),
+      B4: id(7),
+      B5: id(10),
+      B6: id(11),
     };
   }
 

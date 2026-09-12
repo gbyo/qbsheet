@@ -3,11 +3,7 @@
  */
 
 import { describe, expect, test } from 'vitest';
-import {
-  loadShuttleTournament,
-  seedOrderOf,
-  tournamentIdentityFingerprint,
-} from './tournament';
+import { loadShuttleTournament, seedOrderOf, tournamentIdentityFingerprint } from './tournament';
 import { loadedFixture, yftFixtureText } from '../tests/helpers';
 
 describe('loading a YellowFruit file', () => {
@@ -46,8 +42,8 @@ describe('loading a YellowFruit file', () => {
     const first = loadedFixture();
     const second = loadedFixture();
     expect(tournamentIdentityFingerprint(first)).toBe(tournamentIdentityFingerprint(second));
-    expect(
-      tournamentIdentityFingerprint({ ...first, name: 'Renamed Event' }),
-    ).toBe(tournamentIdentityFingerprint(first));
+    expect(tournamentIdentityFingerprint({ ...first, name: 'Renamed Event' })).toBe(
+      tournamentIdentityFingerprint(first),
+    );
   });
 });
