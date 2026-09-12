@@ -253,7 +253,7 @@ describe('the mirror body', () => {
   test('a stale publication is reported, not worked around', async () => {
     stubRelay(() => ({
       status: 409,
-      body: JSON.stringify({ code: 'conflict', currentRevision: 12 }),
+      body: JSON.stringify({ error: 'conflict', currentRevision: 12 }),
     }));
     const tournament = loadedFixture();
     const rooms = roomsFor();
@@ -266,6 +266,34 @@ describe('the mirror body', () => {
         rooms,
       }),
     ).rejects.toThrow(/revision 12.*Nothing was sent to the rooms/);
+  });
+
+  test('a superseded controller is told who owns publication, not to retry', async () => {
+    // After a backup takeover the stale primary's publish is refused with 409 `superseded`,
+    // which carries no currentRevision. Reporting it as a stale revision would send the
+    // operator to review the round and retry, and no retry from this controller can succeed.
+    stubRelay(() => ({
+      status: 409,
+      body: JSON.stringify({
+        error: 'superseded',
+        message:
+          'This primary controller is no longer active. The backup controller owns relay publication now.',
+        active_controller: 'backup',
+        director_epoch: 3,
+      }),
+    }));
+    const tournament = loadedFixture();
+    const rooms = roomsFor();
+    const failure = await publishRound(connection, {
+      epoch: 1,
+      lastRevision: 3,
+      tournamentName: tournament.name,
+      plan: planRound(tournament, tournament.rounds[0], rooms, pairingsFor()),
+      rooms,
+    }).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RelayError);
+    expect((failure as RelayError).code).toBe('superseded');
+    expect((failure as RelayError).message).toMatch(/no longer active.*owns relay publication now/);
   });
 
   test('a round with no matchups can publish a clear-only mirror', async () => {

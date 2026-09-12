@@ -439,6 +439,16 @@ export async function relayPublishMirror(
   });
   if (response.status === 409) {
     const body = parseBody(response);
+    // A superseded controller is not a stale revision: this device lost a takeover, and no
+    // republish from here can ever succeed. The backend says who owns publication now, so
+    // carry that message instead of advising a retry.
+    if (body.error === 'superseded') {
+      const message =
+        typeof body.message === 'string' && body.message.length > 0
+          ? body.message
+          : 'This controller is no longer the active publisher. The controller that took over owns relay publication now.';
+      throw new RelayError(message, 409, 'superseded');
+    }
     const current = typeof body.currentRevision === 'number' ? body.currentRevision : null;
     throw new RelayError(
       current === null
