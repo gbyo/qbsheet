@@ -83,6 +83,10 @@ let assignmentFolder = '/tournaments/assignments';
 let deferResultRequests = false;
 let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reason?: unknown) => void }[] =
   [];
+/** Set to hold the next relay health read open until it resolves, for the reconcile race test. */
+let deferHealthRequests = false;
+let pendingHealthRequests: { resolve: (reply: RelayReply) => void; reject: (reason?: unknown) => void }[] =
+  [];
 let deferWrites = false;
 let pendingWrites: PendingWrite[] = [];
 let scorerCanPair = true;
@@ -179,6 +183,11 @@ function installFakeTauri(): void {
           };
         }
         if (url.endsWith('/health')) {
+          if (deferHealthRequests) {
+            return new Promise<RelayReply>((resolve, reject) => {
+              pendingHealthRequests.push({ resolve, reject });
+            });
+          }
           const authenticatedAs = bearer === backupToken ? 'backup' : 'primary';
           return {
             status: 200,
@@ -198,7 +207,7 @@ function installFakeTauri(): void {
         }
         if (url.endsWith('/takeover')) {
           activeController = 'backup';
-          relayEpoch = 2;
+          relayEpoch += 1;
           relayRevision = 0;
           return {
             status: 200,
@@ -208,6 +217,27 @@ function installFakeTauri(): void {
               revision: relayRevision,
               active_controller: activeController,
               idempotent: false,
+            }),
+          };
+        }
+        if (url.endsWith('/transfer')) {
+          let target: 'primary' | 'backup' = 'primary';
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as { controller?: unknown };
+            if (parsed.controller === 'backup') target = 'backup';
+          } catch {
+            target = 'primary';
+          }
+          activeController = target;
+          relayEpoch += 1;
+          relayRevision = 0;
+          return {
+            status: 200,
+            body: JSON.stringify({
+              tournamentId: relayTournament,
+              director_epoch: relayEpoch,
+              revision: relayRevision,
+              active_controller: activeController,
             }),
           };
         }
@@ -239,6 +269,44 @@ function installFakeTauri(): void {
           if (deferMirror) {
             deferredMirrorStarted = true;
             await deferMirror;
+          }
+          const presented = JSON.stringify(args);
+          const writer = presented.includes(backupToken) ? 'backup' : 'primary';
+          if (writer !== activeController) {
+            return {
+              status: 409,
+              body: JSON.stringify({
+                code: 'superseded',
+                message: `This ${writer} controller is no longer active.`,
+                active_controller: activeController,
+                director_epoch: relayEpoch,
+              }),
+            };
+          }
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as {
+              director_epoch?: unknown;
+              revision?: unknown;
+            };
+            const epoch = typeof parsed.director_epoch === 'number' ? parsed.director_epoch : null;
+            const revision = typeof parsed.revision === 'number' ? parsed.revision : null;
+            if (epoch !== null && revision !== null) {
+              if (epoch < relayEpoch || (epoch === relayEpoch && revision <= relayRevision)) {
+                return {
+                  status: 409,
+                  body: JSON.stringify({
+                    code: 'conflict',
+                    message: 'That mirror state is older than what the relay holds.',
+                    currentRevision: relayRevision,
+                    director_epoch: relayEpoch,
+                  }),
+                };
+              }
+              relayEpoch = epoch;
+              relayRevision = revision;
+            }
+          } catch {
+            // An unparseable test body keeps the legacy accept behavior.
           }
           return { status: 200, body: '{}' };
         }
@@ -276,6 +344,8 @@ beforeEach(() => {
   assignmentFolder = '/tournaments/assignments';
   deferResultRequests = false;
   pendingResultRequests = [];
+  deferHealthRequests = false;
+  pendingHealthRequests = [];
   deferWrites = false;
   pendingWrites = [];
   scorerCanPair = true;
@@ -1009,6 +1079,7 @@ describe('persistence', () => {
       rooms: [],
       pendingRoomRemovals: [],
       retiredRoomIds: [],
+      mirrorReviewPending: false,
       selectedRoundId: null,
       roundPlans: [],
       resultFolder: null,
@@ -1135,6 +1206,7 @@ describe('YellowFruit file boundaries', () => {
       rooms: [],
       pendingRoomRemovals: [],
       retiredRoomIds: [],
+      mirrorReviewPending: false,
       selectedRoundId: 'Phase_Prelims__round_1',
       resultFolder: before.resultFolder,
       results: [],
@@ -1610,6 +1682,247 @@ describe('backup controller recovery', () => {
     expect(ack?.args.bearer).toBe(backupToken);
     expect(backup.result.current.state.results[0].ackPending).toBe(false);
     backup.unmount();
+  });
+
+  test('a primary reconciles its fencing position after control is transferred back', async () => {
+    const primary = await setUpTournament();
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 1, revision: 1 });
+    const roomsBefore = primary.result.current.state.rooms.map((room) => ({ ...room }));
+    const plansBefore = JSON.parse(JSON.stringify(primary.result.current.state.roundPlans)) as unknown;
+    const claimsBefore = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/manage/claim'),
+    ).length;
+
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await primary.result.current.createRecoveryPackage(
+        'correct horse battery staple',
+        'Backup laptop',
+      );
+    });
+    expect(created).toBe(true);
+
+    // The backup profile runs alongside the still-mounted primary, as a second laptop would.
+    // Clearing shared storage is safe: the primary's working state stays in memory.
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    expect(activeController).toBe('backup');
+
+    // A still-superseded primary learns the new position but gains no write authority.
+    let reconciled: boolean | undefined;
+    await act(async () => {
+      reconciled = await primary.result.current.reconcileRelayPosition();
+    });
+    expect(reconciled).toBe(false);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 2, revision: 0 });
+    expect(primary.result.current.notice?.message).toMatch(/backup.*still active|cannot publish/i);
+    // The lock engages even while superseded: the later handback refresh may observe no
+    // further movement and would otherwise clear a danger it cannot see.
+    expect(primary.result.current.state.mirrorReviewPending).toBe(true);
+
+    const blockedMirrors = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+    await act(async () => {
+      await primary.result.current.publish();
+    });
+    expect(primary.result.current.notice?.kind).toBe('bad');
+    expect(primary.result.current.notice?.message).toMatch(/unlock publishing/i);
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(blockedMirrors);
+
+    await act(async () => {
+      expect(await backup.result.current.transferRelayToPrimary()).toBe(true);
+    });
+    expect(activeController).toBe('primary');
+    backup.unmount();
+
+    await act(async () => {
+      reconciled = await primary.result.current.reconcileRelayPosition();
+    });
+    expect(reconciled).toBe(true);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 3, revision: 0 });
+    // Only the fencing position moved; working state is untouched.
+    expect(primary.result.current.state.rooms).toEqual(roomsBefore);
+    expect(primary.result.current.state.roundPlans).toEqual(plansBefore);
+    expect(primary.result.current.notice?.message).toMatch(/Review the recovered room state/);
+
+    // The handback does not restore write readiness on its own.
+    expect(primary.result.current.state.mirrorReviewPending).toBe(true);
+
+    // The original primary publishes at the new epoch with its existing credential, but only
+    // after explicitly confirming the recovered room state was reviewed.
+    let confirmed: boolean | undefined;
+    act(() => {
+      confirmed = primary.result.current.confirmMirrorReviewed();
+    });
+    expect(confirmed).toBe(true);
+    expect(primary.result.current.state.mirrorReviewPending).toBe(false);
+    await setUpRound(primary, 4);
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 3, revision: 1 });
+    const mirrors = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+    const lastMirror = mirrors[mirrors.length - 1]!;
+    expect(lastMirror.args.bearer).toBe('management-secret');
+    const lastBody = JSON.parse(String(lastMirror.args.body)) as {
+      director_epoch: number;
+      revision: number;
+    };
+    expect(lastBody.director_epoch).toBe(3);
+    expect(lastBody.revision).toBe(1);
+    expect(
+      calls.filter(
+        (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/manage/claim'),
+      ),
+    ).toHaveLength(claimsBefore);
+
+    primary.unmount();
+    backup.unmount();
+    globalThis.localStorage.clear();
+  });
+
+  test('a health response from a replaced relay is discarded, not committed', async () => {
+    const rendered = await setUpTournament();
+    expect(rendered.result.current.state.relay).toMatchObject({ epoch: 1, revision: 0 });
+
+    deferHealthRequests = true;
+    const pending = rendered.result.current.reconcileRelayPosition();
+    await waitFor(() => expect(pendingHealthRequests).toHaveLength(1));
+    deferHealthRequests = false;
+
+    // The relay is replaced while the old relay's health read is still in flight.
+    relayResultsByBase.set(replacementRelayBase, []);
+    await act(async () => {
+      await rendered.result.current.connectRelay({
+        baseUrl: replacementRelayBase,
+        tournamentId: relayTournament,
+        setupToken: 'replacement',
+      });
+    });
+    expect(rendered.result.current.state.relay?.baseUrl).toBe(replacementRelayBase);
+
+    const waiting = pendingHealthRequests.shift();
+    if (!waiting) throw new Error('the old relay health read was not waiting');
+    waiting.resolve({
+      status: 200,
+      body: JSON.stringify({
+        tournamentId: relayTournament,
+        mirror: { director_epoch: 99, revision: 99 },
+        controller: {
+          authenticated_as: 'primary',
+          active: true,
+          active_controller: 'primary',
+          backup_provisioned: true,
+          backup_controller_id: backupControllerId,
+          backup_controller_label: 'Backup laptop',
+        },
+      }),
+    });
+    let reconciled: boolean | undefined;
+    await act(async () => {
+      reconciled = await pending;
+    });
+
+    expect(reconciled).toBe(false);
+    expect(rendered.result.current.state.relay?.baseUrl).toBe(replacementRelayBase);
+    expect(rendered.result.current.state.relay?.epoch).not.toBe(99);
+    expect(rendered.result.current.state.relay?.revision).not.toBe(99);
+    expect(rendered.result.current.notice?.message).toMatch(
+      /relay changed while its position was being read/i,
+    );
+    rendered.unmount();
+    globalThis.localStorage.clear();
+  });
+
+  test('a primary cannot overwrite the backup\u2019s newer mirror after handback', async () => {
+    const primary = await setUpTournament();
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay).toMatchObject({ epoch: 1, revision: 1 });
+
+    let created: boolean | undefined;
+    await act(async () => {
+      created = await primary.result.current.createRecoveryPackage(
+        'correct horse battery staple',
+        'Backup laptop',
+      );
+    });
+    expect(created).toBe(true);
+
+    globalThis.localStorage.clear();
+    const backup = renderHook(() => useBridge());
+    await act(async () => {
+      expect(await backup.result.current.importRecoveryPackage('correct horse battery staple')).toBe(true);
+    });
+    await act(async () => {
+      backup.result.current.loadFileContents(null, yftFixtureText());
+    });
+    await act(async () => {
+      expect(await backup.result.current.takeOverRelay()).toBe(true);
+    });
+    expect(activeController).toBe('backup');
+
+    // The backup runs rounds and publishes different room state while it is active.
+    await setUpRound(backup, 4);
+    await publishReviewed(backup);
+    const backupMirrors = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+    expect(backupMirrors.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      expect(await backup.result.current.transferRelayToPrimary()).toBe(true);
+    });
+    expect(activeController).toBe('primary');
+    backup.unmount();
+
+    // Handback restores the position but not write readiness: the primary still holds its
+    // pre-takeover rooms while the relay carries the backup's newer mirror.
+    let reconciled: boolean | undefined;
+    await act(async () => {
+      reconciled = await primary.result.current.reconcileRelayPosition();
+    });
+    expect(reconciled).toBe(true);
+    expect(primary.result.current.state.mirrorReviewPending).toBe(true);
+
+    // No mirror request may leave this profile until the recovered room state is reviewed.
+    const mirrorsBefore = calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    ).length;
+    await act(async () => {
+      await primary.result.current.publish();
+    });
+    expect(
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror')),
+    ).toHaveLength(mirrorsBefore);
+    expect(primary.result.current.notice?.message).toMatch(/unlock publishing/i);
+
+    // The lock survives a restart, like the stale working state does.
+    expect(loadState().mirrorReviewPending).toBe(true);
+
+    let confirmed: boolean | undefined;
+    act(() => {
+      confirmed = primary.result.current.confirmMirrorReviewed();
+    });
+    expect(confirmed).toBe(true);
+    await setUpRound(primary, 4);
+    await publishReviewed(primary);
+    expect(primary.result.current.state.relay?.revision).toBe(1);
+
+    primary.unmount();
+    globalThis.localStorage.clear();
   });
 });
 
