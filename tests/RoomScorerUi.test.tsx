@@ -1470,7 +1470,7 @@ describe('the game menu', () => {
     expect(screen.getByText('Lightning / worksheet')).toBeTruthy();
   });
 
-  test('end regulation is offered only for a timed round', () => {
+  test('end regulation is offered only for a timed round that has started', () => {
     renderScorer(formatFor());
     fireEvent.click(screen.getByText('Game'));
 
@@ -1482,6 +1482,14 @@ describe('the game menu', () => {
         rules.timed = true;
       }),
     );
+
+    // On the opening tossup with nothing played, there is no regulation to end yet.
+    fireEvent.click(screen.getByText('Game'));
+    expect(screen.queryByText('End regulation')).toBeNull();
+    fireEvent.click(screen.getByText('Game'));
+
+    // Once tossup 1 goes dead, the horn has something to end.
+    fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
     fireEvent.click(screen.getByText('Game'));
 
     expect(screen.getByText('End regulation')).toBeTruthy();
