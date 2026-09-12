@@ -17,6 +17,15 @@ import type { BridgeApi } from '../model/useBridge';
 
 type ResultFilter = 'all' | 'needs-import' | 'imported';
 
+function resultImportActionLabel(
+  summary: Parameters<typeof resultActionLabel>[0],
+  resultId: string,
+  imported: boolean,
+): string {
+  const context = resultActionLabel(summary, resultId, true).replace(/^Save again result/, '');
+  return `${imported ? 'Undo imported for' : 'Mark imported'} result${context}`;
+}
+
 export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
   const { state } = bridge;
   const [filter, setFilter] = useState<ResultFilter>('all');
@@ -145,6 +154,7 @@ export default function ResultsView({ bridge }: { bridge: BridgeApi }) {
                       <Button
                         size="sm"
                         variant="quiet"
+                        aria-label={resultImportActionLabel(summary, entry.resultId, importState === 'imported')}
                         isDisabled={bridge.resultBusy(entry.resultId)}
                         onPress={() =>
                           importState === 'imported'
