@@ -234,6 +234,18 @@ export function resultFileSuffix(resultId: string): string {
 }
 
 /**
+ * SHA-256 over the exact file bytes, as lowercase hex.
+ *
+ * The ledger records this at save time so startup verification and readback checks can prove
+ * the file on disk is the document the relay returned — not merely a file with the right
+ * name. WebCrypto, like the recovery-package code already uses.
+ */
+export async function sha256Hex(contents: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(contents));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
  * The bytes written to disk.
  *
  * Pretty-printed for a human who may open one in an editor. Formatting is the only difference from

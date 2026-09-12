@@ -18,14 +18,17 @@ import {
   chooseResultFolder,
   deleteRelayCredential,
   isNativeHost,
+  isResultFileExistsError,
   loadRelayCredential,
   openRecoveryPackage,
   openYellowFruitFile,
+  readResultFile,
+  removeResultFile,
   relayCredentialKey,
   storeRelayCredential,
   writeAssignmentFile,
   writeRecoveryPackage,
-  writeResultFile,
+  writeResultFileDurable,
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
@@ -61,6 +64,7 @@ import {
   resultImportStatus,
   resultMatchId,
   resultSummary,
+  sha256Hex,
 } from './results';
 import { nextRoomId } from './identity';
 import {
@@ -424,7 +428,58 @@ export function useBridge(): BridgeApi {
   const [savingResultIds, setSavingResultIds] = useState<Set<string>>(() => new Set());
   const savingBatchRef = useRef(false);
   const [savingBatch, setSavingBatch] = useState(false);
+  /**
+   * Tail of the serialized batch-save pipeline.
+   *
+   * The manual batch save and the automatic save join this chain instead of racing each
+   * other behind a boolean busy flag. When a batch save call resolves, every result known
+   * at call time has completed a full durable-write-plus-ACK pass (or recorded its
+   * failure) — pressing Save during an in-flight automatic save waits for it instead of
+   * silently no-op'ing and leaving the caller to assert on work still in flight. Chain
+   * tasks only await leaf operations (native file calls, relay fetches); nothing enqueues
+   * from inside a task, so the chain always drains. Per-result saves stay outside the
+   * chain and keep their pinned behavior: one arriving mid-batch is dropped rather than
+   * writing the same file twice.
+   */
+  const batchSaveTailRef = useRef<Promise<unknown>>(Promise.resolve());
+  /**
+   * Whether a batch-save task is running or queued. The flag — not the tail promise, whose
+   * settledness is unknowable synchronously — decides synchronous start versus queue, and a
+   * task clears it only when nothing chained behind it, so a save arriving between two
+   * tasks still queues instead of running alongside the next one.
+   */
+  const batchSaveActiveRef = useRef(false);
+  const enqueueBatchSave = useCallback(<T>(task: () => Promise<T>): Promise<T> => {
+    let run: Promise<T>;
+    if (!batchSaveActiveRef.current) {
+      // Nothing running: start in this flush, so an automatic save holds its write before
+      // the caller continues — the same timing the direct call always had.
+      batchSaveActiveRef.current = true;
+      try {
+        run = task();
+      } catch (error) {
+        batchSaveActiveRef.current = false;
+        throw error;
+      }
+    } else {
+      run = batchSaveTailRef.current.then(task, task);
+    }
+    const tail: Promise<unknown> = run.then(
+      () => {
+        if (batchSaveTailRef.current === tail) batchSaveActiveRef.current = false;
+      },
+      () => {
+        if (batchSaveTailRef.current === tail) batchSaveActiveRef.current = false;
+      },
+    );
+    batchSaveTailRef.current = tail;
+    return run;
+  }, []);
   const credentialMigrationRef = useRef<string | null>(null);
+  /** Last automatic-save failure message shown, so a sick folder says so once, not every poll. */
+  const autoSaveNoticeRef = useRef<string | null>(null);
+  /** Whether the startup ledger verification has run in this session. */
+  const verifiedLedgerRef = useRef(false);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
@@ -1746,18 +1801,82 @@ export function useBridge(): BridgeApi {
    * savedPath. That keeps a folder change exclusive while still allowing an intentional Save again
    * to rewrite this result's own file.
    */
+  /**
+   * Write result bytes durably and prove them: temp file, fsync, atomic rename, readback.
+   *
+   * A readback mismatch removes our own unverified residue (best-effort) so the next attempt
+   * starts clean instead of wedging on the exclusive write — then still throws, loudly. Only
+   * this invocation's own write is ever removed; anything else at that path is someone's
+   * data and is left strictly alone.
+   */
+  const writeAndVerify = useCallback(
+    async (
+      folder: string,
+      fileName: string,
+      contents: string,
+      overwrite: boolean,
+    ): Promise<{ path: string; hash: string }> => {
+      const expectedHash = await sha256Hex(contents);
+      const path = await writeResultFileDurable(folder, fileName, contents, overwrite);
+      const readBack = await readResultFile(path);
+      if ((await sha256Hex(readBack)) !== expectedHash) {
+        await removeResultFile(path).catch(() => {});
+        throw new Error(
+          `${fileName} did not read back correctly and was left unsaved. Saving again retries ` +
+            `it; if this repeats, delete ${fileName} from the folder or choose another folder. ` +
+            `The relay still holds the result.`,
+        );
+      }
+      return { path, hash: expectedHash };
+    },
+    [],
+  );
+
+  /**
+   * Write one result into `folder`, overwriting only the ledger-owned slot.
+   *
+   * The ledger's ownership claim covers exactly `ownedPath`: the write is exclusive
+   * everywhere else, so a folder change can never silently replace a foreign file that
+   * happens to share the derived name. On a collision outside the owned slot, adopt the
+   * file — but only when it byte-matches this exact result (a crash between the write
+   * and the local commit leaves exactly that behind). A different document under the
+   * same name, or an unreadable one, keeps the truthful collision error and is never
+   * removed.
+   */
+  const writeOrAdopt = useCallback(
+    async (
+      folder: string,
+      fileName: string,
+      contents: string,
+      ownedPath: string | undefined,
+    ): Promise<{ path: string; hash: string }> => {
+      const targetPath = resultFilePath(folder, fileName);
+      try {
+        return await writeAndVerify(folder, fileName, contents, ownedPath === targetPath);
+      } catch (error) {
+        if (!isResultFileExistsError(error) || ownedPath === targetPath) throw error;
+        const expectedHash = await sha256Hex(contents);
+        let existing: string;
+        try {
+          existing = await readResultFile(targetPath);
+        } catch {
+          throw error;
+        }
+        if ((await sha256Hex(existing)) !== expectedHash) throw error;
+        return { path: targetPath, hash: expectedHash };
+      }
+    },
+    [writeAndVerify],
+  );
+
   const writeOne = useCallback(
     async (entry: StoredResult, folder: string): Promise<void> => {
       const summary = resultSummary(entry.qbj);
       const fileName = resultFileName(summary, entry.resultId);
-      const targetPath = resultFilePath(folder, fileName);
-      const path = await writeResultFile(
-        folder,
-        fileName,
-        // The bytes are the relay's document, serialized. Nothing is recalculated on the way out.
-        resultFileContents(entry.qbj),
-        entry.savedPath === targetPath,
-      );
+      // The bytes are the relay's document, serialized. Nothing is recalculated on the way out.
+      const contents = resultFileContents(entry.qbj);
+      const { path, hash } = await writeOrAdopt(folder, fileName, contents, entry.savedPath);
+      // The ledger records what proves the save, not just where it went.
       commit((current) => ({
         ...current,
         results: current.results.map((row) =>
@@ -1765,6 +1884,8 @@ export function useBridge(): BridgeApi {
             ? {
                 ...row,
                 savedPath: path,
+                contentSha256: hash,
+                savedAt: new Date().toISOString(),
                 ackPending: true,
                 importStatus: row.importStatus === 'imported' ? 'imported' : 'needs-import',
               }
@@ -1772,7 +1893,7 @@ export function useBridge(): BridgeApi {
         ),
       }));
     },
-    [commit],
+    [commit, writeOrAdopt],
   );
 
   /**
@@ -1838,50 +1959,231 @@ export function useBridge(): BridgeApi {
   );
 
   const saveNewResults = useCallback(async () => {
-    if (savingBatchRef.current || savingResultIdsRef.current.size > 0) return;
-    const current = stateRef.current;
-    const folder = current.resultFolder;
-    if (!folder) {
-      setNotice({ kind: 'bad', message: 'Choose a results folder first.' });
-      return;
+    // Joins the pipeline behind any in-flight automatic save instead of no-op'ing against
+    // it: when this resolves, everything known has had a full write-plus-ACK pass.
+    await enqueueBatchSave(async () => {
+      // Per-result saves run outside the pipeline and hold the file they are writing; yield
+      // to one rather than writing the same file twice.
+      if (savingResultIdsRef.current.size > 0) return;
+      const current = stateRef.current;
+      const folder = current.resultFolder;
+      if (!folder) {
+        setNotice({ kind: 'bad', message: 'Choose a results folder first.' });
+        return;
+      }
+      const unsaved = current.results.filter((entry) => !entry.savedPath);
+      if (unsaved.length === 0) {
+        setNotice({ kind: 'good', message: 'Every result is already saved.' });
+        return;
+      }
+      savingBatchRef.current = true;
+      setSavingBatch(true);
+      setBusy(true);
+      const failures: string[] = [];
+      const written: string[] = [];
+      const connection = connectionOf(current);
+      try {
+        for (const entry of unsaved) {
+          try {
+            await writeOne(entry, folder);
+            written.push(entry.resultId);
+          } catch (error) {
+            // One bad filename or one full disk must not stop the other eleven, and the one that
+            // failed stays unsaved rather than being marked done.
+            failures.push((error as Error).message);
+          }
+        }
+        await acknowledgeSaved(connection, written);
+        setNotice(
+          failures.length === 0
+            ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
+            : {
+                kind: 'bad',
+                message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
+              },
+        );
+      } finally {
+        savingBatchRef.current = false;
+        setSavingBatch(false);
+        setBusy(false);
+      }
+    });
+  }, [acknowledgeSaved, enqueueBatchSave, writeOne]);
+
+  /**
+   * Save newly arrived results without being asked, once a folder is chosen.
+   *
+   * The routine path to durability: finals enter this pipeline on arrival instead of waiting
+   * for a volunteer to press a batch button after every round. Quiet on success — a new
+   * notice every five seconds would train the operator to ignore the one that matters — and
+   * change-only on failure, so a full disk says so once and then stays said. Returns whether
+   * nothing is left unsaved, so the caller can schedule a retry while degraded.
+   */
+  const autoSaveUnsaved = useCallback(async (): Promise<boolean> => {
+    if (!isNativeHost()) {
+      return stateRef.current.results.every((entry) => entry.savedPath !== undefined);
     }
-    const unsaved = current.results.filter((entry) => !entry.savedPath);
-    if (unsaved.length === 0) {
-      setNotice({ kind: 'good', message: 'Every result is already saved.' });
-      return;
-    }
-    savingBatchRef.current = true;
-    setSavingBatch(true);
-    setBusy(true);
-    const failures: string[] = [];
-    const written: string[] = [];
-    const connection = connectionOf(current);
-    try {
-      for (const entry of unsaved) {
+    // Serialized with manual batch saves: overlapping effect runs queue behind in-flight
+    // work instead of bailing out and leaving the retry to a 30s timer.
+    return enqueueBatchSave(async (): Promise<boolean> => {
+      // Per-result saves run outside the pipeline and hold the file they are writing; yield
+      // to one rather than writing the same file twice.
+      if (savingResultIdsRef.current.size > 0) {
+        return stateRef.current.results.every((entry) => entry.savedPath !== undefined);
+      }
+      const current = stateRef.current;
+      const folder = current.resultFolder;
+      if (!folder) return false;
+      const unsaved = current.results.filter((entry) => !entry.savedPath);
+      if (unsaved.length === 0) {
+        autoSaveNoticeRef.current = null;
+        return true;
+      }
+      savingBatchRef.current = true;
+      setSavingBatch(true);
+      const connection = connectionOf(current);
+      const failures: string[] = [];
+      const written: string[] = [];
+      try {
+        for (const entry of unsaved) {
+          try {
+            await writeOne(entry, folder);
+            written.push(entry.resultId);
+          } catch (error) {
+            failures.push((error as Error).message);
+          }
+        }
+        await acknowledgeSaved(connection, written);
+      } finally {
+        savingBatchRef.current = false;
+        setSavingBatch(false);
+      }
+      const remaining = stateRef.current.results.filter((entry) => !entry.savedPath).length;
+      if (failures.length > 0) {
+        const message =
+          `Automatic save left ${remaining} of ${unsaved.length} new result(s) unsaved. ` +
+          `${failures[0]} The relay still holds them; they retry on their own.`;
+        if (autoSaveNoticeRef.current !== message) {
+          autoSaveNoticeRef.current = message;
+          setNotice({ kind: 'bad', message });
+        }
+      } else {
+        autoSaveNoticeRef.current = null;
+      }
+      return remaining === 0;
+    });
+  }, [acknowledgeSaved, enqueueBatchSave, writeOne]);
+
+  /**
+   * Verify the result ledger against the files on disk, once per session — and repair it.
+   *
+   * A saved path is a claim, not a proof: the file may have been deleted, truncated, or
+   * tampered with while Bridge was closed. Every ledger entry carrying a hash is read back
+   * and compared. A mismatch is rewritten from the ledger's own QBJ — overwriting only when
+   * the target is exactly the ledger-owned savedPath. The operator may have chosen a
+   * different folder since the save, and that folder may hold a foreign file under the
+   * derived name; such a collision is never replaced, only adopted when it byte-matches
+   * this exact result. Entries that still fail lose their saved path and return to the
+   * unsaved set with a loud notice. ACK and import markers are preserved throughout:
+   * a lost file does not un-acknowledge the relay or un-handle a YellowFruit handoff the
+   * operator already confirmed.
+   */
+  useEffect(() => {
+    if (verifiedLedgerRef.current || !isNativeHost()) return;
+    verifiedLedgerRef.current = true;
+    void (async () => {
+      const folder = stateRef.current.resultFolder;
+      const recorded = stateRef.current.results.filter(
+        (entry) => entry.savedPath !== undefined && entry.contentSha256 !== undefined,
+      );
+      if (recorded.length === 0) return;
+      const repaired: string[] = [];
+      const broken: string[] = [];
+      for (const entry of recorded) {
+        let intact = false;
         try {
-          await writeOne(entry, folder);
-          written.push(entry.resultId);
-        } catch (error) {
-          // One bad filename or one full disk must not stop the other eleven, and the one that
-          // failed stays unsaved rather than being marked done.
-          failures.push((error as Error).message);
+          const readBack = await readResultFile(entry.savedPath!);
+          intact = (await sha256Hex(readBack)) === entry.contentSha256;
+        } catch {
+          intact = false;
+        }
+        if (intact) continue;
+        if (!folder) {
+          broken.push(entry.resultId);
+          continue;
+        }
+        try {
+          const summary = resultSummary(entry.qbj);
+          const fileName = resultFileName(summary, entry.resultId);
+          const contents = resultFileContents(entry.qbj);
+          const { path, hash } = await writeOrAdopt(folder, fileName, contents, entry.savedPath);
+          commit((current) => ({
+            ...current,
+            results: current.results.map((row) =>
+              row.resultId === entry.resultId
+                ? { ...row, savedPath: path, contentSha256: hash, savedAt: new Date().toISOString() }
+                : row,
+            ),
+          }));
+          repaired.push(entry.resultId);
+        } catch {
+          broken.push(entry.resultId);
         }
       }
-      await acknowledgeSaved(connection, written);
-      setNotice(
-        failures.length === 0
-          ? { kind: 'good', message: `Saved ${written.length} result file(s) to ${folder}.` }
-          : {
-              kind: 'bad',
-              message: `Saved ${written.length} of ${unsaved.length}. ${failures[0]}`,
-            },
-      );
-    } finally {
-      savingBatchRef.current = false;
-      setSavingBatch(false);
-      setBusy(false);
-    }
-  }, [acknowledgeSaved, writeOne]);
+      if (broken.length > 0) {
+        const brokenSet = new Set(broken);
+        commit((current) => ({
+          ...current,
+          results: current.results.map((row) =>
+            brokenSet.has(row.resultId)
+              ? { ...row, savedPath: undefined, contentSha256: undefined, savedAt: undefined }
+              : row,
+          ),
+        }));
+      }
+      if (repaired.length > 0) {
+        setNotice({
+          kind: 'warn',
+          message:
+            `${repaired.length} saved result file(s) did not match the ledger and were ` +
+            `repaired from the retained results.${broken.length > 0 ? ` ${broken.length} more could not be repaired.` : ''}`,
+        });
+      }
+      if (broken.length > 0) {
+        setNotice({
+          kind: 'bad',
+          message:
+            `${broken.length} saved result file(s) could not be verified or repaired. Delete ` +
+            `the named files or choose another folder; unacknowledged results are still on the relay.`,
+        });
+      }
+    })();
+  }, [commit, writeOrAdopt]);
+
+  /**
+   * Run the automatic save whenever unsaved results exist and whenever that set changes.
+   *
+   * Arrivals, folder choices, startup repairs, and re-polls all converge here; a degraded run
+   * retries on a bounded timer until the folder heals or new state arrives. Manual Save and
+   * Save again stay as retry and export actions — routine safety no longer depends on them.
+   */
+  useEffect(() => {
+    if (!isNativeHost()) return;
+    if (!state.resultFolder) return;
+    if (!state.results.some((entry) => !entry.savedPath)) return;
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const run = () => {
+      void autoSaveUnsaved().then((savedAll) => {
+        if (!savedAll && !cancelled) retry = setTimeout(run, 30000);
+      });
+    };
+    run();
+    return () => {
+      cancelled = true;
+      if (retry !== undefined) clearTimeout(retry);
+    };
+  }, [autoSaveUnsaved, state.resultFolder, state.results]);
 
   const markResultImported = useCallback(
     (resultId: string): void => {

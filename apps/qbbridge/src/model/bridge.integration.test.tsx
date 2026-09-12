@@ -12,7 +12,13 @@ import { defineGame, readQbjSource } from '../../../../src/qbj/ParseQbjAssignmen
 import { assignmentFingerprint } from './assignment';
 import { resetNativeHost } from './native';
 import { emptyState, loadState, storageKey } from './persistence';
-import { resultFileSuffix } from './results';
+import {
+  resultFileContents,
+  resultFileName,
+  resultFilePath,
+  resultFileSuffix,
+  resultSummary,
+} from './results';
 import { scoredResultDocument } from '../tests/scoredResult';
 import { yftFixtureText } from '../tests/fixture';
 import { useBridge } from './useBridge';
@@ -85,6 +91,12 @@ let pendingResultRequests: { resolve: (reply: RelayReply) => void; reject: (reas
   [];
 let deferWrites = false;
 let pendingWrites: PendingWrite[] = [];
+/** The fake disk: final paths to the exact bytes the fake durable write stored. */
+let fakeFileBytes = new Map<string, string>();
+/** Set to make durable writes fail, as a full disk or a lost folder would. */
+let durableWriteFails = false;
+/** Set to store garbage instead of the sent bytes, as a failing drive would. */
+let durableStoreGarbage = false;
 let scorerCanPair = true;
 let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
@@ -130,9 +142,11 @@ function installFakeTauri(): void {
           contents: String(args.contents),
         };
         return recoveryPackage.path;
-      case 'write_result_file': {
+      case 'write_result_file_durable': {
         const path = `${String(args.directory)}/${String(args.fileName)}`;
-        // The real command opens with `create_new` unless told to overwrite.
+        if (durableWriteFails) throw new Error('No space left on device (fake disk full).');
+        // The real command refuses an existing final name unless told to overwrite, and the
+        // rename leaves no temporary file behind on success.
         if (existingPaths.has(path) && args.overwrite !== true) {
           throw new Error(`${String(args.fileName)} already exists in that folder`);
         }
@@ -143,8 +157,22 @@ function installFakeTauri(): void {
             pendingWrites.push({ path, file, resolve, reject });
           });
         }
+        fakeFileBytes.set(path, durableStoreGarbage ? '{"corrupt":true}' : String(args.contents));
         writtenFiles.push(file);
         return path;
+      }
+      case 'read_result_file': {
+        const path = String(args.path);
+        const bytes = fakeFileBytes.get(path);
+        if (bytes === undefined) throw new Error(`${path} could not be read back (fake missing).`);
+        return bytes;
+      }
+      case 'remove_result_file': {
+        const path = String(args.path);
+        if (!path.endsWith('.result.qbj')) throw new Error('Only result files can be removed.');
+        fakeFileBytes.delete(path);
+        existingPaths.delete(path);
+        return null;
       }
       case 'relay_request': {
         const url = String(args.url);
@@ -278,6 +306,9 @@ beforeEach(() => {
   pendingResultRequests = [];
   deferWrites = false;
   pendingWrites = [];
+  fakeFileBytes = new Map();
+  durableWriteFails = false;
+  durableStoreGarbage = false;
   scorerCanPair = true;
   scorerReadinessFails = false;
   activeController = 'primary';
@@ -296,6 +327,7 @@ afterEach(() => {
 function releaseNextWrite(): void {
   const pending = pendingWrites.shift();
   if (!pending) throw new Error('no deferred write is waiting');
+  fakeFileBytes.set(pending.path, String(pending.file.contents));
   writtenFiles.push(pending.file);
   pending.resolve(pending.path);
 }
@@ -770,6 +802,9 @@ describe('results', () => {
       await rendered.result.current.pollResults();
       await rendered.result.current.chooseFolder();
     });
+    // Choosing the folder saves the result automatically; wait for that landing, then the
+    // manual save below is a deterministic no-op retry.
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
     await act(async () => {
       await rendered.result.current.saveNewResults();
     });
@@ -801,25 +836,33 @@ describe('results', () => {
     const rendered = await setUpTournament();
     await act(async () => {
       await rendered.result.current.pollResults();
+    });
+
+    // The disk is full before the folder is even chosen: the automatic save meets the same
+    // broken folder a manual save would, says so once, and leaves the result unsaved.
+    durableWriteFails = true;
+    await act(async () => {
       await rendered.result.current.chooseFolder();
     });
-    Object.defineProperty(globalThis, '__TAURI_INTERNALS__', {
-      value: {
-        invoke: async (command: string) => {
-          if (command === 'write_result_file') throw new Error('That results folder no longer exists.');
-          return { status: 200, body: JSON.stringify({ results: relayResults }) };
-        },
-      },
-      configurable: true,
-    });
-    resetNativeHost();
+    await waitFor(() => expect(rendered.result.current.notice?.kind).toBe('bad'));
+    expect(rendered.result.current.notice?.message).toMatch(/No space left/);
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
 
+    // A manual save fails the same way while the folder is sick.
     await act(async () => {
       await rendered.result.current.saveNewResults();
     });
-    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
-    expect(rendered.result.current.notice?.kind).toBe('bad');
-    expect(rendered.result.current.notice?.message).toMatch(/no longer exists/);
+    expect(rendered.result.current.notice?.message).toMatch(/Saved 0 of 1/);
+
+    // The folder heals: the next save lands, the relay is acknowledged, and nothing was
+    // acknowledged while the bytes were not on disk.
+    durableWriteFails = false;
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(1);
   });
 
   test('a folder change makes Save again an exclusive write', async () => {
@@ -832,9 +875,8 @@ describe('results', () => {
       await rendered.result.current.pollResults();
       await rendered.result.current.chooseFolder();
     });
-    await act(async () => {
-      await rendered.result.current.saveResult('res-1');
-    });
+    // Choosing the folder already saved the result automatically.
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
 
     resultFolder = '/tournaments/other-results';
     await act(async () => {
@@ -862,28 +904,27 @@ describe('results', () => {
     const rendered = await setUpTournament();
     await act(async () => {
       await rendered.result.current.pollResults();
-      await rendered.result.current.chooseFolder();
     });
 
+    // The automatic save is the batch in flight: its write is held open while a manual
+    // individual save arrives for the same result.
     deferWrites = true;
-    let batch!: Promise<void>;
     await act(async () => {
-      batch = rendered.result.current.saveNewResults();
+      await rendered.result.current.chooseFolder();
       await Promise.resolve();
     });
     expect(pendingWrites).toHaveLength(1);
     expect(rendered.result.current.savingResults).toBe(true);
-    expect(rendered.result.current.resultBusy('res-1')).toBe(true);
 
     await act(async () => {
       await rendered.result.current.saveResult('res-1');
     });
-    expect(calls.filter((call) => call.command === 'write_result_file')).toHaveLength(1);
+    expect(calls.filter((call) => call.command === 'write_result_file_durable')).toHaveLength(1);
 
     await act(async () => {
       releaseNextWrite();
-      await batch;
     });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
     expect(writtenFiles).toHaveLength(1);
     expect(rendered.result.current.savingResults).toBe(false);
   });
@@ -1602,13 +1643,16 @@ describe('backup controller recovery', () => {
       await backup.result.current.chooseFolder();
       await backup.result.current.saveNewResults();
     });
+    // Choosing the folder may save automatically before the manual save runs; either path
+    // lands exactly one file and one backup-credentialed ACK.
+    await waitFor(() => expect(backup.result.current.state.results[0].savedPath).toBeDefined());
+    await waitFor(() => expect(backup.result.current.state.results[0].ackPending).toBe(false));
     expect(writtenFiles).toHaveLength(1);
     expect(writtenFiles[0].fileName).toMatch(/\.result\.qbj$/);
     const ack = calls.find(
       (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/acks'),
     );
     expect(ack?.args.bearer).toBe(backupToken);
-    expect(backup.result.current.state.results[0].ackPending).toBe(false);
     backup.unmount();
   });
 });
@@ -1689,6 +1733,13 @@ describe('a corrected result', () => {
       await rendered.result.current.pollResults();
       await rendered.result.current.chooseFolder();
     });
+    // Choosing the folder saves both results automatically; the manual save below is a
+    // no-op retry by the time it runs. Wait for the background save to land both files.
+    await waitFor(() =>
+      expect(
+        rendered.result.current.state.results.filter((entry) => entry.savedPath !== undefined),
+      ).toHaveLength(2),
+    );
     await act(async () => {
       await rendered.result.current.saveNewResults();
     });
@@ -1715,23 +1766,20 @@ describe('a corrected result', () => {
     relayResults = [
       { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
     ];
+    // Something else is already at that path — a file restored from a backup, say — before
+    // the folder is even chosen, so the automatic save meets it first.
+    const takenPath = `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`;
+    existingPaths.add(takenPath);
+    fakeFileBytes.set(takenPath, '{"someone":"else"}');
     const rendered = await setUpTournament();
     await act(async () => {
       await rendered.result.current.pollResults();
       await rendered.result.current.chooseFolder();
     });
-    // Something else is already at that path — a file restored from a backup, say.
-    existingPaths.add(
-      `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`,
-    );
 
-    await act(async () => {
-      await rendered.result.current.saveNewResults();
-    });
-
+    await waitFor(() => expect(rendered.result.current.notice?.kind).toBe('bad'));
     expect(writtenFiles).toHaveLength(0);
     expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
-    expect(rendered.result.current.notice?.kind).toBe('bad');
     expect(rendered.result.current.notice?.message).toMatch(/already exists/);
   });
 });
@@ -1770,7 +1818,7 @@ describe('acknowledging saved results', () => {
     expect(JSON.parse(String(ack?.args.body))).toEqual({ results: ['result-aaa'] });
   });
 
-  test('a result that failed to save is not acknowledged', async () => {
+  test('a manual save pressed during an automatic save waits for it instead of vanishing', async () => {
     const { result: document } = scoredResultDocument();
     relayResults = [
       { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
@@ -1778,15 +1826,63 @@ describe('acknowledging saved results', () => {
     const rendered = await setUpTournament();
     await act(async () => {
       await rendered.result.current.pollResults();
+    });
+
+    // Hold the automatic save's write open, as a slow disk would.
+    deferWrites = true;
+    await act(async () => {
       await rendered.result.current.chooseFolder();
     });
-    existingPaths.add(
-      `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`,
-    );
+    // The automatic save reaches the write over several async hops; poll for it instead of
+    // assuming one microtask is enough (a loaded CI runner starves the chain and flakes).
+    await waitFor(() => expect(pendingWrites).toHaveLength(1));
+
+    // Pressing Save while the automatic save is in flight joins it: the call must still be
+    // pending — claiming nothing yet — rather than resolving against work still in flight.
+    let settled = false;
+    let savePromise: Promise<void> | undefined;
+    await act(async () => {
+      savePromise = rendered.result.current.saveNewResults();
+      void savePromise.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+    });
+    for (let tick = 0; tick < 10 && !settled; tick += 1) {
+      await Promise.resolve();
+    }
+    expect(settled).toBe(false);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(0);
 
     await act(async () => {
-      await rendered.result.current.saveNewResults();
+      releaseNextWrite();
+      await savePromise;
     });
+    // Resolving the manual save now means the write and its ACK both happened: exactly one
+    // durable write, exactly one ACK, no second relay delivery needed.
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+    expect(calls.filter((call) => call.command === 'write_result_file_durable')).toHaveLength(1);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(1);
+  });
+
+  test('a result that failed to save is not acknowledged', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'result-aaa', room_id: 'room-1', received_at: '2026-09-11T15:00:00Z', qbj: document },
+    ];
+    // A foreign file already sits at the result's path, so the automatic save cannot land it.
+    const takenPath = `/tournaments/results/R04_Room-101_Cony_vs_Deering_${resultFileSuffix('result-aaa')}.result.qbj`;
+    existingPaths.add(takenPath);
+    fakeFileBytes.set(takenPath, '{"someone":"else"}');
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+
+    await waitFor(() => expect(rendered.result.current.notice?.kind).toBe('bad'));
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
 
     // The bytes are not on disk, so the relay keeps holding it.
     const ackCalls = calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'));
@@ -1852,6 +1948,221 @@ describe('acknowledging saved results', () => {
     expect(rendered.result.current.state.results).toHaveLength(100);
     expect(rendered.result.current.unsavedResultWarning).toMatch(/100 results are still unsaved/);
     expect(rendered.result.current.unsavedResultWarning).toMatch(/oldest 128/);
+  });
+});
+
+describe('durable result saving', () => {
+  test('a new result saves itself once a folder is chosen, with no button press', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
+
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+
+    // One durable write, one ACK, zero manual saves.
+    expect(calls.filter((call) => call.command === 'write_result_file_durable')).toHaveLength(1);
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(1);
+    // The ledger records what proves the save, not just where it went.
+    const entry = rendered.result.current.state.results[0];
+    expect(entry.contentSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(entry.savedAt).toBeTruthy();
+  });
+
+  test('a result whose bytes do not read back is neither saved nor acknowledged', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    // The drive takes the write and returns garbage on readback, as a failing drive would.
+    durableStoreGarbage = true;
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+
+    await waitFor(() => expect(rendered.result.current.notice?.kind).toBe('bad'));
+    expect(rendered.result.current.notice?.message).toMatch(/did not read back/);
+    expect(rendered.result.current.state.results[0].savedPath).toBeUndefined();
+    expect(calls.filter((call) => String(call.args.url ?? '').endsWith('/acks'))).toHaveLength(0);
+
+    // A healthy drive saves the same result on retry, with no second relay delivery needed.
+    durableStoreGarbage = false;
+    await act(async () => {
+      await rendered.result.current.saveNewResults();
+    });
+    expect(rendered.result.current.state.results[0].savedPath).toBeDefined();
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+  });
+
+  test('a write that crashed before the commit is adopted, not duplicated', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+    });
+
+    // The file landed on disk but the commit never ran: exclusive path taken, no ledger entry.
+    const fileName = resultFileName(resultSummary(document), 'res-1');
+    const path = resultFilePath('/tournaments/results', fileName);
+    existingPaths.add(path);
+    fakeFileBytes.set(path, resultFileContents(document));
+
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    // The automatic save adopts the byte-identical file instead of writing a second one.
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBe(path));
+    expect(writtenFiles).toHaveLength(0);
+    await waitFor(() => expect(rendered.result.current.state.results[0].ackPending).toBe(false));
+  });
+
+  test('a tampered file is caught on restart and repaired from the ledger', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const path = rendered.result.current.state.results[0].savedPath!;
+    const acked = rendered.result.current.state.results[0].ackPending;
+    rendered.unmount();
+
+    // Someone edits the file while Bridge is closed. Restart detects the mismatch and
+    // rewrites the slot from the ledger's own QBJ — no relay round-trip, no button press —
+    // while the ACK and import markers stay exactly as they were.
+    fakeFileBytes.set(path, '{"tampered":true}');
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
+    expect(fakeFileBytes.get(path)).toBe(resultFileContents(document));
+    expect(restarted.result.current.state.results[0].savedPath).toBe(path);
+    expect(restarted.result.current.state.results[0].ackPending).toBe(acked);
+    restarted.unmount();
+  });
+
+  test('a deleted file is caught on restart and repaired from the ledger', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const path = rendered.result.current.state.results[0].savedPath!;
+    rendered.unmount();
+
+    // The file is gone entirely. Restart notices the missing bytes and rewrites the slot.
+    fakeFileBytes.delete(path);
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
+    expect(fakeFileBytes.get(path)).toBe(resultFileContents(document));
+    expect(restarted.result.current.state.results[0].savedPath).toBe(path);
+    restarted.unmount();
+  });
+
+  test('startup repair never replaces a foreign file after a folder change', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const ownedPath = rendered.result.current.state.results[0].savedPath!;
+
+    // The operator moves to a new folder, then Bridge restarts with the owned file missing
+    // and a foreign file already sitting at the derived name in the new folder.
+    resultFolder = '/tournaments/other-results';
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    expect(rendered.result.current.state.resultFolder).toBe('/tournaments/other-results');
+    rendered.unmount();
+
+    const fileName = resultFileName(resultSummary(document), 'res-1');
+    const foreignPath = resultFilePath('/tournaments/other-results', fileName);
+    existingPaths.add(foreignPath);
+    fakeFileBytes.set(foreignPath, '{"someone":"else"}');
+    fakeFileBytes.delete(ownedPath);
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.kind).toBe('bad'));
+    // A collision stays a collision: the foreign file is untouched, no new write lands in
+    // the new folder, and the entry returns to the unsaved set instead of claiming it.
+    expect(fakeFileBytes.get(foreignPath)).toBe('{"someone":"else"}');
+    expect(writtenFiles.filter((file) => file.directory === '/tournaments/other-results')).toHaveLength(0);
+    expect(restarted.result.current.state.results[0].savedPath).toBeUndefined();
+    restarted.unmount();
+  });
+
+  test('startup repair adopts a byte-identical file after a folder change', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const ownedPath = rendered.result.current.state.results[0].savedPath!;
+
+    resultFolder = '/tournaments/other-results';
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    rendered.unmount();
+
+    // The derived name in the new folder already holds these exact bytes — a write that
+    // landed without its commit. Repair claims it without writing a second file.
+    const fileName = resultFileName(resultSummary(document), 'res-1');
+    const identicalPath = resultFilePath('/tournaments/other-results', fileName);
+    existingPaths.add(identicalPath);
+    fakeFileBytes.set(identicalPath, resultFileContents(document));
+    fakeFileBytes.delete(ownedPath);
+    const writesBefore = writtenFiles.length;
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
+    expect(restarted.result.current.state.results[0].savedPath).toBe(identicalPath);
+    expect(writtenFiles).toHaveLength(writesBefore);
+    restarted.unmount();
   });
 });
 

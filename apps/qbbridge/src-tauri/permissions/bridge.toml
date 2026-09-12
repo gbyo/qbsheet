@@ -11,6 +11,9 @@ commands.allow = [
   "load_relay_credential",
   "delete_relay_credential",
   "write_result_file",
+  "write_result_file_durable",
+  "read_result_file",
+  "remove_result_file",
   "relay_request",
   "write_assignment_file",
 ]
