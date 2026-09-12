@@ -303,6 +303,7 @@ export default function PreSubmitReview(props: IPreSubmitReviewProps) {
             actionLabel="Copy stats"
             guidance="plain"
             panelLabel="Stat sheet copy"
+            disabled={submitting || blockers.length > 0}
           />
         )}
       </details>
