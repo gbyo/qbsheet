@@ -26,7 +26,13 @@
 
 import { buildAssignment, type PreparedAssignment } from './assignment';
 import { pairingCodeHash } from './pairing';
-import { relayPublishMirror, type MirrorRoomInput, type RelayConnection } from './relay';
+import {
+  RelayError,
+  relayHealth,
+  relayPublishMirror,
+  type MirrorRoomInput,
+  type RelayConnection,
+} from './relay';
 import type { Room, RoomTombstone } from './rooms';
 import { isCompletePairing, pairingsByRoom, type PlannedPairing } from './roundPlans';
 import type { BridgeRound, BridgeTournament } from './tournament';
@@ -229,30 +235,53 @@ export interface PublishOutcome {
   assignments: PreparedAssignment[];
   /** The rooms whose assignment the relay just cleared. */
   clearedRoomIds: string[];
+  /** The key this attempt sent. A retry of the same revision and content reuses it. */
+  idempotencyKey: string;
+  /**
+   * True when the relay already held exactly this publication — a retry whose first receipt was
+   * lost, or a conflict reconciled against the relay's own position. The rooms hold the
+   * publication either way; nothing was sent twice.
+   */
+  duplicate: boolean;
 }
 
 /**
- * Publish a planned round.
+ * Name one logical publication.
+ *
+ * The SHA-256 binds the epoch, the revision and the exact room payloads, so a retry of the same
+ * revision reuses the key only when it would send the same bytes: edited content after a failed
+ * attempt mints a fresh key and is judged as a new publication, never mistaken for the old one.
+ * Random-per-attempt keys would do the opposite — each retry looking like a new publication —
+ * which is the double-apply this exists to prevent.
+ */
+export async function publishIdempotencyKey(input: {
+  epoch: number;
+  revision: number;
+  rooms: readonly MirrorRoomInput[];
+}): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify([input.epoch, input.revision, input.rooms])),
+  );
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Build the exact room payloads a publication will send.
  *
  * Every room in the plan restates its pairing hash, whether or not it is getting a game: the
  * relay replaces a listed room's columns wholesale, so a room republished without one would stop
  * accepting the code on its QR. A cleared room keeps its id, its name and that hash, and loses
  * only its assignment and match id.
+ *
+ * Exported so the caller can name the publication — and durably record its intent — before the
+ * network call, from the same bytes the PUT will carry.
  */
-export async function publishRound(
-  connection: RelayConnection,
-  input: {
-    epoch: number;
-    lastRevision: number;
-    tournamentName: string;
-    plan: PublishPlan;
-    rooms: readonly Room[];
-    tombstones?: readonly RoomTombstone[];
-  },
-): Promise<PublishOutcome> {
-  if (input.plan.publications.length === 0) {
-    throw new Error('There are no rooms to publish. Add a room first.');
-  }
+export async function buildMirrorRoomInputs(input: {
+  plan: PublishPlan;
+  rooms: readonly Room[];
+  tombstones?: readonly RoomTombstone[];
+}): Promise<MirrorRoomInput[]> {
   // A plan with no assignments is valid for the explicit room-setup action. The relay still gets
   // every room and clears any old assignment while keeping its pairing hash and tokens intact.
   const byId = new Map<string, Room | RoomTombstone>(input.rooms.map((room) => [room.id, room]));
@@ -272,16 +301,74 @@ export async function publishRound(
       assignmentRevision: publication.assignment?.assignmentRevision ?? room.assignmentRevision + 1,
     });
   }
+  return mirrorRooms;
+}
+
+export async function publishRound(
+  connection: RelayConnection,
+  input: {
+    epoch: number;
+    lastRevision: number;
+    tournamentName: string;
+    plan: PublishPlan;
+    rooms: readonly Room[];
+    tombstones?: readonly RoomTombstone[];
+  },
+  options?: {
+    /** Prebuilt room payloads and their key, so the intent recorded before the PUT names this send. */
+    prebuilt?: { rooms: MirrorRoomInput[]; idempotencyKey: string };
+  },
+): Promise<PublishOutcome> {
+  if (input.plan.publications.length === 0) {
+    throw new Error('There are no rooms to publish. Add a room first.');
+  }
+  const mirrorRooms =
+    options?.prebuilt?.rooms ??
+    (await buildMirrorRoomInputs({ plan: input.plan, rooms: input.rooms, tombstones: input.tombstones }));
   const revision = input.lastRevision + 1;
-  await relayPublishMirror(connection, {
+  const idempotencyKey =
+    options?.prebuilt?.idempotencyKey ??
+    (await publishIdempotencyKey({
+      epoch: input.epoch,
+      revision,
+      rooms: mirrorRooms,
+    }));
+  const mirrorInput = {
     directorEpoch: input.epoch,
     revision,
     tournamentName: input.tournamentName,
     rooms: mirrorRooms,
-  });
-  return {
+  };
+  const applied = {
     revision,
     assignments: input.plan.assignments,
     clearedRoomIds: input.plan.cleared.map((entry) => entry.roomId),
+    idempotencyKey,
   };
+  try {
+    const publication = await relayPublishMirror(connection, mirrorInput, { idempotencyKey });
+    return { ...applied, duplicate: publication.duplicate };
+  } catch (error) {
+    // The PUT may have landed while its receipt was lost, in which case the relay holds this
+    // revision and refuses the retry as a conflict. The relay's own position settles it: the
+    // same epoch, revision and key means the rooms hold exactly this publication, and the
+    // retry succeeds without sending anything twice. Anything else — another key at this
+    // position, a newer revision, an unreachable health check — keeps the original conflict,
+    // because guessing here would silently adopt someone else's publication as ours.
+    if (!(error instanceof RelayError) || error.status !== 409 || error.code !== 'conflict') {
+      throw error;
+    }
+    let confirmed = false;
+    try {
+      const health = await relayHealth(connection);
+      confirmed =
+        health.directorEpoch === input.epoch &&
+        health.revision === revision &&
+        health.lastMirrorKey === idempotencyKey;
+    } catch {
+      confirmed = false;
+    }
+    if (!confirmed) throw error;
+    return { ...applied, duplicate: true };
+  }
 }

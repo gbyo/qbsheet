@@ -101,6 +101,24 @@ export interface BridgeState {
   roundPlans: RoundPlan[];
   resultFolder: string | null;
   results: StoredResult[];
+  /**
+   * A mirror publication sent (or about to be sent) without a confirmed receipt. Written before
+   * the PUT and cleared by its definitive outcome, so a crash or restart can reconcile the
+   * indeterminate operation against the relay instead of guessing. Never includes pairing
+   * codes or credentials — only the position and key needed to recognize the publication.
+   */
+  pendingPublication: PendingPublication | null;
+}
+
+/** A publication whose receipt is unconfirmed. See `BridgeState.pendingPublication`. */
+export interface PendingPublication {
+  epoch: number;
+  revision: number;
+  /** The idempotency key the PUT carries, for comparison with the relay's stored key. */
+  key: string;
+  /** Operator-facing description of what was attempted, for recovery notices. */
+  roundName: string | null;
+  roomIds: string[];
 }
 
 export type PersistResult = { ok: true } | { ok: false; error: unknown };
@@ -119,6 +137,7 @@ export function emptyState(): BridgeState {
     roundPlans: [],
     resultFolder: null,
     results: [],
+    pendingPublication: null,
   };
 }
 
@@ -336,6 +355,35 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     ),
     resultFolder: typeof state.resultFolder === 'string' ? state.resultFolder : null,
     results: restoreResults(state.results),
+    pendingPublication: readPendingPublication(state.pendingPublication),
+  };
+}
+
+/** Read an untrusted pending-publication record; anything malformed is no record at all. */
+export function readPendingPublication(value: unknown): PendingPublication | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const { epoch, revision, key, roundName, roomIds } = record;
+  if (
+    typeof epoch !== 'number' ||
+    !Number.isInteger(epoch) ||
+    typeof revision !== 'number' ||
+    !Number.isInteger(revision) ||
+    typeof key !== 'string' ||
+    key === '' ||
+    (roundName !== null && roundName !== undefined && typeof roundName !== 'string') ||
+    !Array.isArray(roomIds) ||
+    !roomIds.every((entry): entry is string => typeof entry === 'string')
+  ) {
+    return null;
+  }
+  return {
+    epoch,
+    revision,
+    key,
+    roundName: typeof roundName === 'string' ? roundName : null,
+    roomIds: [...roomIds],
   };
 }
 

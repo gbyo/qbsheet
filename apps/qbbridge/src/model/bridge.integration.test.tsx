@@ -90,6 +90,8 @@ let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
 let relayEpoch = 1;
 let relayRevision = 0;
+/** Key of the last applied mirror publication, like the relay's stored key. */
+let relayLastMirrorKey: string | null = null;
 const backupControllerId = 'backup-test-controller';
 const backupToken = 'backup-management-secret';
 
@@ -184,7 +186,11 @@ function installFakeTauri(): void {
             status: 200,
             body: JSON.stringify({
               tournamentId: relayTournament,
-              mirror: { director_epoch: relayEpoch, revision: relayRevision },
+              mirror: {
+                director_epoch: relayEpoch,
+                revision: relayRevision,
+                last_mirror_key: relayLastMirrorKey,
+              },
               controller: {
                 authenticated_as: authenticatedAs,
                 active: authenticatedAs === activeController,
@@ -240,6 +246,13 @@ function installFakeTauri(): void {
             deferredMirrorStarted = true;
             await deferMirror;
           }
+          try {
+            const parsed = JSON.parse(String(args.body ?? '{}')) as { idempotency_key?: unknown };
+            relayLastMirrorKey = typeof parsed.idempotency_key === 'string' ? parsed.idempotency_key : null;
+          } catch {
+            relayLastMirrorKey = null;
+          }
+          relayRevision += 1;
           return { status: 200, body: '{}' };
         }
         if (url.includes('/results')) {
@@ -283,6 +296,7 @@ beforeEach(() => {
   activeController = 'primary';
   relayEpoch = 1;
   relayRevision = 0;
+  relayLastMirrorKey = null;
   installFakeTauri();
 });
 
@@ -1013,6 +1027,7 @@ describe('persistence', () => {
       roundPlans: [],
       resultFolder: null,
       results: [],
+      pendingPublication: null,
     });
   });
 });
@@ -1528,11 +1543,49 @@ describe('critical relay persistence', () => {
     setItem.mockRestore();
   });
 
-  test('warns and offers recovery when a relay accepts a publication but its revision is not saved', async () => {
+  test('refuses to publish when the publication intent cannot be saved', async () => {
+    const rendered = await setUpTournament();
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('storage failed before the publication');
+    });
+    const mirrors = () =>
+      calls.filter((call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'));
+    const mirrorsBefore = mirrors().length;
+
+    // An unrecorded attempt that loses its receipt is unrecoverable by construction, so the
+    // PUT never goes out: fail closed before sending anything.
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    if (rendered.result.current.pendingPublicationReview !== null) {
+      await act(async () => {
+        await rendered.result.current.confirmPublicationReview();
+      });
+    }
+
+    expect(mirrors()).toHaveLength(mirrorsBefore);
+    expect(rendered.result.current.state.relay?.revision).toBe(0);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/intent could not be saved/i);
+    setItem.mockRestore();
+
+    // With storage back, the same publish goes out with a recorded intent that retires.
+    await publishReviewed(rendered);
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+    expect(rendered.result.current.state.pendingPublication).toBeNull();
+    expect(loadState().pendingPublication).toBeNull();
+  });
+
+  test('keeps the intent when the relay accepts a publication but its revision is not saved', async () => {
     const rendered = await setUpTournament();
     const originalSetItem = globalThis.localStorage.setItem.bind(globalThis.localStorage);
-    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
-      throw new Error('storage failed after remote publication');
+    // Fail only the write that retires the intent: the intent itself must land first, and the
+    // relay commit must still go out, reproducing a crash between the PUT and local success.
+    const setItem = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation((key, value) => {
+      if (String(value).includes('"pendingPublication":null')) {
+        throw new Error('storage failed after remote publication');
+      }
+      originalSetItem(key, value);
     });
 
     await publishReviewed(rendered);
@@ -1541,6 +1594,9 @@ describe('critical relay persistence', () => {
     expect(loadState().relay?.revision).toBe(0);
     expect(rendered.result.current.persistenceSavePending).toBe(true);
     expect(rendered.result.current.notice?.message).toMatch(/accepted it.*could not save the new revision/i);
+    // The last durable write still names the unconfirmed attempt, so a restart reconciles it.
+    expect(loadState().pendingPublication).toMatchObject({ epoch: 1, revision: 1 });
+    expect(typeof loadState().pendingPublication?.key).toBe('string');
 
     setItem.mockRestore();
     // Keep the original reference used above alive for the test's explicit recovery boundary.
@@ -1550,6 +1606,7 @@ describe('critical relay persistence', () => {
     });
     expect(rendered.result.current.persistenceSavePending).toBe(false);
     expect(loadState().relay?.revision).toBe(1);
+    expect(loadState().pendingPublication).toBeNull();
   });
 });
 
@@ -2353,5 +2410,129 @@ describe('preplanned rounds', () => {
     expect(rendered.result.current.roomStatus(rendered.result.current.state.rooms[0])).toBe(
       'result-received',
     );
+  });
+});
+
+describe('unconfirmed publication recovery', () => {
+  function mirrorCalls() {
+    return calls.filter(
+      (call) => call.command === 'relay_request' && String(call.args.url).endsWith('/mirror'),
+    );
+  }
+
+  function lastMirrorKey(): string {
+    const body = JSON.parse(String(mirrorCalls().at(-1)?.args.body ?? '{}')) as {
+      idempotency_key?: unknown;
+    };
+    if (typeof body.idempotency_key !== 'string') throw new Error('no idempotency key was sent');
+    return body.idempotency_key;
+  }
+
+  test('a crash after the relay commit is recovered on startup without resending', async () => {
+    globalThis.localStorage.clear();
+    const rendered = await setUpTournament();
+    // The last durable write before the fatal publish: local records still at revision 0.
+    const prePublish = loadState();
+    expect(prePublish.relay?.revision).toBe(0);
+
+    await publishReviewed(rendered);
+    expect(rendered.result.current.state.relay?.revision).toBe(1);
+    const key = lastMirrorKey();
+
+    // The process dies after the PUT lands but before local success is recorded: storage
+    // keeps the pre-publish rooms with only the intent added.
+    const crashed = {
+      ...prePublish,
+      pendingPublication: {
+        epoch: 1,
+        revision: 1,
+        key,
+        roundName: 'crashed round',
+        roomIds: [],
+      },
+    };
+    globalThis.localStorage.setItem(storageKey, JSON.stringify(crashed));
+    rendered.unmount();
+
+    const mirrorsBefore = mirrorCalls().length;
+    const restarted = renderHook(() => useBridge());
+
+    // Startup reconciles against the relay instead of guessing: the PUT landed, so the
+    // position is adopted, the intent retires, and nothing is sent twice.
+    await waitFor(() => expect(restarted.result.current.state.pendingPublication).toBeNull());
+    expect(restarted.result.current.state.relay?.revision).toBe(1);
+    expect(restarted.result.current.notice?.message).toMatch(/Recovered an unconfirmed publication/i);
+    expect(mirrorCalls()).toHaveLength(mirrorsBefore);
+    expect(loadState().pendingPublication).toBeNull();
+    restarted.unmount();
+    globalThis.localStorage.clear();
+  });
+
+  test('an interrupted publish that never landed clears on startup and can be retried', async () => {
+    globalThis.localStorage.clear();
+    const rendered = await setUpTournament();
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    if (rendered.result.current.pendingPublicationReview !== null) {
+      await act(async () => {
+        await rendered.result.current.confirmPublicationReview();
+      });
+    }
+    mirrorFails = false;
+
+    // The PUT never reached the relay, but the intent is durable.
+    expect(rendered.result.current.state.pendingPublication).toMatchObject({ epoch: 1, revision: 1 });
+    expect(loadState().pendingPublication).toMatchObject({ epoch: 1, revision: 1 });
+    rendered.unmount();
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() => expect(restarted.result.current.state.pendingPublication).toBeNull());
+    expect(restarted.result.current.state.relay?.revision).toBe(0);
+    expect(restarted.result.current.notice?.message).toMatch(/never reached the relay/i);
+
+    // The retry records a fresh intent for the same content and lands exactly once more.
+    // The tournament itself is in-memory only, so the restarted profile reloads it first.
+    await act(async () => {
+      restarted.result.current.loadFileContents(null, yftFixtureText());
+    });
+    const mirrorsBefore = mirrorCalls().length;
+    await publishReviewed(restarted);
+    expect(restarted.result.current.state.relay?.revision).toBe(1);
+    expect(mirrorCalls()).toHaveLength(mirrorsBefore + 1);
+    restarted.unmount();
+    globalThis.localStorage.clear();
+  });
+
+  test('an intent the relay moved past retires without adopting anything', async () => {
+    globalThis.localStorage.clear();
+    const rendered = await setUpTournament();
+    mirrorFails = true;
+    await act(async () => {
+      await rendered.result.current.publish();
+    });
+    if (rendered.result.current.pendingPublicationReview !== null) {
+      await act(async () => {
+        await rendered.result.current.confirmPublicationReview();
+      });
+    }
+    mirrorFails = false;
+    expect(rendered.result.current.state.pendingPublication).toMatchObject({ epoch: 1, revision: 1 });
+    rendered.unmount();
+
+    // Another controller publishes while this profile is down.
+    relayRevision = 1;
+    relayLastMirrorKey = 'a-different-publication';
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() => expect(restarted.result.current.state.pendingPublication).toBeNull());
+    // The foreign position is reported, never adopted: local records stay behind on purpose.
+    expect(restarted.result.current.state.relay?.revision).toBe(0);
+    expect(restarted.result.current.notice?.message).toMatch(
+      /moved on while a publication.*was unconfirmed/i,
+    );
+    restarted.unmount();
+    globalThis.localStorage.clear();
   });
 });

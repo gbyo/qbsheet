@@ -29,9 +29,11 @@ import {
 } from './native';
 import { generatePairingCode } from './pairing';
 import {
+  buildMirrorRoomInputs,
   planRoomSetup,
   planRound,
   publicationReviewItems,
+  publishIdempotencyKey,
   publishRound,
   type PublicationReviewItem,
   type PublishOutcome,
@@ -91,6 +93,7 @@ import {
   loadState,
   saveState,
   type BridgeState,
+  type PendingPublication,
   type PersistResult,
   type ScorerReadinessSnapshot,
   type StoredResult,
@@ -162,6 +165,19 @@ export interface ScorerReadinessState {
   checkedAt?: string;
 }
 
+/** How an unconfirmed publication intent settled against the relay. */
+export type PendingPublicationSettlement =
+  /** No intent was pending. */
+  | 'none'
+  /** The relay holds exactly the attempted publication; local records were updated to match. */
+  | 'landed'
+  /** The relay never received it; the intent is cleared and publishing may proceed. */
+  | 'never-landed'
+  /** The relay moved on or holds something else; the intent is cleared, review before publishing. */
+  | 'foreign'
+  /** The relay could not be reached; the intent is kept for the next attempt. */
+  | 'unreachable';
+
 export interface BridgeApi {
   state: BridgeState;
   tournament: BridgeTournament | null;
@@ -228,6 +244,13 @@ export interface BridgeApi {
   publish(): Promise<void>;
   pendingPublicationReview: PendingPublicationReview | null;
   confirmPublicationReview(): Promise<void>;
+  /**
+   * Reconcile an unconfirmed publication intent against the relay. Returns how the intent
+   * settled; notices explain what the operator must do next. Runs automatically on startup
+   * and before a new publication while an intent is pending, and is available in Setup for
+   * a manual recheck.
+   */
+  reconcilePendingPublication(): Promise<PendingPublicationSettlement>;
   cancelPublicationReview(): void;
   assignmentFallback: AssignmentFallback | null;
   exportAssignmentFallback(): Promise<boolean>;
@@ -1158,7 +1181,13 @@ export function useBridge(): BridgeApi {
       }
     }
     pollGenerationRef.current += 1;
-    const persisted = commit((current) => ({ ...current, relay: null, scorerReadiness: null })).persisted;
+    const persisted = commit((current) => ({
+      ...current,
+      relay: null,
+      scorerReadiness: null,
+      // No relay left to ask about the unconfirmed attempt; a fresh claim starts clean.
+      pendingPublication: null,
+    })).persisted;
     setChangingRelay(true);
     setRelayReachable(null);
     setNotice({
@@ -1296,6 +1325,95 @@ export function useBridge(): BridgeApi {
    * sent — never by rebuilding from the current plan, which an in-flight edit may already have
    * moved on from. A failed publish never reaches here, so the previous fingerprint stands.
    */
+  /**
+   * Settle an unconfirmed publication intent against the relay's own position.
+   *
+   * The relay is the only witness to whether the PUT landed: the same epoch, revision and
+   * stored key means exactly this publication is held, so the local position is adopted and
+   * the intent retired. A relay still behind the attempt proves it never landed. Anything
+   * else — a newer revision, a different key, a moved epoch — means someone else published
+   * or control moved on, and the intent is retired without adopting anything. Only a match
+   * adopts; every other definitive answer clears, and only an unreachable relay keeps.
+   */
+  const reconcilePendingPublication = useCallback(async (): Promise<PendingPublicationSettlement> => {
+    const pending = stateRef.current.pendingPublication;
+    if (!pending) return 'none';
+    const connection = connectionOf(stateRef.current);
+    if (!connection) return 'unreachable';
+    let health: Awaited<ReturnType<typeof relayHealth>>;
+    try {
+      health = await relayHealth(connection);
+    } catch {
+      setRelayReachable(false);
+      setNotice({
+        kind: 'warn',
+        message:
+          'An earlier publication is still unconfirmed and the relay could not be reached to check it. It stays recorded; check again from Tournament → Relay once the relay is back.',
+      });
+      return 'unreachable';
+    }
+    // The relay may have been replaced while the read was in flight; adopting its position
+    // into this profile would repeat the corruption the fencing exists to prevent.
+    if (!sameRelayConnection(connection, connectionOf(stateRef.current))) return 'unreachable';
+    const what = pending.roundName ? ` for ${pending.roundName}` : '';
+    if (
+      health.directorEpoch === pending.epoch &&
+      health.revision === pending.revision &&
+      health.lastMirrorKey === pending.key
+    ) {
+      // The PUT landed; only its receipt was lost. Adopt the position the relay holds and
+      // retire the intent. Room bookkeeping from that publish was never recorded locally,
+      // so the operator must verify the published rooms before the next round.
+      commit((current) => ({
+        ...current,
+        relay: current.relay
+          ? { ...current.relay, epoch: pending.epoch, revision: pending.revision }
+          : current.relay,
+        pendingPublication: null,
+      }));
+      setRelayReachable(true);
+      setNotice({
+        kind: 'warn',
+        message: `Recovered an unconfirmed publication${what}: the relay already holds revision ${pending.revision}. Local records were updated to match, but room bookkeeping from that publish was not recorded — verify the published rooms before publishing the next round.`,
+      });
+      return 'landed';
+    }
+    if (health.directorEpoch === pending.epoch && health.revision < pending.revision) {
+      commit((current) => ({ ...current, pendingPublication: null }));
+      setRelayReachable(true);
+      setNotice({
+        kind: 'good',
+        message: `The interrupted publication${what} never reached the relay. Review and publish again.`,
+      });
+      return 'never-landed';
+    }
+    commit((current) => ({ ...current, pendingPublication: null }));
+    setRelayReachable(true);
+    setNotice({
+      kind: 'warn',
+      message: `The relay moved on while a publication${what} was unconfirmed (now epoch ${health.directorEpoch}, revision ${health.revision}). The attempt was retired without adopting anything; review the room state before publishing.`,
+    });
+    return 'foreign';
+  }, [commit]);
+
+  // An intent left behind by a previous session, as of mount. Mid-session intents are settled
+  // by the publish path itself; only a mount-inherited one reconciles here, so a failure
+  // notice is never overwritten behind the operator's back.
+  const crashIntentRef = useRef<PendingPublication | null>(state.pendingPublication);
+  useEffect(() => {
+    // Crash recovery, single-shot: a previous session may have died between the PUT and its
+    // receipt. Waits for the relay credential to be restored before asking, and never fires
+    // for intents created mid-session. A manual recheck stays available in Setup.
+    if (!crashIntentRef.current) return;
+    if (!stateRef.current.pendingPublication) {
+      crashIntentRef.current = null;
+      return;
+    }
+    if (!connectionOf(stateRef.current)) return;
+    crashIntentRef.current = null;
+    void reconcilePendingPublication();
+  }, [reconcilePendingPublication, state.pendingPublication, state.relay?.managementToken]);
+
   const applyPublication = useCallback(
     (
       outcome: PublishOutcome,
@@ -1310,6 +1428,8 @@ export function useBridge(): BridgeApi {
       return commit((current) => ({
         ...current,
         relay: current.relay ? { ...current.relay, revision: outcome.revision } : null,
+        // The receipt is confirmed — applied or recognized duplicate — so the intent retires.
+        pendingPublication: null,
         rooms: current.rooms.map((room) => {
           const wasMirrored = pendingCodes.has(room.id);
           if (!wasMirrored) return room;
@@ -1359,6 +1479,8 @@ export function useBridge(): BridgeApi {
       missingRelayMessage: string;
       assignmentFallback?: AssignmentFallback;
       snapshot?: PublicationSnapshot;
+      /** Operator-facing name of what is being published, recorded in the intent. */
+      roundName?: string;
     }): Promise<PublishOutcome | null> => {
       const current = stateRef.current;
       const snapshot = input.snapshot ?? publicationSnapshot(current);
@@ -1382,18 +1504,61 @@ export function useBridge(): BridgeApi {
         setNotice({ kind: 'bad', message: 'There are no rooms to publish. Add a room first.' });
         return null;
       }
+      if (stateRef.current.pendingPublication) {
+        // A previous attempt has no confirmed receipt. Settle what it did before sending
+        // anything new: a retry reconciles against the relay, never rebuilds from intent.
+        // A landed or foreign attempt stops here with its notice; a cleared attempt
+        // proceeds; an unreachable relay leaves this PUT itself as the probe.
+        const settled = await reconcilePendingPublication();
+        if (settled === 'landed' || settled === 'foreign') return null;
+      }
       setBusy(true);
       const pendingCodes = new Map(snapshot.rooms.map((room) => [room.id, room.pendingPairingCode]));
       const tombstoneIds = new Set(snapshot.tombstones.map((room) => room.id));
       try {
-        const outcome = await publishRound(connection, {
-          epoch: snapshot.epoch,
-          lastRevision: snapshot.revision,
-          tournamentName: input.tournamentName,
+        // Name this exact send and durably record the intent before the PUT, so a crash or
+        // restart reconciles the indeterminate operation instead of guessing. Refusing to
+        // send without a recorded intent is the point: an unrecorded attempt that loses its
+        // receipt is unrecoverable by construction.
+        const revision = snapshot.revision + 1;
+        const mirrorRooms = await buildMirrorRoomInputs({
           plan: input.plan,
           rooms: snapshot.rooms,
           tombstones: snapshot.tombstones,
         });
+        const idempotencyKey = await publishIdempotencyKey({
+          epoch: snapshot.epoch,
+          revision,
+          rooms: mirrorRooms,
+        });
+        const intent: PendingPublication = {
+          epoch: snapshot.epoch,
+          revision,
+          key: idempotencyKey,
+          roundName: input.roundName ?? null,
+          roomIds: mirrorRooms.map((room) => room.roomId),
+        };
+        const intentPersisted = commit((current) => ({ ...current, pendingPublication: intent })).persisted;
+        if (!intentPersisted.ok) {
+          setNotice({
+            kind: 'bad',
+            message:
+              'Round not published because the publication intent could not be saved locally. Retry saving local state before publishing, or a crash now would leave the attempt unrecoverable.',
+          });
+          return null;
+        }
+        const outcome = await publishRound(
+          connection,
+          {
+            epoch: snapshot.epoch,
+            lastRevision: snapshot.revision,
+            tournamentName: input.tournamentName,
+            plan: input.plan,
+            rooms: snapshot.rooms,
+            tombstones: snapshot.tombstones,
+          },
+          { prebuilt: { rooms: mirrorRooms, idempotencyKey } },
+        );
         if (
           !sameRelayConnection(connection, connectionOf(stateRef.current)) ||
           stateRef.current.relay?.revision !== snapshot.revision
@@ -1433,7 +1598,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, rememberAssignmentFallback],
+    [applyPublication, commit, reconcilePendingPublication, rememberAssignmentFallback],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {
@@ -1462,6 +1627,7 @@ export function useBridge(): BridgeApi {
         exportDirectory: null,
       },
       snapshot: review.snapshot,
+      roundName: review.roundName,
     });
   }, [publishPlan, rememberPublicationReview]);
 
@@ -1556,6 +1722,7 @@ export function useBridge(): BridgeApi {
       missingRelayMessage: 'Connect the relay before publishing a round.',
       assignmentFallback,
       snapshot,
+      roundName: round.displayName,
     });
   }, [publishPlan, rememberPublicationReview, tournament]);
 
@@ -2100,6 +2267,7 @@ export function useBridge(): BridgeApi {
     publish,
     pendingPublicationReview,
     confirmPublicationReview,
+    reconcilePendingPublication,
     cancelPublicationReview,
     assignmentFallback,
     exportAssignmentFallback,
