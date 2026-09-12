@@ -22,6 +22,8 @@
 import type { Room, RoomTombstone } from './rooms';
 import { dedupeRoundPlans } from './roundPlans';
 import type { PlannedPairing, RoundPlan } from './roundPlans';
+import { readRecoveryDigests, readTakeoverReview } from './recovery';
+import type { RecoveryBaseline, RecoverySource, TakeoverReview } from './recovery';
 import { scoresheetOrigin } from '../../../../src/director/relay/relayConfig';
 
 /**
@@ -84,6 +86,30 @@ export interface BridgeState {
   scorerReadiness: ScorerReadinessSnapshot | null;
   /** Where the `.yft` was last read from, so the panel can name it after a restart. */
   yftPath: string | null;
+  /**
+   * Identity hash of the loaded `.yft` bytes, or null when no file is loaded. YellowFruit is
+   * the authority, so the hash is what ties this profile — and any recovery package it
+   * creates or imports — to the exact tournament document in use.
+   */
+  yftFingerprint: string | null;
+  /**
+   * What the world looked like when this profile last created a recovery package. Compared
+   * against live state to show package age per category. Null when no package was created
+   * here; a backup that only imports never carries one.
+   */
+  lastRecoveryPackage: RecoveryBaseline | null;
+  /**
+   * Provenance of the recovery package this profile imported, or null for ordinary primary
+   * state. Gates publication until the authoritative `.yft` is proven loaded; see
+   * `recoverySource` verification at file load.
+   */
+  recoverySource: RecoverySource | null;
+  /**
+   * The relay-changes review owed after this profile took over control, or null when no
+   * review is outstanding. Publishing stays locked until the drift report is explicitly
+   * confirmed; the lock survives restarts like the stale rooms do.
+   */
+  takeoverReview: TakeoverReview | null;
   tournamentName: string | null;
   rooms: Room[];
   /** Rooms removed locally whose assignments still need a clear publication. */
@@ -111,6 +137,10 @@ export function emptyState(): BridgeState {
     relay: null,
     scorerReadiness: null,
     yftPath: null,
+    yftFingerprint: null,
+    lastRecoveryPackage: null,
+    recoverySource: null,
+    takeoverReview: null,
     tournamentName: null,
     rooms: [],
     pendingRoomRemovals: [],
@@ -227,6 +257,64 @@ function normalizeTombstone(value: unknown): RoomTombstone | null {
   };
 }
 
+function readYftFingerprint(value: unknown): string | null {
+  return typeof value === 'string' && /^[0-9a-f]{16}$/.test(value) ? value : null;
+}
+
+/**
+ * Read a package-creation baseline. Stored by this profile, so a malformed one is dropped
+ * rather than repaired: the worst case is a freshness panel with no opinion until the next
+ * package is created, never a stale baseline misread as fresh.
+ */
+function readRecoveryBaseline(value: unknown): RecoveryBaseline | null {
+  if (!isRecord(value)) return null;
+  const digests = readRecoveryDigests(value.digests);
+  const { createdAt, yftFingerprint, relayEpoch, relayRevision } = value;
+  if (
+    typeof createdAt !== 'string' ||
+    !digests ||
+    typeof relayEpoch !== 'number' ||
+    !Number.isInteger(relayEpoch) ||
+    typeof relayRevision !== 'number' ||
+    !Number.isInteger(relayRevision)
+  ) {
+    return null;
+  }
+  return {
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
+    digests,
+    relayEpoch,
+    relayRevision,
+  };
+}
+
+/**
+ * Read import provenance. Verification is session-bound — startup re-locks publication until
+ * the authoritative `.yft` is loaded again — so a stored `verified: true` only ever reflects
+ * a file proven loaded in an earlier session, never a license to publish now.
+ */
+function readRecoverySource(value: unknown): RecoverySource | null {
+  if (!isRecord(value)) return null;
+  const { createdAt, yftFingerprint, packageRelayEpoch, packageRelayRevision, verified } = value;
+  if (
+    typeof createdAt !== 'string' ||
+    typeof packageRelayEpoch !== 'number' ||
+    !Number.isInteger(packageRelayEpoch) ||
+    typeof packageRelayRevision !== 'number' ||
+    !Number.isInteger(packageRelayRevision)
+  ) {
+    return null;
+  }
+  return {
+    createdAt,
+    yftFingerprint: readYftFingerprint(yftFingerprint),
+    packageRelayEpoch,
+    packageRelayRevision,
+    verified: verified === true,
+  };
+}
+
 function readScorerReadiness(value: unknown): ScorerReadinessSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
@@ -326,6 +414,10 @@ export function migrateV1(state: Partial<BridgeState> & Record<string, unknown>)
     relay: state.relay ?? null,
     scorerReadiness: readScorerReadiness(state.scorerReadiness),
     yftPath: typeof state.yftPath === 'string' ? state.yftPath : null,
+    yftFingerprint: readYftFingerprint(state.yftFingerprint),
+    lastRecoveryPackage: readRecoveryBaseline(state.lastRecoveryPackage),
+    recoverySource: readRecoverySource(state.recoverySource),
+    takeoverReview: readTakeoverReview(state.takeoverReview),
     tournamentName: typeof state.tournamentName === 'string' ? state.tournamentName : null,
     rooms,
     pendingRoomRemovals,

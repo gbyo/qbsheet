@@ -86,6 +86,8 @@ function testBridge(rooms: Room[], scorerReady = true): BridgeApi {
     revokeBackup: vi.fn(async () => false),
     takeOverRelay: vi.fn(async () => false),
     transferRelayToPrimary: vi.fn(async () => false),
+    refreshTakeoverDrift: vi.fn(async () => true),
+    confirmTakeoverReviewed: vi.fn(() => true),
     relayCredentialSavePending: false,
     retryRelayCredentialSave: vi.fn(async () => false),
     persistenceSavePending: false,
