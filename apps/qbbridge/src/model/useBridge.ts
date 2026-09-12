@@ -1832,23 +1832,29 @@ export function useBridge(): BridgeApi {
     [],
   );
 
-  const writeOne = useCallback(
-    async (entry: StoredResult, folder: string): Promise<void> => {
-      const summary = resultSummary(entry.qbj);
-      const fileName = resultFileName(summary, entry.resultId);
+  /**
+   * Write one result into `folder`, overwriting only the ledger-owned slot.
+   *
+   * The ledger's ownership claim covers exactly `ownedPath`: the write is exclusive
+   * everywhere else, so a folder change can never silently replace a foreign file that
+   * happens to share the derived name. On a collision outside the owned slot, adopt the
+   * file — but only when it byte-matches this exact result (a crash between the write
+   * and the local commit leaves exactly that behind). A different document under the
+   * same name, or an unreadable one, keeps the truthful collision error and is never
+   * removed.
+   */
+  const writeOrAdopt = useCallback(
+    async (
+      folder: string,
+      fileName: string,
+      contents: string,
+      ownedPath: string | undefined,
+    ): Promise<{ path: string; hash: string }> => {
       const targetPath = resultFilePath(folder, fileName);
-      // The bytes are the relay's document, serialized. Nothing is recalculated on the way out.
-      const contents = resultFileContents(entry.qbj);
-      let path: string;
-      let hash: string;
       try {
-        ({ path, hash } = await writeAndVerify(folder, fileName, contents, entry.savedPath === targetPath));
+        return await writeAndVerify(folder, fileName, contents, ownedPath === targetPath);
       } catch (error) {
-        if (!isResultFileExistsError(error) || entry.savedPath === targetPath) throw error;
-        // A previous attempt may have written the file without recording it — a crash between
-        // the write and the local commit. Adopt the file, but only if it byte-matches this
-        // exact result; a different document under the same name, or an unreadable one, keeps
-        // the truthful collision error and is never removed.
+        if (!isResultFileExistsError(error) || ownedPath === targetPath) throw error;
         const expectedHash = await sha256Hex(contents);
         let existing: string;
         try {
@@ -1857,9 +1863,19 @@ export function useBridge(): BridgeApi {
           throw error;
         }
         if ((await sha256Hex(existing)) !== expectedHash) throw error;
-        path = targetPath;
-        hash = expectedHash;
+        return { path: targetPath, hash: expectedHash };
       }
+    },
+    [writeAndVerify],
+  );
+
+  const writeOne = useCallback(
+    async (entry: StoredResult, folder: string): Promise<void> => {
+      const summary = resultSummary(entry.qbj);
+      const fileName = resultFileName(summary, entry.resultId);
+      // The bytes are the relay's document, serialized. Nothing is recalculated on the way out.
+      const contents = resultFileContents(entry.qbj);
+      const { path, hash } = await writeOrAdopt(folder, fileName, contents, entry.savedPath);
       // The ledger records what proves the save, not just where it went.
       commit((current) => ({
         ...current,
@@ -1877,7 +1893,7 @@ export function useBridge(): BridgeApi {
         ),
       }));
     },
-    [commit, writeAndVerify],
+    [commit, writeOrAdopt],
   );
 
   /**
@@ -2063,13 +2079,14 @@ export function useBridge(): BridgeApi {
    *
    * A saved path is a claim, not a proof: the file may have been deleted, truncated, or
    * tampered with while Bridge was closed. Every ledger entry carrying a hash is read back
-   * and compared. A mismatch is rewritten from the ledger's own QBJ into the same slot
-   * (overwrite is safe here: the slot is ours by ledger provenance and its bytes are proven
-   * wrong), then read back again — so a restart heals tampered or deleted files with no
-   * relay round-trip and no button press. Entries that still fail lose their saved path and
-   * return to the unsaved set with a loud notice. ACK and import markers are preserved
-   * throughout: a lost file does not un-acknowledge the relay or un-handle a YellowFruit
-   * handoff the operator already confirmed.
+   * and compared. A mismatch is rewritten from the ledger's own QBJ — overwriting only when
+   * the target is exactly the ledger-owned savedPath. The operator may have chosen a
+   * different folder since the save, and that folder may hold a foreign file under the
+   * derived name; such a collision is never replaced, only adopted when it byte-matches
+   * this exact result. Entries that still fail lose their saved path and return to the
+   * unsaved set with a loud notice. ACK and import markers are preserved throughout:
+   * a lost file does not un-acknowledge the relay or un-handle a YellowFruit handoff the
+   * operator already confirmed.
    */
   useEffect(() => {
     if (verifiedLedgerRef.current || !isNativeHost()) return;
@@ -2099,7 +2116,7 @@ export function useBridge(): BridgeApi {
           const summary = resultSummary(entry.qbj);
           const fileName = resultFileName(summary, entry.resultId);
           const contents = resultFileContents(entry.qbj);
-          const { path, hash } = await writeAndVerify(folder, fileName, contents, true);
+          const { path, hash } = await writeOrAdopt(folder, fileName, contents, entry.savedPath);
           commit((current) => ({
             ...current,
             results: current.results.map((row) =>
@@ -2129,7 +2146,7 @@ export function useBridge(): BridgeApi {
           kind: 'warn',
           message:
             `${repaired.length} saved result file(s) did not match the ledger and were ` +
-            `rewritten from the retained results.${broken.length > 0 ? ` ${broken.length} more could not be repaired.` : ''}`,
+            `repaired from the retained results.${broken.length > 0 ? ` ${broken.length} more could not be repaired.` : ''}`,
         });
       }
       if (broken.length > 0) {
@@ -2141,7 +2158,7 @@ export function useBridge(): BridgeApi {
         });
       }
     })();
-  }, [commit, writeAndVerify]);
+  }, [commit, writeOrAdopt]);
 
   /**
    * Run the automatic save whenever unsaved results exist and whenever that set changes.

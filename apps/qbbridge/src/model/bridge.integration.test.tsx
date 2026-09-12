@@ -2085,6 +2085,85 @@ describe('durable result saving', () => {
     expect(restarted.result.current.state.results[0].savedPath).toBe(path);
     restarted.unmount();
   });
+
+  test('startup repair never replaces a foreign file after a folder change', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const ownedPath = rendered.result.current.state.results[0].savedPath!;
+
+    // The operator moves to a new folder, then Bridge restarts with the owned file missing
+    // and a foreign file already sitting at the derived name in the new folder.
+    resultFolder = '/tournaments/other-results';
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    expect(rendered.result.current.state.resultFolder).toBe('/tournaments/other-results');
+    rendered.unmount();
+
+    const fileName = resultFileName(resultSummary(document), 'res-1');
+    const foreignPath = resultFilePath('/tournaments/other-results', fileName);
+    existingPaths.add(foreignPath);
+    fakeFileBytes.set(foreignPath, '{"someone":"else"}');
+    fakeFileBytes.delete(ownedPath);
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.kind).toBe('bad'));
+    // A collision stays a collision: the foreign file is untouched, no new write lands in
+    // the new folder, and the entry returns to the unsaved set instead of claiming it.
+    expect(fakeFileBytes.get(foreignPath)).toBe('{"someone":"else"}');
+    expect(writtenFiles.filter((file) => file.directory === '/tournaments/other-results')).toHaveLength(0);
+    expect(restarted.result.current.state.results[0].savedPath).toBeUndefined();
+    restarted.unmount();
+  });
+
+  test('startup repair adopts a byte-identical file after a folder change', async () => {
+    const { result: document } = scoredResultDocument();
+    relayResults = [
+      { result_id: 'res-1', room_id: 'room-1', received_at: '2026-09-10T15:00:00Z', qbj: document },
+    ];
+    const rendered = await setUpTournament();
+    await act(async () => {
+      await rendered.result.current.pollResults();
+      await rendered.result.current.chooseFolder();
+    });
+    await waitFor(() => expect(rendered.result.current.state.results[0].savedPath).toBeDefined());
+    const ownedPath = rendered.result.current.state.results[0].savedPath!;
+
+    resultFolder = '/tournaments/other-results';
+    await act(async () => {
+      await rendered.result.current.chooseFolder();
+    });
+    rendered.unmount();
+
+    // The derived name in the new folder already holds these exact bytes — a write that
+    // landed without its commit. Repair claims it without writing a second file.
+    const fileName = resultFileName(resultSummary(document), 'res-1');
+    const identicalPath = resultFilePath('/tournaments/other-results', fileName);
+    existingPaths.add(identicalPath);
+    fakeFileBytes.set(identicalPath, resultFileContents(document));
+    fakeFileBytes.delete(ownedPath);
+    const writesBefore = writtenFiles.length;
+
+    const restarted = renderHook(() => useBridge());
+    await waitFor(() =>
+      expect(restarted.result.current.state.relay?.managementToken).toBe('management-secret'),
+    );
+    await waitFor(() => expect(restarted.result.current.notice?.message).toMatch(/did not match the ledger/));
+    expect(restarted.result.current.state.results[0].savedPath).toBe(identicalPath);
+    expect(writtenFiles).toHaveLength(writesBefore);
+    restarted.unmount();
+  });
 });
 
 /**

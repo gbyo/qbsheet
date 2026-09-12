@@ -434,6 +434,10 @@ pub async fn write_result_file_durable(
             .sync_all()
             .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
         drop(temporary);
+        // Set when an overwrite landed a replacement while a preserved copy still sits
+        // beside it. The backup is removed only after the sync below proves the new
+        // directory entry durable — never as part of error cleanup.
+        let mut pending_backup: Option<PathBuf> = None;
         if overwrite {
             // Preserve the replaced bytes under a unique backup name until the replacement
             // lands. Remove-then-rename leaves a window holding neither copy; two renames
@@ -447,22 +451,17 @@ pub async fn write_result_file_durable(
                 RESULT_TEMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             );
             let backup_path = directory.join(backup_name);
-            match std::fs::rename(&final_path, &backup_path) {
-                Ok(()) => {
-                    let renamed = std::fs::rename(&temporary_path, &final_path);
-                    // A stale backup is evidence, not corruption; its absence is never an error.
-                    let _ = std::fs::remove_file(&backup_path);
-                    renamed
-                        .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    std::fs::rename(&temporary_path, &final_path)
-                        .map_err(|error| CommandError::new("write_failed", error.to_string()))?;
-                }
-                Err(error) => {
-                    return Err(CommandError::new("write_failed", error.to_string()));
-                }
-            }
+            publish_durable_replacement(
+                &directory,
+                &temporary_path,
+                &final_path,
+                &backup_path,
+                &|from, to| std::fs::rename(from, to),
+            )?;
+            // The replacement landed and the directory entry is synced below; only now is
+            // the preserved copy redundant. Its absence is never an error — a crash between
+            // the sync and this removal simply leaves evidence behind.
+            pending_backup = Some(backup_path);
         } else {
             // Atomic no-replace publish: link(2) fails when the final name exists instead
             // of replacing it, closing the check-then-rename race between concurrent saves.
@@ -480,6 +479,9 @@ pub async fn write_result_file_durable(
             let _ = std::fs::remove_file(&temporary_path);
         }
         sync_directory(&directory)?;
+        if let Some(backup) = pending_backup {
+            let _ = std::fs::remove_file(backup);
+        }
         Ok(())
     })();
     if outcome.is_err() {
@@ -487,6 +489,54 @@ pub async fn write_result_file_durable(
     }
     outcome?;
     Ok(final_path.to_string_lossy().into_owned())
+}
+
+/// Swap an fsynced temporary result onto its final name without ever destroying the
+/// only known-good copy.
+///
+/// The previous final (when there is one) is renamed aside to `backup_path` first, so a
+/// crash or error between the two renames always leaves one complete copy on disk. The
+/// backup is deliberately *not* removed here: the caller deletes it only after the sync
+/// that follows proves the new directory entry durable. On replacement failure the backup
+/// is rolled back onto the final name; when the rollback itself fails the backup is left
+/// in place and the error names it, so the previous result stays recoverable by hand.
+///
+/// `rename` is a hook rather than a direct call so tests can fault-inject the second
+/// rename. Production always passes `std::fs::rename`.
+fn publish_durable_replacement(
+    directory: &Path,
+    temporary_path: &Path,
+    final_path: &Path,
+    backup_path: &Path,
+    rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+) -> CommandResult<()> {
+    if let Err(error) = rename(final_path, backup_path) {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            // Nothing to preserve: a first write wearing overwrite's clothes.
+            return rename(temporary_path, final_path)
+                .map_err(|error| CommandError::new("write_failed", error.to_string()));
+        }
+        return Err(CommandError::new("write_failed", error.to_string()));
+    }
+    if let Err(error) = rename(temporary_path, final_path) {
+        // The replacement did not land, so the only complete copy is the backup. Put it
+        // back before reporting, and re-sync best-effort so the restored name is durable.
+        if let Err(rollback) = rename(backup_path, final_path) {
+            return Err(CommandError::new(
+                "write_failed",
+                format!(
+                    "The replacement result could not be published ({error}), and restoring \
+                     the previous result also failed ({rollback}). The previous result is \
+                     preserved as {}; move it back to {} before saving again.",
+                    backup_path.display(),
+                    final_path.display(),
+                ),
+            ));
+        }
+        let _ = sync_directory(directory);
+        return Err(CommandError::new("write_failed", error.to_string()));
+    }
+    Ok(())
 }
 
 /// Directory sync after a durable rename. The file fsync above orders the bytes; this syncs
@@ -979,6 +1029,100 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "no working files must survive a success"
+        );
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_failed_replacement_rolls_the_preserved_copy_back() {
+        use super::publish_durable_replacement;
+        let (directory, _runtime) = durable_test_dir("overwrite-rollback");
+        let final_path = directory.join("R04_Room-101_A_vs_B_a81f3c.result.qbj");
+        let temporary_path = directory.join("replacement.qbbridge-tmp-0");
+        let backup_path = directory.join("previous.qbbridge-bak-0");
+        std::fs::write(&final_path, "{\"first\":true}").unwrap();
+        std::fs::write(&temporary_path, "{\"second\":true}").unwrap();
+
+        // Fail exactly the temp-to-final rename; every other rename really runs.
+        let rename = |from: &std::path::Path, to: &std::path::Path| {
+            if from == temporary_path.as_path() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected temp-to-final failure",
+                ));
+            }
+            std::fs::rename(from, to)
+        };
+
+        let error = publish_durable_replacement(
+            &directory,
+            &temporary_path,
+            &final_path,
+            &backup_path,
+            &rename,
+        )
+        .expect_err("a failed replacement must report, not pretend");
+        assert_eq!(error.code, "write_failed");
+        assert_eq!(
+            std::fs::read_to_string(&final_path).unwrap(),
+            "{\"first\":true}",
+            "the previous result must be rolled back onto the final name"
+        );
+        assert!(
+            !backup_path.exists(),
+            "a restored backup must not linger beside the final"
+        );
+
+        std::fs::remove_dir_all(&directory).ok();
+    }
+
+    #[test]
+    fn a_failed_rollback_preserves_the_backup_and_names_it() {
+        use super::publish_durable_replacement;
+        let (directory, _runtime) = durable_test_dir("overwrite-rollback-failed");
+        let final_path = directory.join("R04_Room-101_A_vs_B_a81f3c.result.qbj");
+        let temporary_path = directory.join("replacement.qbbridge-tmp-0");
+        let backup_path = directory.join("previous.qbbridge-bak-0");
+        std::fs::write(&final_path, "{\"first\":true}").unwrap();
+        std::fs::write(&temporary_path, "{\"second\":true}").unwrap();
+
+        // Fail the temp-to-final rename and the backup-to-final rollback alike.
+        let rename = |from: &std::path::Path, to: &std::path::Path| {
+            if from == temporary_path.as_path() || from == backup_path.as_path() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected replacement and rollback failure",
+                ));
+            }
+            std::fs::rename(from, to)
+        };
+
+        let error = publish_durable_replacement(
+            &directory,
+            &temporary_path,
+            &final_path,
+            &backup_path,
+            &rename,
+        )
+        .expect_err("a doubly failed replacement must report loudly");
+        assert_eq!(error.code, "write_failed");
+        // The backup is the only complete copy left: it must survive with the old bytes,
+        // and the message must say exactly where it is so the operator can recover it.
+        assert_eq!(
+            std::fs::read_to_string(&backup_path).unwrap(),
+            "{\"first\":true}",
+            "the previous result must stay recoverable in the preserved backup"
+        );
+        let backup_display = backup_path.display().to_string();
+        assert!(
+            error.message.contains(&backup_display),
+            "the error must name the preserved backup, got: {}",
+            error.message
+        );
+        assert!(
+            !final_path.exists(),
+            "nothing complete may masquerade as the final result"
         );
 
         std::fs::remove_dir_all(&directory).ok();
