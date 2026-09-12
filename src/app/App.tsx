@@ -1322,6 +1322,7 @@ export default function App() {
         recovery={recoveryUi}
         onRecovery={() => setScreen({ kind: 'recovery', returnTo: 'room' })}
         onPractice={() => setScreen({ kind: 'practice' })}
+        onCreateGame={() => setScreen({ kind: 'create' })}
         onOtherScoring={() => setScreen({ kind: 'home' })}
         onChangeTournament={() => {
           if (pairingProtected) return;
@@ -1390,7 +1391,7 @@ export default function App() {
       <ManualGameSetup
         initialInput={screen.initialInput}
         onStart={createManualGame}
-        onCancel={() => setScreen({ kind: 'home' })}
+        onCancel={() => setScreen(pairedRoom ? { kind: 'room' } : { kind: 'home' })}
       />
     );
   }
@@ -1432,7 +1433,7 @@ export default function App() {
   if (screen.kind === 'completed' && current) {
     // A connected room goes back to its room, not to the front door. The next assignment appears
     // there on its own, and nobody has to find an address or a pairing code between rounds.
-    const backToRoom = current.connected && pairedRoom !== null;
+    const backToRoom = pairedRoom !== null && (current.connected || isManualGame(current.package));
     return (
       <CompletionScreen
         record={current}

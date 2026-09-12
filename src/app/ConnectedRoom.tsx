@@ -222,6 +222,7 @@ export default function ConnectedRoom(props: {
   recovery?: IRecoveryUi;
   onRecovery?: () => void;
   onPractice: () => void;
+  onCreateGame?: () => void;
   onOtherScoring: () => void;
   onChangeTournament: () => void;
   onResume: (record: IStoredGameRecord) => void | Promise<void>;
@@ -247,6 +248,7 @@ export default function ConnectedRoom(props: {
     recovery,
     onRecovery = () => undefined,
     onOtherScoring,
+    onCreateGame = onOtherScoring,
     onChangeTournament,
     onResume,
     onStart,
@@ -800,6 +802,21 @@ export default function ConnectedRoom(props: {
         >
           {practiceInProgress ? 'Resume practice' : 'Practice'}
         </button>
+        {/*
+          Assignment-first (#832): the direct manual fallback recedes while a valid tournament
+          assignment is ready, so the room cannot silently invite the same assignment to be
+          scored twice. Manual scoring stays reachable through Other scoring options.
+        */}
+        {!startable && (
+          <button
+            type="button"
+            className="shell-button shell-button-quiet"
+            onClick={onCreateGame}
+            disabled={starting}
+          >
+            Create game manually
+          </button>
+        )}
         <button
           type="button"
           className="shell-button shell-button-quiet"
