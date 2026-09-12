@@ -684,20 +684,30 @@ export function useBridge(): BridgeApi {
   );
 
   /**
-   * One provenance probe of the loaded source file: metadata first, bytes on suspicion.
+   * One provenance probe of the loaded source file: metadata first, bytes on suspicion —
+   * or bytes unconditionally for the publication boundary.
    *
    * - `current`: the bytes on disk hash to the loaded bytes (a same-content save adopts
    *   the new metadata baseline silently);
    * - `changed`: the bytes provably differ;
    * - `unknown`: anything unreadable or unjudgeable — a deleted file has no newer content
    *   to be stale against, and a persisted path from before source hashing has no loaded
-   *   bytes to compare. Unknown is never a refusal on its own.
+   *   bytes to compare. Unknown is never a refusal on its own: the background poller stays
+   *   non-destructive, and the publication boundary judges it separately.
+   *
+   * `hashAlways` skips the metadata shortcut and re-reads plus hashes every time. The
+   * publication boundary always sets it: filesystem mtime resolution is not guaranteed to
+   * be millisecond-precise (FAT/exFAT/network/cloud-synced tournament media), so a
+   * same-size save within one timestamp tick can change bytes without changing either
+   * metadata value. The source is size-guarded at 8 MiB, so the extra read is one small
+   * local round-trip at the point where correctness matters most.
    */
   const probeYftSource = useCallback(
     async (
       path: string,
       sha256: string | null,
       baseline: { byteLength: number; modifiedMs: number } | null,
+      options?: { hashAlways?: boolean },
     ): Promise<{
       status: 'current' | 'changed' | 'unknown';
       live: { byteLength: number; modifiedMs: number } | null;
@@ -705,7 +715,12 @@ export function useBridge(): BridgeApi {
       if (sha256 === null) return { status: 'unknown', live: null };
       try {
         const live = await readYftSourceMetadata(path);
-        if (baseline && live.byteLength === baseline.byteLength && live.modifiedMs === baseline.modifiedMs) {
+        if (
+          !options?.hashAlways &&
+          baseline &&
+          live.byteLength === baseline.byteLength &&
+          live.modifiedMs === baseline.modifiedMs
+        ) {
           return { status: 'current', live };
         }
         const contents = await readYftSourceContents(path);
@@ -718,17 +733,22 @@ export function useBridge(): BridgeApi {
   );
 
   /**
-   * Whether the loaded source still matches the file on disk, adopting a same-content
-   * baseline along the way. Only a proven change reports false.
+   * Whether the loaded source is provably the file on disk, for the publication boundary.
+   *
+   * Unlike the background check below, an unverifiable source fails closed here: a deleted,
+   * disconnected, or unreadable `.yft` — including the transient window of an atomic editor
+   * save — must refuse with an actionable message rather than publish from stale in-memory
+   * bytes precisely when the authoritative source cannot be proven current. Returns
+   * `unverified` for anything unjudgeable and never latches it: a transient gap clears on
+   * its own once the file is readable again.
    */
-  const checkYftSourceCurrent = useCallback(async (): Promise<boolean> => {
+  const verifyYftSourceForPublish = useCallback(async (): Promise<'current' | 'changed' | 'unverified'> => {
     const current = stateRef.current;
-    if (!isNativeHost() || !current.yftPath) return true;
-    if (current.yftChangedOnDisk) return false;
+    if (!isNativeHost() || !current.yftPath) return 'current';
+    if (current.yftChangedOnDisk) return 'changed';
     const path = current.yftPath;
     const sha256 = current.yftSha256;
-    const probe = await probeYftSource(path, sha256, current.yftSource);
-    if (probe.status === 'changed') return false;
+    const probe = await probeYftSource(path, sha256, current.yftSource, { hashAlways: true });
     if (probe.status === 'current' && probe.live) {
       const live = probe.live;
       const stillCurrent = stateRef.current;
@@ -739,7 +759,7 @@ export function useBridge(): BridgeApi {
         }));
       }
     }
-    return true;
+    return probe.status === 'unknown' ? 'unverified' : probe.status;
   }, [commit, probeYftSource]);
 
   const applyLoadedFile = useCallback(
@@ -1607,12 +1627,24 @@ export function useBridge(): BridgeApi {
       // the file on disk. A YellowFruit edit that landed after load — a roster fix between
       // rounds is the classic one — refuses here, loudly, instead of publishing a stale
       // snapshot as the next round. Reloading is transactional and keeps rooms and plans.
-      if (!(await checkYftSourceCurrent())) {
+      // An unverifiable source refuses just as loudly: publishing from in-memory bytes
+      // while the file is missing or unreadable is exactly when staleness cannot be ruled
+      // out. That refusal never latches — a transient atomic-save gap clears on its own.
+      const sourceStatus = await verifyYftSourceForPublish();
+      if (sourceStatus === 'changed') {
         commit((pending) => (pending.yftChangedOnDisk ? pending : { ...pending, yftChangedOnDisk: true }));
         setNotice({
           kind: 'bad',
           message:
             'Round not published because the YellowFruit source file changed on disk after it was loaded. Reload it in Setup — rooms and plans are kept — then publish again.',
+        });
+        return null;
+      }
+      if (sourceStatus === 'unverified') {
+        setNotice({
+          kind: 'bad',
+          message:
+            'Round not published because the YellowFruit source file could not be verified on disk — it is missing or unreadable. Restore the file, or reload it in Setup, then publish again.',
         });
         return null;
       }
@@ -1726,7 +1758,7 @@ export function useBridge(): BridgeApi {
         setBusy(false);
       }
     },
-    [applyPublication, checkYftSourceCurrent, commit, rememberAssignmentFallback],
+    [applyPublication, commit, rememberAssignmentFallback, verifyYftSourceForPublish],
   );
 
   const confirmPublicationReview = useCallback(async (): Promise<void> => {

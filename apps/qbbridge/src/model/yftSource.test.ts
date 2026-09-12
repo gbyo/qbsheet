@@ -180,4 +180,30 @@ describe('correction groups and verification', () => {
   test('with no authoritative games loaded there is no opinion', () => {
     expect(verificationForResult(correction, groups, null, teams)).toBe('unknown');
   });
+
+  test('results without a match id never collapse into a false correction pair', () => {
+    // Two distinct games sharing round number and team ids with no stable match id: the
+    // playoff rematch the old round-plus-teams fallback key merged into one group.
+    const idless = (leftPoints: number): { objects: QbjObject[] } => ({
+      objects: documentWithMatches('4', [
+        {
+          type: 'Match',
+          tossups_read: 20,
+          match_teams: [
+            { team: { $ref: 'Team_A' }, points: leftPoints },
+            { team: { $ref: 'Team_B' }, points: 40 },
+          ],
+        },
+      ]),
+    });
+    const first = { resultId: 'res-a', receivedAt: '2026-09-11T15:00:00Z', qbj: idless(30) };
+    const second = { resultId: 'res-b', receivedAt: '2026-09-11T16:00:00Z', qbj: idless(35) };
+    const idlessGroups = groupResultsByMatch([first, second]);
+    expect(idlessGroups).toHaveLength(2);
+
+    const games = extractYftGames(resultDocument('Match_1').objects);
+    // Each stands on its own proof: neither is automatically the other's correction.
+    expect(verificationForResult(first, idlessGroups, games, teams)).toBe('verified');
+    expect(verificationForResult(second, idlessGroups, games, teams)).toBe('needs-import');
+  });
 });

@@ -241,7 +241,12 @@ export function verifyGameInIndex(
 
 /** The logical game one or more relay finals belong to. */
 export interface CorrectionGroup {
-  /** The QBJ match id shared by original and corrections, or a content fallback key. */
+  /**
+   * The QBJ match id shared by original and corrections — the only proof two finals are
+   * the same game — or a per-result identity when no match id exists. Round-plus-teams
+   * tuples are deliberately never used: phases reuse round names and teams meet again,
+   * so inferring correction identity from them would mark a legitimate game superseded.
+   */
   key: string;
   /** Every result id in the group, oldest first. */
   resultIds: string[];
@@ -262,17 +267,17 @@ function resultMatchId(qbj: unknown): string | null {
 }
 
 function fallbackGroupKey(result: GroupableResult): string {
-  const objects = isRecord(result.qbj) && Array.isArray(result.qbj.objects) ? result.qbj.objects : [];
-  const games = extractYftGames(objects);
-  const game = games[0];
-  if (!game) return `unparseable:${result.resultId}`;
-  return [game.roundNumber ?? '?', game.leftTeamId ?? '?', game.rightTeamId ?? '?'].join('|');
+  // No match id, no proven identity. A correction re-scores the same assignment document,
+  // so it always carries its original's match id; anything without one is either a legacy
+  // row or a different game, and both cases must stand alone for operator review rather
+  // than collapse into a false correction pair.
+  return `unmatched:${result.resultId}`;
 }
 
 /**
  * Group relay finals by logical game. A correction re-scores the same assignment document,
- * so it carries the same match id as its original; anything without one falls back to its
- * round and team content, and anything without even that stands alone.
+ * so it carries the same match id as its original; anything without one stands alone in
+ * its own group and is never automatically marked as another result's correction.
  */
 export function groupResultsByMatch(results: readonly GroupableResult[]): CorrectionGroup[] {
   const groups = new Map<string, { resultIds: string[]; latestAt: string; latestResultId: string }>();

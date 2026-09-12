@@ -99,6 +99,8 @@ let yftSourceMetadata: { byteLength: number; modifiedMs: number } = {
 };
 /** Null means the source file cannot be re-read, as a deleted file would be. */
 let yftSourceContents: string | null = null;
+/** When set, even the metadata read fails, as a deleted file reports. */
+let yftSourceMetadataThrows = false;
 let scorerCanPair = true;
 let scorerReadinessFails = false;
 let activeController: 'primary' | 'backup' = 'primary';
@@ -145,6 +147,7 @@ function installFakeTauri(): void {
         };
         return recoveryPackage.path;
       case 'yellowfruit_source_metadata': {
+        if (yftSourceMetadataThrows) throw new Error('source file is gone (fake missing metadata).');
         return { ...yftSourceMetadata };
       }
       case 'read_yellowfruit_source': {
@@ -300,7 +303,8 @@ beforeEach(() => {
   deferWrites = false;
   pendingWrites = [];
   yftSourceMetadata = { byteLength: 4242, modifiedMs: 1000 };
-  yftSourceContents = null;
+  yftSourceMetadataThrows = false;
+  yftSourceContents = yftFixtureText();
   scorerCanPair = true;
   scorerReadinessFails = false;
   activeController = 'primary';
@@ -457,6 +461,13 @@ describe('a round, published and returned', () => {
       value: {
         invoke: async (command: string) => {
           if (command === 'relay_request') throw new Error('relay_unreachable');
+          // The disk is fine; only the relay is dead. The failure below must prove the
+          // relay refusal, not a source refusal.
+          if (command === 'yellowfruit_source_metadata') return { ...yftSourceMetadata };
+          if (command === 'read_yellowfruit_source') {
+            if (yftSourceContents === null) throw new Error('source file is gone (fake missing).');
+            return yftSourceContents;
+          }
           throw new Error(command);
         },
       },
@@ -2054,6 +2065,67 @@ describe('YellowFruit source and result reconciliation', () => {
     expect(mirrorCalls()).toBe(1);
     expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
     expect(rendered.result.current.state.yftSource?.modifiedMs).toBe(2000);
+    rendered.unmount();
+  });
+  test('a missing source file refuses publication without latching', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // The file disappears, as in the transient window of an atomic editor save: even the
+    // metadata read fails now.
+    yftSourceMetadataThrows = true;
+    yftSourceContents = null;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.kind).toBe('bad');
+    expect(rendered.result.current.notice?.message).toMatch(/could not be verified on disk/);
+    // A transient gap is not a change: nothing latches, so the next publish re-proves.
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+
+    yftSourceMetadataThrows = false;
+    yftSourceContents = yftFixtureText();
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(1);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    rendered.unmount();
+  });
+
+  test('an unreadable file with matching metadata refuses publication', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // Metadata still matches the baseline, but the bytes cannot be re-read. The pre-publish
+    // proof hashes unconditionally, so it cannot mistake this for current.
+    yftSourceContents = null;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.message).toMatch(/could not be verified on disk/);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(false);
+    rendered.unmount();
+  });
+
+  test('a same-tick edit with unchanged metadata is caught by the pre-publish hash', async () => {
+    const rendered = await setUpTournament();
+    await waitFor(() => expect(rendered.result.current.state.yftSource).not.toBeNull());
+
+    // Same size, same timestamp tick, different bytes: the metadata shortcut would call
+    // this current, so only the unconditional hash can catch it.
+    const edited = yftFixtureText().replace('Hebron Academy', 'Hebron AcademX');
+    expect(edited).not.toBe(yftFixtureText());
+    expect(edited.length).toBe(yftFixtureText().length);
+    yftSourceContents = edited;
+    await act(async () => {
+      await rendered.result.current.publishRoomSetup();
+    });
+    expect(mirrorCalls()).toBe(0);
+    expect(rendered.result.current.notice?.message).toMatch(/changed on disk/);
+    expect(rendered.result.current.state.yftChangedOnDisk).toBe(true);
     rendered.unmount();
   });
 
