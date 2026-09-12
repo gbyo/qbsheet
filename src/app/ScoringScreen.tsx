@@ -137,7 +137,7 @@ export default function ScoringScreen(props: {
     onConnectionRepaired,
     onConnectionLost,
   } = props;
-  const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjDownloadedAt);
+  const [downloadedAt, setDownloadedAt] = useState<string | undefined>(record.qbjBackupDownloadedAt);
   /**
    * How many times the game's own definition has been corrected in this sitting. Part of the
    * scorer's key.
@@ -310,6 +310,13 @@ export default function ScoringScreen(props: {
     [record.id, store, setRecordDurablyStored],
   );
 
+  /**
+   * The in-game menu's lifeboat: download whatever the game holds right now.
+   *
+   * Records a *backup* stamp, never the download gate: this QBJ may be a mid-game partial,
+   * and sharing the completion field would let a room finish handoff without ever writing
+   * the final result out. Only the completion screen's download sets qbjDownloadedAt.
+   */
   const write = useCallback(
     (qbj: object) => {
       const written = downloadQbj(qbj, record.package);
@@ -317,7 +324,7 @@ export default function ScoringScreen(props: {
         const at = new Date().toISOString();
         setDownloadedAt(at);
         void store
-          .update(record.id, { qbjDownloadedAt: at })
+          .update(record.id, { qbjBackupDownloadedAt: at })
           .then((updated) => {
             if (!onScreen.current) return;
             if (updated === null || !store.durable || store.storageDegraded) setRecordDurablyStored(false);

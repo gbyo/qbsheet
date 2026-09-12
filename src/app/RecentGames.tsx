@@ -196,7 +196,9 @@ export default function RecentGames(props: {
                   <dd>
                     {record.qbjDownloadedAt
                       ? `Downloaded · ${timeOfDay(record.qbjDownloadedAt)}`
-                      : 'Not downloaded'}
+                      : record.qbjBackupDownloadedAt
+                        ? `Backup saved · ${timeOfDay(record.qbjBackupDownloadedAt)}`
+                        : 'Not downloaded'}
                   </dd>
                 </div>
                 <div>
