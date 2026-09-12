@@ -143,6 +143,8 @@ interface TournamentRow extends Record<string, SqlStorageValue> {
   mirror_revision: number;
   mirror_updated_at: string | null;
   last_mirror_key: string | null;
+  /** SHA-256 of the normalized body the stored key arrived with. The key alone never proves sameness. */
+  last_mirror_digest: string | null;
   tournament_name: string | null;
   lifecycle: Lifecycle;
   management_token_hash: string | null;
@@ -424,6 +426,7 @@ export class QbtcpRelay extends DurableObject<Env> {
       'last_takeover_id TEXT',
       'last_takeover_epoch INTEGER',
       'last_mirror_key TEXT',
+      'last_mirror_digest TEXT',
     ]) {
       try {
         this.sql.exec(`ALTER TABLE tournament ADD COLUMN ${column}`);
@@ -2023,7 +2026,7 @@ export class QbtcpRelay extends DurableObject<Env> {
     const nextEpoch = Math.max(1, tournament.director_epoch + 1);
     const now = nowIso();
     this.sql.exec(
-      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = ?, last_takeover_epoch = ?, last_mirror_key = NULL, updated_at = ? WHERE id = 1',
+      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = ?, last_takeover_epoch = ?, last_mirror_key = NULL, last_mirror_digest = NULL, updated_at = ? WHERE id = 1',
       'backup',
       nextEpoch,
       takeoverId,
@@ -2074,7 +2077,7 @@ export class QbtcpRelay extends DurableObject<Env> {
     const nextEpoch = Math.max(1, tournament.director_epoch + 1);
     const now = nowIso();
     this.sql.exec(
-      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = NULL, last_takeover_epoch = NULL, last_mirror_key = NULL, updated_at = ? WHERE id = 1',
+      'UPDATE tournament SET active_controller = ?, director_epoch = ?, mirror_revision = 0, mirror_updated_at = NULL, last_takeover_id = NULL, last_takeover_epoch = NULL, last_mirror_key = NULL, last_mirror_digest = NULL, updated_at = ? WHERE id = 1',
       target,
       nextEpoch,
       now,
@@ -2144,13 +2147,25 @@ export class QbtcpRelay extends DurableObject<Env> {
     if (body.idempotency_key !== undefined && body.idempotency_key !== null && idempotencyKey === null) {
       throw new RelayError(400, 'invalid_request', 'An idempotency key must be a short string.');
     }
-    // Duplicate delivery, not a conflicting publication: the same key at the same position is
-    // answered from the stored position without touching rooms, sessions, or events. This runs
-    // before the staleness refusal on purpose — a retry names the revision it already won.
+    // The key names a publication; only the digest proves it is the same one. The digest runs
+    // over the normalized body the key arrived with, so a client that reuses a key with
+    // different bytes — a corrupted retry, a buggy caller — can never receive a false success
+    // for content the relay never applied.
+    const bodyDigest =
+      idempotencyKey === null
+        ? null
+        : await sha256Hex(JSON.stringify({ ...body, idempotency_key: undefined }));
+    // Duplicate delivery, not a conflicting publication: the same key and digest at the same
+    // position is answered from the stored position without touching rooms, sessions, or
+    // events. This runs before the staleness refusal on purpose — a retry names the revision
+    // it already won.
     if (
       idempotencyKey !== null &&
+      bodyDigest !== null &&
       tournament.last_mirror_key !== null &&
       idempotencyKey === tournament.last_mirror_key &&
+      tournament.last_mirror_digest !== null &&
+      bodyDigest === tournament.last_mirror_digest &&
       epoch === tournament.director_epoch &&
       revision === tournament.mirror_revision
     ) {
@@ -2164,6 +2179,26 @@ export class QbtcpRelay extends DurableObject<Env> {
         },
         200,
         cors,
+      );
+    }
+    if (
+      idempotencyKey !== null &&
+      tournament.last_mirror_key !== null &&
+      idempotencyKey === tournament.last_mirror_key &&
+      epoch === tournament.director_epoch &&
+      revision === tournament.mirror_revision
+    ) {
+      // The position and key match but the content does not: this is not the retry of the
+      // stored publication. Refuse before the staleness check so it can never read as an
+      // ordinary conflict, and write nothing — the stored publication stands.
+      throw new RelayError(
+        409,
+        'key_mismatch',
+        'That idempotency key arrived with different publication content. Nothing was written.',
+        {
+          currentRevision: tournament.mirror_revision,
+          director_epoch: tournament.director_epoch,
+        },
       );
     }
     const stale =
@@ -2407,13 +2442,15 @@ export class QbtcpRelay extends DurableObject<Env> {
       }
     }
     this.sql.exec(
-      'UPDATE tournament SET director_epoch = ?, mirror_revision = ?, mirror_updated_at = ?, tournament_name = COALESCE(?, tournament_name), lifecycle = ?, last_mirror_key = ?, updated_at = ? WHERE id = 1',
+      'UPDATE tournament SET director_epoch = ?, mirror_revision = ?, mirror_updated_at = ?, tournament_name = COALESCE(?, tournament_name), lifecycle = ?, last_mirror_key = ?, last_mirror_digest = ?, updated_at = ? WHERE id = 1',
       epoch,
       revision,
       now,
       tournamentName,
       'live',
       idempotencyKey,
+      // A keyless publication stores no digest: there is nothing to bind a retry to.
+      idempotencyKey === null ? null : bodyDigest,
       now,
     );
     this.wrote();

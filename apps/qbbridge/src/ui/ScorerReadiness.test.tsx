@@ -57,6 +57,7 @@ function bridgeFor(status: ScorerReadinessState['status']): BridgeApi {
     revokeBackup: async () => false,
     takeOverRelay: async () => false,
     transferRelayToPrimary: async () => false,
+    reconcilePendingPublication: async () => 'none',
     relayCredentialSavePending: false,
     retryRelayCredentialSave: async () => false,
     persistenceSavePending: false,

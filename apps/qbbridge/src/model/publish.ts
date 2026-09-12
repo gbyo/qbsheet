@@ -267,27 +267,21 @@ export async function publishIdempotencyKey(input: {
 }
 
 /**
- * Publish a planned round.
+ * Build the exact room payloads a publication will send.
  *
  * Every room in the plan restates its pairing hash, whether or not it is getting a game: the
  * relay replaces a listed room's columns wholesale, so a room republished without one would stop
  * accepting the code on its QR. A cleared room keeps its id, its name and that hash, and loses
  * only its assignment and match id.
+ *
+ * Exported so the caller can name the publication — and durably record its intent — before the
+ * network call, from the same bytes the PUT will carry.
  */
-export async function publishRound(
-  connection: RelayConnection,
-  input: {
-    epoch: number;
-    lastRevision: number;
-    tournamentName: string;
-    plan: PublishPlan;
-    rooms: readonly Room[];
-    tombstones?: readonly RoomTombstone[];
-  },
-): Promise<PublishOutcome> {
-  if (input.plan.publications.length === 0) {
-    throw new Error('There are no rooms to publish. Add a room first.');
-  }
+export async function buildMirrorRoomInputs(input: {
+  plan: PublishPlan;
+  rooms: readonly Room[];
+  tombstones?: readonly RoomTombstone[];
+}): Promise<MirrorRoomInput[]> {
   // A plan with no assignments is valid for the explicit room-setup action. The relay still gets
   // every room and clears any old assignment while keeping its pairing hash and tokens intact.
   const byId = new Map<string, Room | RoomTombstone>(input.rooms.map((room) => [room.id, room]));
@@ -307,12 +301,38 @@ export async function publishRound(
       assignmentRevision: publication.assignment?.assignmentRevision ?? room.assignmentRevision + 1,
     });
   }
+  return mirrorRooms;
+}
+
+export async function publishRound(
+  connection: RelayConnection,
+  input: {
+    epoch: number;
+    lastRevision: number;
+    tournamentName: string;
+    plan: PublishPlan;
+    rooms: readonly Room[];
+    tombstones?: readonly RoomTombstone[];
+  },
+  options?: {
+    /** Prebuilt room payloads and their key, so the intent recorded before the PUT names this send. */
+    prebuilt?: { rooms: MirrorRoomInput[]; idempotencyKey: string };
+  },
+): Promise<PublishOutcome> {
+  if (input.plan.publications.length === 0) {
+    throw new Error('There are no rooms to publish. Add a room first.');
+  }
+  const mirrorRooms =
+    options?.prebuilt?.rooms ??
+    (await buildMirrorRoomInputs({ plan: input.plan, rooms: input.rooms, tombstones: input.tombstones }));
   const revision = input.lastRevision + 1;
-  const idempotencyKey = await publishIdempotencyKey({
-    epoch: input.epoch,
-    revision,
-    rooms: mirrorRooms,
-  });
+  const idempotencyKey =
+    options?.prebuilt?.idempotencyKey ??
+    (await publishIdempotencyKey({
+      epoch: input.epoch,
+      revision,
+      rooms: mirrorRooms,
+    }));
   const mirrorInput = {
     directorEpoch: input.epoch,
     revision,

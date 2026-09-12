@@ -461,6 +461,16 @@ export async function relayPublishMirror(
   });
   if (response.status === 409) {
     const body = parseBody(response);
+    // A key mismatch is not an ordinary conflict: the stored publication stands under this
+    // key, so the position must never be adopted as ours. Preserve the code so the caller
+    // cannot mistake it for a conflict it may reconcile.
+    if (body.error === 'key_mismatch') {
+      throw new RelayError(
+        'The relay already holds a different publication under that idempotency key. Nothing was sent to the rooms.',
+        409,
+        'key_mismatch',
+      );
+    }
     const current = typeof body.currentRevision === 'number' ? body.currentRevision : null;
     throw new RelayError(
       current === null

@@ -150,6 +150,28 @@ export default function SetupView({ bridge }: { bridge: BridgeApi }) {
               The management credential is kept in this computer&rsquo;s operating-system secure storage. It
               never enters an assignment, a pairing link, a QR code, a saved result, or an ordinary backup.
             </p>
+            {state.pendingPublication ? (
+              <div className="scorer-readiness" aria-live="polite">
+                <h3>Unconfirmed publication</h3>
+                <p>
+                  A publication
+                  {state.pendingPublication.roundName
+                    ? ` for ${state.pendingPublication.roundName}`
+                    : ''}{' '}
+                  (revision {state.pendingPublication.revision}) was sent without a confirmed receipt. Check
+                  it against the relay before publishing again.
+                </p>
+                <div className="row">
+                  <Button
+                    variant="quiet"
+                    onPress={() => void bridge.reconcilePendingPublication()}
+                    isDisabled={bridge.busy}
+                  >
+                    Check against the relay now
+                  </Button>
+                </div>
+              </div>
+            ) : null}
             <dl className="facts">
               <dt>Controller</dt>
               <dd>

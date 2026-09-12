@@ -113,12 +113,12 @@ describe('idempotent mirror publication', () => {
     const eventsAfterFirst = await assignmentEventCount(tournamentId, management);
     expect(eventsAfterFirst).toBeGreaterThan(0);
 
-    // The receipt was lost, so the Director retries — and the retry even carries different
-    // room content, proving the stored position wins over the repeated bytes.
+    // The receipt was lost, so the Director retries the identical bytes: the stored position
+    // is replayed without touching rooms, sessions, or events.
     const retry = await putMirror(
       tournamentId,
       management,
-      await mirrorBody('match-two', {
+      await mirrorBody('match-one', {
         idempotency_key: 'key-one',
       }),
     );
@@ -126,6 +126,38 @@ describe('idempotent mirror publication', () => {
     expect(retry.json).toMatchObject({ revision: 1, duplicate: true });
 
     // Nothing moved: same revision, same key, no new assignment events.
+    const health = await mirrorHealth(tournamentId, management);
+    expect(health.mirror).toMatchObject({ director_epoch: 1, revision: 1, last_mirror_key: 'key-one' });
+    expect(await assignmentEventCount(tournamentId, management)).toBe(eventsAfterFirst);
+  });
+
+  it('refuses the same key with altered bytes instead of replaying a false duplicate', async () => {
+    const tournamentId = freshTournamentId();
+    const management = await claimTournament(tournamentId);
+
+    const first = await putMirror(
+      tournamentId,
+      management,
+      await mirrorBody('match-one', {
+        idempotency_key: 'key-one',
+      }),
+    );
+    expect(first.status).toBe(200);
+    const eventsAfterFirst = await assignmentEventCount(tournamentId, management);
+
+    // A corrupted retry or a buggy caller reuses the key with different content. The relay
+    // must not report success for content it never applied.
+    const altered = await putMirror(
+      tournamentId,
+      management,
+      await mirrorBody('match-two', {
+        idempotency_key: 'key-one',
+      }),
+    );
+    expect(altered.status).toBe(409);
+    expect(altered.json.error).toBe('key_mismatch');
+
+    // Nothing moved: the stored publication stands, with its key, revision, and events.
     const health = await mirrorHealth(tournamentId, management);
     expect(health.mirror).toMatchObject({ director_epoch: 1, revision: 1, last_mirror_key: 'key-one' });
     expect(await assignmentEventCount(tournamentId, management)).toBe(eventsAfterFirst);
