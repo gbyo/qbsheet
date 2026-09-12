@@ -89,6 +89,18 @@ describe('a file game that owes its result', () => {
     expect(screen.getByRole('button', { name: 'Review score' })).toBeEnabled();
   });
 
+  test('a mid-game backup stamp does not satisfy the final download gate', () => {
+    // A lifeboat downloaded mid-game records a backup stamp, never the completion field:
+    // the finished result still has to leave this device through Download QBJ.
+    show(record({ qbjBackupDownloadedAt: '2026-08-12T12:15:00.000Z' }));
+
+    expect(screen.getByText('This result needs to be handed over.')).toBeInTheDocument();
+    const download = screen.getByRole('button', { name: 'Download QBJ' });
+    expect(download).toHaveClass('is-primary');
+    expect(primaryButtons()).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+  });
+
   test('downloading records qbjDownloadedAt and unlocks continuation', () => {
     const onUpdate = vi.fn();
     const { view } = show(record(), { onUpdate });
