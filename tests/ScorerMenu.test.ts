@@ -48,6 +48,7 @@ function items(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] =
     lastPlayed: 0,
     keyboardEnabled: false,
     submitting: false,
+    timeoutAvailable: true,
     canDownloadForms: false,
     canCorrectGame: false,
     openDialog: vi.fn(),
@@ -120,6 +121,15 @@ describe('what depends on the format', () => {
     expect(menu({ procedure: undefined })).not.toContain('Timeout');
     expect(menu({ procedure: { version: 1, halves: false, timeoutsPerTeam: 1 } })).toContain('Timeout');
     expect(menu({ procedure: { version: 1, halves: false, timeoutsPerTeam: 0 } })).not.toContain('Timeout');
+  });
+
+  test('a timeout is not offered when the engine would refuse one', () => {
+    // The engine allows a timeout only before an untouched tossup begins. A bonus in progress,
+    // a score-check, the lineup screen, or an answered tossup all refuse — and the menu asks
+    // the engine instead of restating that rule, so the verdict arrives as one boolean.
+    const timeouts = { version: 1, halves: false, timeoutsPerTeam: 1 };
+    expect(menu({ procedure: timeouts, timeoutAvailable: false })).not.toContain('Timeout');
+    expect(menu({ procedure: timeouts, timeoutAvailable: true })).toContain('Timeout');
   });
 });
 
