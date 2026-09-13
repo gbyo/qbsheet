@@ -22,7 +22,7 @@ export default function TeamStatLines(props: { format: IScorekeeperFormat; team:
       <h3 className="scorer-check-team-name">
         {team.name} <span className="scorer-check-team-score">{team.points}</span>
       </h3>
-      <table className="scorer-check-table">
+      <table className="scorer-check-table" aria-label={`${team.name} player statistics`}>
         <thead>
           <tr>
             <th scope="col">Player</th>
