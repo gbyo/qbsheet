@@ -47,6 +47,7 @@ export default function SecretGenerator({
     <div className="secret-generator">
       <div className="row">
         <Button
+          aria-label={value === null ? `Generate ${label}` : `Generate another ${label}`}
           onPress={() => {
             setValue(generate());
             setCopied('idle');
@@ -66,7 +67,9 @@ export default function SecretGenerator({
               value={value}
               onFocus={(event) => event.currentTarget.select()}
             />
-            <Button onPress={() => void copy()}>Copy</Button>
+            <Button aria-label={`Copy ${label}`} onPress={() => void copy()}>
+              Copy
+            </Button>
           </>
         ) : null}
       </div>
