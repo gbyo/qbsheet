@@ -94,6 +94,8 @@ describe('the help page', () => {
     expect(page).toContain('Reload YellowFruit File');
     expect(page).toContain('Publish Room Setup');
     expect(page).toContain('Publish Round');
+    expect(page).toContain('separate matchup plan for each round');
+    expect(page).not.toContain('Changing the round clears every team selection');
     // The honest-status rule, restated where an operator will look for it.
     expect(page).toMatch(/never claims a result was imported, accepted or applied to standings/);
   });

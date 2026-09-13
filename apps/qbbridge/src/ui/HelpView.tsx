@@ -185,8 +185,9 @@ YellowFruit → Import Games Only`}</pre>
         </ol>
         <p>
           A room you leave blank is published as having <em>no</em> game, so it cannot open last round&rsquo;s
-          assignment by mistake. Changing the round clears every team selection for the same reason, after
-          asking first.
+          assignment by mistake. QBBridge keeps a separate matchup plan for each round, so switching rounds
+          preserves the teams you have already planned for each one. You can enter several rounds ahead of
+          time and return to them before publishing.
         </p>
         <p>
           The room token survives a round change. A device connected in round 1 can still connect in round 8 —
