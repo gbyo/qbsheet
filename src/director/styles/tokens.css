@@ -3,9 +3,9 @@
  *
  * # What changed, and what deliberately did not
  *
- * These values moved to `@qbsheet/ui`'s `tokens.css`, because QBSheet grew a second desktop
- * application and it immediately invented a six-variable palette of its own. There is now one
- * source of truth for what QBSheet looks like, and this file points at it.
+ * Canonical values live in `@qbsheet/ui` and are derived from QBSheet Scorer, the web reference
+ * implementation. There is one source of truth for what QBSheet looks like, and this file points
+ * Director's established vocabulary at it.
  *
  * The `--director-*` vocabulary stays. Hundreds of rules across `controls.css`, `surfaces.css`,
  * `tables.css`, `dialogs.css`, `shell.css` and the page files reference these names, and
@@ -18,10 +18,6 @@
  */
 
 :root {
-  /* The shared layer already declares this; restated so Director's own stylesheet is complete
-     when read on its own. */
-  color-scheme: light;
-
   /* --------------------------------------------------------------- Typography */
   --director-font-sans: var(--qbs-font-sans);
   --director-font-mono: var(--qbs-font-mono);
