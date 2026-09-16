@@ -100,8 +100,7 @@ main {
 
 section.panel {
   background: var(--qbs-surface);
-  border: 1px solid var(--qbs-border);
-  border-radius: var(--qbs-radius);
+  border-block: 1px solid var(--qbs-border);
   padding: var(--qbs-space-4) var(--qbs-space-5);
   margin-bottom: var(--qbs-space-4);
   max-width: 960px;

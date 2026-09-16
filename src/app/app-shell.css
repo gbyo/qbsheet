@@ -1,3 +1,5 @@
+@import '@qbsheet/ui/room-compat.css';
+
 /* The shell around the scoresheet: welcome, connection, completion, recent games.
  *
  * The palette and the rhythm are the scorer's, because they are the same application and a
@@ -14,87 +16,19 @@
  * Spacing follows a 4 / 8 / 12 / 16 / 24 / 32 rhythm. Sized for the 1366x768 Chromebook a school
  * actually owns.
  *
- * Derived from YellowFruit's room stylesheet, which is where the tokens below come from.
+ * Shared values come from `@qbsheet/ui`; this file owns only application-specific shell rules.
  */
 
 /*
- * The palette, in one place, three times.
- *
- * # Why the light values sit on bare `:root`
- *
- * Every colour the application uses is defined here first, unconditionally. The dark blocks below
- * restate the same names and nothing else -- they never introduce a token, and they never remove
- * one. So a stylesheet that reaches for `--room-warning-bg` gets an answer in every appearance, and
- * a token added later cannot be accidentally light-only: it is defined here or it does not exist.
- *
- * # Why there are two dark blocks
- *
- * Appearance has three states and only two of them are a media query. `system` is the default and
- * follows the device, which is `prefers-color-scheme`. `light` and `dark` are deliberate choices by
- * the scorekeeper, written to the root element as `data-theme` by `displayPreference`.
- *
- * The media block is therefore guarded with `:not([data-theme='light'])` -- a device set to dark
- * whose scorekeeper explicitly asked for light must get light -- and the attribute block repeats the
- * values so that a device set to light whose scorekeeper asked for dark gets dark. Both directions
- * have to win, which is why the values appear twice rather than once.
- *
- * `color-scheme` moves with them. That is the declaration that tells the browser how to paint the
- * parts the application does not: scrollbars, `<select>` popups, form controls, autofill, the
- * `<dialog>` backdrop. `index.html` previously claimed `light dark` while every rule here painted
- * light, so those widgets rendered dark on white surfaces. It is now the truth in all three states.
+ * The update wash and arcade promotion are deliberately application-specific decoration, not
+ * reusable surfaces. Their dark variants follow the same system/explicit appearance selectors as
+ * the shared theme without duplicating the shared palette.
  */
 :root {
-  color-scheme: light;
-
-  /*
-   * Multiplied into the root font size by `displayPreference`. Declared here so that the stylesheet
-   * is coherent on its own -- a page rendered before the script runs, or with scripting off, gets
-   * the browser's own font-size preference rather than nothing.
-   */
-  --room-text-scale: 1;
-
-  --room-text: #1c1d20;
-  --room-muted: #5c6066;
-  --room-faint: #8a8f96;
-  --room-border: #d8dade;
-  --room-border-strong: #c2c5ca;
-  --room-surface: #ffffff;
-  --room-surface-sunken: #f6f7f8;
-  --room-accent: #1565c0;
-  --room-accent-hover: #10529c;
-  /* Text drawn on top of `--room-accent`. A token because the two themes disagree about it: the
-     light accent is dark enough for white, the dark accent is light enough to need near-black. */
-  --room-on-accent: #ffffff;
-  --room-success: #1e6b32;
-  --room-success-bg: #e8f3ea;
-  --room-warning: #8a5300;
-  --room-warning-bg: #fdf3e3;
-  --room-warning-border: #e0a33c;
-  --room-error: #a8231b;
-  --room-error-bg: #fceceb;
-  --room-error-border: #d9534f;
-  --room-info-bg: #eaf3fb;
-  --room-info-border: #6aa9dd;
   /* The homepage update wash is deliberately separate from ordinary information surfaces. It is
      allowed to illuminate the page, but is not a palette for cards, controls, or other screens. */
   --update-wash-strong: #d7ecff;
   --update-wash-soft: #edf6ff;
-
-  /* Elevation and scrims, tokenized for the same reason the colours are: black at 40% over a white
-     page is a dimmer, and over a near-black one it is invisible. */
-  --room-scrim: rgb(0 0 0 / 40%);
-  --room-shadow-raised: 0 1px 3px rgb(20 24 28 / 12%);
-  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 18%);
-  /* Cast upward, by a bar that sits above content rather than on it. */
-  --room-shadow-lifted: 0 -3px 12px rgb(25 28 32 / 8%);
-
-  /*
-   * The inverted pill: keyboard status, tooltips, anything drawn on `--room-text` instead of on a
-   * surface. Its ground flips with the theme, so anything layered on top of it has to flip the other
-   * way. Without these two the seat box and its tick are white-on-white the moment dark is on.
-   */
-  --room-inverted-key: rgb(255 255 255 / 18%);
-  --room-inverted-success: #7fd39b;
 
   /*
    * The arcade promotion, and the only place in QBSheet allowed to be this bright.
@@ -117,46 +51,8 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    /* Not pure black. A scoresheet is read for four hours, and #000 under a white-on-black grid
-       produces the halation that makes long reading tiring. This is the same near-black the camera
-       preview already used. */
-    --room-text: #e7e9ec;
-    --room-muted: #a6acb5;
-    --room-faint: #7b818a;
-    --room-border: #33363b;
-    --room-border-strong: #4a4f57;
-    --room-surface: #16171a;
-    --room-surface-sunken: #1f2125;
-    /* Lightened until it clears 4.5:1 on the surface above. The light accent is #1565c0, which on
-       this ground is 2.4:1 -- readable as a shape, not as text. */
-    --room-accent: #7ab3ee;
-    --room-accent-hover: #9ac9f8;
-    --room-on-accent: #10151c;
-    --room-success: #7fd39b;
-    --room-success-bg: #15281c;
-    --room-warning: #e5b264;
-    --room-warning-bg: #2a2013;
-    --room-warning-border: #7c5b21;
-    --room-error: #f3948d;
-    --room-error-bg: #2c1917;
-    --room-error-border: #8e3b35;
-    --room-info-bg: #13202d;
-    --room-info-border: #35638f;
     --update-wash-strong: #102c4a;
     --update-wash-soft: #152231;
-
-    /* A scrim has to darken a ground that is already dark, so it is heavier here; a shadow cannot
-       darken one at all, so elevation is carried by the sunken/raised surface pair instead and the
-       shadows step back to a hairline. */
-    --room-scrim: rgb(0 0 0 / 62%);
-    --room-shadow-raised: 0 1px 3px rgb(0 0 0 / 45%);
-    --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
-    --room-shadow-lifted: 0 -3px 12px rgb(0 0 0 / 50%);
-
-    --room-inverted-key: rgb(0 0 0 / 14%);
-    --room-inverted-success: #1e6b32;
 
     --arcade-promo-band-a: #241a3a;
     --arcade-promo-band-b: #13273a;
@@ -170,38 +66,8 @@
 }
 
 :root[data-theme='dark'] {
-  color-scheme: dark;
-
-  --room-text: #e7e9ec;
-  --room-muted: #a6acb5;
-  --room-faint: #7b818a;
-  --room-border: #33363b;
-  --room-border-strong: #4a4f57;
-  --room-surface: #16171a;
-  --room-surface-sunken: #1f2125;
-  --room-accent: #7ab3ee;
-  --room-accent-hover: #9ac9f8;
-  --room-on-accent: #10151c;
-  --room-success: #7fd39b;
-  --room-success-bg: #15281c;
-  --room-warning: #e5b264;
-  --room-warning-bg: #2a2013;
-  --room-warning-border: #7c5b21;
-  --room-error: #f3948d;
-  --room-error-bg: #2c1917;
-  --room-error-border: #8e3b35;
-  --room-info-bg: #13202d;
-  --room-info-border: #35638f;
   --update-wash-strong: #102c4a;
   --update-wash-soft: #152231;
-
-  --room-scrim: rgb(0 0 0 / 62%);
-  --room-shadow-raised: 0 1px 3px rgb(0 0 0 / 45%);
-  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
-  --room-shadow-lifted: 0 -3px 12px rgb(0 0 0 / 50%);
-
-  --room-inverted-key: rgb(0 0 0 / 14%);
-  --room-inverted-success: #1e6b32;
 
   --arcade-promo-band-a: #241a3a;
   --arcade-promo-band-b: #13273a;
@@ -280,7 +146,7 @@ html {
  */
 body {
   margin: 0;
-  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--qbs-font-sans);
   color: var(--room-text);
   background: var(--room-surface);
   font-size: 0.875rem;
@@ -1401,7 +1267,7 @@ body:has(.welcome-shell .update-notice-hero) {
 
 .settings-address {
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--qbs-font-mono);
   font-size: 0.75rem;
 }
 
@@ -1449,7 +1315,7 @@ body:has(.welcome-shell .update-notice-hero) {
 
 .settings-build {
   padding-top: 14px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--qbs-font-mono);
   font-size: 0.6875rem;
   color: var(--room-faint);
   text-align: center;
@@ -3076,7 +2942,7 @@ body:has(.welcome-shell .update-notice-hero) {
 
 .crash-thrown {
   margin: 8px 0 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--qbs-font-mono);
   font-size: 0.75rem;
   overflow-wrap: anywhere;
 }
