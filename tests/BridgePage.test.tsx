@@ -127,7 +127,7 @@ describe('the Bridge page', () => {
     expect(container.textContent).not.toContain('Bridge runs the tournament');
   });
 
-  test('explains a round as four ordered steps in the application\u2019s own words', () => {
+  test('explains a round as four ordered steps in the application’s own words', () => {
     const { container } = render(<Bridge />);
 
     expect(
@@ -145,6 +145,8 @@ describe('the Bridge page', () => {
     expect(words(flow)).toContain('eight-digit pairing code');
     expect(words(flow)).toContain('Save New Results');
     expect(words(flow)).toContain('Import Games Only');
+    expect(words(flow)).toContain('Mark imported');
+    expect(words(flow)).toContain('local confirmation that YellowFruit handled the files');
   });
 
   test('tells scorekeepers their pairing survives the round change', () => {
@@ -173,9 +175,11 @@ describe('the Bridge page', () => {
     expect(words(container)).toContain('That is a reread, not synchronization');
     expect(words(container)).toContain('one .qbj file per game, written out exactly as the room sent it');
     expect(words(container)).toContain('Planned pairings are never written back');
+    expect(words(container)).toContain('mark the saved result imported as a local handoff reminder');
     expect(words(container)).toContain(
-      'It never claims a result was imported, accepted, or applied to standings',
+      'does not inspect YellowFruit to verify that the game was accepted or applied to standings',
     );
+    expect(words(container)).not.toContain('never claims a result was imported');
   });
 
   test('separates Bridge from Director in two sentences', () => {
@@ -187,7 +191,7 @@ describe('the Bridge page', () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /the tournament should run in QBSheet\u2019s own tournament-control application instead/,
+        /the tournament should run in QBSheet’s own tournament-control application instead/,
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'About Director' })).toHaveAttribute('href', '../director/');
