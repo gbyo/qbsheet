@@ -321,9 +321,8 @@ export const practiceSteps: IPracticeStep[] = [
     id: 'q5-correction',
     title: 'Correct an earlier question',
     call: 'The moderator checks the paper: Lachlan, not Gibson, answered Tossup 5.',
-    instruction:
-      'Select Q5 in the Recent column on the right, change Player to Lachlan, then choose Save changes.',
-    hint: 'The Recent column lists what you have scored; selecting a question opens the whole of it — every buzz on it and its bonus — in one editor. Change the Player dropdown from Gibson to Lachlan and leave the ruling alone. Nothing is written until Save changes, and Cancel, the × button, or Escape leaves the question exactly as it was.',
+    instruction: 'Select Q5 in the live ledger, change Player to Lachlan, then choose Save changes.',
+    hint: 'The Scoresheet ledger lists what you have scored (Table keeps the Recent rail); selecting a question opens the whole of it — every buzz on it and its bonus — in one editor. Change the Player dropdown from Gibson to Lachlan and leave the ruling alone. Nothing is written until Save changes, and Cancel, the × button, or Escape leaves the question exactly as it was.',
     success:
       'Fixed. QBSheet recalculated the player stats without changing the team score or later questions.',
     section: 'Fix mistakes',

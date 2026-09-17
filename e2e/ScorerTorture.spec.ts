@@ -159,9 +159,9 @@ test('production keyboard scoring records seat rulings, bonuses, and safe focus 
   await page.keyboard.press('1');
   await expect(page.getByText('Tossup 3 of 20', { exact: true })).toBeVisible();
 
-  // 5 is the first right seat. Its negative leaves the other team eligible, so Space then records the
+  // 6 is the first right seat. Its negative leaves the other team eligible, so Space then records the
   // unanswered remainder and advances to the next tossup.
-  await page.keyboard.press('5');
+  await page.keyboard.press('6');
   await page.keyboard.press('n');
   await expect(page.getByLabel('Greenwood score')).toHaveText('-5');
   await page.keyboard.press('Space');

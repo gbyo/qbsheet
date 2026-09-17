@@ -19,10 +19,12 @@ import ScoreValue, { ScoreReaction } from './secrets/ScoreReaction';
 import { CSSProperties, useEffect, useId, useRef, useState } from 'react';
 import { IScorekeeperAnswerType, IScorekeeperFormat } from '../scoring/ScorekeeperFormat';
 import { IDerivedTeam } from '../scoring/deriveGame';
+import { LeftOrRight } from '../scoring/types';
 import { orderBySeating } from './PlayerSeating';
 import { lineupMoveMs, lineupSettleMs } from './LineupMotion';
 import { availableAnswerTypes, powerCorrect } from './tossupRulings';
 import ControlIcon from './ControlIcon';
+import { keyboardSeatNumbers } from './KeyboardScoring';
 
 /**
  * How long the seat a substitution landed in keeps its emphasis.
@@ -98,11 +100,23 @@ export interface ITeamPanelProps {
   substitutionBlockedReason?: string;
   /** The question the change takes effect from, so the row can say so before it is written. */
   substitutionQuestionNumber?: number;
+  /** Draw the actual global shortcut keys in the row markers. */
+  keyboardEnabled?: boolean;
+  /** Display side, because the two teams use different global number ranges. */
+  keyboardSide?: LeftOrRight;
+  /** The tossup named by the ruled column header. */
+  questionNumber?: number;
+  /** Bonuses with a recorded result; `team.bonusesHeard` may include the live pending bonus. */
+  completedBonuses?: number;
 }
 
-/** "+15" / "-5". The sign is the fastest thing to read, so it is always shown. */
+/** The printed value in a ruled scoresheet cell: `15`, `10`, `−5`. */
 function buttonLabel(answerType: IScorekeeperAnswerType): string {
-  // A format that gave this type a real label means it; only fall back to the number.
+  return String(answerType.value).replace('-', '−');
+}
+
+/** Stable semantic token used by workflow automation and integrations, independent of presentation. */
+function scoreLabel(answerType: IScorekeeperAnswerType): string {
   if (answerType.shortLabel !== String(answerType.value)) return answerType.shortLabel;
   return answerType.value > 0 ? `+${answerType.value}` : String(answerType.value);
 }
@@ -115,6 +129,33 @@ function answerButtonClass(format: IScorekeeperFormat, answerType: IScorekeeperA
     return 'scorer-answer scorer-answer-power';
   }
   return 'scorer-answer';
+}
+
+function columnLabel(format: IScorekeeperFormat, answerType: IScorekeeperAnswerType): string {
+  if (powerCorrect(format)?.index === answerType.index) return 'Power';
+  if (answerType.isNeg) return answerType.label;
+  // The familiar ten-point ruling is called "Correct" in the format. On a scoresheet the value is
+  // the faster column name, while every nonstandard label remains the format's own wording.
+  if (/^correct$/i.test(answerType.label) && answerType.value === 10) return 'Ten';
+  return answerType.label;
+}
+
+function playerSummary(player: IDerivedTeam['players'][number], format: IScorekeeperFormat): string {
+  const counts = format.answerTypes.flatMap((answerType) => {
+    const count = player.answerCounts.get(answerType.index) ?? 0;
+    if (count === 0) return [];
+    const suffix =
+      powerCorrect(format)?.index === answerType.index
+        ? 'P'
+        : answerType.isNeg
+          ? 'N'
+          : answerType.shortLabel === String(answerType.value)
+            ? 'TU'
+            : answerType.shortLabel;
+    return [`${count}${suffix}`];
+  });
+  if (counts.length === 0) return '';
+  return `${counts.join(' · ')} · ${player.points}`;
 }
 
 export default function TeamPanel(props: ITeamPanelProps) {
@@ -136,6 +177,10 @@ export default function TeamPanel(props: ITeamPanelProps) {
     substitutionAllowed = true,
     substitutionBlockedReason,
     substitutionQuestionNumber,
+    keyboardEnabled = false,
+    keyboardSide = 'left',
+    questionNumber,
+    completedBonuses = team.bonusesHeard,
   } = props;
   /** Which row, if any, has its replacement list open. One at a time, by name. */
   const [substituting, setSubstituting] = useState<string | null>(null);
@@ -211,7 +256,10 @@ export default function TeamPanel(props: ITeamPanelProps) {
    * Derived in `tossupRulings` rather than here, because the keyboard layer binds to the same rule and
    * two copies of "is a neg legal right now" would disagree the first time either was corrected.
    */
-  const answerTypes = availableAnswerTypes(format, negsAvailable);
+  const availableIndexes = new Set(availableAnswerTypes(format, negsAvailable).map((type) => type.index));
+  // Draw every format-defined column even when a ruling is temporarily illegal. The scorekeeper's
+  // hand should never find a different column merely because the other team just answered.
+  const answerTypes = format.answerTypes;
   // One extra column for the zero, so the values stay in the same place down every row.
   const columns = answerTypes.length + 1;
   // The row the picker belongs to can leave the floor — by the substitution itself, or by a change
@@ -222,9 +270,20 @@ export default function TeamPanel(props: ITeamPanelProps) {
   return (
     <section className="scorer-team" aria-label={team.name}>
       <header className="scorer-team-head">
-        <h2 className="scorer-team-name" title={team.name}>
-          {team.name}
-        </h2>
+        <div className="scorer-team-identity">
+          <h2 className="scorer-team-name" title={team.name}>
+            {team.name}
+          </h2>
+          <span className="scorer-team-bonus-stat">
+            {completedBonuses}/{team.bonusesHeard} bonuses ·{' '}
+            {team.bonusesHeard === 0
+              ? '0'
+              : Number.isInteger(team.bonusPoints / team.bonusesHeard)
+                ? team.bonusPoints / team.bonusesHeard
+                : (team.bonusPoints / team.bonusesHeard).toFixed(1)}{' '}
+            PPB
+          </span>
+        </div>
         <p className="scorer-team-score" aria-label={`${team.name} score`}>
           <ScoreValue team={team} reaction={reaction} />
         </p>
@@ -247,6 +306,15 @@ export default function TeamPanel(props: ITeamPanelProps) {
        * row should not have to look: on a real scoresheet that column is in the same place all the
        * way down, and ragged flex rows are what stop it being.
        */}
+      <div className="scorer-ruling-head" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
+        <span>Tossup {questionNumber ?? '—'} · ruling</span>
+        {answerTypes.map((answerType) => (
+          <span key={answerType.index} className={answerType.isNeg ? 'is-neg' : undefined}>
+            {columnLabel(format, answerType)}
+          </span>
+        ))}
+        <span>Zero</span>
+      </div>
       <ul className="scorer-roster" style={{ '--scorer-answer-columns': columns } as CSSProperties}>
         {active.map((player, seat) => (
           <li
@@ -262,14 +330,19 @@ export default function TeamPanel(props: ITeamPanelProps) {
               .join(' ')}
           >
             {/* The seat, not an identity. Hidden from assistive technology, which reads the name. */}
-            <span className="scorer-player-seat" aria-hidden="true">
-              {seat + 1}
+            <span className={`scorer-player-seat${keyboardEnabled ? ' is-keycap' : ''}`} aria-hidden="true">
+              {keyboardEnabled ? keyboardSeatNumbers[keyboardSide][seat] : seat + 1}
             </span>
             {/* Keyed by the name so a substitution replaces the element rather than editing its text,
                 which is what lets the arriving name have an entrance and the seat around it not. */}
             <span key={player.name} className="scorer-player-name" title={player.name}>
               {player.name}
             </span>
+            {playerSummary(player, format) && (
+              <span className={player.points < 0 ? 'scorer-player-summary is-neg' : 'scorer-player-summary'}>
+                {playerSummary(player, format)}
+              </span>
+            )}
             {recorded?.playerName === player.name && (
               <span className="visually-hidden" role="status">
                 {player.name}{' '}
@@ -317,7 +390,8 @@ export default function TeamPanel(props: ITeamPanelProps) {
                       ? ' is-recorded'
                       : ''
                   }`}
-                  disabled={!scoringEnabled || !eligible}
+                  disabled={!scoringEnabled || !eligible || !availableIndexes.has(answerType.index)}
+                  data-score-label={scoreLabel(answerType)}
                   onClick={() => {
                     if (onBuzz(player.name, answerType))
                       acknowledgeRuling(player.name, answerType.index, answerType.isNeg);
@@ -345,6 +419,7 @@ export default function TeamPanel(props: ITeamPanelProps) {
                 }}
                 aria-label={`${player.name} 0, Wrong, no penalty`}
                 title="Wrong, no penalty"
+                data-score-label="0"
               >
                 0
               </button>

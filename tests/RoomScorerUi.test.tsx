@@ -379,13 +379,13 @@ describe('scoring buttons come from the format', () => {
    */
   const wrong = '0';
 
-  test('mACF gives each player +15 / +10 / -5', () => {
+  test('mACF gives each player 15 / 10 / −5', () => {
     renderScorer(formatFor());
 
     expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual([
-      '+15',
-      '+10',
-      '-5',
+      '15',
+      '10',
+      '−5',
       wrong,
     ]);
   });
@@ -393,7 +393,7 @@ describe('scoring buttons come from the format', () => {
   test('a format with no powers gives two', () => {
     renderScorer(formatFor((rules) => rules.applyRuleSet(CommonRuleSets.Acf)));
 
-    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+10', '-5', wrong]);
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['10', '−5', wrong]);
   });
 
   test('a 7-point format with a -3 shows exactly that', () => {
@@ -404,7 +404,7 @@ describe('scoring buttons come from the format', () => {
       }),
     );
 
-    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['+7', '-3', wrong]);
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual(['7', '−3', wrong]);
   });
 
   test('two power tiers and two negs all appear', () => {
@@ -421,11 +421,11 @@ describe('scoring buttons come from the format', () => {
     );
 
     expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toEqual([
-      '+20',
-      '+15',
-      '+10',
-      '-5',
-      '-10',
+      '20',
+      '15',
+      '10',
+      '−5',
+      '−10',
       wrong,
     ]);
   });
@@ -957,7 +957,7 @@ describe('no buzz', () => {
     fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
 
     expect(screen.getByText('Tossup 2 of 20')).toBeTruthy();
-    expect(screen.getByText('No buzz', { selector: '.scorer-rail-what' })).toBeTruthy();
+    expect(screen.getByText('No buzz', { selector: '.scorer-ledger-row > span' })).toBeTruthy();
   });
 });
 
@@ -1018,7 +1018,7 @@ describe('scoring motion state', () => {
 
     const row = button.closest('.scorer-player') as HTMLElement;
     expect(button).toHaveClass('is-recorded');
-    expect(button).toHaveTextContent('+7');
+    expect(button).toHaveTextContent('7');
     expect(row).toHaveClass('is-ruling-recorded');
     expect(buttonsFor('James Robinson')[0]).not.toHaveClass('is-recorded');
   });
@@ -1185,39 +1185,30 @@ describe('undo', () => {
   });
 });
 
-describe('the recent rail', () => {
-  test('it shows only what actually happened', () => {
+describe('the live ledger', () => {
+  test('starts with the current question and then shows only what actually happened', () => {
     renderScorer(formatFor());
 
-    expect(screen.getByText('Nothing scored yet.')).toBeTruthy();
+    expect(screen.getByText('Live — waiting on a buzz')).toBeTruthy();
 
     fireEvent.click(buttonsFor('Sarah Mitchell')[0]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
 
-    const rail = screen.getByLabelText('Recent activity');
-    // What happened and what it was worth are separate cells, so the points can be set in their own
-    // right-aligned column. Assert on the pairing rather than on one run of text.
-    const lines = Array.from(rail.querySelectorAll('.scorer-rail-line')).map((line) => [
-      line.querySelector('.scorer-rail-what')?.textContent,
-      line.querySelector('.scorer-rail-points')?.textContent,
-    ]);
-
-    expect(lines).toEqual([
-      ['Sarah Mitchell', '+15'],
-      ['Ninety Six bonus', '+20'],
-    ]);
+    const ledger = screen.getByLabelText('This game so far');
+    const completed = ledger.querySelector('.scorer-ledger-row[aria-label="Review question 1"]');
+    expect(completed).toHaveTextContent('Sarah Mitchell · power +15');
+    expect(completed).toHaveTextContent('20 / 30');
+    expect(screen.queryByLabelText('Recent activity')).toBeNull();
   });
 
-  test('a dead tossup reads as one line with nothing in the points column', () => {
+  test('a dead tossup reads tersely in one team column', () => {
     renderScorer(formatFor());
 
     fireEvent.click(screen.getByRole('button', { name: 'No buzz' }));
 
-    const rail = screen.getByLabelText('Recent activity');
-    const line = rail.querySelector('.scorer-rail-line');
-
-    expect(line?.querySelector('.scorer-rail-what')?.textContent).toBe('No buzz');
-    expect(line?.querySelector('.scorer-rail-points')?.textContent).toBe('');
+    const row = screen.getByLabelText('Review question 1');
+    expect(row).toHaveTextContent('No buzz');
+    expect(row).toHaveTextContent('—');
   });
 });
 
@@ -2179,17 +2170,18 @@ describe('a wrong answer that costs nothing', () => {
     expect(screen.getByText('Tossup 1 of 20')).toBeTruthy();
   });
 
-  test('the second team is offered its positive values and a zero, but not a neg', () => {
+  test('the second team keeps every column in place but disables the unavailable neg', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[2]); // -5
 
-    expect(buttonsFor('Emma Turner').map((button) => button.textContent)).toEqual(['+15', '+10', '0']);
+    expect(buttonsFor('Emma Turner').map((button) => button.textContent)).toEqual(['15', '10', '−5', '0']);
+    expect(buttonsFor('Emma Turner')[2]).toBeDisabled();
   });
 
   test('the first team still has the neg available', () => {
     renderScorer(formatFor());
 
-    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toContain('-5');
+    expect(buttonsFor('Sarah Mitchell').map((button) => button.textContent)).toContain('−5');
   });
 });
 
@@ -2425,7 +2417,7 @@ describe('the header identifies the packet when the tournament named one', () =>
   });
 });
 
-describe('the Recent rail is a way back into the scoresheet', () => {
+describe('the live ledger is a way back into the scoresheet', () => {
   test('clicking a question opens its editor', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
@@ -2442,7 +2434,7 @@ describe('the Recent rail is a way back into the scoresheet', () => {
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(within(screen.getByLabelText('Bonus')).getByText('20'));
 
-    expect(screen.getAllByLabelText('Score after this question')[0].textContent).toBe('30–0');
+    expect(screen.getAllByLabelText('Score after this question')[0].textContent).toBe('30 · 0');
   });
 });
 
@@ -2467,8 +2459,8 @@ describe('undo and redo say what they changed', () => {
 
     expect(notice()).toBe('Undid Q1 · Sarah Mitchell +10');
     expect(scoreOf('Ninety Six')).toBe('0');
-    const undoRow = document.querySelector('.scorer-rail-item.is-undoing');
-    expect(undoRow).toHaveTextContent('Q1');
+    const undoRow = document.querySelector('.scorer-ledger-row.is-undoing');
+    expect(undoRow).toHaveTextContent('1');
     expect(undoRow).toHaveAttribute('aria-hidden', 'true');
   });
 
@@ -2481,7 +2473,7 @@ describe('undo and redo say what they changed', () => {
 
     expect(notice()).toBe('Redid Q1 · Sarah Mitchell +10');
     expect(scoreOf('Ninety Six')).toBe('10');
-    expect(document.querySelector('.scorer-rail-item.is-redoing')).toHaveTextContent('Q1');
+    expect(document.querySelector('.scorer-ledger-row.is-redoing')).toHaveTextContent('1');
   });
 
   /*
@@ -2504,7 +2496,7 @@ describe('undo and redo say what they changed', () => {
     expect(scoreOf('Ninety Six')).toBe('10');
   });
 
-  test('a question still in Recent is pointed at, and stays clickable while it is', () => {
+  test('an undo points at the question now live in the ledger without bypassing correction flow', () => {
     renderScorer(formatFor());
     fireEvent.click(buttonsFor('Sarah Mitchell')[1]);
     fireEvent.click(screen.getByText('20'));
@@ -2514,13 +2506,12 @@ describe('undo and redo say what they changed', () => {
     // The bonus comes off and question 2 is still a question, so there is a row to point at.
     fireEvent.click(screen.getByText('Undo'));
 
-    const emphasised = document.querySelectorAll('.scorer-rail-item.is-emphasized');
+    const emphasised = document.querySelectorAll('.scorer-ledger-row.is-emphasized');
     expect(emphasised).toHaveLength(1);
-    expect(emphasised[0].textContent).toContain('Q2');
-    // Emphasis is a background and nothing else; the row still opens the question.
-    expect(
-      within(emphasised[0] as HTMLElement).getByRole('button', { name: 'Review question 2' }),
-    ).toBeTruthy();
+    expect(emphasised[0].textContent).toContain('2');
+    // Question 2 is live again, but its recorded tossup can still be corrected from the blue row.
+    expect(screen.getByRole('button', { name: 'Review question 2' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Review question 1' })).toBeTruthy();
   });
 
   test('a multi-event action is still one undo, described as one thing', () => {
@@ -2626,7 +2617,7 @@ describe('the issue category carries forward from Flag', () => {
  * that happened to a question, not a property it now carries.
  */
 describe('a historical correction lands visibly', () => {
-  /** Reopen question one from Recent and rescore the buzz on it as `label`. */
+  /** Reopen question one from the ledger and rescore the buzz on it as `label`. */
   function correctQ1To(label: string) {
     fireEvent.click(screen.getByRole('button', { name: 'Review question 1' }));
     const editor = screen.getByRole('dialog', { name: 'Edit Question 1' });
@@ -2645,11 +2636,11 @@ describe('a historical correction lands visibly', () => {
     correctQ1To('Correct (+10)');
 
     expect(screen.getByText('Question 1 corrected.')).toBeTruthy();
-    const emphasised = document.querySelectorAll('.scorer-rail-item.is-emphasized');
+    const emphasised = document.querySelectorAll('.scorer-ledger-row.is-emphasized');
     expect(emphasised).toHaveLength(1);
-    expect(emphasised[0].textContent).toContain('Q1');
+    expect(emphasised[0].textContent).toContain('1');
     // Nothing permanent is left behind: no badge, no mark, no colour.
-    expect(emphasised[0].querySelector('.scorer-rail-mark')).toBeNull();
+    expect(emphasised[0].querySelector('.scorer-ledger-question small')).toBeNull();
   });
 
   test('the emphasised row still opens the question', () => {
@@ -2658,8 +2649,8 @@ describe('a historical correction lands visibly', () => {
     fireEvent.click(screen.getByText('20'));
     correctQ1To('Correct (+10)');
 
-    const emphasised = document.querySelector('.scorer-rail-item.is-emphasized') as HTMLElement;
-    fireEvent.click(within(emphasised).getByRole('button', { name: 'Review question 1' }));
+    const emphasised = document.querySelector('.scorer-ledger-row.is-emphasized') as HTMLElement;
+    fireEvent.click(emphasised);
 
     expect(screen.getByRole('dialog', { name: 'Edit Question 1' })).toBeTruthy();
   });
@@ -2676,7 +2667,7 @@ describe('a historical correction lands visibly', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Save changes' }));
 
     expect(screen.queryByText('Question 1 corrected.')).toBeNull();
-    expect(document.querySelectorAll('.scorer-rail-item.is-emphasized')).toHaveLength(0);
+    expect(document.querySelectorAll('.scorer-ledger-row.is-emphasized')).toHaveLength(0);
   });
 });
 

@@ -388,6 +388,10 @@ div.scorer-banner .scorer-banner-message {
   flex-direction: column;
 }
 
+.scorer-main.is-scoresheet {
+  overflow: hidden;
+}
+
 /* Completion is a full scoresheet review, not the contextual row used during live play. */
 .scorer-completion {
   flex: 1;
@@ -405,7 +409,7 @@ div.scorer-banner .scorer-banner-message {
 
 /* One sheet in two columns, divided by a rule. Not two cards with a gutter between them. */
 .scorer-teams {
-  flex: 1;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: 1fr 1px 1fr;
   align-content: start;
@@ -431,9 +435,10 @@ div.scorer-banner .scorer-banner-message {
 /* #region Teams */
 
 .scorer-team {
+  overflow-x: auto;
   grid-row: 1;
   min-width: 0;
-  padding: 14px 16px 16px;
+  padding: 0;
 }
 
 /*
@@ -445,8 +450,16 @@ div.scorer-banner .scorer-banner-message {
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 10px;
+  min-height: 62px;
+  padding: 10px 16px 8px;
   border-bottom: 1px solid var(--room-border);
+}
+
+.scorer-team-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
 }
 
 .scorer-team-name {
@@ -457,6 +470,14 @@ div.scorer-banner .scorer-banner-message {
   font-weight: 600;
   line-height: 1.2;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-team-bonus-stat {
+  flex: 0 0 auto;
+  color: var(--room-faint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
@@ -519,18 +540,53 @@ div.scorer-banner .scorer-banner-message {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-x: auto;
+  overflow: visible;
   scrollbar-width: thin;
+}
+
+.scorer-ruling-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(var(--scorer-answer-columns, 3), 64px);
+  align-items: stretch;
+  height: 26px;
+  padding-left: 16px;
+  overflow: hidden;
+  color: var(--room-faint);
+  background: var(--room-surface-sunken);
+  border-bottom: 1px solid var(--room-border);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.065em;
+  text-transform: uppercase;
+}
+
+.scorer-ruling-head > span {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+.scorer-ruling-head > span:first-child {
+  justify-content: start;
+}
+
+.scorer-ruling-head > span:not(:first-child) {
+  border-left: 1px solid var(--room-border);
+}
+
+.scorer-ruling-head > .is-neg {
+  color: var(--room-error);
 }
 
 .scorer-player {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 7px 0;
+  min-height: 56px;
+  padding: 0 0 0 16px;
   border-bottom: 1px solid var(--room-border);
-  min-width: max-content;
+  min-width: 0;
 }
 
 /*
@@ -548,8 +604,12 @@ div.scorer-banner .scorer-banner-message {
  */
 .scorer-sub-action {
   flex: none;
-  min-width: 44px;
-  min-height: 44px;
+  align-self: center;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  margin-left: auto;
+  margin-right: -6px;
   padding: 0 8px;
   font: inherit;
   font-size: 1.0625rem;
@@ -577,6 +637,7 @@ div.scorer-banner .scorer-banner-message {
 
 .scorer-sub-picker {
   flex-basis: 100%;
+  margin: 0 10px 10px 0;
   padding: 9px 10px;
   background: var(--room-surface-sunken);
   border: 1px solid var(--room-border);
@@ -622,11 +683,39 @@ div.scorer-banner .scorer-banner-message {
  * tabular: it is a label for the row, not a value anybody reads for meaning.
  */
 .scorer-player-seat {
+  align-self: center;
   flex: none;
-  width: 16px;
+  width: 22px;
   color: var(--room-faint);
   font-variant-numeric: tabular-nums;
   text-align: right;
+}
+
+.scorer-player-seat.is-keycap,
+.scorer-keycap {
+  display: inline-grid;
+  place-items: center;
+  height: 22px;
+  color: var(--room-muted);
+  background: var(--room-surface-sunken);
+  border: 1px solid var(--room-border);
+  border-radius: 3px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.scorer-player-summary {
+  align-self: center;
+  flex: 0 0 auto;
+  color: var(--room-faint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.scorer-player-summary.is-neg {
+  color: var(--room-error);
 }
 
 /*
@@ -644,6 +733,7 @@ div.scorer-banner .scorer-banner-message {
  * holding the ruling block on the right, so the columns still line up down the sheet.
  */
 .scorer-player-name {
+  align-self: center;
   flex: 0 1 auto;
   min-width: 5.5em;
   overflow: hidden;
@@ -664,11 +754,12 @@ div.scorer-banner .scorer-banner-message {
    * with, which reads as filler. Held between a thumb's width and a comfortable maximum, the block
    * of buttons keeps the same shape whether the format defines two values or six.
    */
-  grid-template-columns: repeat(var(--scorer-answer-columns, 3), minmax(46px, 62px));
+  grid-template-columns: repeat(var(--scorer-answer-columns, 3), 64px);
   /* Held to the right edge now that the name no longer grows into the space ahead of it. */
-  margin-left: auto;
+  align-self: stretch;
+  margin-left: 0;
   justify-content: end;
-  gap: 4px;
+  gap: 0;
   overflow: visible;
 }
 
@@ -688,25 +779,32 @@ div.scorer-banner .scorer-banner-message {
  * that stands out, which is the button that must not be pressed by accident.
  */
 .scorer-answer {
-  min-width: 46px;
-  min-height: 44px;
-  padding: 8px;
+  min-width: 64px;
+  min-height: 55px;
+  padding: 8px 4px;
   font: inherit;
   font-variant-numeric: tabular-nums;
   color: var(--room-text);
   background: var(--room-surface);
-  border: 1px solid var(--room-border-strong);
-  border-radius: 4px;
+  border: 0;
+  border-left: 1px solid var(--room-border);
+  border-radius: 0;
   cursor: pointer;
 }
 
 .scorer-answer:hover:not(:disabled) {
-  border-color: var(--room-accent);
   color: var(--room-accent);
+  background: var(--room-info-bg);
 }
 
 .scorer-answer:active:not(:disabled) {
   background: var(--room-info-bg);
+}
+
+.scorer-answer.is-recorded,
+.scorer-answer.is-recorded:hover:not(:disabled) {
+  color: var(--room-on-accent);
+  background: var(--room-accent);
 }
 
 /* The highest tier carries weight rather than colour, so it reads first without shouting. */
@@ -716,6 +814,7 @@ div.scorer-banner .scorer-banner-message {
 
 .scorer-answer-neg {
   color: var(--room-error);
+  background: var(--room-error-bg);
 }
 
 .scorer-answer-neg:hover:not(:disabled) {
@@ -726,7 +825,7 @@ div.scorer-banner .scorer-banner-message {
 
 .scorer-answer:disabled {
   color: var(--room-faint);
-  border-color: var(--room-border);
+  background: var(--room-surface-sunken);
   cursor: default;
 }
 
@@ -865,10 +964,42 @@ div.scorer-banner .scorer-banner-message {
   z-index: 2;
 }
 
+.scorer-stage.is-ruled {
+  position: static;
+}
+
+.scorer-stage.is-ruled.is-tossup {
+  min-height: 56px;
+  padding: 7px 16px;
+}
+
 .scorer-tossup-actions {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+.scorer-stage.is-ruled .scorer-tossup-actions {
+  justify-content: space-between;
+  width: 100%;
+}
+
+.scorer-live-status {
+  margin: 0;
+  color: var(--room-muted);
+}
+
+.scorer-nobuzz-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorer-keycap {
+  min-width: 44px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--room-surface);
 }
 
 .scorer-hint {
@@ -1035,6 +1166,176 @@ div.scorer-banner .scorer-banner-message {
 
 .scorer-spreadsheet-fallback .scorer-action {
   margin-top: 8px;
+}
+
+/* #endregion */
+
+/* #region Live scoresheet ledger */
+
+.scorer-ledger {
+  display: flex;
+  flex: 1 1 132px;
+  min-height: 108px;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-ledger-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 7px;
+}
+
+.scorer-ledger-title h2,
+.scorer-ledger-title p {
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.scorer-ledger-title h2 {
+  color: var(--room-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.scorer-ledger-title p {
+  color: var(--room-faint);
+}
+
+.scorer-ledger-columns,
+.scorer-ledger-row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) 96px 108px;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.scorer-ledger-columns {
+  flex: 0 0 26px;
+  min-height: 26px;
+  color: var(--room-faint);
+  background: var(--room-surface-sunken);
+  border-top: 1px solid var(--room-border);
+  border-bottom: 1px solid var(--room-border);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.scorer-ledger-columns span,
+.scorer-ledger-row > span,
+.scorer-ledger-live-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-ledger-columns span:last-child,
+.scorer-ledger-score {
+  text-align: right;
+}
+
+.scorer-ledger-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.scorer-ledger-row {
+  width: 100%;
+  min-height: 44px;
+  color: var(--room-text);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--room-border);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+button.scorer-ledger-row {
+  cursor: pointer;
+}
+
+button.scorer-ledger-row:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
+button.scorer-ledger-row:hover:not(:disabled) {
+  background: var(--room-surface-sunken);
+}
+
+button.scorer-ledger-row:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: -2px;
+}
+
+.scorer-ledger-row.is-emphasized {
+  background: var(--room-info-bg);
+  box-shadow: inset 3px 0 0 var(--room-accent);
+}
+
+.scorer-ledger-row.is-undoing,
+.scorer-ledger-row.is-redoing {
+  background: var(--room-info-bg);
+}
+
+.scorer-ledger-row.is-motion-ghost {
+  color: var(--room-faint);
+  opacity: 0.72;
+}
+
+.scorer-ledger-question,
+.scorer-ledger-bonus,
+.scorer-ledger-score {
+  color: var(--room-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorer-ledger-question small {
+  margin-left: 4px;
+  color: var(--room-warning);
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+
+.scorer-ledger-row .is-neg {
+  color: var(--room-error);
+}
+
+.scorer-ledger-row.is-live {
+  background: var(--room-info-bg);
+  border-bottom-color: color-mix(in srgb, var(--room-accent) 45%, var(--room-border));
+  box-shadow: inset 3px 0 0 var(--room-accent);
+}
+
+.scorer-ledger-row.is-live .scorer-ledger-question,
+.scorer-ledger-live-copy,
+.scorer-ledger-live-bonus {
+  color: var(--room-accent);
+  font-weight: 600;
+}
+
+.scorer-ledger-live-bonus {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-ledger-live-copy {
+  grid-column: 2 / 5;
+}
+
+.scorer-ledger-empty {
+  margin: 0;
+  padding: 12px 16px;
+  color: var(--room-faint);
+  font-size: 0.8125rem;
 }
 
 /* #endregion */
@@ -1227,6 +1528,10 @@ div.scorer-banner .scorer-banner-message {
  * a third column that no longer exists.
  */
 @media (max-width: 820px) {
+  .scorer-main.is-scoresheet {
+    overflow-y: auto;
+  }
+
   .scorer-teams {
     grid-template-columns: 1fr;
   }
@@ -1246,6 +1551,21 @@ div.scorer-banner .scorer-banner-message {
     grid-column: 1;
     grid-row: 3;
   }
+
+  .scorer-ledger {
+    flex: 0 0 238px;
+    min-height: 238px;
+  }
+
+  .scorer-ledger-columns,
+  .scorer-ledger-row {
+    grid-template-columns: 44px minmax(140px, 1fr) minmax(140px, 1fr) 88px 94px;
+    min-width: 570px;
+  }
+
+  .scorer-ledger-title {
+    min-width: 0;
+  }
 }
 
 /* Keep the five always-available controls inside a phone-width viewport. The previous intrinsic
@@ -1256,6 +1576,24 @@ div.scorer-banner .scorer-banner-message {
     --scorer-footer-height: 58px;
 
     padding-bottom: calc(var(--scorer-footer-height) + env(safe-area-inset-bottom));
+  }
+
+  .scorer-team {
+    overflow-x: auto;
+  }
+
+  .scorer-team > .scorer-team-head,
+  .scorer-team > .scorer-ruling-head,
+  .scorer-team > .scorer-roster {
+    min-width: 520px;
+  }
+
+  .scorer-team-bonus-stat {
+    display: none;
+  }
+
+  .scorer-live-status {
+    max-width: 56vw;
   }
 
   .scorer-notice-region {
