@@ -204,7 +204,14 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       });
     }
   }
-  if (format.regulation.timed && !game.regulationComplete && phase.kind !== 'complete') {
+  // Like 'End game early' below, this needs a played tossup: ending regulation on the
+  // Choose-starters screen would jump to the overtime checkpoint with no regulation history.
+  if (
+    format.regulation.timed &&
+    !game.regulationComplete &&
+    phase.kind !== 'complete' &&
+    game.tossupsRead > 0
+  ) {
     round.push({
       label: 'End regulation',
       icon: 'pause',
