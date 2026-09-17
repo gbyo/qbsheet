@@ -1034,13 +1034,9 @@ export default function App() {
       roomId: next.roomId,
       roomName: next.roomName,
       roomToken: next.roomToken,
-      lanBaseUrl: next.lanBaseUrl,
-      lanRoomToken: next.lanRoomToken,
       deviceId: next.deviceId,
       sessionId: next.sessionId,
       sessionToken: next.sessionToken,
-      lanSessionId: next.lanSessionId,
-      lanSessionToken: next.lanSessionToken,
       gameRecordId: next.gameRecordId,
       tournamentKey: next.tournamentKey,
       progressSequence: next.progressSequence,
@@ -1080,7 +1076,7 @@ export default function App() {
       if (!isCurrent()) return staleStart();
       // The session id is the game key for a new game, so a browser that reloads finds the same
       // history the server would recover, and so two devices in one room cannot collide on a key.
-      const activeCredentials = start.credentials ?? start.lanCredentials;
+      const activeCredentials = start.credentials;
       if (!activeCredentials) return { ok: false, error: 'Tournament control did not open this game.' };
       const record = await ensureRecord(start.definition, {
         connected: true,
@@ -1103,12 +1099,6 @@ export default function App() {
         ...start.room,
         ...(start.credentials
           ? { sessionId: start.credentials.sessionId, sessionToken: start.credentials.token }
-          : {}),
-        ...(start.lanCredentials
-          ? {
-              lanSessionId: start.lanCredentials.sessionId,
-              lanSessionToken: start.lanCredentials.token,
-            }
           : {}),
         gameRecordId: record.id,
         tournamentKey: start.tournamentKey,
@@ -1354,9 +1344,6 @@ export default function App() {
           connection?.roomToken,
           connection?.sessionToken,
           connection?.sessionId,
-          connection?.lanRoomToken,
-          connection?.lanSessionToken,
-          connection?.lanSessionId,
           connection?.roomId,
           connection?.deviceId,
         ].filter((value): value is string => typeof value === 'string' && value !== '')}

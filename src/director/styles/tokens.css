@@ -128,7 +128,7 @@
   --director-target-min: var(--qbs-target-min);
 
   /* ------------------------------------------------------------------- Layout
-     Director's own. A sidebar width is not a QBSheet-wide value: QBBridge has
+     Director's own. A sidebar width is not a QBSheet-wide value: Director has
      no sidebar, and the next surface may not either. */
   --director-sidebar: 248px;
   --director-sidebar-rail: 64px;

@@ -46,35 +46,36 @@ describe('connected session clock handling', () => {
     });
   });
 
-  test('round-trips endpoint-specific LAN room and session credentials', () => {
+  test('drops stored secondary-endpoint credentials from the removed dual-transport era', () => {
     const storage = new TestStorage();
     writeConnection(
       {
-        baseUrl: 'https://relay.example/tournament',
+        baseUrl: 'https://control.example/tournament',
         roomId: 'room-1',
         roomName: 'Room 1',
-        roomToken: 'relay-room-token',
+        roomToken: 'room-token',
         deviceId: 'device-1',
-        sessionId: 'relay-session',
-        sessionToken: 'relay-session-token',
+        sessionId: 'session',
+        sessionToken: 'session-token',
         lanBaseUrl: 'http://192.168.1.20:8787',
         lanRoomToken: 'lan-room-token',
         lanSessionId: 'lan-session',
         lanSessionToken: 'lan-session-token',
-      },
+      } as never,
       new Date('2026-09-06T16:00:00.000Z'),
       storage,
     );
 
-    expect(readConnection(new Date(), storage)).toMatchObject({
-      baseUrl: 'https://relay.example/tournament',
-      roomToken: 'relay-room-token',
-      sessionId: 'relay-session',
-      sessionToken: 'relay-session-token',
-      lanBaseUrl: 'http://192.168.1.20:8787',
-      lanRoomToken: 'lan-room-token',
-      lanSessionId: 'lan-session',
-      lanSessionToken: 'lan-session-token',
+    const read = readConnection(new Date(), storage);
+    expect(read).toMatchObject({
+      baseUrl: 'https://control.example/tournament',
+      roomToken: 'room-token',
+      sessionId: 'session',
+      sessionToken: 'session-token',
     });
+    expect(read).not.toHaveProperty('lanBaseUrl');
+    expect(read).not.toHaveProperty('lanRoomToken');
+    expect(read).not.toHaveProperty('lanSessionId');
+    expect(read).not.toHaveProperty('lanSessionToken');
   });
 });
