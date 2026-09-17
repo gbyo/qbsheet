@@ -86,7 +86,7 @@ describe('guided practice scenario', () => {
 
   it('teaches only the keyboard rulings the scoresheet actually supports', () => {
     expect(practiceKeystroke('q1-power')).toBe('1 then P');
-    expect(practiceKeystroke('q2-ten')).toBe('5 then C');
+    expect(practiceKeystroke('q2-ten')).toBe('6 then C');
     expect(practiceKeystroke('q3-neg')).toBe('2 then N');
     expect(practiceKeystroke('q4-wrong-no-penalty')).toBe('3 then 0');
     expect(practiceKeystroke('q4-dead')).toBe('Space');
@@ -100,7 +100,7 @@ describe('guided practice scenario', () => {
     expect(practiceKeystroke('q6-power')).toBe('2 then P');
     // Olivia has taken Owen's seat by Tossup 7, so her key is his.
     expect(practiceKeystroke('q7-ten')).toBe('3 then C');
-    expect(practiceKeystroke('q8-ten')).toBe('6 then C');
+    expect(practiceKeystroke('q8-ten')).toBe('7 then C');
 
     // Only the four steps that are genuinely mouse work go unannotated.
     const mouseOnly = ['lineup', 'q5-correction', 'substitution', 'submit'];

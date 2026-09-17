@@ -70,6 +70,7 @@ import { RoomConnectionState } from '../app/ConnectionState';
 import TeamPanel from './TeamPanel';
 import BonusPrompt from './BonusPrompt';
 import RecentRail, { IRecentMotion } from './RecentRail';
+import LiveLedger from './LiveLedger';
 import GameMenu from './GameMenu';
 import scorerMenuItems from './scorerMenu';
 import ArcadeLauncher from '../arcade/ArcadeLauncher';
@@ -127,6 +128,7 @@ import {
   availableActionKeys,
   bonusKeyLegend,
   bonusPartKeyLegend,
+  keyboardShortcutLabels,
   keyboardActionNames,
   sequenceLegend,
   type BonusKeyboardStage,
@@ -2813,7 +2815,7 @@ export default function Scorer(props: IScorerProps) {
 
       {phase.kind !== 'lineup' && phase.kind !== 'complete' && (
         <div className="scorer-body">
-          <main className="scorer-main">
+          <main className={`scorer-main${scoringLayout === 'scoresheet' ? ' is-scoresheet' : ''}`}>
             {/*
               The switch, and — in the table layout — the one editing action the table has.
 
@@ -2964,6 +2966,13 @@ export default function Scorer(props: IScorerProps) {
                   substitutionAllowed={lineupChangeAllowed || lineupChangeAuthorized[displaySideMapping.left]}
                   substitutionBlockedReason={lineupChangeReason}
                   substitutionQuestionNumber={lineupQuestion}
+                  keyboardEnabled={keyboardEnabled}
+                  keyboardSide="left"
+                  questionNumber={currentQuestion}
+                  completedBonuses={
+                    game.questions.filter((question) => question.bonus?.team === displaySideMapping.left)
+                      .length
+                  }
                 />
                 <TeamPanel
                   key={displaySideMapping.right}
@@ -2994,6 +3003,13 @@ export default function Scorer(props: IScorerProps) {
                   }
                   substitutionBlockedReason={lineupChangeReason}
                   substitutionQuestionNumber={lineupQuestion}
+                  keyboardEnabled={keyboardEnabled}
+                  keyboardSide="right"
+                  questionNumber={currentQuestion}
+                  completedBonuses={
+                    game.questions.filter((question) => question.bonus?.team === displaySideMapping.right)
+                      .length
+                  }
                 />
               </div>
             )}
@@ -3003,7 +3019,11 @@ export default function Scorer(props: IScorerProps) {
             {keyboardEnabled && <KeyboardMap context={keyboardContext} />}
 
             {/* Pinned to the control bar during live play so the current scoring action stays in view. */}
-            <div className="scorer-stage is-pinned">
+            <div
+              className={`scorer-stage is-pinned${scoringLayout === 'scoresheet' ? ' is-ruled' : ''}${
+                phase.kind === 'tossup' ? ' is-tossup' : ''
+              }`}
+            >
               {noBuzzAcknowledgement && (
                 <span
                   key={`no-buzz-${noBuzzAcknowledgement.token}`}
@@ -3038,19 +3058,29 @@ export default function Scorer(props: IScorerProps) {
 
               {phase.kind === 'tossup' && (
                 <div className="scorer-tossup-actions">
-                  <button
-                    type="button"
-                    className="scorer-nobuzz"
-                    onClick={recordNoBuzz}
-                    disabled={playBlockedByProtest}
-                  >
-                    {noBuzzLabel}
-                  </button>
-                  {phase.eligibleTeams.length === 1 && (
-                    <p className="scorer-hint">
-                      {displayedTeams[displayForCanonical(phase.eligibleTeams[0])].name} may still answer.
-                    </p>
-                  )}
+                  <p className="scorer-live-status">
+                    Tossup {phase.questionNumber} is live —{' '}
+                    {phase.eligibleTeams.length === 1
+                      ? `${displayedTeams[displayForCanonical(phase.eligibleTeams[0])].name} may still answer.`
+                      : answeredTeams.size === 0
+                        ? 'nobody has buzzed yet.'
+                        : 'waiting on the remaining team.'}
+                  </p>
+                  <div className="scorer-nobuzz-group">
+                    <button
+                      type="button"
+                      className="scorer-nobuzz"
+                      onClick={recordNoBuzz}
+                      disabled={playBlockedByProtest}
+                    >
+                      {noBuzzLabel}
+                    </button>
+                    {keyboardEnabled && (
+                      <span className="scorer-keycap" aria-hidden="true">
+                        {keyboardShortcutLabels.noBuzz}
+                      </span>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -3150,15 +3180,30 @@ export default function Scorer(props: IScorerProps) {
                 />
               )}
             </div>
+
+            {scoringLayout === 'scoresheet' && (
+              <LiveLedger
+                game={game}
+                format={format}
+                phase={phase}
+                currentQuestion={currentQuestion}
+                displaySides={displaySideMapping}
+                emphasizeQuestion={emphasizedQuestion}
+                motion={recentMotion}
+                onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
+              />
+            )}
           </main>
 
-          <RecentRail
-            game={game}
-            displaySides={displaySideMapping}
-            emphasizeQuestion={emphasizedQuestion}
-            motion={recentMotion}
-            onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
-          />
+          {scoringLayout === 'table' && (
+            <RecentRail
+              game={game}
+              displaySides={displaySideMapping}
+              emphasizeQuestion={emphasizedQuestion}
+              motion={recentMotion}
+              onInspect={(questionNumber) => openReviewAt(questionNumber, true)}
+            />
+          )}
         </div>
       )}
 
