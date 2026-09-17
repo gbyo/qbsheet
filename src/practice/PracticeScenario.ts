@@ -201,7 +201,7 @@ export const practiceSteps: IPracticeStep[] = [
     call: 'Before the game starts, each team has five players available.',
     instruction:
       'Start Gibson, Jeremy, Owen and Lachlan for Ninety Six, and Tucker, Phillip, Efren and Valerie for Greenwood — in that order — then choose Start game.',
-    hint: 'Only four of each five may start, so leave Olivia and Bella on the Bench. Each Start action adds the player to the next available seat, and the ↑/↓ controls change that order without starting again. Start game stays disabled until both teams have four starters.',
+    hint: 'Only four of each five may start, so leave Olivia and Bella unselected. Each tap adds the player to the next starting position; tap a selected player again to remove them and close up the order. Start game stays disabled until both teams have four starters.',
     success: 'Good. The scorer now knows who should receive tossups heard from question 1.',
     section: 'Get ready',
     expectation: { kind: 'lineup' },

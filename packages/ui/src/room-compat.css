@@ -1,0 +1,42 @@
+/*
+ * Compatibility names for the existing Scorer stylesheets.
+ *
+ * New shared work uses `--qbs-*`. Scorer can keep its established `--room-*` vocabulary while the
+ * values and light/dark ownership live in `tokens.css`. This file contains aliases only.
+ */
+@import './tokens.css';
+
+:root {
+  --room-text-scale: var(--qbs-text-scale);
+  --room-text: var(--qbs-text);
+  --room-muted: var(--qbs-text-muted);
+  --room-faint: var(--qbs-text-faint);
+  --room-border: var(--qbs-border);
+  --room-border-strong: var(--qbs-border-strong);
+  --room-surface: var(--qbs-surface);
+  --room-surface-sunken: var(--qbs-surface-sunken);
+  --room-accent: var(--qbs-accent);
+  --room-accent-hover: var(--qbs-accent-hover);
+  --room-on-accent: var(--qbs-text-on-accent);
+  --room-success: var(--qbs-success-fg);
+  --room-success-bg: var(--qbs-success-bg);
+  --room-warning: var(--qbs-warning-fg);
+  --room-warning-bg: var(--qbs-warning-bg);
+  --room-warning-border: var(--qbs-warning-border);
+  --room-error: var(--qbs-danger-fg);
+  --room-error-bg: var(--qbs-danger-bg);
+  --room-error-border: var(--qbs-danger-border);
+  --room-info-bg: var(--qbs-info-bg);
+  --room-info-border: var(--qbs-info-border);
+  --room-scrim: var(--qbs-scrim);
+  --room-shadow-raised: var(--qbs-shadow-sm);
+  --room-shadow-strong: var(--qbs-shadow-modal);
+  --room-shadow-lifted: var(--qbs-shadow-lifted);
+  --room-inverted-key: var(--qbs-inverted-key);
+  --room-inverted-success: var(--qbs-inverted-success);
+  --room-motion-fast: var(--qbs-duration-fast);
+  --room-motion-standard: var(--qbs-duration);
+  --room-motion-slow: var(--qbs-duration-slow);
+  --room-ease-out: var(--qbs-ease-out);
+  --room-ease-standard: var(--qbs-ease);
+}

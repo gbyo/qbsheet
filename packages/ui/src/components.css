@@ -271,7 +271,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--qbs-space-6);
-  background: rgb(16 33 46 / 38%);
+  background: var(--qbs-scrim);
 }
 
 .qbs-modal {
