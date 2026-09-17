@@ -23,6 +23,7 @@ export default function TeamStatLines(props: { format: IScorekeeperFormat; team:
         {team.name} <span className="scorer-check-team-score">{team.points}</span>
       </h3>
       <table className="scorer-check-table">
+        <caption className="visually-hidden">{team.name} player statistics</caption>
         <thead>
           <tr>
             <th scope="col">Player</th>
