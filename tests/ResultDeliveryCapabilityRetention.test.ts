@@ -28,7 +28,7 @@ const capability = {
 };
 
 describe('result delivery capability retention', () => {
-  test('round-trips the complete LAN authority without changing primary-only entries', () => {
+  test('drops stored secondary-endpoint fields without changing single-server entries', () => {
     const storage = new MemoryStorage();
     const store = new ResultDeliveryCapabilityStore(storage, () => new Date('2026-08-11T14:05:00.000Z'));
     expect(
@@ -39,19 +39,14 @@ describe('result delivery capability retention', () => {
           lanBaseUrl: 'http://lan.test',
           lanSessionId: 'lan-session',
           lanSessionToken: 'lan-secret',
-        },
+        } as never,
         '2026-08-11T14:00:00.000Z',
       ),
     ).toBe(true);
     expect(store.remember('game-primary', capability, '2026-08-11T14:00:00.000Z')).toBe(true);
 
     const reloaded = new ResultDeliveryCapabilityStore(storage, () => new Date('2026-08-11T14:05:00.000Z'));
-    expect(reloaded.get('game-lan')).toEqual({
-      ...capability,
-      lanBaseUrl: 'http://lan.test',
-      lanSessionId: 'lan-session',
-      lanSessionToken: 'lan-secret',
-    });
+    expect(reloaded.get('game-lan')).toEqual(capability);
     expect(reloaded.get('game-primary')).toEqual(capability);
   });
 

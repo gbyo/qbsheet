@@ -551,7 +551,7 @@ a:focus-visible {
 }
 
 /*
- * The Bridge page's diagram: where a game travels during a round.
+ * A journey diagram: where a game travels during a round.
  *
  * Five stops in reading order, joined by arrows that are decoration — the list itself carries the
  * sequence, so a reader meets five items and no glyphs. The stops are boxes rather than stages
@@ -603,7 +603,7 @@ a:focus-visible {
 }
 
 /*
- * The Bridge page's room card: an example of what one room is given.
+ * A room card: an example of what one room is given.
  *
  * A bordered card rather than another definition list, because the section already speaks in
  * sentences and the card is an illustration — one room's pairing, not a term being defined. The

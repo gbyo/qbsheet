@@ -1,7 +1,17 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+
+/**
+ * How a result *changing* reads, as opposed to what it says.
+ *
+ * Two claims live here. The acceptance stamp is drawn once, for the submission that was accepted
+ * while the room was watching, and never replayed for a record that was already accepted when the
+ * screen opened — a stamp that fires on every visit is decoration rather than feedback. And the
+ * delivery status is a polite live region, so a pending result that lands announces itself without
+ * taking focus off whatever the scorekeeper was reaching for.
+ */
+import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import CompletionScreen from '../src/app/CompletionScreen';
 import { IStoredGameRecord } from '../src/game/GameStore';
@@ -36,95 +46,55 @@ function show(candidate: IStoredGameRecord, acceptedJustNow = false) {
       onUpdate={vi.fn()}
       onBackToScorekeeper={vi.fn()}
       onHome={vi.fn()}
+      continueLabel="Back to Room 204"
     />,
   );
 }
 
 afterEach(cleanup);
 
-describe('accepted-result acknowledgement', () => {
-  test('offers a clearly separate Excel scoresheet after completion', () => {
-    show(record());
-
-    expect(screen.getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
-    expect(screen.getByText(/Excel is a readable scoresheet for review/)).toBeInTheDocument();
-  });
-
-  test('puts the next connected-room action before the optional copy section', () => {
-    show(record());
-
-    const next = screen.getByRole('button', { name: 'Done' });
-    const copy = screen.getByText('Files & exports');
-    expect(next).toHaveClass('is-primary');
-    expect(next.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(copy.closest('details')).not.toHaveAttribute('open');
-  });
-
-  test('the existing accepted status receives the stamp only for a freshly accepted result', () => {
+describe('the acceptance stamp', () => {
+  test('is drawn for a result that was accepted while the room was watching', () => {
     show(record(), true);
 
-    const accepted = screen.getByText('Result sent').closest('.final-accepted');
+    const accepted = screen.getByText(/Result sent/).closest('.final-accepted');
     expect(accepted).toHaveClass('is-newly-accepted');
     expect(accepted).toHaveAttribute('data-acceptance-motion', 'new');
     expect(accepted?.querySelector('.final-accepted-mark')).toBeTruthy();
   });
 
-  test('remounting an already accepted result does not replay the stamp', () => {
+  test('is not replayed when an already accepted result is opened again', () => {
     show(record());
 
-    expect(screen.getByText('Result sent').closest('.final-accepted')).not.toHaveClass('is-newly-accepted');
+    expect(screen.getByText(/Result sent/).closest('.final-accepted')).not.toHaveClass('is-newly-accepted');
   });
 
-  test('offline/manual completion cannot display server acceptance', () => {
+  /**
+   * The class means tournament control accepted this. A screen that has never spoken to tournament
+   * control must not be able to grow it, whatever the navigation claimed on the way in.
+   */
+  test('cannot appear on a game that has no tournament control behind it', () => {
     show(record({ connected: false, serverDelivery: 'none' }), true);
 
     expect(document.querySelector('.final-accepted')).toBeNull();
   });
 });
 
-describe('pending-result delivery', () => {
-  test('can return to the scorekeeper while the handoff gate remains locked', () => {
-    const onBackToScorekeeper = vi.fn();
-    render(
-      <CompletionScreen
-        record={record({
-          serverDelivery: 'pending',
-          serverDeliveryLedger: { attemptCount: 2, retryable: true, outcome: 'pending' },
-        })}
-        onUpdate={vi.fn()}
-        onBackToScorekeeper={onBackToScorekeeper}
-        onHome={vi.fn()}
-      />,
-    );
+describe('a delivery that changes under the scorekeeper', () => {
+  test('the status is one polite live region rather than a set of shouting fragments', () => {
+    show(record({ serverDelivery: 'pending' }));
 
-    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
-    expect(screen.getByText(/before finishing\./)).toBeInTheDocument();
-    const back = screen.getByRole('button', { name: 'Review score' });
-    expect(back).toBeEnabled();
-    fireEvent.click(back);
-    expect(onBackToScorekeeper).toHaveBeenCalledOnce();
+    const status = document.querySelector('.completion-status');
+    expect(status).toHaveAttribute('role', 'status');
+    // One region, announced once. Nested alerts would announce the same change twice.
+    expect(status?.querySelectorAll('[role="alert"]')).toHaveLength(0);
   });
 
-  test('explains automatic retry while keeping the handoff gate closed', () => {
-    show(
-      record({
-        serverDelivery: 'pending',
-        serverDeliveryLedger: { attemptCount: 2, retryable: true, outcome: 'pending' },
-      }),
-    );
+  test('the screen changes in place when the result is accepted, without a reload or a new screen', () => {
+    const view = show(record({ serverDelivery: 'pending' }));
 
-    expect(screen.getByText(/QBSheet will keep trying automatically while it is open/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
-    expect(screen.getByRole('button', { name: /^Download QBJ$/ })).toBeTruthy();
-  });
-
-  test('acceptance updates the receipt and unlocks continuation', () => {
-    const view = show(
-      record({
-        serverDelivery: 'pending',
-        serverDeliveryLedger: { attemptCount: 1, retryable: true, outcome: 'pending' },
-      }),
-    );
+    expect(screen.getByText('Sending result…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back to Room 204' })).toBeNull();
 
     view.rerender(
       <CompletionScreen
@@ -141,12 +111,13 @@ describe('pending-result delivery', () => {
         onUpdate={vi.fn()}
         onBackToScorekeeper={vi.fn()}
         onHome={vi.fn()}
+        continueLabel="Back to Room 204"
       />,
     );
 
-    expect(screen.getByText('Result sent')).toBeTruthy();
-    expect(screen.queryByText(/hasn't received this result yet/)).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Download QBJ' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(screen.getByText(/Result sent/)).toBeInTheDocument();
+    expect(screen.queryByText('Sending result…')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Back to Room 204' })).toBeEnabled();
+    expect(document.querySelectorAll('.shell-button.is-primary')).toHaveLength(1);
   });
 });
