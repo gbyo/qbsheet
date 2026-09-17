@@ -150,8 +150,17 @@ export interface IStoredGameRecord {
   serverDeliveryDetail?: string;
   /** Optional bounded delivery facts. Records from before this field was added remain valid. */
   serverDeliveryLedger?: IServerDeliveryLedger;
-  /** ISO 8601. When this device last wrote the QBJ to the downloads folder. */
+  /**
+   * ISO 8601. When this device last wrote the final QBJ to the downloads folder.
+   * Only the completion download sets this: a mid-game backup is a lifeboat, not the
+   * finished result, and must never satisfy the download gate (see qbjBackupDownloadedAt).
+   */
   qbjDownloadedAt?: string;
+  /**
+   * ISO 8601. When this device last wrote a mid-game partial QBJ backup to the downloads
+   * folder. Display and reassurance only — never proof the final result left this device.
+   */
+  qbjBackupDownloadedAt?: string;
   /** ISO 8601. When somebody said they had handed the file over. Our workflow state, not proof. */
   handoffAcknowledgedAt?: string;
 }
