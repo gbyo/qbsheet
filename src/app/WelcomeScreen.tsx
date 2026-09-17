@@ -475,6 +475,15 @@ export default function WelcomeScreen(
             <div className="welcome-create-copy">
               <h3 className="welcome-option-heading">Create a game</h3>
               <p className="welcome-option-copy">Enter teams, players, and scoring rules yourself.</p>
+              {/*
+                Said plainly, because the room that needs this most is the room whose tournament
+                system has just stopped answering. The route has never needed a server; what it
+                needed was for somebody standing in front of a failed pairing screen to know that.
+              */}
+              <p className="welcome-option-copy">
+                No tournament control, no pairing, no network. Score offline and read the full stat sheet off
+                the screen when the game ends.
+              </p>
             </div>
             <button type="button" className="shell-button" onClick={onCreateGame}>
               Create game
@@ -485,7 +494,8 @@ export default function WelcomeScreen(
         <section className="shell-section welcome-start welcome-other-scoring">
           <h2 className="shell-heading">Other scoring options</h2>
           <p className="welcome-option-copy">
-            Use a game file or enter a local game when this room is not using its assigned game.
+            Use a game file or enter a local game when this room is not using its assigned game. A created
+            game needs no tournament control, no pairing and no network, and ends on a full stat sheet.
           </p>
           <div className="welcome-other-scoring-actions">
             <GameFileOpen onOpen={openPackage} onOpenBackup={onOpenBackup} />

@@ -996,69 +996,194 @@
 
 /* #region Starting lineups and the halftime score check */
 
-.scorer-starters {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-.scorer-starters-team {
-  min-width: 0;
-}
-
-.scorer-starters-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.scorer-starters-team .scorer-text-action:disabled {
-  color: var(--room-faint);
-  cursor: default;
-}
-
-/*
- * A lineup change, shown.
- *
- * Scoped to the places where a press moves a row between groups: the starting prompt, and the two
- * Playing / Bench editors that replaced the checkbox lists. Not applied to the Players roster at
- * large, where the rows are a reading of the current lineup rather than something being rearranged.
- * The geometry is worked out in LineupMotion; all this contributes is how long the travel takes and
- * what the moved row looks like while it happens.
- *
- * The row stays the ruled row it already is. It is not lifted, outlined, rounded or shadowed, because
- * a row that turns into a card while it moves is saying "you are dragging this", and nobody is: they
- * pressed an arrow, and the row is on its way to a seat it has already been given. So the whole
- * treatment is the sunken wash the rest of the scoresheet uses for "this line, the one you just
- * touched" — arriving at once so it is legible during the travel, and taking its time leaving so the
- * eye has somewhere to land after the movement stops.
- */
-.scorer-starters-team .scorer-lineup-entry.is-moved,
+/* Playing / Bench editors still move a row between groups after a lineup change. */
 .scorer-lineup-groups .scorer-lineup-entry.is-moved {
   background: var(--room-surface-sunken);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .scorer-starters-team .scorer-lineup-entry,
   .scorer-lineup-groups .scorer-lineup-entry {
     transition: background-color 220ms ease-out;
   }
 
-  /* Ease-out only. A seat is a fixed thing and a row that overshoots one has to be read twice. */
-  .scorer-starters-team .scorer-lineup-entry.is-moving,
   .scorer-lineup-groups .scorer-lineup-entry.is-moving {
     transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
     will-change: transform;
   }
 }
 
-.scorer-starters-submit {
+.scorer-starters {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px clamp(16px, 4vw, 48px);
+}
+
+.scorer-starters-team {
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--room-border-strong);
+}
+
+.scorer-starters-instruction {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.scorer-starters-procedure {
+  max-width: 760px;
+  margin-top: 3px;
+  margin-bottom: 20px;
+}
+
+.scorer-starters-team .scorer-lineup-head {
+  min-height: 28px;
+}
+
+.scorer-starters-team .scorer-lineup-team {
+  margin-bottom: 2px;
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-lineup-clear {
+  flex: none;
+  font-size: 0.75rem;
+}
+
+.scorer-starters-team .scorer-lineup-count {
+  margin-bottom: 10px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One roster, in registration order. Starting order is the numbered state on each tile. */
+.scorer-starter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+  gap: 7px;
+}
+
+.scorer-starter-tile,
+.scorer-starter-add {
+  display: flex;
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--room-text);
+  text-align: left;
+  background: var(--room-surface);
+  border: 1px solid var(--room-border-strong);
+  border-radius: 4px;
+}
+
+button.scorer-starter-tile,
+.scorer-starter-add {
+  cursor: pointer;
+}
+
+button.scorer-starter-tile:hover:not([aria-disabled='true']),
+.scorer-starter-add:hover {
+  border-color: var(--room-accent);
+  background: var(--room-info-bg);
+}
+
+.scorer-starter-tile:focus-visible,
+.scorer-starter-add:focus-visible {
+  outline: 2px solid var(--room-accent);
+  outline-offset: 1px;
+}
+
+/* Border, wash, weight and position number make selection legible without colour alone. */
+.scorer-starter-tile.is-selected {
+  font-weight: 600;
+  background: var(--room-info-bg);
+  border-color: var(--room-accent);
+  box-shadow: inset 3px 0 0 var(--room-accent);
+}
+
+button.scorer-starter-tile[aria-disabled='true'] {
+  color: var(--room-muted);
+  border-color: var(--room-border);
+  cursor: default;
+}
+
+.scorer-starter-seat {
+  display: inline-flex;
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  align-items: center;
+  justify-content: center;
+  color: var(--room-faint);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--room-border);
+  border-radius: 50%;
+}
+
+.scorer-starter-tile.is-selected .scorer-starter-seat {
+  color: var(--room-on-accent);
+  background: var(--room-accent);
+  border-color: var(--room-accent);
+}
+
+.scorer-starter-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorer-starter-add {
+  justify-content: center;
+  color: var(--room-accent);
+  border-color: var(--room-border);
+  border-style: dashed;
+}
+
+.scorer-starter-inline-add {
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+
+.scorer-starters-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 20px;
   margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid var(--room-border);
+}
+
+.scorer-starters-status {
+  min-width: 0;
+  text-align: right;
+}
+
+.scorer-starters-status > p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.scorer-starters-status > p.is-ready {
+  color: var(--room-success);
+}
+
+.scorer-starters-submit {
+  flex: none;
 }
 
 .scorer-lineup-problem {
-  margin: 8px 0;
+  margin: 3px 0 0;
   font-size: 0.8125rem;
   color: var(--room-error);
 }
@@ -1066,6 +1191,36 @@
 .scorer-starters-title {
   margin: 0 0 4px;
   font-size: 1.25rem;
+}
+
+@media (max-width: 700px) {
+  .scorer-starters {
+    padding-block: 18px;
+  }
+
+  .scorer-starters-procedure {
+    margin-bottom: 16px;
+  }
+
+  .scorer-starters-footer {
+    position: sticky;
+    bottom: 0;
+    margin-inline: -16px;
+    padding: 12px 16px;
+    background: var(--room-surface);
+  }
+}
+
+@media (max-width: 430px) {
+  .scorer-starters-footer {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .scorer-starters-status {
+    text-align: left;
+  }
 }
 
 .scorer-score-check {

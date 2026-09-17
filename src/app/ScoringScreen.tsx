@@ -56,9 +56,8 @@ import { RoomConnectionState } from './ConnectionState';
 import { IConnectedSession } from './ConnectedSession';
 import FruityServerClient from '../integrations/fruity/FruityServerClient';
 import type { IRosterAddResult, IRosterAmendment } from '../integrations/fruity/FruityServerClient';
-import useConnectedRuntime, { ICredentialRepair, type RoomCredentialEndpoint } from './useConnectedRuntime';
+import useConnectedRuntime, { ICredentialRepair } from './useConnectedRuntime';
 import { connectionTimeline } from './ConnectionTimeline';
-import { describeTransport } from '../qbtcp/QbtcpPreferredTransport';
 import { useAppUpdate } from '../pwa/useAppUpdate';
 import { updateDeferredAlert } from '../pwa/UpdateNotice';
 import { ResultDeliveryService } from './ResultDelivery';
@@ -89,11 +88,9 @@ export function connectionBelongsTo(
   connection: IConnectedSession | null,
   record: IStoredGameRecord,
 ): boolean {
-  const hasPrimary = Boolean(connection?.sessionId && connection.sessionToken);
-  const hasLan = Boolean(connection?.lanSessionId && connection.lanSessionToken);
-  if (!connection || (!hasPrimary && !hasLan)) return false;
+  if (!connection || !connection.sessionId || !connection.sessionToken) return false;
   if (connection.gameRecordId !== undefined) return connection.gameRecordId === record.id;
-  return connection.sessionId === record.gameKey || connection.lanSessionId === record.gameKey;
+  return connection.sessionId === record.gameKey;
 }
 
 /** The package's roster shape, rebuilt from the names a correction settled on. */
@@ -160,7 +157,7 @@ export default function ScoringScreen(props: {
   // never a render-phase state update and no synchronizing effect. See that hook for the
   // degrade/recover contract.
   const [recordDurablyStored, setRecordDurablyStored] = useDurableRecordFlag(durable, storageDegraded);
-  const [repairing, setRepairing] = useState<RoomCredentialEndpoint | null>(null);
+  const [repairing, setRepairing] = useState(false);
   const update = useAppUpdate();
   const rosterPackageRef = useRef(record.package);
   const rosterIdentityWrite = useRef(Promise.resolve());
@@ -212,34 +209,6 @@ export default function ScoringScreen(props: {
   }, [record, connection, operatorName]);
 
   /**
-   * The tournament-supplied LAN fallback under the same pairing, if any.
-   *
-   * A separate client and separate capabilities because relay and LAN mint authority
-   * independently. They still name one logical room and game.
-   */
-  // `live` gates on the connection belonging to this game; hoisting the address out keeps
-  // the memo key a plain value the compiler can verify instead of a deep property access.
-  const lanBaseUrl = live ? connection?.lanBaseUrl : undefined;
-  const lanRoomToken = live ? connection?.lanRoomToken : undefined;
-  const lanSessionId = live ? connection?.lanSessionId : undefined;
-  const lanSessionToken = live ? connection?.lanSessionToken : undefined;
-  const lanClient = useMemo(
-    () =>
-      lanBaseUrl && lanRoomToken && lanSessionId && lanSessionToken
-        ? new FruityServerClient(lanBaseUrl)
-        : undefined,
-    [lanBaseUrl, lanRoomToken, lanSessionId, lanSessionToken],
-  );
-  const lanIdentity = useMemo(
-    () => (live && lanRoomToken ? { ...live.identity, token: lanRoomToken } : undefined),
-    [lanRoomToken, live],
-  );
-  const lanCredentials = useMemo(
-    () => (lanSessionId && lanSessionToken ? { sessionId: lanSessionId, token: lanSessionToken } : undefined),
-    [lanSessionId, lanSessionToken],
-  );
-
-  /**
    * Only the fields a repair actually produced.
    *
    * A change carrying `sessionToken: undefined` is indistinguishable from one deliberately clearing
@@ -251,8 +220,6 @@ export default function ScoringScreen(props: {
       onConnectionRepaired({
         ...(repair.sessionId !== undefined ? { sessionId: repair.sessionId } : {}),
         ...(repair.sessionToken !== undefined ? { sessionToken: repair.sessionToken } : {}),
-        ...(repair.lanSessionId !== undefined ? { lanSessionId: repair.lanSessionId } : {}),
-        ...(repair.lanSessionToken !== undefined ? { lanSessionToken: repair.lanSessionToken } : {}),
       });
     },
     [onConnectionRepaired],
@@ -272,17 +239,13 @@ export default function ScoringScreen(props: {
     scheduledMatchId: record.package.scheduledMatchId,
     tournamentKey: live?.tournamentKey,
     enabled: live !== null,
-    onRepairConnection: live ? (endpoint) => setRepairing(endpoint) : undefined,
+    onRepairConnection: live ? () => setRepairing(true) : undefined,
     onCredentialsRepaired,
     progressSequence: connection?.progressSequence,
     onProgressSequence,
-    lanClient,
-    lanIdentity,
-    lanCredentials,
-    initialLan: Boolean(live && !live.credentials.sessionId && lanCredentials),
   });
 
-  const repairClient = repairing === 'lan' ? lanClient : live?.client;
+  const repairClient = live?.client;
 
   /**
    * The second copy.
@@ -413,21 +376,8 @@ export default function ScoringScreen(props: {
               baseUrl: live.client.baseUrl,
               sessionId: live.credentials.sessionId,
               sessionToken: live.credentials.token,
-              ...(lanBaseUrl !== undefined && lanCredentials !== undefined
-                ? {
-                    lanBaseUrl,
-                    lanSessionId: lanCredentials.sessionId,
-                    lanSessionToken: lanCredentials.token,
-                  }
-                : {}),
             }
-          : lanBaseUrl !== undefined && lanCredentials !== undefined
-            ? {
-                baseUrl: lanBaseUrl,
-                sessionId: lanCredentials.sessionId,
-                sessionToken: lanCredentials.token,
-              }
-            : null;
+          : null;
         if (retryCapability) resultDelivery.remember(record.id, retryCapability, completedAt);
 
         // Send exactly the object just committed as `finalQbj`. The internal scorer recovery layer
@@ -446,18 +396,7 @@ export default function ScoringScreen(props: {
         durablySaved: true,
       };
     },
-    [
-      record.id,
-      record.package,
-      store,
-      resultDelivery,
-      live,
-      lanBaseUrl,
-      lanCredentials,
-      runtime,
-      onComplete,
-      setRecordDurablyStored,
-    ],
+    [record.id, record.package, store, resultDelivery, live, runtime, onComplete, setRecordDurablyStored],
   );
 
   /**
@@ -670,7 +609,7 @@ export default function ScoringScreen(props: {
         durableSetup={record.setup}
         durableEvents={record.events}
         degradedMessage={live ? runtime.degradedMessage : undefined}
-        scoringPath={live ? describeTransport(runtime.transport) : undefined}
+        scoringPath={live ? live.client.baseUrl : undefined}
         onSubmit={submit}
         onCorrectGame={correctGame}
         onDownload={write}
@@ -714,21 +653,21 @@ export default function ScoringScreen(props: {
           delivery: downloadedAt ? 'hand-over' : undefined,
         }}
       />
-      {repairing !== null && live && repairClient && (
+      {repairing && live && repairClient && (
         <RepairConnectionDialog
           client={repairClient}
           roomId={live.identity.roomId}
           roomName={connection?.roomName ?? live.identity.roomId}
           onRepaired={(roomToken) => {
-            onConnectionRepaired(repairing === 'lan' ? { lanRoomToken: roomToken } : { roomToken });
+            onConnectionRepaired({ roomToken });
             connectionTimeline.record('room-repaired');
-            setRepairing(null);
+            setRepairing(false);
           }}
           onDisconnect={() => {
             onConnectionLost();
-            setRepairing(null);
+            setRepairing(false);
           }}
-          onClose={() => setRepairing(null)}
+          onClose={() => setRepairing(false)}
         />
       )}
     </>
