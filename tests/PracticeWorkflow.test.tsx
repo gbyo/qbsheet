@@ -49,9 +49,11 @@ test('practice requires its named starters, keeps mistakes editable, and advance
 
   expect(screen.getByText(/Start Gibson, Jeremy, Owen and Lachlan for Ninety Six/)).toBeTruthy();
   expect(screen.queryByText(/Tick|untick|Reorder starters/i)).toBeNull();
+  expect(within(prompt).getByText('8 more starters needed')).toBeTruthy();
 
   fireEvent.click(within(left).getByRole('button', { name: 'Start Gibson' }));
   fireEvent.click(within(right).getByRole('button', { name: 'Start Tucker' }));
+  expect(within(prompt).getByText('6 more starters needed')).toBeTruthy();
   expect(start.hasAttribute('disabled')).toBe(true);
 
   for (const name of ['Jeremy', 'Owen', 'Olivia'])
@@ -93,7 +95,7 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
   const right = within(prompt).getByLabelText('Greenwood starters');
   const start = within(prompt).getByText('Start game');
 
-  // Start the right names in the wrong order so practice can teach the real seat-order controls.
+  // Start the right names in the wrong order so practice can teach the picker's ordering model.
   for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
     fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
   for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
@@ -102,13 +104,12 @@ test('the right four in the wrong seats names the seat, the player in it, and wh
 
   const alert = screen.getByRole('alert');
   expect(alert.textContent).toContain(
-    'Use the ↑/↓ controls to put Gibson, Jeremy, Owen and Lachlan in that order.',
+    'Choose Clear, then select Gibson, Jeremy, Owen and Lachlan in that order.',
   );
   expect(screen.getByLabelText('Starting lineups')).toBeTruthy();
 
-  // Bench the wrong order, then start the names in the order the guide lists.
-  for (const name of ['Lachlan', 'Owen', 'Jeremy', 'Gibson'])
-    fireEvent.click(within(left).getByRole('button', { name: `Bench ${name}` }));
+  // Clear the wrong order, then start the names in the order the guide lists.
+  fireEvent.click(within(left).getByRole('button', { name: 'Clear' }));
   for (const name of ['Gibson', 'Jeremy', 'Owen', 'Lachlan'])
     fireEvent.click(within(left).getByRole('button', { name: `Start ${name}` }));
   fireEvent.click(start);

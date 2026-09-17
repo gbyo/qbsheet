@@ -32,21 +32,11 @@ import type { IRecoveryUi } from './DeviceReadiness';
 import NativeDialog from './NativeDialog';
 import { exchangePairingCode } from './ControlPairing';
 import UpdateNotice from '../pwa/UpdateNotice';
-import {
-  classifyTransportFailure,
-  initialFailoverMemory,
-  notePreferredPathHealed,
-  notePrimaryResult,
-  notePrimarySuccess,
-  PRIMARY_HEALTH_CHECK_INTERVAL_MS,
-  type IFailoverMemory,
-} from '../qbtcp/QbtcpPreferredTransport';
 
 export interface IConnectedStart {
   room: IPairedRoom;
   identity: IRoomIdentity;
   credentials?: ISessionCredentials;
-  lanCredentials?: ISessionCredentials;
   tournamentKey?: string;
   definition: IGameDefinition;
   /** False once the room that owns this start transaction has unmounted or changed. */
@@ -162,24 +152,6 @@ function identityFor(room: IPairedRoom, operatorName: string): IRoomIdentity {
   };
 }
 
-function lanIdentityFor(room: IPairedRoom, operatorName: string): IRoomIdentity | null {
-  if (!room.lanRoomToken) return null;
-  return { ...identityFor(room, operatorName), token: room.lanRoomToken };
-}
-
-/** Open the same match on LAN with LAN-minted authority; absence/failure leaves Internet usable. */
-export async function openLanFallbackSession(
-  room: IPairedRoom,
-  operatorName: string,
-  matchId: string,
-  clientFactory: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
-): Promise<ISessionCredentials | undefined> {
-  const identity = lanIdentityFor(room, operatorName);
-  if (!room.lanBaseUrl || !identity) return undefined;
-  const opened = await clientFactory(room.lanBaseUrl).openSession(identity, matchId);
-  return opened.ok ? { sessionId: opened.value.sessionId, token: opened.value.token } : undefined;
-}
-
 function progressFor(record: IStoredGameRecord): string {
   try {
     const game = deriveGame(record.package.scorekeeperFormat, record.setup, record.events);
@@ -290,55 +262,11 @@ export default function ConnectedRoom(props: {
 
   const client = useMemo(() => new FruityServerClient(pairedRoom.baseUrl), [pairedRoom.baseUrl]);
   const identity = useMemo(() => identityFor(pairedRoom, operatorName), [pairedRoom, operatorName]);
-  const lanClient = useMemo(
-    () =>
-      pairedRoom.lanBaseUrl && pairedRoom.lanRoomToken
-        ? new FruityServerClient(pairedRoom.lanBaseUrl)
-        : undefined,
-    [pairedRoom.lanBaseUrl, pairedRoom.lanRoomToken],
-  );
-  const lanIdentity = useMemo(
-    () => (pairedRoom.lanRoomToken ? { ...identity, token: pairedRoom.lanRoomToken } : undefined),
-    [identity, pairedRoom.lanRoomToken],
-  );
-  const failoverRef = useRef<IFailoverMemory>(initialFailoverMemory);
-  const [activeEndpoint, setActiveEndpoint] = useState<'primary' | 'lan'>('primary');
-  const activeEndpointRef = useRef<'primary' | 'lan'>('primary');
-  const selectEndpoint = useCallback((endpoint: 'primary' | 'lan') => {
-    activeEndpointRef.current = endpoint;
-    setActiveEndpoint(endpoint);
-  }, []);
-  const endpoint = useCallback(() => {
-    if (activeEndpointRef.current === 'lan' && lanClient && lanIdentity) {
-      return { kind: 'lan' as const, client: lanClient, identity: lanIdentity };
-    }
-    return { kind: 'primary' as const, client, identity };
-  }, [client, identity, lanClient, lanIdentity]);
 
-  const assignmentFromActiveEndpoint = useCallback(async () => {
-    let selected = endpoint();
-    let result = await selected.client.assignment(selected.identity);
-    if (selected.kind === 'primary') {
-      if (result.ok) {
-        failoverRef.current = notePrimarySuccess(failoverRef.current);
-      } else {
-        const before = failoverRef.current;
-        const after = notePrimaryResult(
-          before,
-          classifyTransportFailure(result),
-          Boolean(lanClient && lanIdentity),
-        );
-        failoverRef.current = after;
-        if (!before.lanActive && after.lanActive && lanClient && lanIdentity) {
-          selectEndpoint('lan');
-          connectionTimeline.record('lan-fallback', lanClient.baseUrl);
-          selected = { kind: 'lan', client: lanClient, identity: lanIdentity };
-          result = await selected.client.assignment(selected.identity);
-        }
-      }
-    }
-    return { selected, result };
-  }, [endpoint, lanClient, lanIdentity, selectEndpoint]);
+  const loadAssignmentFromServer = useCallback(async () => {
+    const result = await client.assignment(identity);
+    return { result };
+  }, [client, identity]);
 
   // App keys this component by the persisted room binding, so a new pairing gets a fresh room
   // state instead of carrying the old assignment through. Keep this ref current for the narrow
@@ -399,7 +327,7 @@ export default function ConnectedRoom(props: {
     assignmentRequest.current = { key, sequence };
     setBusy(true);
     try {
-      const { result } = await assignmentFromActiveEndpoint();
+      const { result } = await loadAssignmentFromServer();
       if (roomKeyRef.current !== key || assignmentRequest.current?.sequence !== sequence) return;
       setNow(Date.now());
       if (!result.ok) {
@@ -443,7 +371,7 @@ export default function ConnectedRoom(props: {
         setBusy(false);
       }
     }
-  }, [assignmentFromActiveEndpoint, noteFailure, roomKey]);
+  }, [loadAssignmentFromServer, noteFailure, roomKey]);
 
   useEffect(() => {
     loadRef.current = loadAssignment;
@@ -459,20 +387,6 @@ export default function ConnectedRoom(props: {
     return () => clearInterval(timer);
   }, [roomKey, resumeRecord]);
 
-  useEffect(() => {
-    if (activeEndpoint !== 'lan') return undefined;
-    const check = async () => {
-      const result = await client.assignment(identity);
-      if (!result.ok) return;
-      failoverRef.current = notePreferredPathHealed(failoverRef.current);
-      selectEndpoint('primary');
-      connectionTimeline.record('connected', 'via internet relay');
-      void loadRef.current();
-    };
-    const timer = setInterval(() => void check(), PRIMARY_HEALTH_CHECK_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [activeEndpoint, client, identity, selectEndpoint]);
-
   const retryAssignment = () => {
     setActionError('');
     void loadAssignment();
@@ -487,8 +401,7 @@ export default function ConnectedRoom(props: {
 
   const handleProblemReport = useCallback(
     async (category: HelpRequestCategory, message: string): Promise<HelpRequestResult> => {
-      const selected = endpoint();
-      const result = await selected.client.requestHelp(selected.identity, category, message);
+      const result = await client.requestHelp(identity, category, message);
       if (result.kind === 'accepted' || result.kind === 'already-outstanding') {
         connectionTimeline.record(
           'control-requested',
@@ -503,7 +416,7 @@ export default function ConnectedRoom(props: {
       }
       return result;
     },
-    [endpoint],
+    [client, identity],
   );
 
   const start = async () => {
@@ -525,8 +438,7 @@ export default function ConnectedRoom(props: {
     const generation = startGeneration.current;
     const isCurrent = () => startGeneration.current === generation && roomKeyRef.current === roomKey;
     try {
-      const selectedEndpoint = endpoint();
-      const session = await selectedEndpoint.client.openSession(selectedEndpoint.identity, expectedMatchId);
+      const session = await client.openSession(identity, expectedMatchId);
       if (!isCurrent()) return;
       if (!session.ok) {
         noteFailure(session, safeStartFailure(session), 'start');
@@ -534,7 +446,7 @@ export default function ConnectedRoom(props: {
       }
       // The assignment is deliberately read again at kickoff. A room may have been reassigned
       // between the display and the human press; opening the old session must not score the new game.
-      const current = await selectedEndpoint.client.assignment(selectedEndpoint.identity);
+      const current = await client.assignment(identity);
       if (!isCurrent()) return;
       if (!current.ok) {
         noteFailure(current, safeStartFailure(current), 'start');
@@ -557,19 +469,10 @@ export default function ConnectedRoom(props: {
         );
         return;
       }
-      const primaryCredentials =
-        selectedEndpoint.kind === 'primary'
-          ? { sessionId: session.value.sessionId, token: session.value.token }
-          : undefined;
-      const lanCredentials =
-        selectedEndpoint.kind === 'lan'
-          ? { sessionId: session.value.sessionId, token: session.value.token }
-          : await openLanFallbackSession(pairedRoom, operatorName, expectedMatchId);
       const outcome = await onStart({
         room: pairedRoom,
         identity,
-        ...(primaryCredentials ? { credentials: primaryCredentials } : {}),
-        ...(lanCredentials ? { lanCredentials } : {}),
+        credentials: { sessionId: session.value.sessionId, token: session.value.token },
         ...(currentValue.tournamentKey ? { tournamentKey: currentValue.tournamentKey } : {}),
         definition: currentValue.definition,
         isCurrent,
@@ -936,22 +839,12 @@ function RoomPairingRepair(props: {
         code,
         room.roomId,
         room.deviceId,
-        // Re-pair the same advertised fallback. The exchange reports whether the LAN
-        // was repaired, temporarily unavailable, or positively paired to another room.
-        room.lanBaseUrl,
       );
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      const repairedRoom =
-        result.lanOutcome === 'transient-failure' && room.lanBaseUrl && room.lanRoomToken
-          ? { ...result.value, lanBaseUrl: room.lanBaseUrl, lanRoomToken: room.lanRoomToken }
-          : result.value;
-      // A transient LAN outage must not erase a still-valid fallback. A room mismatch or definitive
-      // rejection deliberately passes the primary-only value through, so App.onPaired clears the
-      // stale LAN capability instead of merging it into the repaired room.
-      onPaired(repairedRoom);
+      onPaired(result.value);
     } catch {
       setError('This room could not be paired. Check the connection and try again.');
     } finally {

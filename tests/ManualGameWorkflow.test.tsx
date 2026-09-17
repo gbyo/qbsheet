@@ -12,7 +12,16 @@
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { bonus, openApp, openGameFile, press, pressControl, score, startLineups } from './appHarness';
+import {
+  bonus,
+  openApp,
+  openGameDetails,
+  openGameFile,
+  press,
+  pressControl,
+  score,
+  startLineups,
+} from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
 
 afterEach(cleanup);
@@ -358,7 +367,7 @@ describe('the setup form', () => {
     await openApp();
     await press('Create game');
 
-    expect(screen.queryByText('Who is starting?')).toBeNull();
+    expect(screen.queryByText('Starting lineup')).toBeNull();
     expect(screen.queryByLabelText('Starting lineups')).toBeNull();
   });
 });
@@ -369,7 +378,7 @@ describe('starting the game', () => {
     await createGame();
 
     expect(await screen.findByText('Sarah')).toBeInTheDocument();
-    expect(screen.queryByText('Who is starting?')).toBeNull();
+    expect(screen.queryByText('Starting lineup')).toBeNull();
     expect(screen.getByText(/Tossup 1 of/)).toBeInTheDocument();
   });
 
@@ -377,7 +386,7 @@ describe('starting the game', () => {
     await openApp();
     await createGame({ leftPlayers: ['Sarah', 'James', 'Alex', 'Chris', 'Robin'] });
 
-    expect(await screen.findByText('Who is starting?')).toBeInTheDocument();
+    expect(await screen.findByText('Starting lineup')).toBeInTheDocument();
     // The existing prompt, unchanged: the side that has a choice to make is asked, and the side
     // that fits on the floor is shown as already settled rather than hidden.
     expect(screen.getByLabelText('Ninety Six starters')).toBeInTheDocument();
@@ -415,7 +424,7 @@ describe('starting the game', () => {
       rules: { 'Players playing at once': '2' },
     });
 
-    expect(await screen.findByText('Who is starting?')).toBeInTheDocument();
+    expect(await screen.findByText('Starting lineup')).toBeInTheDocument();
     const left = screen.getByLabelText('Ninety Six starters');
     await act(async () => {
       fireEvent.click(within(left).getByRole('button', { name: 'Start Sarah' }));
@@ -424,7 +433,7 @@ describe('starting the game', () => {
       fireEvent.click(within(left).getByRole('button', { name: 'Start James' }));
     });
     // The floor is two, so the third player cannot be added to it.
-    expect(within(left).getByRole('button', { name: 'Start Alex' })).toBeDisabled();
+    expect(within(left).getByRole('button', { name: 'Start Alex' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   test('the game is filed under the label it was given', async () => {
@@ -485,21 +494,21 @@ describe('a manual game is an ordinary game', () => {
 });
 
 describe('finishing a practice', () => {
-  test('the completion screen asks for a copy rather than a handoff', async () => {
+  test('the completion screen offers a copy rather than demanding a handoff', async () => {
     await openApp();
     await createGame();
     await score('Sarah', 'C');
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('Files & exports')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'This result is saved on this device. Download a QBJ if you want to keep or share a portable copy.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download QBJ copy' })).toBeInTheDocument();
-    expect(screen.queryByText('This result needs to be handed over')).toBeNull();
+    // Nothing is owed, so nothing is on the screen but the score, the fact that it is saved, and
+    // the way out. The copy is available for whoever wants one, behind the one quiet door.
+    expect(screen.getByText(/Saved on this device/)).toBeInTheDocument();
+    expect(screen.queryByText(/needs to be handed over/)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Download QBJ/ })).toBeNull();
+
+    const details = await openGameDetails();
+    expect(within(details).getByRole('button', { name: 'Download QBJ copy' })).toBeInTheDocument();
   });
 
   test('Done is enabled without downloading anything', async () => {
@@ -524,12 +533,13 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
+    await openGameDetails();
     await press('Download QBJ copy');
 
     expect(downloads.files).toHaveLength(1);
-    expect(await screen.findByText(/QBJ downloaded/)).toBeInTheDocument();
-    expect(screen.queryByText('A copy of this result is in your downloads.')).toBeNull();
-    expect(screen.queryByRole('button', { name: 'I uploaded the result' })).toBeNull();
+    expect(await screen.findByRole('button', { name: 'Download QBJ again' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /handed off the result/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /uploaded the result/ })).toBeNull();
     expect(screen.getByRole('button', { name: 'Done' })).not.toBeDisabled();
   });
 
@@ -541,10 +551,10 @@ describe('finishing a practice', () => {
     await bonus('20');
     await finishGame();
 
-    expect(screen.getByText('This result needs to be handed over.')).toBeInTheDocument();
+    expect(screen.getByText('Result needs to be handed over')).toBeInTheDocument();
+    expect(screen.getByText('Save the tournament result file before leaving.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Download QBJ' })).toHaveClass('is-primary');
-    expect(screen.getByText(/Download the QBJ before finishing/)).toBeInTheDocument();
   });
 });
 
@@ -557,6 +567,7 @@ describe('the QBJ a practice produces', () => {
     await bonus('20');
     await finishGame();
 
+    await openGameDetails();
     await press('Download QBJ copy');
 
     expect(downloads.files).toHaveLength(1);
@@ -589,6 +600,7 @@ describe('the QBJ a practice produces', () => {
     await bonus('20');
     await finishGame();
 
+    await openGameDetails();
     await press('Download QBJ copy');
 
     const contents = downloads.files[0].contents;

@@ -1,8 +1,9 @@
 /**
  * `@qbsheet/ui` — QBSheet's shared design tokens and interaction primitives.
  *
- * The smallest useful version of the shared layer: enough for QBBridge to stop carrying a visual
- * system of its own, and shaped so the next surface adds components here rather than beside it.
+ * QBSheet Scorer is the reference visual implementation. Shared controls use its canonical token
+ * layer; applications retain their own layout and only promote behavior that truly has multiple
+ * consumers.
  *
  * Behaviour comes from `react-aria-components`; appearance comes entirely from
  * `tokens.css` + `components.css`. No third-party theme is imported, and nothing here should

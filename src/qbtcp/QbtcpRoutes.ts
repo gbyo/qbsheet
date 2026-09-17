@@ -38,13 +38,6 @@ export interface IQbtcpDiscovery {
   /** The QBJ serialization version this server produces and accepts, when it says. */
   qbjVersion?: string;
   name?: string;
-  /**
-   * The raw `stream` descriptor, when the server advertised the `stream` capability.
-   *
-   * Preserved uninterpreted so `src/qbtcp/QbtcpStream.ts` can validate it. Every other
-   * unfamiliar discovery field is still ignored, per the v1 compatibility rule.
-   */
-  stream?: unknown;
 }
 
 export interface IQbtcpRoutes {
@@ -156,14 +149,12 @@ export function readDiscovery(value: unknown): IQbtcpDiscovery | null {
   const capabilities = Array.isArray(record.capabilities)
     ? record.capabilities.filter((entry): entry is string => typeof entry === 'string')
     : [];
-  const stream = Object.prototype.hasOwnProperty.call(record, 'stream') ? record.stream : undefined;
   return {
     protocol: 'QBTCP',
     version: record.version,
     capabilities,
     ...(typeof record.qbj_version === 'string' ? { qbjVersion: record.qbj_version } : {}),
     ...(typeof record.name === 'string' ? { name: record.name } : {}),
-    ...(stream !== undefined ? { stream } : {}),
   };
 }
 
