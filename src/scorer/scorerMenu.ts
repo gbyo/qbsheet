@@ -71,6 +71,12 @@ export interface IScorerMenuInput {
    */
   /** True while a submission is in flight, when nothing about the game may change. */
   submitting: boolean;
+  /**
+   * Engine verdict for a timeout-start probe: whether either team could take a timeout right now.
+   * The menu asks the engine instead of restating its rule, so an entry that would only be
+   * refused — and silently dropped by the dialog — never appears.
+   */
+  timeoutAvailable: boolean;
   /** Present only when the host can deliver a mid-game or legacy QBJ. */
   canDownloadForms: boolean;
   /**
@@ -110,6 +116,7 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
     lastPlayed,
     keyboardEnabled,
     submitting,
+    timeoutAvailable,
     canDownloadForms,
     canRedo = false,
     openDialog,
@@ -164,7 +171,12 @@ export default function scorerMenuItems(input: IScorerMenuInput): IGameMenuItem[
       disabled: submitting,
     });
   }
-  if ((procedure?.timeoutsPerTeam ?? 0) > 0 && phase.kind !== 'complete' && phase.kind !== 'timeout') {
+  if (
+    (procedure?.timeoutsPerTeam ?? 0) > 0 &&
+    phase.kind !== 'complete' &&
+    phase.kind !== 'timeout' &&
+    timeoutAvailable
+  ) {
     round.push({
       label: 'Timeout',
       icon: 'clock',
