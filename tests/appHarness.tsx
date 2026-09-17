@@ -104,6 +104,18 @@ export async function startLineups(): Promise<void> {
   });
 }
 
+/**
+ * Open the completion screen's Game details, where everything optional lives.
+ *
+ * A separate helper rather than a `press` because the redesign deliberately moved the exports, the
+ * statistics, the correction and the rematch off the completion surface: a test that still reached
+ * for them at the top level would be asserting on the toolbox the screen stopped being.
+ */
+export async function openGameDetails(): Promise<HTMLElement> {
+  await press('Game details');
+  return screen.getByRole('dialog', { name: 'Game details' });
+}
+
 export async function press(name: string | RegExp): Promise<void> {
   const button = await screen.findByRole('button', { name });
   await act(async () => {

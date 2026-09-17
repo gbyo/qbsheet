@@ -58,8 +58,11 @@ Read [During the game](During-the-game) for the controls, the corrections, and t
 ## Step 6. Hand over the result
 
 1. End the game. Read [Finish a game](Finish-a-game).
-2. Select **Export / backup…**, then **Download QBJ backup**.
+2. The completion screen shows **Result needs to be handed over**. Select **Download QBJ**.
 3. Give the file to the staff. Follow the instruction for your room.
+
+A file-only game has no server. The QBJ file is the result, so QBSheet asks for the download before
+it lets you leave the screen.
 
 The file name looks like this:
 

@@ -3,14 +3,6 @@
  * feedback so the scoresheet itself stays fixed under the scorekeeper's hands.
  */
 
-:root {
-  --room-motion-fast: 110ms;
-  --room-motion-standard: 180ms;
-  --room-motion-slow: 240ms;
-  --room-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --room-ease-standard: cubic-bezier(0.2, 0, 0, 1);
-}
-
 @keyframes qbsheet-fade-in {
   from {
     opacity: 0;

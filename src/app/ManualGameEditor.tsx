@@ -33,6 +33,7 @@ import HelpTooltip from './HelpTooltip';
 import {
   DraftSaveState,
   IManualGamePreset,
+  builtInManualRulePresets,
   cloneRules,
   emptyInput,
   hasMeaningfulAdvancedOptions,
@@ -121,6 +122,14 @@ export default function ManualGameEditor(props: {
         rules: scoringRulesInputDefaults(),
         options: { ...manualRoundOptionDefaults },
       },
+      // Common rule sets, above this device's own history: on the morning something has gone wrong
+      // they are what a room is most likely to want, and they are the same shape as every other row.
+      ...builtInManualRulePresets().map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        rules: cloneRules(preset.rules),
+        options: { ...preset.options },
+      })),
       ...presets.map((preset) => ({
         id: preset.id,
         label: preset.label,
@@ -252,7 +261,7 @@ export default function ManualGameEditor(props: {
         <details>
           <summary id="manual-presets-heading" className="shell-heading">
             <SectionIcon name="clock" />
-            Use recent setup
+            Use recent teams &amp; rosters
           </summary>
           <p className="shell-hint">
             Successful setups stay on this device as a convenience. Loading one changes this draft; it does
@@ -279,26 +288,6 @@ export default function ManualGameEditor(props: {
               </select>
               <button type="button" className="shell-button" disabled={!rosterPresetId} onClick={loadRosters}>
                 Load rosters
-              </button>
-            </div>
-            <div className="manual-preset-field">
-              <label className="shell-label" htmlFor="manual-rule-preset">
-                Rules and round options preset
-              </label>
-              <select
-                id="manual-rule-preset"
-                className="shell-input"
-                value={rulePresetId}
-                onChange={(event) => setRulePresetId(event.target.value)}
-              >
-                {rulePresets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="shell-button" onClick={loadRules}>
-                Load rules and round options
               </button>
             </div>
           </div>
@@ -354,6 +343,35 @@ export default function ManualGameEditor(props: {
             <SectionIcon name="lightning" />
             Scoring rules
           </h2>
+          {/*
+            The common formats, in the section they are about.
+
+            Rule presets used to sit beside the roster history inside a closed "recent setup"
+            disclosure, which is the wrong place for them twice over: they are not recent, and a room
+            whose tournament software has just gone down should not have to open a disclosure about
+            this device's history to say 15/10 with no negs. Loading one fills the fields below,
+            which stay editable, and nothing is committed until Start game.
+          */}
+          <div className="manual-preset-field manual-rule-preset">
+            <label className="shell-label" htmlFor="manual-rule-preset">
+              Start from a preset
+            </label>
+            <select
+              id="manual-rule-preset"
+              className="shell-input"
+              value={rulePresetId}
+              onChange={(event) => setRulePresetId(event.target.value)}
+            >
+              {rulePresets.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="shell-button" onClick={loadRules}>
+              Load rules and round options
+            </button>
+          </div>
           <ScoringRulesEditor
             idPrefix="manual-rules"
             basicVariant="full"
