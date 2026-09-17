@@ -128,5 +128,5 @@ test('a director’s ruling and a corrected team name both survive the tab dying
   }
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
 });

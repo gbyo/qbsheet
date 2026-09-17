@@ -25,7 +25,7 @@ test('the substitution control sits against the name, unbordered, with the rulin
     buffer: Buffer.from(JSON.stringify(packageValue)),
   });
   await chooseScoringLayout(page);
-  await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Starting lineup', exact: true })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six A starters');
   const right = prompt.getByLabel('Greenwood starters');

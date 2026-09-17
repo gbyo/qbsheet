@@ -13,7 +13,7 @@
  */
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { bonus, openApp, press, score } from './appHarness';
+import { bonus, openApp, openGameDetails, press, score } from './appHarness';
 import { claimResponseTimeoutMs } from '../src/persistence/TabClaim';
 
 afterEach(cleanup);
@@ -337,7 +337,12 @@ describe('finishing without anywhere to send it', () => {
     await screen.findByText('Final');
   }
 
-  test('the completion screen shows the full stat sheet and the next actions', async () => {
+  /**
+   * A standalone game's numbers are the whole point of having scored it, and they are still one
+   * press away — but they are in Game details with everything else optional rather than spread
+   * across a completion screen whose only job is to say the result is saved and let the room go.
+   */
+  test('the completion screen is quiet, and the full stat sheet is one press behind it', async () => {
     await openApp();
     await fillSetup({ label: 'R1 · 315' });
     await loadRulePreset('15/10, bonuses, no negs, 20 tossups');
@@ -346,9 +351,13 @@ describe('finishing without anywhere to send it', () => {
     await endGame();
     await submit();
 
-    const stats = screen.getByLabelText('Final statistics');
-    expect(within(stats).getByText(/4 tossups heard/)).toBeInTheDocument();
-    const dorman = within(stats).getByLabelText('Dorman players');
+    expect(screen.getByText(/Saved on this device/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(document.querySelectorAll('.shell-button.is-primary')).toHaveLength(1);
+
+    const details = await openGameDetails();
+    expect(within(details).getByText('Tossups heard').closest('div')).toHaveTextContent('Tossups heard4');
+    const dorman = within(details).getByLabelText('Dorman players');
     const alice = within(dorman).getByRole('row', { name: /Alice/ });
     expect(
       within(alice)
@@ -356,11 +365,10 @@ describe('finishing without anywhere to send it', () => {
         .map((cell) => cell.textContent),
     ).toEqual(['4', '1', '0', '15']);
 
-    expect(within(stats).getByRole('button', { name: 'Copy stats' })).toBeInTheDocument();
-    expect(within(stats).getByRole('button', { name: 'Download QBJ backup' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Review score' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Rematch' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
+    expect(within(details).getByRole('button', { name: 'Copy stats' })).toBeInTheDocument();
+    expect(within(details).getByRole('button', { name: 'Download QBJ copy' })).toBeInTheDocument();
+    expect(within(details).getByRole('button', { name: 'Correct result' })).toBeInTheDocument();
+    expect(within(details).getByRole('button', { name: 'Start a rematch' })).toBeInTheDocument();
   });
 
   test('Copy stats on the completion screen matches the finished game', async () => {
@@ -373,6 +381,7 @@ describe('finishing without anywhere to send it', () => {
     await endGame();
     await submit();
 
+    await openGameDetails();
     await press('Copy stats');
 
     await waitFor(() => expect(clipboard.texts).toHaveLength(1));
@@ -392,17 +401,17 @@ describe('finishing without anywhere to send it', () => {
     await endGame();
     await submit();
 
-    await press('Download QBJ backup');
+    const details = await openGameDetails();
+    await press('Download QBJ copy');
 
     expect(downloads.files).toHaveLength(1);
     const document_ = JSON.parse(downloads.files[0].contents) as {
       match_teams: { team: { name: string } }[];
     };
     expect(document_.match_teams.map((matchTeam) => matchTeam.team.name)).toEqual(['Dorman', 'Wren A']);
-    // The ordinary exports are untouched: the same disclosure, the same recorded download.
-    expect(await screen.findByText(/QBJ downloaded/)).toBeInTheDocument();
-    expect(screen.getByText('Files & exports')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
+    // The download is recorded, and the readable scoresheet is beside it rather than somewhere else.
+    expect(await screen.findByRole('button', { name: 'Download QBJ again' })).toBeInTheDocument();
+    expect(within(details).getByRole('button', { name: 'Download Excel scoresheet' })).toBeInTheDocument();
   });
 
   test('a refresh mid-game still comes back to the same score', async () => {

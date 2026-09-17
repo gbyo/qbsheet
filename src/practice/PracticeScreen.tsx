@@ -197,8 +197,8 @@ function nameList(names: readonly string[]): string {
  * scorekeeper who read four names off the guide and put them in the wrong order was left comparing two
  * lists of four identical names to find a difference that was in their order.
  *
- * So this tells the scorekeeper which players to Bench or Start, or points at the ↑/↓ controls when the
- * names are right but their seat order is not.
+ * So this tells the scorekeeper which players to remove or select. When the names are right but their
+ * seat order is not, clearing once and selecting in order is the shortest correction in the picker.
  */
 function practiceLineupProblem(side: LeftOrRight, chosen: readonly string[] | undefined): string | undefined {
   const team = side === 'left' ? practiceLeftTeam : practiceRightTeam;
@@ -216,7 +216,7 @@ function practiceLineupProblem(side: LeftOrRight, chosen: readonly string[] | un
 
   const seat = expected.findIndex((player, index) => selected[index] !== player);
   if (seat >= 0) {
-    return `Use the ↑/↓ controls to put ${nameList(expected)} in that order.`;
+    return `Choose Clear, then select ${nameList(expected)} in that order.`;
   }
   return undefined;
 }
