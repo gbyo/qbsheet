@@ -50,17 +50,6 @@ export interface IPairedRoom {
   roomToken: string;
   /** A stable per-browser label for presence and writer arbitration. Carries no authority. */
   deviceId: string;
-  /**
-   * Optional LAN fallback for the same room authority. Normalized, no trailing slash.
-   *
-   * Kept as a secondary endpoint under the same logical room, with its independently minted
-   * credentials below. A tournament-owned Internet endpoint is the normal primary; this is the
-   * venue-network address used when the primary is unreachable. Absent for rooms paired before
-   * the fallback existed, which stay primary-only.
-   */
-  lanBaseUrl?: string;
-  /** Room capability issued independently by the LAN Director for the same room. */
-  lanRoomToken?: string;
 }
 
 export interface IConnectedSession extends IPairedRoom {
@@ -68,9 +57,6 @@ export interface IConnectedSession extends IPairedRoom {
   /** Set once a game has been started, so a reload resumes the same session. */
   sessionId?: string;
   sessionToken?: string;
-  /** LAN session credentials are endpoint-specific and must never be replaced by relay credentials. */
-  lanSessionId?: string;
-  lanSessionToken?: string;
   /**
    * The local game record this connection belongs to.
    *
@@ -106,33 +92,7 @@ export function pairedRoomOf(session: IConnectedSession | null): IPairedRoom | n
     roomName: session.roomName,
     roomToken: session.roomToken,
     deviceId: session.deviceId,
-    ...(session.lanBaseUrl !== undefined ? { lanBaseUrl: session.lanBaseUrl } : {}),
-    ...(session.lanRoomToken !== undefined ? { lanRoomToken: session.lanRoomToken } : {}),
   };
-}
-
-/**
- * Whether a stored string is a usable secondary endpoint.
- *
- * Same rules as the primary address — http(s), no query, no fragment — and never equal to
- * the primary, which would make "fallback" a second copy of the same path. A stored value
- * that fails this (hand-edited storage, an older writer) is dropped, not repaired: the
- * room stays primary-only rather than failing over somewhere unvalidated.
- */
-function readLanBaseUrl(value: unknown, primary: string): string | undefined {
-  if (typeof value !== 'string' || value === '') return undefined;
-  const trimmed = value.trim();
-  if (!/^https?:\/\//i.test(trimmed)) return undefined;
-  let url: URL;
-  try {
-    url = new URL(trimmed);
-  } catch {
-    return undefined;
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined;
-  if (url.search !== '' || url.hash !== '') return undefined;
-  const normalized = `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, '')}`;
-  return normalized === primary ? undefined : normalized;
 }
 
 interface IStorageLike {
@@ -165,7 +125,8 @@ export function readConnection(
     if (typeof parsed.updatedAt !== 'string') return null;
     const updated = new Date(parsed.updatedAt).getTime();
     if (!Number.isFinite(updated)) return null;
-    const lanBaseUrl = readLanBaseUrl(parsed.lanBaseUrl, parsed.baseUrl);
+    // Stored secondary-endpoint credentials from the removed dual-transport era are
+    // deliberately not read back: this device talks to one tournament-control server.
     return {
       version: connectionVersion,
       baseUrl: parsed.baseUrl,
@@ -175,18 +136,12 @@ export function readConnection(
       deviceId: typeof parsed.deviceId === 'string' ? parsed.deviceId : newDeviceId(),
       sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
       sessionToken: typeof parsed.sessionToken === 'string' ? parsed.sessionToken : undefined,
-      lanSessionId: typeof parsed.lanSessionId === 'string' ? parsed.lanSessionId : undefined,
-      lanSessionToken: typeof parsed.lanSessionToken === 'string' ? parsed.lanSessionToken : undefined,
       gameRecordId: typeof parsed.gameRecordId === 'string' ? parsed.gameRecordId : undefined,
       progressSequence:
         typeof parsed.progressSequence === 'number' && Number.isFinite(parsed.progressSequence)
           ? parsed.progressSequence
           : undefined,
       tournamentKey: typeof parsed.tournamentKey === 'string' ? parsed.tournamentKey : undefined,
-      ...(lanBaseUrl !== undefined ? { lanBaseUrl } : {}),
-      ...(lanBaseUrl !== undefined && typeof parsed.lanRoomToken === 'string' && parsed.lanRoomToken
-        ? { lanRoomToken: parsed.lanRoomToken }
-        : {}),
       updatedAt: parsed.updatedAt,
     };
   } catch {

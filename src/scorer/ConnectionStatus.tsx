@@ -257,8 +257,8 @@ export function ConnectionDetailDialog(props: {
   /** The word the header is showing, when the game's standing is not a network fact. See `Scorer`. */
   statusLabel?: string;
   /**
-   * Which path serves the game, in troubleshooting words ("internet relay", "local
-   * network", "this device only"). Present for connected games; absent for file games.
+   * Which server serves the game, in troubleshooting words (a tournament-control address
+   * for connected games). Present for connected games; absent for file games.
    * Never a credential — endpoints are normalized addresses with no query or fragment.
    */
   scoringPath?: string;

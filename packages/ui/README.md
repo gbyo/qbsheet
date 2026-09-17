@@ -51,4 +51,4 @@ canonical `--qbs-*` names.
 - Recovery Mode uses the same CSS-only compatibility entry point and stays independently bootable.
 - Director keeps its `--director-*` aliases for reviewable migration while those names resolve to
   the Scorer-led shared values.
-- QBBridge uses the canonical tokens and the shared controls directly.
+- Director uses the canonical tokens and the shared controls directly.

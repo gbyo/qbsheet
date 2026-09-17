@@ -62,12 +62,7 @@ import FruityServerClient, {
   IWriterConflict,
   readWriterConflict,
 } from '../integrations/fruity/FruityServerClient';
-import { readResultReceipt } from '../integrations/fruity/ProtocolAdapters';
-import {
-  classifyFinalDelivery,
-  deliverFinalResult,
-  ProgressSender,
-} from '../integrations/fruity/FruityResultDestination';
+import { deliverFinalResult, ProgressSender } from '../integrations/fruity/FruityResultDestination';
 import type { IFinalDelivery } from '../integrations/fruity/FruityResultDestination';
 import {
   ControlRequestState,
@@ -78,32 +73,6 @@ import {
 import { ConnectionTimeline, connectionTimeline } from './ConnectionTimeline';
 import { buildVersion } from '../pwa/BuildVersion';
 import { qbjSerializationVersion } from '../qbj/QbjSerialization';
-import {
-  RELAY_RECEIPT_COPY,
-  classifyTransportFailure,
-  describeTransport,
-  endpointForTransport,
-  notePreferredPathHealed,
-  notePrimaryResult,
-  notePrimarySuccess,
-  newFinalRetryKey,
-  PRIMARY_HEALTH_CHECK_INTERVAL_MS,
-  selectTransportPollIntervalMs,
-  transportForContractState,
-  transportStatusCopy,
-  type IFailoverMemory,
-  type IQbtcpEndpoints,
-  type QbtcpTransport,
-  initialFailoverMemory,
-} from '../qbtcp/QbtcpPreferredTransport';
-import {
-  readStreamDescriptor,
-  nextTransportState,
-  streamUrl,
-  type TransportEvent,
-  type TransportState,
-} from '../qbtcp/QbtcpStream';
-import { QbtcpStreamClient, browserSocketFactory, type QbtcpSocketFactory } from '../qbtcp/QbtcpStreamClient';
 
 /** How often a room asks control what it should be playing. */
 export const assignmentPollIntervalMs = 10_000;
@@ -112,11 +81,7 @@ export const assignmentPollIntervalMs = 10_000;
 export interface ICredentialRepair {
   sessionId?: string;
   sessionToken?: string;
-  lanSessionId?: string;
-  lanSessionToken?: string;
 }
-
-export type RoomCredentialEndpoint = 'primary' | 'lan';
 
 export interface IConnectedRuntimeInput {
   client: FruityServerClient;
@@ -134,7 +99,7 @@ export interface IConnectedRuntimeInput {
    */
   enabled: boolean;
   /** Offer to pair this room again, in place. Never navigates. */
-  onRepairConnection?: (endpoint: RoomCredentialEndpoint) => void;
+  onRepairConnection?: () => void;
   /** A repair produced new session credentials. Persist them; the game does not change. */
   onCredentialsRepaired?: (repair: ICredentialRepair) => void;
   /** The highest progress sequence this room has already used, as it was last persisted. */
@@ -149,40 +114,26 @@ export interface IConnectedRuntimeInput {
    * device-wide buffer; see `ConnectionTimeline`.
    */
   timeline?: ConnectionTimeline;
-  /**
-   * A client for the tournament-supplied LAN fallback under the same room authority.
-   *
-   * Optional: rooms paired without a fallback stay primary-only and this hook behaves as
-   * before. When present and the primary stops answering, assignment, progress, and finals
-   * move to this client with its endpoint-specific credentials — one logical room/game,
-   * two authorities — and stay there until the preferred path proves healthy again.
-   */
-  lanClient?: FruityServerClient;
-  /** Credentials minted by the LAN authority; required before LAN can be selected. */
-  lanIdentity?: IRoomIdentity;
-  lanCredentials?: ISessionCredentials;
-  /** The game opened on LAN while the preferred Internet endpoint was unavailable. */
-  initialLan?: boolean;
-  /**
-   * How the realtime stream is opened. Defaults to the browser WebSocket; `null`
-   * disables the stream (honest HTTP-only operation); tests inject a fake.
-   */
-  socketFactory?: QbtcpSocketFactory | null;
+}
+
+/**
+ * The one tournament-control server this room talks to, over plain HTTP.
+ *
+ * There is exactly one authority per game now: whatever server the room paired with.
+ * `http` names it; `none` is a file game with no server behind it.
+ */
+export interface IQbtcpTransport {
+  kind: 'http' | 'none';
+  endpoint: string | null;
 }
 
 export interface IConnectedRuntime {
   connection: RoomConnectionState;
   /** Set when control answered but the poll failed: the game is real, the room state may be stale. */
   degradedMessage?: string;
-  /**
-   * Which path currently serves the game: Internet stream, Internet HTTP, LAN, or none.
-   *
-   * Sits underneath `connection`: the room still reads Connected/Offline while this records
-   * which endpoint earned the word, for calm status copy and troubleshooting diagnostics.
-   * Transport changes never unmount the game.
-   */
-  transport: QbtcpTransport;
-  /** The operational words for `transport`: connected, local-network, or keep-scoring copy. */
+  /** The single server behind this game, or none for a file game. */
+  transport: IQbtcpTransport;
+  /** The operational words for `transport`. */
   transportNote: string;
   alerts: IScorerAlert[];
   /** Epoch ms of the last snapshot control accepted, or null. */
@@ -453,11 +404,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     progressSequence,
     onProgressSequence,
     timeline = connectionTimeline,
-    lanClient,
-    lanIdentity,
-    lanCredentials,
-    initialLan = false,
-    socketFactory,
   } = input;
 
   /**
@@ -495,7 +441,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const [connection, setConnection] = useState(RoomConnectionState.Connected);
   const [degradedMessage, setDegradedMessage] = useState<string | undefined>(undefined);
   const [roomCredentialProblem, setRoomCredentialProblem] = useState(false);
-  const [roomCredentialEndpoint, setRoomCredentialEndpoint] = useState<RoomCredentialEndpoint>('primary');
   /** Control accepted the credential and refused the operation. A person, not a code, resolves it. */
   const [forbidden, setForbidden] = useState<string | null>(null);
   const [sessionCredentialProblem, setSessionCredentialProblem] = useState(false);
@@ -504,89 +449,13 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const [reassigned, setReassigned] = useState(false);
   const [tournamentSwitched, setTournamentSwitched] = useState(false);
   /**
-   * Which path serves the game right now. Starts as primary HTTP: discovery has not run
-   * yet, so claiming the stream would be inferring support from the URL — exactly what
-   * the contract forbids. A client with no address (a file game) starts local-only.
+   * The one server behind this game. A client with no address (a file game) is local-only.
    */
-  const startsOnLan = Boolean(initialLan && lanClient && lanIdentity && lanCredentials);
-  const [transport, setTransport] = useState<QbtcpTransport>(() =>
-    startsOnLan && lanClient
-      ? { kind: 'lan', endpoint: lanClient.baseUrl }
-      : client.baseUrl
-        ? { kind: 'internet-http', endpoint: client.baseUrl }
-        : { kind: 'none' },
-  );
-  /**
-   * The contract-level connection underneath the endpoint-aware transport above.
-   *
-   * Advanced only through `nextTransportState`, so the runtime implements the transition
-   * table in `docs/QBTCP-STREAM.md` exactly rather than approximating it per call site.
-   * The LAN rides on `http-only` plus the failover latch: no new stream is opened against
-   * it, and no second logical session exists.
-   */
-  const contractRef = useRef<TransportState>('http-only');
-  /** Sticky failover memory for this mounted game. Reset per mount, never per poll. */
-  const failoverRef = useRef<IFailoverMemory>(
-    startsOnLan ? { consecutivePrimaryFailures: 0, lanActive: true } : initialFailoverMemory,
-  );
-  /** The live stream client, when discovery advertised one and this browser could open it. */
-  const streamRef = useRef<QbtcpStreamClient | null>(null);
-  /**
-   * The latest poll body, for stream pushes to trigger.
-   *
-   * A server push is a hint, per the contract — the client refetches over HTTP and converges —
-   * so `assignment-changed` and friends call through here rather than duplicating the poll.
-   * Assigned from the committed poll effect; stream callbacks are async tasks that may read it.
-   */
-  const pollRef = useRef<() => void>(() => undefined);
-  const transportRef = useRef(transport);
-  useLayoutEffect(() => {
-    transportRef.current = transport;
-  }, [transport]);
-
-  const lanReady = Boolean(lanClient && lanIdentity && lanCredentials);
-  const endpoints = useMemo<IQbtcpEndpoints>(
-    () => ({
-      primary: client.baseUrl,
-      ...(lanReady && lanClient ? { lan: lanClient.baseUrl } : {}),
-    }),
-    [client, lanClient, lanReady],
-  );
-
-  /**
-   * Fold one contract event into the connection both layers hold.
-   *
-   * The state update is identity-stable when nothing changed, so a repeated `http-ok`
-   * does not restart the assignment poll: the poll restarts only when the transport — and
-   * therefore its cadence — actually moves.
-   */
-  const applyTransportEvent = useCallback(
-    (event: TransportEvent) => {
-      contractRef.current = nextTransportState(contractRef.current, event);
-      const lanActive = failoverRef.current.lanActive;
-      setTransport((previous) => {
-        const next = transportForContractState(contractRef.current, endpoints, lanActive);
-        if (previous.kind === next.kind && endpointForTransport(previous) === endpointForTransport(next))
-          return previous;
-        return next;
-      });
-    },
-    [endpoints],
-  );
-
-  /** Which client serves the next HTTP operation: the LAN once it has taken over. */
-  const getActiveClient = useCallback(
-    () => (failoverRef.current.lanActive && lanReady && lanClient ? lanClient : client),
-    [client, lanClient, lanReady],
-  );
-  const getActiveIdentity = useCallback(
-    () => (failoverRef.current.lanActive && lanReady && lanIdentity ? lanIdentity : identity),
-    [identity, lanIdentity, lanReady],
-  );
-  const getActiveCredentials = useCallback(
-    () => (failoverRef.current.lanActive && lanReady && lanCredentials ? lanCredentials : credentials),
-    [credentials, lanCredentials, lanReady],
-  );
+  const transport: IQbtcpTransport = client.baseUrl
+    ? { kind: 'http', endpoint: client.baseUrl }
+    : { kind: 'none', endpoint: null };
+  const transportNote =
+    transport.kind === 'http' && transport.endpoint ? `Connected to ${transport.endpoint}` : 'Local only';
   const [serverSnapshotAt, setServerSnapshotAt] = useState<number | null>(null);
   const [snapshotError, setSnapshotError] = useState<string | undefined>(undefined);
   const helpStorageKey = useMemo(
@@ -764,7 +633,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     const readVersion = helpMutationVersion.current;
     const mutationInFlightAtRead = helpSendInFlight.current !== null || helpClearInFlight.current !== null;
     const read = Promise.resolve()
-      .then(() => getActiveClient().readHelp(getActiveIdentity()))
+      .then(() => client.readHelp(identity))
       .catch((): HelpReadResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
     helpReadInFlight.current = read;
     try {
@@ -832,8 +701,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       if (helpReadInFlight.current === read) helpReadInFlight.current = null;
     }
   }, [
-    getActiveClient,
-    getActiveIdentity,
+    client,
+    identity,
     enabled,
     helpStorageKey,
     noteHelpCredentialProblem,
@@ -856,7 +725,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       setControlRequestValue({ kind: 'sending', ...draft });
 
       const send = Promise.resolve()
-        .then(() => getActiveClient().requestHelp(getActiveIdentity(), draft.category, draft.message))
+        .then(() => client.requestHelp(identity, draft.category, draft.message))
         .catch((): HelpRequestResult => ({
           kind: 'unreachable',
           error: 'Could not reach tournament control.',
@@ -909,14 +778,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
         if (helpSendInFlight.current === send) helpSendInFlight.current = null;
       }
     },
-    [
-      getActiveClient,
-      getActiveIdentity,
-      helpStorageKey,
-      noteHelpCredentialProblem,
-      setControlRequestValue,
-      timeline,
-    ],
+    [client, identity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline],
   );
 
   const retryControlRequest = useCallback(async (): Promise<HelpRequestResult | null> => {
@@ -936,7 +798,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     if (helpClearInFlight.current) return helpClearInFlight.current;
     helpMutationVersion.current += 1;
     const clear = Promise.resolve()
-      .then(() => getActiveClient().cancelHelp(getActiveIdentity(), current.request.id as string))
+      .then(() => client.cancelHelp(identity, current.request.id as string))
       .catch((): HelpClearResult => ({ kind: 'unreachable', error: 'Could not reach tournament control.' }));
     helpClearInFlight.current = clear;
     try {
@@ -956,14 +818,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     } finally {
       if (helpClearInFlight.current === clear) helpClearInFlight.current = null;
     }
-  }, [
-    getActiveClient,
-    getActiveIdentity,
-    helpStorageKey,
-    noteHelpCredentialProblem,
-    setControlRequestValue,
-    timeline,
-  ]);
+  }, [client, identity, helpStorageKey, noteHelpCredentialProblem, setControlRequestValue, timeline]);
 
   /**
    * Reopen this room's session with the room capability it still holds.
@@ -977,8 +832,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       setRepairMessage('This game has no scheduled match to reopen. Finish it and hand the QBJ over.');
       return false;
     }
-    const activeClient = getActiveClient();
-    const opened = await activeClient.openSession(getActiveIdentity(), scheduledMatchId);
+    const opened = await client.openSession(identity, scheduledMatchId);
     if (!opened.ok) {
       noteWrite(opened);
       setRepairMessage(opened.error);
@@ -1000,25 +854,12 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     // that did not change means that effect never runs. Without this, a session refused twice in
     // one game would silently stop repairing itself after the first.
     autoRepairAttempted.current = false;
-    onCredentialsRepaired?.(
-      activeClient === client
-        ? { sessionId: opened.value.sessionId, sessionToken: opened.value.token }
-        : { lanSessionId: opened.value.sessionId, lanSessionToken: opened.value.token },
-    );
+    onCredentialsRepaired?.({ sessionId: opened.value.sessionId, sessionToken: opened.value.token });
     return true;
-  }, [
-    getActiveClient,
-    getActiveIdentity,
-    client,
-    scheduledMatchId,
-    onCredentialsRepaired,
-    noteWrite,
-    timeline,
-  ]);
+  }, [client, identity, scheduledMatchId, onCredentialsRepaired, noteWrite, timeline]);
 
   const takeOverWriter = useCallback(async () => {
-    const activeClient = getActiveClient();
-    const result = await activeClient.takeWriter(getActiveIdentity(), getActiveCredentials());
+    const result = await client.takeWriter(identity, credentials);
     if (!result.ok) {
       noteWrite(result);
       setRepairMessage(result.error);
@@ -1027,20 +868,8 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     setRepairMessage(undefined);
     setWriterConflict(null);
     timeline.record('writer-taken');
-    onCredentialsRepaired?.(
-      activeClient === client
-        ? { sessionId: result.value.sessionId, sessionToken: result.value.token }
-        : { lanSessionId: result.value.sessionId, lanSessionToken: result.value.token },
-    );
-  }, [
-    getActiveClient,
-    getActiveIdentity,
-    getActiveCredentials,
-    client,
-    onCredentialsRepaired,
-    noteWrite,
-    timeline,
-  ]);
+    onCredentialsRepaired?.({ sessionId: result.value.sessionId, sessionToken: result.value.token });
+  }, [client, identity, credentials, onCredentialsRepaired, noteWrite, timeline]);
 
   /**
    * One unattended reopen per session problem, and no more.
@@ -1073,35 +902,18 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
   const sendProgress = useCallback(
     async (qbj: object) => {
       if (!writesAllowedRef.current) return;
-      // A healthy stream carries progress: one coalesced snapshot over the authenticated
-      // connection instead of an HTTP request per interval. The 60-second HTTP reconcile
-      // keeps confirming the path underneath, so the timestamp below means "handed to the
-      // relay stream", re-confirmed by polling — never a guess about the server.
-      const stream = streamRef.current;
-      if (stream?.isLive) {
-        const sequence = nextSequence();
-        stream.offerProgress(sequence, qbj);
-        setServerSnapshotAt(Date.now());
-        setSnapshotError(undefined);
-        timeline.record('progress-sent', 'via internet relay');
-        return;
-      }
-      const activeClient = getActiveClient();
-      const result = await activeClient.putSnapshot(getActiveCredentials(), qbj, nextSequence());
+      const result = await client.putSnapshot(credentials, qbj, nextSequence());
       if (result.ok) {
         setServerSnapshotAt(Date.now());
         setSnapshotError(undefined);
-        timeline.record(
-          'progress-sent',
-          activeClient === client ? undefined : `via ${describeTransport(transportRef.current)}`,
-        );
+        timeline.record('progress-sent');
       } else {
         setSnapshotError(result.detail);
         timeline.record('progress-refused', result.detail ?? result.error);
         noteWrite(result);
       }
     },
-    [client, noteWrite, nextSequence, timeline, getActiveClient, getActiveCredentials],
+    [client, credentials, noteWrite, nextSequence, timeline],
   );
   /*
    * The sender is built by an effect and held in a ref, not memoized into render.
@@ -1132,160 +944,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     };
   }, [sendProgress]);
 
-  /**
-   * The realtime stream, when the server offers one and this browser can open one.
-   *
-   * Opens only on capability plus descriptor — never from a URL convention — and only while
-   * a game is live. An HTTP-only server skips all of this and works exactly as before;
-   * so does a browser without WebSocket. Pushes refetch over HTTP and converge; the stream
-   * never unmounts, never takes the writer lock, and never marks a final sent.
-   */
-  useEffect(() => {
-    if (!enabled) return undefined;
-    if (typeof client.ensureDiscovered !== 'function') return undefined;
-    const factory = socketFactory === undefined ? browserSocketFactory() : socketFactory;
-    if (!factory) return undefined;
-    let cancelled = false;
-    let stream: QbtcpStreamClient | null = null;
-    void Promise.resolve()
-      .then(() => client.ensureDiscovered())
-      .then((discovery) => {
-        if (cancelled || !discovery) return;
-        const descriptor = readStreamDescriptor(discovery);
-        const url = descriptor ? streamUrl(client.baseUrl, descriptor) : null;
-        // No capability, no stream. HTTP remains the whole transport, as it always was.
-        if (!descriptor || !url) return;
-        if (cancelled) return;
-        applyTransportEvent('stream-available');
-        stream = new QbtcpStreamClient({
-          url,
-          credentials: {
-            ...(identity.token ? { roomToken: identity.token } : {}),
-            ...(credentials.sessionId ? { sessionId: credentials.sessionId } : {}),
-            ...(credentials.token ? { sessionToken: credentials.token } : {}),
-            ...(identity.deviceId ? { deviceId: identity.deviceId } : {}),
-          },
-          maxFrameBytes: descriptor.maxFrameBytes,
-          socketFactory: factory,
-          events: {
-            onStateChange: (_state, event) => {
-              if (cancelled) return;
-              applyTransportEvent(event);
-              if (event === 'stream-open') timeline.record('stream-connected', url);
-              if (event === 'stream-closed') timeline.record('stream-reconnecting', url);
-            },
-            onOpen: () => {
-              if (cancelled) return;
-              // Explicit reconciliation, per the contract: never assume missed pushes did
-              // not exist. When the LAN has been serving, prove the primary healthy first
-              // and only then come home — a converged handoff, not a blind cutover.
-              if (failoverRef.current.lanActive) {
-                void client.assignment(identity).then((result) => {
-                  if (cancelled) return;
-                  if (result.ok) {
-                    failoverRef.current = notePreferredPathHealed(failoverRef.current);
-                    applyTransportEvent('stream-open');
-                    timeline.record('connected', 'via internet relay');
-                  }
-                  pollRef.current();
-                });
-              } else {
-                pollRef.current();
-              }
-            },
-            onFrame: (frame) => {
-              if (cancelled) return;
-              // Assignment and session pushes are hints: refetch and let the revision
-              // comparison decide. A stale relay push loses to newer LAN state by rule.
-              if (frame.type === 'help-changed') void reconcileHelp();
-              else if (frame.type === 'assignment-changed' || frame.type === 'session-changed')
-                pollRef.current();
-            },
-            onResync: (reason) => {
-              if (cancelled) return;
-              // The stream is no longer whole. Refetch rather than replay.
-              pollRef.current();
-              timeline.record('degraded', `resync required: ${reason}`);
-            },
-            onDegraded: (reason) => {
-              if (cancelled) return;
-              timeline.record('degraded', `relay draining: ${reason}`);
-            },
-            onUnauthorized: () => {
-              if (cancelled) return;
-              // Same repair as an HTTP 401 on the session: reopen with the room
-              // capability the room still holds. The room pairing is preserved.
-              setSessionCredentialProblem(true);
-              applyTransportEvent('stream-closed');
-            },
-            onWriterConflict: (error) => {
-              if (cancelled) return;
-              // Surfaced, never taken. A person presses Take over, or does not.
-              setWriterConflict({ canTakeOver: error.canTakeOver === true });
-              timeline.record('writer-conflict');
-            },
-            onProtocolError: (detail) => {
-              if (cancelled) return;
-              timeline.record('degraded', detail);
-            },
-          },
-        });
-        streamRef.current = stream;
-        stream.start();
-      })
-      .catch(() => {
-        // Discovery failure is the poll's business; it retries on its own cadence.
-      });
-    return () => {
-      cancelled = true;
-      stream?.close();
-      if (stream !== null && streamRef.current === stream) streamRef.current = null;
-    };
-    // The identity object is intentionally narrowed to its scalars: ScoringScreen rebuilds
-    // the object when the connection record changes (e.g. progressSequence), and restarting
-    // the stream on those churns would drop a live connection for no behavioral reason.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    enabled,
-    client,
-    credentials.sessionId,
-    credentials.token,
-    identity.roomId,
-    identity.token,
-    identity.deviceId,
-    socketFactory,
-    applyTransportEvent,
-    reconcileHelp,
-    timeline,
-  ]);
-
-  /**
-   * Heal the primary while the LAN serves the game.
-   *
-   * The stream reconnect loop already probes a stream-capable primary; this covers the
-   * HTTP-only one, which has no stream to come home on. One cheap check a minute: on
-   * success the game migrates back and the restarting poll reconciles onto it. Until
-   * then the LAN keeps serving — stability over chasing.
-   */
-  useEffect(() => {
-    if (!enabled || !lanReady || !lanClient || transport.kind !== 'lan') return undefined;
-    let cancelled = false;
-    const check = async () => {
-      const result = await client.assignment(identity);
-      if (cancelled) return;
-      if (result.ok) {
-        failoverRef.current = notePreferredPathHealed(failoverRef.current);
-        applyTransportEvent('http-ok');
-        timeline.record('connected', 'via internet relay');
-      }
-    };
-    const timer = setInterval(() => void check(), PRIMARY_HEALTH_CHECK_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [enabled, lanReady, lanClient, transport.kind, client, identity, applyTransportEvent, timeline]);
-
   // The assignment poll. Its only outputs are state; it can neither start nor stop a game.
   useEffect(() => {
     if (!enabled) return undefined;
@@ -1295,44 +953,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // asked again ten seconds later, so the room asks once and then waits for somebody to press
       // the action on the alert.
       if (forbiddenRef.current !== null) return;
-      const activeClient = getActiveClient();
-      const viaPrimary = activeClient === client;
-      const result = await activeClient.assignment(getActiveIdentity());
+      const result = await client.assignment(identity);
       if (cancelled) return;
       const classified = classifyPoll(result);
       setConnection(classified.connection);
       // Only transitions are kept; a poll every ten seconds all day would otherwise be the whole
       // history. See `ConnectionTimeline`.
       timeline.record(classified.connection);
-      // Every poll is also a transport answer. Successes and outages move the contract state;
-      // credential refusals and explicit rejections deliberately do not — those are answers
-      // from the same authority on either path, and failing over cannot fix them.
-      applyTransportEvent(result.ok ? 'http-ok' : 'http-failed');
-      if (viaPrimary) {
-        if (result.ok) {
-          failoverRef.current = notePrimarySuccess(failoverRef.current);
-        } else if (contractRef.current !== 'stream-live') {
-          // A live stream is stronger evidence than one HTTP poll: the primary is serving
-          // this room right now, so a failed reconcile never latches the LAN by itself.
-          // Everywhere else, repeated primary outages earn the fallback.
-          const before = failoverRef.current;
-          const after = notePrimaryResult(before, classifyTransportFailure(result), lanReady);
-          failoverRef.current = after;
-          if (after.lanActive && !before.lanActive && lanClient) {
-            // The game did not move: both endpoint-specific sessions name the same match.
-            // The poll restarting below reconciles onto the LAN authority.
-            timeline.record('lan-fallback', describeTransport({ kind: 'lan', endpoint: lanClient.baseUrl }));
-            applyTransportEvent('http-ok');
-          }
-        }
-      } else if (!result.ok && classifyTransportFailure(result) === 'transport-unavailable') {
-        // The LAN stopped answering too. Local-only continuation: the game stays mounted,
-        // the final stays durable, and both paths keep healing underneath. No second
-        // `http-failed` here — the poll already applied it above, and the transition is
-        // idempotent, so re-applying would only restate the same contract state.
-      }
       if (classified.credentialProblem) {
-        setRoomCredentialEndpoint(viaPrimary ? 'primary' : 'lan');
         setRoomCredentialProblem(true);
         setForbidden(null);
         timeline.record('room-refused');
@@ -1373,36 +1001,15 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       const latestSnapshot = latestSnapshotRef.current;
       if (latestSnapshot !== null) senderRef.current?.offer(latestSnapshot);
     };
-    pollRef.current = () => void poll();
     void poll();
-    // A healthy stream pushes assignment changes, so routine polling relaxes to the documented
-    // reconciliation interval; everywhere else the normal cadence stands. The poll restarts —
-    // and runs once immediately — whenever the transport moves, which is also what reconciles
-    // onto a new path after failover or healing.
-    const timer = setInterval(() => void poll(), selectTransportPollIntervalMs(transportRef.current));
+    const timer = setInterval(() => void poll(), assignmentPollIntervalMs);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
     // `sendProgress` rather than the sender itself, so the poll still restarts on the same changes
-    // the memoized sender used to signal. `transport.kind` restarts it when the cadence moves.
-    // `getActiveClient` and `applyTransportEvent` are stable across those restarts.
-  }, [
-    client,
-    identity,
-    scheduledMatchId,
-    tournamentKey,
-    enabled,
-    reconcileHelp,
-    sendProgress,
-    timeline,
-    transport.kind,
-    getActiveClient,
-    getActiveIdentity,
-    applyTransportEvent,
-    lanClient,
-    lanReady,
-  ]);
+    // the memoized sender used to signal.
+  }, [client, identity, scheduledMatchId, tournamentKey, enabled, reconcileHelp, sendProgress, timeline]);
 
   /*
    * Built as one literal rather than by pushing onto a list.
@@ -1425,7 +1032,7 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
                 ? [
                     {
                       label: 'Repair connection…',
-                      onSelect: () => onRepairConnection(roomCredentialEndpoint),
+                      onSelect: () => onRepairConnection(),
                     },
                   ]
                 : undefined,
@@ -1496,7 +1103,6 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
     ],
     [
       roomCredentialProblem,
-      roomCredentialEndpoint,
       forbidden,
       sessionCredentialProblem,
       writerConflict,
@@ -1530,35 +1136,9 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
           retryable: forbidden !== null || writerConflict !== null,
         };
       }
-      // A healthy stream takes the final through the protocol's durable-receipt path: the
-      // relay commits before answering, so a receipt means retained even when Director is
-      // offline — received, never standings-accepted. The stream frame carries a
-      // retry key, and the HTTP fallthrough below posts the bare QBJ both servers
-      // accept, so a repeat is answered `duplicate: true` and exactly one result
-      // is retained.
-      const stream = streamRef.current;
-      if (stream?.isLive) {
-        const answered = await stream.submitFinal(newFinalRetryKey(), qbj);
-        if (answered.delivered) {
-          const receipt = readResultReceipt(answered.receipt ?? {});
-          const delivery = classifyFinalDelivery({ ok: true, value: receipt });
-          if (delivery.delivery === 'sent' && delivery.reviewRequired) {
-            timeline.record('relay-receipt', RELAY_RECEIPT_COPY);
-            return { ...delivery, detail: RELAY_RECEIPT_COPY };
-          }
-          timeline.record(delivery.duplicate ? 'final-duplicate' : 'final-sent', 'via internet relay');
-          return delivery;
-        }
-        // Unanswered over the stream is not a refusal — retry over HTTP with the same
-        // bytes, and let fingerprint idempotency converge the two paths.
-      }
-      const activeClient = getActiveClient();
-      const delivered = await deliverFinalResult(activeClient, getActiveCredentials(), qbj, noteWrite);
+      const delivered = await deliverFinalResult(client, credentials, qbj, noteWrite);
       if (delivered.delivery === 'sent') {
-        timeline.record(
-          delivered.duplicate ? 'final-duplicate' : 'final-sent',
-          activeClient === client ? undefined : `via ${describeTransport(transportRef.current)}`,
-        );
+        timeline.record(delivered.duplicate ? 'final-duplicate' : 'final-sent');
       } else if (delivered.delivery === 'pending') {
         timeline.record('final-pending', delivered.detail);
       } else {
@@ -1566,22 +1146,22 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       }
       return delivered;
     },
-    [client, forbidden, noteWrite, timeline, writerConflict, getActiveClient, getActiveCredentials],
+    [client, credentials, forbidden, noteWrite, timeline, writerConflict],
   );
 
   const recoverFromServer = useCallback(async () => {
-    const result = await getActiveClient().recover(getActiveCredentials());
+    const result = await client.recover(credentials);
     if (!result.ok) {
       throw new Error(result.detail ?? result.error);
     }
     return result.value;
-  }, [getActiveClient, getActiveCredentials]);
+  }, [client, credentials]);
 
   const syncRosterPlayer = useCallback(
     async (teamName: string, playerName: string, teamId?: string, questionNumber?: number) => {
-      const result = await getActiveClient().addRosterPlayer(
-        getActiveIdentity(),
-        getActiveCredentials(),
+      const result = await client.addRosterPlayer(
+        identity,
+        credentials,
         teamName,
         playerName,
         teamId,
@@ -1595,14 +1175,14 @@ export default function useConnectedRuntime(input: IConnectedRuntimeInput): ICon
       // network problem the room can try again. The scorer says different things about each.
       return { ok: false, error: result.error, rejected: result.status !== undefined };
     },
-    [getActiveClient, getActiveIdentity, getActiveCredentials, timeline],
+    [client, identity, credentials, timeline],
   );
 
   return {
     connection,
     degradedMessage,
     transport,
-    transportNote: transportStatusCopy(transport),
+    transportNote,
     alerts,
     serverSnapshotAt,
     snapshotError,
