@@ -51,16 +51,19 @@ interface StatsTeamColumn {
 /**
  * The team columns worth printing for this game.
  *
- * Points, tossup points and bonus points always; bouncebacks, lightning and adjustments only when
- * the game actually has any. An empty "Bouncebacks" column in a format with no bouncebacks is a
- * question the person transcribing this has to stop and answer.
+ * Points and tossup points always; bonus points only when the format has them; bouncebacks,
+ * lightning and adjustments only when the game actually has any. An empty column for a scoring
+ * component this format does not use is a question the person transcribing this has to stop and
+ * answer.
  */
-function teamColumns(game: IDerivedGame): StatsTeamColumn[] {
+function teamColumns(format: IScorekeeperFormat, game: IDerivedGame): StatsTeamColumn[] {
   const columns: StatsTeamColumn[] = [
     { heading: 'Points', value: (team) => team.points },
     { heading: 'Tossup points', value: (team) => team.tossupPoints },
-    { heading: 'Bonus points', value: (team) => team.bonusPoints },
   ];
+  if (format.bonus.enabled) {
+    columns.push({ heading: 'Bonus points', value: (team) => team.bonusPoints });
+  }
   const either = (read: (team: IDerivedTeam) => number) => read(game.left) !== 0 || read(game.right) !== 0;
   if (either((team) => team.bonusBouncebackPoints)) {
     columns.push({ heading: 'Bouncebacks', value: (team) => team.bonusBouncebackPoints });
@@ -72,6 +75,13 @@ function teamColumns(game: IDerivedGame): StatsTeamColumn[] {
     columns.push({ heading: 'Adjustment', value: (team) => team.adjustmentPoints });
   }
   return columns;
+}
+
+function overtimeAnswerCountRow(format: IScorekeeperFormat, team: IDerivedTeam): string[] {
+  return [
+    statsCell(team.name),
+    ...format.answerTypes.map((answerType) => String(team.overtimeBuzzes.get(answerType.index) ?? 0)),
+  ];
 }
 
 export interface IStatsSheetOptions {
@@ -91,7 +101,7 @@ export function derivedStatsGrid(
   options: IStatsSheetOptions = {},
 ): string[][] {
   const label = options.gameLabel?.trim() ?? '';
-  const columns = teamColumns(game);
+  const columns = teamColumns(format, game);
   const grid: string[][] = [];
 
   if (label !== '') grid.push(['Game', statsCell(label)]);
@@ -112,6 +122,17 @@ export function derivedStatsGrid(
   grid.push(teamSummaryRow(game.left, columns));
   grid.push(teamSummaryRow(game.right, columns));
   grid.push([]);
+
+  if (game.overtimeTossupsRead > 0) {
+    // Player answer counts include overtime, matching the aggregate shape used by QBJ/YellowFruit.
+    // Keep the team-level overtime counts too so a no-bonus overtime conversion can be excluded from
+    // bonuses heard instead of looking like an ordinary regulation conversion after transcription.
+    grid.push(['Overtime answer counts']);
+    grid.push(['Team', ...format.answerTypes.map((answerType) => signedAnswerValue(answerType.value))]);
+    grid.push(overtimeAnswerCountRow(format, game.left));
+    grid.push(overtimeAnswerCountRow(format, game.right));
+    grid.push([]);
+  }
 
   grid.push([
     'Team',

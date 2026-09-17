@@ -48,6 +48,7 @@ function items(overrides: Partial<IScorerMenuInput> = {}, events: ScoreEvent[] =
     lastPlayed: 0,
     keyboardEnabled: false,
     submitting: false,
+    timeoutAvailable: true,
     canDownloadForms: false,
     canCorrectGame: false,
     openDialog: vi.fn(),
@@ -108,18 +109,37 @@ describe('what depends on the format', () => {
 
   test('End regulation is for a timed round, and only until regulation is over', () => {
     const timed = formatFor(CommonRuleSets.NaqtTimed);
-    expect(menu({ format: timed })).toContain('End regulation');
-    expect(menu({ format: formatFor(CommonRuleSets.NaqtUntimed) })).not.toContain('End regulation');
+    const played = [event({ type: 'tossup-dead', questionNumber: 1 })];
+    expect(menu({ format: timed }, played)).toContain('End regulation');
+    expect(menu({ format: formatFor(CommonRuleSets.NaqtUntimed) }, played)).not.toContain('End regulation');
 
     // Once the horn has gone, there is nothing left to end.
     const ended = [event({ type: 'end-regulation', questionNumber: 5, lastRegulationQuestion: 4 })];
     expect(menu({ format: timed }, ended)).not.toContain('End regulation');
   });
 
+  test('End regulation needs a played tossup, like ending early does', () => {
+    // Still on Choose starters: ending regulation now would jump to the overtime checkpoint
+    // with no regulation history, recoverable only via Undo or a procedure correction.
+    const timed = formatFor(CommonRuleSets.NaqtTimed);
+    expect(menu({ format: timed })).not.toContain('End regulation');
+    const played = [event({ type: 'tossup-dead', questionNumber: 1 })];
+    expect(menu({ format: timed }, played)).toContain('End regulation');
+  });
+
   test('a timeout is offered only by a procedure that has any', () => {
     expect(menu({ procedure: undefined })).not.toContain('Timeout');
     expect(menu({ procedure: { version: 1, halves: false, timeoutsPerTeam: 1 } })).toContain('Timeout');
     expect(menu({ procedure: { version: 1, halves: false, timeoutsPerTeam: 0 } })).not.toContain('Timeout');
+  });
+
+  test('a timeout is not offered when the engine would refuse one', () => {
+    // The engine allows a timeout only before an untouched tossup begins. A bonus in progress,
+    // a score-check, the lineup screen, or an answered tossup all refuse — and the menu asks
+    // the engine instead of restating that rule, so the verdict arrives as one boolean.
+    const timeouts = { version: 1, halves: false, timeoutsPerTeam: 1 };
+    expect(menu({ procedure: timeouts, timeoutAvailable: false })).not.toContain('Timeout');
+    expect(menu({ procedure: timeouts, timeoutAvailable: true })).toContain('Timeout');
   });
 });
 

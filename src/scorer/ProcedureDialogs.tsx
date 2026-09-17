@@ -235,7 +235,8 @@ export function TimeoutDialog(props: {
   extraTimeouts?: Record<LeftOrRight, number>;
   /** Opens the procedure/exception route. Absent when the host cannot record either. */
   onProcedureQuery?: (team: LeftOrRight) => void;
-  onRecord: (team: LeftOrRight) => void;
+  /** True when the timeout was recorded. A refusal keeps the dialog open (see below). */
+  onRecord: (team: LeftOrRight) => boolean;
   onClose: () => void;
 }) {
   const { game, timeoutsPerTeam, extraTimeouts, onProcedureQuery, onRecord, onClose } = props;
@@ -258,8 +259,10 @@ export function TimeoutDialog(props: {
                 className="scorer-choice"
                 disabled={exhausted}
                 onClick={() => {
-                  onRecord(side);
-                  onClose();
+                  // A refusal keeps the dialog open: closing it would read as a running timeout
+                  // while the room clock keeps going. The menu already hides the entry when the
+                  // engine would refuse, so this is the race slit, not the path.
+                  if (onRecord(side)) onClose();
                 }}
               >
                 {game[side].name}

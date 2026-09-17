@@ -163,7 +163,7 @@ export default function SpreadsheetCopyPanel(props: ISpreadsheetCopyPanelProps) 
       {result?.status === 'error' && (
         <p className="scorer-complete-warning" role="alert">
           {guidance === 'plain'
-            ? 'The stat copy could not be prepared. Finish the game review and try again.'
+            ? 'The stat copy could not be prepared. Try again, or use another export or backup option.'
             : 'The spreadsheet copy could not be prepared. Finish the game review and try again.'}
         </p>
       )}

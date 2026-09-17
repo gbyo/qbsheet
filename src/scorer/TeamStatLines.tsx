@@ -23,6 +23,7 @@ export default function TeamStatLines(props: { format: IScorekeeperFormat; team:
         {team.name} <span className="scorer-check-team-score">{team.points}</span>
       </h3>
       <table className="scorer-check-table">
+        <caption className="visually-hidden">{team.name} player statistics</caption>
         <thead>
           <tr>
             <th scope="col">Player</th>
@@ -54,7 +55,8 @@ export default function TeamStatLines(props: { format: IScorekeeperFormat; team:
         </tbody>
       </table>
       <p className="scorer-check-breakdown">
-        Tossup points {team.tossupPoints} · Bonus points {team.bonusPoints}
+        Tossup points {team.tossupPoints}
+        {format.bonus.enabled && <> · Bonus points {team.bonusPoints}</>}
         {team.bonusBouncebackPoints > 0 && <> · Bouncebacks {team.bonusBouncebackPoints}</>}
         {team.lightningPoints > 0 && <> · Lightning {team.lightningPoints}</>}
         {team.adjustmentPoints !== 0 && <> · Adjustment {signed(team.adjustmentPoints)}</>}
