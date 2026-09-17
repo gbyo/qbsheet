@@ -37,7 +37,7 @@ async function fillSetupForm(page: Page, label: string): Promise<void> {
 
 async function chooseStarters(page: Page): Promise<void> {
   await chooseScoringLayout(page);
-  await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Starting lineup', exact: true })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six starters');
   for (const player of ['Sarah', 'James', 'Alex', 'Chris']) {
@@ -56,6 +56,13 @@ async function chooseStarters(page: Page): Promise<void> {
  */
 async function scorePlayer(page: Page, playerName: string, ruling: string): Promise<void> {
   await page.getByRole('button', { name: `${playerName} ${ruling}`, exact: true }).click();
+}
+
+async function endGameEarly(page: Page, reason: string): Promise<void> {
+  await page.getByRole('button', { name: 'Game', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'End game early…' }).click();
+  await page.getByLabel('Why is the game ending early?').fill(reason);
+  await page.getByRole('button', { name: 'End the game now' }).click();
 }
 
 test('a practice game is created, scored, reloaded, finished and kept', async ({ page }) => {
@@ -91,41 +98,52 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
     await page.getByRole('button', { name: 'No buzz' }).click();
   }
 
+  // Completion is explicitly a review state, not a trap or a second final screen. Editing is visible
+  // before confirmation, while detailed exports stay out of the decision path until requested.
+  await expect(page.getByRole('heading', { name: 'Confirm the result' })).toBeVisible();
+  await expect(page.getByText(/You can still edit this game here/)).toBeVisible();
   await expect(page.getByLabel('Final score confirmed with both teams')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Copy game for tournament spreadsheet' })).toBeVisible();
-  await page.getByRole('button', { name: 'Copy game for tournament spreadsheet' }).click();
-  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('NEW BLANK TAB');
-  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('A1');
+  await page.getByRole('button', { name: 'Edit game' }).first().click();
+  await expect(page.getByRole('dialog', { name: 'Full scoresheet review' })).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+
+  const preSubmitExports = page.locator('details.scorer-review-export');
+  await expect(preSubmitExports.locator('summary')).toHaveText('Backup & export');
+  await expect(preSubmitExports).not.toHaveAttribute('open', '');
+  await expect(
+    preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }),
+  ).toBeHidden();
+  await preSubmitExports.locator('summary').click();
+  await expect(
+    preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }),
+  ).toBeVisible();
+  await preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }).click();
+  // Two copy panels share this class on the review screen — the readable stat sheet and the
+  // canonical tournament copy. The guidance being asserted belongs to the canonical one.
+  const tournamentCopy = page.getByRole('region', { name: 'Tournament spreadsheet copy' });
+  await expect(tournamentCopy).toContainText('NEW BLANK TAB');
+  await expect(tournamentCopy).toContainText('A1');
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
   await expect(page.locator('.final-row').first()).toContainText('45');
   await expect(page.locator('.final-row').nth(1)).toContainText('0');
 
-  // Nobody is waiting for this file, so nothing is demanded before the screen can be left. The
-  // optional exports stay out of the way until somebody asks for them.
-  const copy = page.locator('details.final-copy-details');
-  await expect(copy).toBeVisible();
-  await expect(copy.locator('summary')).toHaveText('Files & exports');
-  await expect(copy).not.toHaveAttribute('open', '');
-  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeHidden();
-  await copy.locator('summary').click();
-  await expect(copy).toHaveAttribute('open', '');
-  await expect(copy).toContainText('This result is saved on this device.');
-  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
-  await expect(copy.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
+  // Nobody is waiting for this file, so nothing is demanded before the screen can be left and
+  // nothing optional is on it. The copy is behind the one quiet door, named for what it is.
+  await expect(page.getByText('Saved on this device')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Download QBJ/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /handed off the result/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
 
-  // A finished result must remain editable. Return to the scorer, verify the completed review is
-  // still the active presentation, then submit it again so the original exit path remains covered.
-  await page.getByRole('button', { name: 'Review score' }).click();
-  await expect(page.locator('.scorer-completion')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Full scoresheet review' })).toBeVisible();
-  await page.getByLabel('Final score confirmed with both teams').check();
-  await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await page.getByRole('button', { name: 'Game details' }).click();
+  const details = page.getByRole('dialog', { name: 'Game details' });
+  await expect(details.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Start a rematch' })).toBeVisible();
+  await details.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(details).toBeHidden();
 
   await page.getByRole('button', { name: 'Done' }).click();
 
@@ -135,6 +153,70 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
     .filter({ has: page.getByRole('heading', { name: 'Recent' }) });
   await expect(recent).toContainText('Tuesday practice');
   await expect(recent).toContainText('Ninety Six');
+});
+
+test('reviewing an already submitted result does not claim it is unsent', async ({ page }) => {
+  await page.goto('/');
+
+  await fillSetupForm(page, 'Submitted review');
+  await page.getByRole('button', { name: 'Start game' }).click();
+  await chooseStarters(page);
+
+  // Score first: four scoreless tossups would end regulation tied and offer overtime
+  // instead of the review screen this test is about.
+  await scorePlayer(page, 'Sarah', 'Power');
+  await page.getByLabel('Bonus').getByRole('button', { name: '30', exact: true }).click();
+  for (let tossup = 2; tossup <= 4; tossup += 1) {
+    await page.getByRole('button', { name: 'No buzz' }).click();
+  }
+  await page.getByLabel('Final score confirmed with both teams').check();
+  await page.getByRole('button', { name: 'Submit result' }).click();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
+
+  // Correcting a result is an exception rather than a step in every finish, so it lives in Game
+  // details and is named for what it does.
+  await page.getByRole('button', { name: 'Game details' }).click();
+  await page
+    .getByRole('dialog', { name: 'Game details' })
+    .getByRole('button', { name: 'Correct result' })
+    .click();
+  await expect(page.locator('.scorer-completion')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Edit game' }).first()).toBeVisible();
+  await expect(page.getByText('Not submitted yet.')).toHaveCount(0);
+  await expect(page.getByText(/if you opened a result that was already sent/i)).toBeVisible();
+});
+
+test('an accidentally ended game can return to live scoring before submission', async ({ page }) => {
+  await page.goto('/');
+
+  await fillSetupForm(page, 'Resume review');
+  await page.getByRole('button', { name: 'Start game' }).click();
+  await chooseStarters(page);
+
+  await page.getByRole('button', { name: 'No buzz' }).click();
+  await expect(page.getByText('Tossup 2 of 4', { exact: true })).toBeVisible();
+  await endGameEarly(page, 'Ended by mistake');
+
+  await expect(page.getByRole('heading', { name: 'Confirm the result' })).toBeVisible();
+  await expect(page.getByText(/You can still edit this game here/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Resume scoring/ })).toBeVisible();
+
+  // Resume uses the same auditable correction surface as every other post-game correction. Removing
+  // the explicit game-ending event recalculates the phase and puts the ordinary scoresheet back.
+  await page.getByRole('button', { name: /^Resume scoring/ }).click();
+  const review = page.getByRole('dialog', { name: 'Full scoresheet review' });
+  await expect(review).toBeVisible();
+  const finish = review.locator('.scorer-review-event').filter({
+    hasText: 'Game ended early after 1 tossups: Ended by mistake',
+  });
+  await expect(finish).toBeVisible();
+  page.once('dialog', async (dialog) => dialog.accept());
+  await finish.getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+
+  await expect(page.locator('.scorer-completion')).toHaveCount(0);
+  await expect(page.getByText('Tossup 2 of 4', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'No buzz' })).toBeVisible();
 });
 
 test('a second practice between the same two teams is a second game', async ({ page }) => {

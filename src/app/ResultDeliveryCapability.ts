@@ -15,10 +15,6 @@ export interface IResultDeliveryCapability {
   baseUrl: string;
   sessionId: string;
   sessionToken: string;
-  /** Optional LAN authority and the independently minted session capability for this game. */
-  lanBaseUrl?: string;
-  lanSessionId?: string;
-  lanSessionToken?: string;
 }
 interface IStoredResultDeliveryCapability extends IResultDeliveryCapability {
   expiresAt: string;
@@ -46,25 +42,13 @@ function browserStorage(): IResultDeliveryCapabilityStorage | null {
 function validCapability(value: unknown): value is IResultDeliveryCapability {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const candidate = value as Partial<IResultDeliveryCapability>;
-  const lanAbsent =
-    candidate.lanBaseUrl === undefined &&
-    candidate.lanSessionId === undefined &&
-    candidate.lanSessionToken === undefined;
-  const lanComplete =
-    typeof candidate.lanBaseUrl === 'string' &&
-    candidate.lanBaseUrl !== '' &&
-    typeof candidate.lanSessionId === 'string' &&
-    candidate.lanSessionId !== '' &&
-    typeof candidate.lanSessionToken === 'string' &&
-    candidate.lanSessionToken !== '';
   return (
     typeof candidate.baseUrl === 'string' &&
     candidate.baseUrl !== '' &&
     typeof candidate.sessionId === 'string' &&
     candidate.sessionId !== '' &&
     typeof candidate.sessionToken === 'string' &&
-    candidate.sessionToken !== '' &&
-    (lanAbsent || lanComplete)
+    candidate.sessionToken !== ''
   );
 }
 
@@ -160,17 +144,12 @@ export class ResultDeliveryCapabilityStore {
       if (entry) this.remove(recordId);
       return null;
     }
+    // Stored secondary-endpoint credentials from the removed dual-transport era are
+    // deliberately not read back: retries go to the one server behind the game.
     return {
       baseUrl: entry.baseUrl,
       sessionId: entry.sessionId,
       sessionToken: entry.sessionToken,
-      ...(entry.lanBaseUrl !== undefined
-        ? {
-            lanBaseUrl: entry.lanBaseUrl,
-            lanSessionId: entry.lanSessionId,
-            lanSessionToken: entry.lanSessionToken,
-          }
-        : {}),
     };
   }
 

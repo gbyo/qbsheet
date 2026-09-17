@@ -84,7 +84,7 @@ test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
 
       await page.getByRole('button', { name: 'Start scoring' }).click();
       await chooseScoringLayout(page);
-      const lineup = page.getByRole('heading', { name: 'Who is starting?' });
+      const lineup = page.getByRole('heading', { name: 'Starting lineup', exact: true });
       if (await lineup.count()) {
         const prompt = page.getByLabel('Starting lineups');
         for (const player of rounds[4].left.players) {
@@ -130,8 +130,8 @@ test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
       }
       await page.getByLabel('Final score confirmed with both teams').check();
       await page.getByRole('button', { name: 'Submit result' }).click();
-      await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
-      await expect(page.getByText(/Result sent|Result received for director review/)).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
+      await expect(page.getByText(/Result sent|Result received/)).toBeVisible();
 
       await expect.poll(() => control.state().results.length, { timeout: 20_000 }).toBe(1);
       await expect.poll(() => control.state().results[0]?.status, { timeout: 20_000 }).toBe('accepted');

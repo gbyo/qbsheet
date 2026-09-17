@@ -54,10 +54,11 @@ import deriveGame, {
   lastPlayedQuestion,
   lineupChangeEffectiveQuestion,
 } from '../scoring/deriveGame';
+import { serializeDerivedStats } from '../scoring/statsSheet';
 import { IBonusEvent, IBonusPartResult, ScoreEvent } from '../scoring/ScoreEvents';
 import validateScoresheet from '../scoring/validateScoresheet';
 import toQbjMatch, { IQbjMatchMeta } from '../scoring/toQbjMatch';
-import { IGameDefinition } from '../game/GameDefinition';
+import { IGameDefinition, isManualGame } from '../game/GameDefinition';
 import { IGamePackage } from '../game/GamePackage';
 import {
   createSpreadsheetGameSnapshot,
@@ -1162,6 +1163,24 @@ export default function Scorer(props: IScorerProps) {
     () => `${roundName} · ${game.left.name} ${game.left.points}–${game.right.points} ${game.right.name}`,
     [game.left.name, game.left.points, game.right.name, game.right.points, roundName],
   );
+  /**
+   * The readable stat sheet, for a room that has to transcribe this result by hand.
+   *
+   * Built from the same `format` and derived `game` the review tables render, so it cannot disagree
+   * with what is on screen. Always available: a connected room whose server has gone down needs it
+   * for exactly the same reason a standalone one does.
+   */
+  const statsTsv = useMemo(
+    () => serializeDerivedStats(format, game, { gameLabel: spreadsheetGameLabel }),
+    [format, game, spreadsheetGameLabel],
+  );
+  /**
+   * Whether this device created the game itself.
+   *
+   * A standalone game has no tournament control behind it, so the review screen is the last place
+   * anybody sees these numbers and the player lines open with it. See `statsExpanded`.
+   */
+  const locallyCreatedGame = gamePackage !== undefined && isManualGame(gamePackage);
   const spreadsheetSuggestedTabName = useMemo(
     () => `${roundName} ${game.left.name}–${game.right.name}`,
     [game.left.name, game.right.name, roundName],
@@ -2764,6 +2783,8 @@ export default function Scorer(props: IScorerProps) {
               spreadsheetTsv={spreadsheetTsv}
               spreadsheetGameLabel={spreadsheetGameLabel}
               spreadsheetSuggestedTabName={spreadsheetSuggestedTabName}
+              statsTsv={statsTsv}
+              statsExpanded={locallyCreatedGame}
             />
             {submitResult && (
               <div className={submitResult.ok ? 'scorer-complete-ok' : 'scorer-complete-warning'}>
