@@ -56,8 +56,8 @@ describe('guided practice scenario', () => {
     const lineup = practiceSteps[0];
 
     expect(lineup.instruction).toContain('Start Gibson, Jeremy, Owen and Lachlan');
-    expect(lineup.hint).toContain('leave Olivia and Bella on the Bench');
-    expect(lineup.hint).toContain('↑/↓ controls');
+    expect(lineup.hint).toContain('leave Olivia and Bella unselected');
+    expect(lineup.hint).toContain('tap a selected player again');
     expect(lineup.instruction).not.toMatch(/tick|untick/i);
     expect(lineup.hint).not.toMatch(/tick|untick|Reorder starters/i);
   });

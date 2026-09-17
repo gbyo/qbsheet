@@ -82,15 +82,7 @@ export type TimelineEventKind =
   /** Control answered the help request but refused it. */
   | 'control-request-refused'
   /** The room's outstanding help request was withdrawn or disappeared from control. */
-  | 'control-request-cleared'
-  /** The Internet relay stream authenticated. Assignment polling relaxes while it is healthy. */
-  | 'stream-connected'
-  /** The Internet relay stream dropped and is reconnecting. HTTP covers; scoring continues. */
-  | 'stream-reconnecting'
-  /** The primary stopped answering and the same room authority is now served over LAN. */
-  | 'lan-fallback'
-  /** The relay durably retained the finished result while Director is absent. Not acceptance. */
-  | 'relay-receipt';
+  | 'control-request-cleared';
 
 export interface ITimelineEntry {
   /**
@@ -257,10 +249,6 @@ export const timelineLabels: Record<TimelineEventKind, string> = {
   'control-request-failed': 'tournament control request failed',
   'control-request-refused': 'tournament control request refused',
   'control-request-cleared': 'tournament control request cleared',
-  'stream-connected': 'internet relay stream connected',
-  'stream-reconnecting': 'internet relay stream reconnecting',
-  'lan-fallback': 'using local network fallback',
-  'relay-receipt': 'result safely received by relay',
 };
 
 /** `10:33:09` — local time, seconds included, because the gaps that matter are seconds long. */

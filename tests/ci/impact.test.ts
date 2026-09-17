@@ -62,14 +62,7 @@ describe('every rule is well formed', () => {
 
 describe('a scorer change keeps the whole scorer safety net', () => {
   it('runs the scorer suite and the browser torture test for scorer runtime source', () => {
-    // `qbbridge` is on the list because its tests read the scorer's QBJ parser and scoring
-    // engine to prove an assignment is playable; see `apps/qbbridge/src/model/assignment.test.ts`.
-    expect(affected(['src/scorer/Scoresheet.tsx'])).toEqual([
-      'quality',
-      'scorer',
-      'scorer-browser',
-      'qbbridge',
-    ]);
+    expect(affected(['src/scorer/Scoresheet.tsx'])).toEqual(['quality', 'scorer', 'scorer-browser']);
   });
 
   it('runs them for the scoring engine, the app shell, and persistence', () => {
@@ -104,7 +97,6 @@ describe('a scorer change keeps the whole scorer safety net', () => {
       'quality',
       'scorer',
       'scorer-browser',
-      'qbbridge',
     ]);
   });
 
@@ -204,11 +196,9 @@ describe('the tournament packages route by their real consumers', () => {
         'tournament-js',
       ]);
     }
-    // `tournament-formats` gained a third consumer: QBBridge reads a `.yft` through it.
     expect(affected(['packages/tournament-formats/src/index.ts'])).toEqual([
       'quality',
       'director-ui',
-      'qbbridge',
       'tournament-js',
     ]);
   });
@@ -219,7 +209,6 @@ describe('the tournament packages route by their real consumers', () => {
       'scorer',
       'scorer-browser',
       'director-ui',
-      'qbbridge',
       'tournament-js',
       'qblive-js',
     ]);
@@ -246,11 +235,6 @@ describe('the Rust crates are independent, except where Cargo says otherwise', (
   it('runs only the Director crate for a Director native change', () => {
     expect(affected(['apps/director/src-tauri/src/live.rs'])).toEqual(['rust-director']);
     expect(affected(['apps/director/src-tauri/Cargo.lock'])).toEqual(['rust-director']);
-  });
-
-  it('runs the Bridge application and native crate for a Bridge native change', () => {
-    expect(affected(['apps/qbbridge/src-tauri/src/lib.rs'])).toEqual(['qbbridge', 'rust-qbbridge']);
-    expect(affected(['apps/qbbridge/src-tauri/tauri.conf.json'])).toEqual(['qbbridge', 'rust-qbbridge']);
   });
 
   it('never runs the browser torture test for a Rust-only change', () => {
@@ -342,7 +326,7 @@ describe('shared and global configuration is treated conservatively', () => {
     // The Director and QBLive pages are prerendered documents like every other page under
     // `about/`, so they belong to the website build rather than to the Director application.
     expect(affected(['about/director/index.html'])).toEqual(['scorer', 'scorer-browser']);
-    expect(affected(['src/about/QbLive.tsx'])).toEqual(['quality', 'scorer', 'scorer-browser', 'qbbridge']);
+    expect(affected(['src/about/QbLive.tsx'])).toEqual(['quality', 'scorer', 'scorer-browser']);
   });
 
   it('runs every JavaScript domain for the root TypeScript config, which every package extends', () => {
@@ -351,7 +335,6 @@ describe('shared and global configuration is treated conservatively', () => {
       'scorer',
       'scorer-browser',
       'director-ui',
-      'qbbridge',
       'tournament-js',
       'qblive-js',
     ]);
@@ -364,7 +347,6 @@ describe('shared and global configuration is treated conservatively', () => {
       'scorer',
       'scorer-browser',
       'director-ui',
-      'qbbridge',
       'tournament-js',
       'qblive-js',
     ]);
@@ -409,9 +391,9 @@ describe('the root lockfile', () => {
   });
 
   it('does not run the scorer for a desktop-application dependency change', () => {
-    // `@tauri-apps/api` is declared by the two Tauri applications and by nothing else, so a bump
-    // to it is reachable from those workspaces alone even though it lives in the hoisted root
-    // tree. Neither of them is the scorer, which is the point.
+    // `@tauri-apps/api` is declared by the Director Tauri application and by nothing else, so
+    // a bump to it is reachable from that workspace alone even though it lives in the hoisted
+    // root tree. It is not the scorer, which is the point.
     const base = realLockfile();
     const head = copy(base);
     const entry = head.packages['node_modules/@tauri-apps/api'] as { version: string };
@@ -419,13 +401,12 @@ describe('the root lockfile', () => {
     entry.version = '2.99.0';
 
     expect(lockfileProjects(base, head)).toEqual({
-      projects: ['apps/director', 'apps/qbbridge'],
+      projects: ['apps/director'],
       unexplained: [],
     });
     const result = classify(['package-lock.json'], { base, head });
     expect(result.domains['scorer-browser']).toBe(false);
     expect(result.domains['director-ui']).toBe(true);
-    expect(result.domains.qbbridge).toBe(true);
   });
 
   it('runs the scorer and the browser suite for a root dependency update', () => {

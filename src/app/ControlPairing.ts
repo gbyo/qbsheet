@@ -111,11 +111,7 @@ export async function openControl(address: string): Promise<ControlOpenResult> {
   };
 }
 
-export type LanPairingOutcome =
-  'not-configured' | 'paired' | 'transient-failure' | 'rejected' | 'room-mismatch';
-
-export type PairingExchangeResult =
-  { ok: true; value: IPairedRoom; lanOutcome: LanPairingOutcome } | { ok: false; error: string };
+export type PairingExchangeResult = { ok: true; value: IPairedRoom } | { ok: false; error: string };
 
 /**
  * Spend the short code and keep what it bought.
@@ -130,19 +126,6 @@ export async function exchangePairingCode(
   code: string,
   roomId: string | undefined,
   existingDeviceId?: string,
-  /**
-   * Optional LAN fallback for the same room authority, usually from a pairing launch link.
-   *
-   * Validated, never trusted blind: a value that is not a well-formed secondary endpoint —
-   * or that equals the primary — is dropped rather than stored, so a bad hint leaves a
-   * primary-only pairing instead of a broken fallback.
-   *
-   * Plain HTTP remains intentional for controlled venue networks. It is not equivalent to HTTPS;
-   * the accepted threat model and protected-tunnel requirement for untrusted networks are documented
-   * in `docs/QBTCP-LAN-THREAT-MODEL.md`.
-   */
-  lanServer?: string,
-  lanClientFactory: (baseUrl: string) => FruityServerClient = (baseUrl) => new FruityServerClient(baseUrl),
 ): Promise<PairingExchangeResult> {
   const trimmed = code.trim();
   if (trimmed === '') return { ok: false, error: 'Enter the pairing code for this room.' };
@@ -150,55 +133,14 @@ export async function exchangePairingCode(
   const joined = await client.join(trimmed, roomId === undefined || roomId === '' ? undefined : roomId);
   if (!joined.ok) return { ok: false, error: joined.error };
 
-  const lanBaseUrl = readSecondaryEndpoint(lanServer, client.baseUrl);
-  let lanRoomToken: string | undefined;
-  let lanOutcome: LanPairingOutcome = lanBaseUrl ? 'rejected' : 'not-configured';
-  if (lanBaseUrl) {
-    const lanJoined = await lanClientFactory(lanBaseUrl).join(
-      trimmed,
-      roomId === undefined || roomId === '' ? undefined : roomId,
-    );
-    if (lanJoined.ok) {
-      if (lanJoined.value.roomId === joined.value.roomId) {
-        lanRoomToken = lanJoined.value.accessToken;
-        lanOutcome = 'paired';
-      } else {
-        lanOutcome = 'room-mismatch';
-      }
-    } else {
-      const transient =
-        !lanJoined.unsupported &&
-        (lanJoined.status === undefined ||
-          lanJoined.status === 408 ||
-          lanJoined.status === 429 ||
-          (lanJoined.status !== undefined && lanJoined.status >= 500));
-      lanOutcome = transient ? 'transient-failure' : 'rejected';
-    }
-  }
   return {
     ok: true,
-    lanOutcome,
     value: {
       baseUrl: client.baseUrl,
       roomId: joined.value.roomId,
       roomName: joined.value.roomName,
       roomToken: joined.value.accessToken,
       deviceId: existingDeviceId ?? newDeviceId(),
-      ...(lanBaseUrl !== undefined && lanRoomToken !== undefined ? { lanBaseUrl, lanRoomToken } : {}),
     },
   };
-}
-
-/**
- * Keep a secondary endpoint only when it is genuinely secondary.
- *
- * Same address rules as pairing itself, minus the code: http(s), no query, no fragment,
- * and different from the primary it backs up. Anything else is absent, not an error —
- * the pairing it arrived with is still good.
- */
-function readSecondaryEndpoint(value: string | undefined, primary: string): string | undefined {
-  if (value === undefined) return undefined;
-  const normalized = normalizeBaseUrl(value.trim());
-  if (!normalized.ok || normalized.value === primary) return undefined;
-  return normalized.value;
 }

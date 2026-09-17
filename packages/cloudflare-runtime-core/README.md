@@ -15,30 +15,29 @@ no credentials, and no protocol.
 | `migrations.ts`  | Append-only versioned migration runner with a `schema_version` journal       |
 | `websocket.ts`   | Versioned hibernation attachments and frame-size guards                      |
 
-Consumers: the QBTCP relay (`apps/qbtcp-relay-backend-cloudflare`) and QBLive
-(`apps/qblive-backend-cloudflare`) reuse the credential helpers and page clamping
-today; the replay, migration, and socket modules are covered for Director
-Collaboration (#508) to adopt without taking on scorer or spectator semantics.
+Consumers: QBLive (`apps/qblive-backend-cloudflare`) reuses the credential helpers and
+page clamping today; the replay, migration, and socket modules are covered for
+Director Collaboration (#508) to adopt without taking on scorer or spectator
+semantics.
 
 ## What is deliberately not shared
 
 - **Bearer tokens, Durable Object instances, tables, and routes.** Each service mints,
   stores, and checks its own credentials in its own DO/SQLite namespace. Same-shaped
   tokens never cross-accept (`credentials.test.ts` proves the mechanism; the
-  relay/QBLive conformance isolation test proves the deployments).
+  QBLive conformance isolation test proves the deployment).
 - **Authorization policy.** Which bearer opens which surface, claim/rotation flows,
   and lifetimes are per-service.
 - **Retention rules.** QBLive may trim old public revisions; QBTCP must never trim an
   unacknowledged final because a generic window elapsed. `replay.ts` takes a
   `durableOnly` flag instead of deciding.
-- **Frame protocols and CORS.** The relay's scorer frames and QBLive's public routes
-  (including their different `json()` CORS postures) stay in each service.
+- **Frame protocols and CORS.** QBLive's public routes
+  (including their `json()` CORS posture) stay in that service.
 - **Schemas.** The migration runner never sees a `CREATE TABLE` it was not handed.
 
 ## Trust levels
 
 ```
-QBTCP relay             scorer-facing, least trusted callers (room/session capabilities)
 QBLive backend          public spectator projection (read-only public, claimed management)
 Director Collaboration  trusted staff commands (#508; reuses mechanics, never scorer auth)
 ```
