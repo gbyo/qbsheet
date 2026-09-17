@@ -1646,25 +1646,6 @@ body:has(.welcome-shell .update-notice-hero) {
   border-top: 1px solid var(--room-border);
 }
 
-.final-copy-details {
-  margin: 0;
-}
-
-.final-copy-details > summary {
-  display: list-item;
-  margin: 0;
-  color: var(--room-muted);
-  cursor: pointer;
-}
-
-.final-copy-content {
-  padding-top: 12px;
-}
-
-.final-copy-content .shell-actions {
-  margin-top: 12px;
-}
-
 .final-more-formats {
   align-self: flex-start;
   min-width: 0;
@@ -1685,88 +1666,172 @@ body:has(.welcome-shell .update-notice-hero) {
 }
 
 /*
- * The completion screen answers three questions in order: the final score, whether the result
- * reached where it needs to go, and the one thing to do next. Delivery state sits directly
- * under the score inside the same result block, exactly one button at a time carries the
- * primary treatment, and everything secondary — reviewing the score, a rematch, exports —
- * waits quietly underneath a single separator.
+ * The completion screen is a receipt.
+ *
+ * Three questions in order — what was the final, did tournament control get it, am I free to go —
+ * and then it stops. The score is the anchor and is the largest thing on the page; the delivery
+ * line sits directly under it in the same block; one button carries the primary treatment; and a
+ * single quiet `Game details` waits underneath for the tools that are not part of finishing a game.
+ *
+ * A successful game is the quietest state here on purpose. Nothing is boxed, nothing celebrates,
+ * and the only coloured text is a status that earned it. Everything else — the player lines, the
+ * exports, the correction, the rematch — is in the dialog and styled as flat sections in it.
  */
 .completion-result {
   padding-bottom: 0;
   border-bottom: none;
 }
 
+/* The final score is the visual anchor: given room above it and a rule under it, nothing else. */
 .completion-result .final-score {
-  margin-top: 12px;
+  margin-top: 16px;
   border-bottom: none;
 }
 
+.completion-result .final-points {
+  font-size: 2.25rem;
+}
+
 .completion-status {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .completion-status .shell-hint {
   margin-top: 4px;
 }
 
-.completion-status .shell-warning {
-  margin-bottom: 8px;
-}
-
-.completion-saved {
+/* Status headlines share a baseline with the check mark that may precede them. */
+.completion-headline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   margin: 0;
-  color: var(--room-muted);
   font-weight: 500;
 }
 
-.completion-primary {
+/*
+ * A refusal, said once and in ordinary text.
+ *
+ * Not the boxed `.shell-warning`: this line already sits under the score with tournament control's
+ * own sentence beneath it, and wrapping an explanation the room has to read aloud in a coloured
+ * panel makes it look like a system error rather than a fact about round 6.
+ */
+.completion-rejected {
+  margin: 0;
+  color: var(--room-error);
+  font-weight: 600;
+}
+
+.completion-status-detail {
+  margin: 6px 0 0;
+}
+
+.completion-handoff {
   margin-top: 16px;
+}
+
+.completion-handoff > * + * {
+  margin-top: 8px;
+}
+
+.completion-handoff .final-instruction {
+  margin: 0;
+}
+
+.completion-primary {
+  margin-top: 20px;
 }
 
 .completion-primary > .shell-button.is-primary {
   min-width: min(100%, 300px);
 }
 
-.completion-locked {
-  display: flex;
-  flex-basis: 100%;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-.completion-locked .shell-hint {
-  flex-basis: 100%;
-  margin: 0;
-}
-
-.completion-handoff {
-  padding-top: 4px;
-}
-
+/*
+ * One quiet door, and no separator line above it.
+ *
+ * A rule here would read as the start of another section, which is exactly what this is not: it is
+ * a single affordance for everything the ordinary finish does not need.
+ */
 .completion-secondary {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  margin-top: 12px;
+}
+
+.completion-details-open {
+  padding-right: 0;
+  padding-left: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/*
+ * Game details: a scrolling drawer of flat sections, not a dashboard of cards.
+ *
+ * Sections are separated by a rule and nothing else — no surfaces, no borders around groups, no
+ * icons. Every action carries one line saying what the file it produces is for, because the whole
+ * reason these moved off the completion screen is that nobody could tell them apart at a glance.
+ */
+.completion-detail-section + .completion-detail-section {
   margin-top: 20px;
-  padding-top: 8px;
+  padding-top: 16px;
   border-top: 1px solid var(--room-border);
 }
 
-.completion-secondary > .shell-button-quiet {
-  align-self: flex-start;
-  padding-right: 0;
-  padding-left: 0;
+.completion-detail-heading {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--room-muted);
 }
 
-.completion-exports {
-  padding: 0;
-  border-bottom: none;
+.completion-detail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
 }
 
-.completion-exports > summary {
-  padding: 8px 0;
+.completion-detail-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.completion-detail-row dt {
+  flex: 0 0 auto;
+  font-size: 0.8125rem;
+  color: var(--room-muted);
+}
+
+.completion-detail-row dd {
+  margin: 0;
+  text-align: right;
+}
+
+.completion-detail-action + .completion-detail-action {
+  margin-top: 16px;
+}
+
+.completion-detail-action .shell-hint {
+  margin-top: 4px;
+}
+
+.completion-details .scorer-check-teams {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 520px) {
+  .completion-detail-row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .completion-detail-row dd {
+    text-align: left;
+  }
 }
 
 .assignment-matchup {

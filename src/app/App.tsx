@@ -1432,6 +1432,11 @@ export default function App() {
   if (screen.kind === 'completed' && current) {
     // A connected room goes back to its room, not to the front door. The next assignment appears
     // there on its own, and nobody has to find an address or a pairing code between rounds.
+    //
+    // "Back to Room 3" rather than "Next game in Room 3": at this moment nothing has told this
+    // device that another game exists. The room screen is where an assignment turns up, or where
+    // waiting is shown as waiting, and promising a next game before there is one is a promise this
+    // screen is in no position to make.
     const backToRoom = current.connected && pairedRoom !== null;
     return (
       <CompletionScreen
@@ -1439,7 +1444,7 @@ export default function App() {
         acceptedJustNow={screen.acceptedJustNow === true}
         onUpdate={updateRecord}
         onBackToScorekeeper={() => backToScorekeeper(current.id)}
-        continueLabel={backToRoom ? `Next game in ${pairedRoom.roomName}` : 'Done'}
+        continueLabel={backToRoom ? `Back to ${pairedRoom.roomName}` : 'Done'}
         onRematch={
           isManualGame(current.package)
             ? () => createManualGame(current.package as IGameDefinition)

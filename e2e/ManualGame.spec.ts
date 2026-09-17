@@ -118,29 +118,33 @@ test('a practice game is created, scored, reloaded, finished and kept', async ({
     preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }),
   ).toBeVisible();
   await preSubmitExports.getByRole('button', { name: 'Copy game for tournament spreadsheet' }).click();
-  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('NEW BLANK TAB');
-  await expect(page.locator('.scorer-spreadsheet-copy')).toContainText('A1');
+  // Two copy panels share this class on the review screen — the readable stat sheet and the
+  // canonical tournament copy. The guidance being asserted belongs to the canonical one.
+  const tournamentCopy = page.getByRole('region', { name: 'Tournament spreadsheet copy' });
+  await expect(tournamentCopy).toContainText('NEW BLANK TAB');
+  await expect(tournamentCopy).toContainText('A1');
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
   await expect(page.locator('.final-row').first()).toContainText('45');
   await expect(page.locator('.final-row').nth(1)).toContainText('0');
 
-  // Nobody is waiting for this file, so nothing is demanded before the screen can be left. The
-  // optional exports stay out of the way until somebody asks for them.
-  const copy = page.locator('details.final-copy-details');
-  await expect(copy).toBeVisible();
-  await expect(copy.locator('summary')).toHaveText('Files & exports');
-  await expect(copy).not.toHaveAttribute('open', '');
-  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeHidden();
-  await copy.locator('summary').click();
-  await expect(copy).toHaveAttribute('open', '');
-  await expect(copy).toContainText('This result is saved on this device.');
-  await expect(copy.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
-  await expect(copy.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'I uploaded the result' })).toHaveCount(0);
+  // Nobody is waiting for this file, so nothing is demanded before the screen can be left and
+  // nothing optional is on it. The copy is behind the one quiet door, named for what it is.
+  await expect(page.getByText('Saved on this device')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Download QBJ/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /handed off the result/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Done' })).toBeEnabled();
+
+  await page.getByRole('button', { name: 'Game details' }).click();
+  const details = page.getByRole('dialog', { name: 'Game details' });
+  await expect(details.getByRole('button', { name: 'Download QBJ copy' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
+  await expect(details.getByRole('button', { name: 'Start a rematch' })).toBeVisible();
+  await details.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(details).toBeHidden();
+
   await page.getByRole('button', { name: 'Done' }).click();
 
   await expect(page.getByRole('heading', { name: 'Start scoring' })).toBeVisible();
@@ -167,9 +171,15 @@ test('reviewing an already submitted result does not claim it is unsent', async 
   }
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Review score' }).click();
+  // Correcting a result is an exception rather than a step in every finish, so it lives in Game
+  // details and is named for what it does.
+  await page.getByRole('button', { name: 'Game details' }).click();
+  await page
+    .getByRole('dialog', { name: 'Game details' })
+    .getByRole('button', { name: 'Correct result' })
+    .click();
   await expect(page.locator('.scorer-completion')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Edit game' }).first()).toBeVisible();
   await expect(page.getByText('Not submitted yet.')).toHaveCount(0);

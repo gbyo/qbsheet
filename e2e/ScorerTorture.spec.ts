@@ -244,7 +244,7 @@ test('a real scorer session survives fast input, reload, correction, completion,
   await expect(page.getByLabel('Final score confirmed with both teams')).not.toBeChecked();
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
 
   const downloadStarted = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download QBJ' }).click();

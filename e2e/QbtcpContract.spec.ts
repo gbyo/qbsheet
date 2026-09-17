@@ -90,7 +90,7 @@ async function endGameAndSubmit(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'End the game now' }).click();
   await page.getByLabel('Final score confirmed with both teams').check();
   await page.getByRole('button', { name: 'Submit result' }).click();
-  await expect(page.getByRole('heading', { name: 'Final' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Final', exact: true })).toBeVisible();
 }
 
 test.describe('a server that speaks only QBTCP', () => {
@@ -161,15 +161,20 @@ test.describe('a server that speaks only QBTCP', () => {
     await expect(page.getByText('Result sent ✓')).toBeVisible();
 
     // Tournament control accepted it and attached no handoff instruction, so the room is free to
-    // move on. The backup is still one press away and the game is still on this device.
-    const next = page.getByRole('button', { name: `Next game in ${roomName}` });
+    // move on. The screen says so and stops: nothing exportable competes with the way back, and the
+    // backup is still one press away behind the single quiet door.
+    const next = page.getByRole('button', { name: `Back to ${roomName}` });
     await expect(next).toBeEnabled();
-    const copy = page.locator('details.final-copy-details');
-    await expect(copy).toBeVisible();
-    await expect(copy.locator('summary')).toHaveText('Files & exports');
-    await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeHidden();
-    await copy.locator('summary').click();
-    await expect(copy.getByRole('button', { name: 'Download QBJ backup' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Download QBJ/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Excel/ })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Game details' }).click();
+    const details = page.getByRole('dialog', { name: 'Game details' });
+    await expect(details.getByRole('button', { name: 'Download QBJ backup' })).toBeVisible();
+    await expect(details.getByRole('button', { name: 'Download Excel scoresheet' })).toBeVisible();
+    await expect(details.getByRole('button', { name: 'Correct result' })).toBeVisible();
+    await details.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(details).toBeHidden();
 
     // --- back to the room, which is where the next assignment turns up -------------------------
     control.assign(5);
@@ -363,16 +368,17 @@ test.describe('a server that speaks only QBTCP', () => {
     // The request reached the fixture but its retryable server failure means no result was accepted.
     control.failNextResult(503, 'Tournament control is temporarily unavailable.');
     await endGameAndSubmit(page);
-    await expect(page.getByText(/will keep trying automatically while it is open/)).toBeVisible();
+    await expect(page.getByText('Sending result…')).toBeVisible();
+    await expect(page.getByText('QBSheet is still trying automatically.')).toBeVisible();
     await expect.poll(() => control.resultAttempts.length).toBe(1);
     const firstAttempt = JSON.stringify(control.resultAttempts[0]);
     expect(control.results).toHaveLength(0);
     expect(control.resultAttempts[0]).not.toHaveProperty('_yf_scorekeeper_recovery');
 
-    // The existing handoff gate remains closed until the automatic retry is accepted. Since the
-    // completion redesign the closed gate shows the handoff it demands rather than a disabled
-    // continuation: no Next button exists yet, and the QBJ download is the primary action.
-    const next = page.getByRole('button', { name: `Next game in ${roomName}` });
+    // The existing handoff gate remains closed until the automatic retry is accepted. The closed
+    // gate shows the handoff it demands rather than a disabled continuation: no way-back button
+    // exists yet, and the QBJ download is the primary action.
+    const next = page.getByRole('button', { name: `Back to ${roomName}` });
     await expect(next).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Download QBJ', exact: true })).toBeVisible();
 
@@ -429,7 +435,7 @@ test.describe('a server that speaks only QBTCP', () => {
 
     // Back to the room with nothing to play, which is where a scorekeeper actually waits.
     control.assign(null);
-    await page.getByRole('button', { name: `Next game in ${roomName}` }).click();
+    await page.getByRole('button', { name: `Back to ${roomName}` }).click();
     await expect(page.locator('.connected-room-shell')).toBeVisible();
     await expect(page.getByText('Waiting for the next assignment.')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Start scoring' })).toHaveCount(0);
