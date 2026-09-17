@@ -234,7 +234,7 @@ describe('the review screen is the stat sheet', () => {
         .map((cell) => cell.textContent),
     ).toEqual(['4', '1', '0', '15']);
 
-    expect(within(dorman).getByText(/Tossups 25 · Bonuses 50/)).toBeInTheDocument();
+    expect(within(dorman).getByText(/Tossup points 25 · Bonus points 50/)).toBeInTheDocument();
   });
 
   test('the score and the tossups heard are stated at the top', async () => {
@@ -304,7 +304,7 @@ describe('the review screen is the stat sheet', () => {
     expect(rows[0]).toMatch(/^Game\tR1 · 315/);
     expect(rows).toContain('Result\tDorman\t75\tWren A\t35');
     expect(rows).toContain('Tossups heard\t4');
-    expect(rows).toContain('Team\tPoints\tTossups\tBonuses');
+    expect(rows).toContain('Team\tPoints\tTossup points\tBonus points');
     expect(rows).toContain('Dorman\t75\t25\t50');
     expect(rows).toContain('Team\tPlayer\tTUH\t+15\t+10\tPts');
     expect(rows).toContain('Dorman\tAlice\t4\t1\t0\t15');

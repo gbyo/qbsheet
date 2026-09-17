@@ -27,11 +27,11 @@ describe('no-bonus stat sheet presentation', () => {
     const teamHeading = derivedStatsGrid(format, game).find(
       (row) => row[0] === 'Team' && row[1] === 'Points',
     );
-    expect(teamHeading).toEqual(['Team', 'Points', 'Tossups']);
+    expect(teamHeading).toEqual(['Team', 'Points', 'Tossup points']);
     expect(teamHeading).not.toContain('Bonuses');
 
     render(<TeamStatLines format={format} team={game.left} />);
-    expect(screen.getByText(/Tossups 0/)).toBeInTheDocument();
+    expect(screen.getByText(/Tossup points 0/)).toBeInTheDocument();
     expect(screen.queryByText(/Bonuses/)).not.toBeInTheDocument();
   });
 });

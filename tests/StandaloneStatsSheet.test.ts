@@ -175,7 +175,7 @@ describe('the numbers are the derived game', () => {
     const grid = derivedStatsGrid(format, game);
     const heading = grid.findIndex((row) => row[0] === 'Team' && row[1] === 'Points');
 
-    expect(grid[heading]).toEqual(['Team', 'Points', 'Tossups', 'Bonuses']);
+    expect(grid[heading]).toEqual(['Team', 'Points', 'Tossup points', 'Bonus points']);
     expect(grid[heading + 1]).toEqual([
       'Dorman',
       String(game.left.points),

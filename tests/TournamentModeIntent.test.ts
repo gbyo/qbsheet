@@ -23,6 +23,7 @@ function activeGameMenu(tournamentControlled = false): string[] {
     lastPlayed: 0,
     keyboardEnabled: false,
     submitting: false,
+    timeoutAvailable: true,
     canDownloadForms: false,
     canCorrectGame: false,
     tournamentControlled,
