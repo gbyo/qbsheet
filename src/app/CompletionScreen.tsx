@@ -325,6 +325,10 @@ export default function CompletionScreen(props: {
    */
   const outstanding = stage === 'needs-download' || stage === 'needs-handoff-confirmation';
   const showInstruction = outstanding && Boolean(record.package.handoffInstruction);
+  // Connected rooms without a tournament-supplied instruction still get told what to do with
+  // the file, in transport-neutral words: the tournament's actual channel (drive, folder,
+  // email) is outside what this application can see (#832).
+  const showRoomHint = outstanding && connected && !record.package.handoffInstruction;
   const showDownloadReceipt = (outstanding || stage === 'handoff-complete') && downloaded;
   // The QBJ's own failures follow its button. That button is either the required primary action
   // above, or the one in Game details; the dialog is modal, so rendering here whenever it is closed
@@ -332,11 +336,19 @@ export default function CompletionScreen(props: {
   const showQbjRecovery =
     (qbjIsRequired || !detailsOpen) && (qbjWriteFailed || qbjRecordPending || qbjRecordFailed);
   const hasHandoffNote =
-    showInstruction || showDownloadReceipt || acknowledged || showQbjRecovery || handoffFailed;
+    showInstruction ||
+    showRoomHint ||
+    showDownloadReceipt ||
+    acknowledged ||
+    showQbjRecovery ||
+    handoffFailed;
 
   const handoffNote = hasHandoffNote ? (
     <section className="completion-handoff" aria-label="Result handoff">
       {showInstruction && <p className="final-instruction">{record.package.handoffInstruction}</p>}
+      {showRoomHint && (
+        <p className="shell-hint">Hand off the QBJ using the instructions provided for this room.</p>
+      )}
       {showDownloadReceipt && (
         <p className="final-ok">✓ QBJ downloaded · {timeOfDay(record.qbjDownloadedAt)}</p>
       )}
