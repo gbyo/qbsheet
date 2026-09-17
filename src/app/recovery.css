@@ -2,91 +2,14 @@
 @import '@fontsource/ibm-plex-sans/latin-500.css';
 @import '@fontsource/ibm-plex-sans/latin-600.css';
 @import '@fontsource/ibm-plex-sans/latin-700.css';
+@import '@qbsheet/ui/room-compat.css';
 
 /*
  * Recovery Mode is loaded before the normal application shell so it can survive a scorer crash.
- * It still belongs to the same application: these are the shell's palette, type, spacing, rules,
- * and controls in a self-contained bootstrap stylesheet. The page is quiet and deliberately flat,
- * like the welcome screen, while the normal scorer remains completely unmounted.
+ * It consumes only the shared CSS tokens and compatibility aliases: no normal Scorer React or
+ * component bundle enters this bootstrap path. The page stays quiet and deliberately flat while
+ * the normal scorer remains completely unmounted.
  */
-:root {
-  color-scheme: light;
-  --room-text-scale: 1;
-  --room-text: #1c1d20;
-  --room-muted: #5c6066;
-  --room-faint: #8a8f96;
-  --room-border: #d8dade;
-  --room-border-strong: #c2c5ca;
-  --room-surface: #ffffff;
-  --room-surface-sunken: #f6f7f8;
-  --room-accent: #1565c0;
-  --room-accent-hover: #10529c;
-  --room-on-accent: #ffffff;
-  --room-success: #1e6b32;
-  --room-success-bg: #e8f3ea;
-  --room-warning: #8a5300;
-  --room-warning-bg: #fdf3e3;
-  --room-warning-border: #e0a33c;
-  --room-error: #a8231b;
-  --room-error-bg: #fceceb;
-  --room-error-border: #d9534f;
-  --room-info-bg: #eaf3fb;
-  --room-info-border: #6aa9dd;
-  --room-shadow-strong: 0 5px 18px rgb(20 24 28 / 18%);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-    --room-text: #e7e9ec;
-    --room-muted: #a6acb5;
-    --room-faint: #7b818a;
-    --room-border: #33363b;
-    --room-border-strong: #4a4f57;
-    --room-surface: #16171a;
-    --room-surface-sunken: #1f2125;
-    --room-accent: #7ab3ee;
-    --room-accent-hover: #9ac9f8;
-    --room-on-accent: #10151c;
-    --room-success: #7fd39b;
-    --room-success-bg: #15281c;
-    --room-warning: #e5b264;
-    --room-warning-bg: #2a2013;
-    --room-warning-border: #7c5b21;
-    --room-error: #f3948d;
-    --room-error-bg: #2c1917;
-    --room-error-border: #8e3b35;
-    --room-info-bg: #13202d;
-    --room-info-border: #35638f;
-    --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
-  }
-}
-
-:root[data-theme='dark'] {
-  color-scheme: dark;
-  --room-text: #e7e9ec;
-  --room-muted: #a6acb5;
-  --room-faint: #7b818a;
-  --room-border: #33363b;
-  --room-border-strong: #4a4f57;
-  --room-surface: #16171a;
-  --room-surface-sunken: #1f2125;
-  --room-accent: #7ab3ee;
-  --room-accent-hover: #9ac9f8;
-  --room-on-accent: #10151c;
-  --room-success: #7fd39b;
-  --room-success-bg: #15281c;
-  --room-warning: #e5b264;
-  --room-warning-bg: #2a2013;
-  --room-warning-border: #7c5b21;
-  --room-error: #f3948d;
-  --room-error-bg: #2c1917;
-  --room-error-border: #8e3b35;
-  --room-info-bg: #13202d;
-  --room-info-border: #35638f;
-  --room-shadow-strong: 0 5px 18px rgb(0 0 0 / 55%);
-}
-
 html {
   font-size: calc(100% * var(--room-text-scale, 1));
   background: var(--room-surface);
@@ -97,7 +20,7 @@ body {
   margin: 0;
   color: var(--room-text);
   background: var(--room-surface);
-  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--qbs-font-sans);
   font-size: 0.875rem;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
@@ -135,7 +58,7 @@ button {
   padding: 32px 16px 48px;
   color: var(--room-text);
   background: var(--room-surface);
-  font-family: 'IBM Plex Sans', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--qbs-font-sans);
 }
 
 .crash-panel {
@@ -227,7 +150,7 @@ button {
 .crash-thrown {
   margin: 8px 0 0;
   overflow-wrap: anywhere;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--qbs-font-mono);
   font-size: 0.75rem;
 }
 

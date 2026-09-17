@@ -55,7 +55,6 @@ import useConnectedRuntime, { assignmentPollIntervalMs } from '../src/app/useCon
 import { RoomConnectionState } from '../src/app/ConnectionState';
 import FruityServerClient from '../src/integrations/fruity/FruityServerClient';
 import { progressIntervalMs } from '../src/integrations/fruity/FruityResultDestination';
-import { PRIMARY_HEALTH_CHECK_INTERVAL_MS } from '../src/qbtcp/QbtcpPreferredTransport';
 import { validPackage } from './packages';
 import { event } from './events';
 
@@ -609,56 +608,39 @@ describe('a morning of network failures', () => {
     vi.useFakeTimers();
   });
 
-  test('LAN failover uses credentials minted by the LAN authority, never relay credentials', async () => {
-    const primaryControl = new FakeControl();
-    primaryControl.offline = true;
-    const lanControl = new FakeControl();
-    const primary = primaryControl.asClient();
-    const lan = lanControl.asClient();
-    Object.assign(primary, { baseUrl: 'https://relay.example/tournament' });
-    Object.assign(lan, { baseUrl: 'http://192.168.1.24:3000' });
-    const lanAssignment = vi.spyOn(lan, 'assignment');
-    const lanFinal = vi.spyOn(lan, 'postFinal');
-    const primaryFinal = vi.spyOn(primary, 'postFinal');
-    const lanIdentity = {
+  test('an outage keeps the one server and its credentials; recovery resumes on both', async () => {
+    const control = new FakeControl();
+    const server = control.asClient();
+    Object.assign(server, { baseUrl: 'https://control.example/tournament' });
+    const serverFinal = vi.spyOn(server, 'postFinal');
+    const identity = {
       roomId: 'room-204',
-      token: 'lan-room-token',
+      token: 'room-token',
       deviceId: 'device-1',
       roomName: 'Room 204',
     };
-    const lanCredentials = { sessionId: 'lan-session-5', token: 'lan-session-token' };
+    const credentials = { sessionId: 'session-5', token: 'session-token' };
     const hook = renderHook(() =>
       useConnectedRuntime({
-        client: primary,
-        identity: { ...lanIdentity, token: 'relay-room-token' },
-        credentials: { sessionId: 'relay-session-5', token: 'relay-session-token' },
+        client: server,
+        identity,
+        credentials,
         scheduledMatchId: 'sched-5',
         enabled: true,
         timeline: new ConnectionTimeline(),
-        lanClient: lan,
-        lanIdentity,
-        lanCredentials,
-        socketFactory: null,
       }),
     );
 
+    control.offline = true;
     await nextPoll();
-    await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(lanAssignment).toHaveBeenCalledWith(lanIdentity);
+    expect(hook.result.current.connection).toBe(RoomConnectionState.Offline);
+
+    control.offline = false;
+    await nextPoll();
     await act(async () => {
       await hook.result.current.submitFinal({ tossups_read: 20 });
     });
-    expect(lanFinal).toHaveBeenCalledWith(lanCredentials, { tossups_read: 20 });
-
-    primaryControl.offline = false;
-    await act(async () => vi.advanceTimersByTimeAsync(PRIMARY_HEALTH_CHECK_INTERVAL_MS));
-    await act(async () => {
-      await hook.result.current.submitFinal({ tossups_read: 21 });
-    });
-    expect(primaryFinal).toHaveBeenCalledWith(
-      { sessionId: 'relay-session-5', token: 'relay-session-token' },
-      { tossups_read: 21 },
-    );
+    expect(serverFinal).toHaveBeenCalledWith(credentials, { tossups_read: 20 });
     hook.unmount();
   });
 
