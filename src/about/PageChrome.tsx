@@ -120,19 +120,20 @@ interface INavPage {
 /**
  * The products this navigation names, which is not the same list as the pages the footer names.
  *
- * `Scorer` is the application itself, one directory above `about/`. Director and QBLive are *pages*,
- * because neither application is served from this website: Director is installed on the machine
- * running the tournament, and QBLive is served from `live.qbsheet.com` by whoever is publishing the
- * tournament. A header link that jumped straight into either one would be describing a deployment
- * this site does not have — which is exactly what `Director` used to do, pointing at a browser build
- * of tournament control that the production site no longer contains.
+ * `Scorer` is the application itself, one directory above `about/`. Director and QBLive
+ * are *pages*, because none of those applications is served from this website: Director
+ * is installed on the machine running the tournament, and QBLive is served from
+ * `live.qbsheet.com` by whoever is publishing the tournament. A header link that jumped straight
+ * into any of them would be describing a deployment this site does not have — which is exactly what
+ * `Director` used to do, pointing at a browser build of tournament control that the production site
+ * no longer contains.
  *
  * # Why these are not also in the footer
  *
  * The footer is this site's writing: the overview, the two audience pages, self-hosting, the
- * questions, the wiki, the privacy notice. Director and QBLive are the other two products, and the
- * header carries them on every page including the ones with a footer, so listing them again below
- * would both double every product link on the site and present them as siblings of `FAQ` and
+ * questions, the wiki, the privacy notice. Director and QBLive are the other products, and
+ * the header carries them on every page including the ones with a footer, so listing them again
+ * below would both double every product link on the site and present them as siblings of `FAQ` and
  * `Privacy` rather than of `Scorer`. `About` remains the route back into the writing.
  */
 const productPages: { slug: PageSlug; label: string }[] = [
@@ -291,10 +292,10 @@ function ActionLink({ link, primary }: { link: IActionLink; primary: boolean }) 
  *
  * `secondary` exists for the product pages, and for nothing else so far. On a page about the scorer,
  * "Open QBSheet" beside the page's own action is exactly right — the reader is one click from the
- * thing being described. On the Director page it would be wrong: Director is not the scorer, it is
- * not on this website, and offering the scorer as the runner-up action to downloading it invites the
- * misreading the whole page exists to prevent. So those pages state both of their actions, and the
- * default — the scorer, then the repository — is untouched.
+ * thing being described. On the Director page it would be wrong: it is not the scorer,
+ * neither is on this website, and offering the scorer as the runner-up action to downloading it
+ * invites the misreading the whole page exists to prevent. So those pages state both of their
+ * actions, and the default — the scorer, then the repository — is untouched.
  */
 export function ActionLinks({
   slug,

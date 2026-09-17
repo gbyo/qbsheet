@@ -204,7 +204,6 @@ export default function ConnectedSetup(
         stage.intent.code,
         stage.intent.roomId,
         existingDeviceId,
-        stage.intent.lanServer,
       );
       if (!activeRef.current) return;
       if (!paired.ok) {

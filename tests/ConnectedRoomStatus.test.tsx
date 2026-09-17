@@ -9,14 +9,12 @@ import { INormalizedAssignment } from '../src/integrations/fruity/FruityServerCl
 import { assignmentPollIntervalMs } from '../src/app/useConnectedRuntime';
 import { IGameDefinition } from '../src/game/GameDefinition';
 import { validPackage } from './packages';
-import { PRIMARY_HEALTH_CHECK_INTERVAL_MS } from '../src/qbtcp/QbtcpPreferredTransport';
 
 vi.mock('../src/pwa/useAppUpdate', () => ({
   useAppUpdate: () => ({ available: true, applying: false }),
 }));
 
 let answer: () => Promise<unknown>;
-let lanAnswer: () => Promise<unknown>;
 let sessionAnswer: () => Promise<unknown>;
 let assignmentCalls = 0;
 let sessionCalls = 0;
@@ -31,7 +29,7 @@ vi.mock('../src/integrations/fruity/FruityServerClient', () => {
     async assignment() {
       assignmentCalls += 1;
       assignmentEndpoints.push(this.baseUrl);
-      return (this.baseUrl === 'http://lan.local:8787' ? lanAnswer : answer)();
+      return answer();
     }
 
     async openSession() {
@@ -128,7 +126,6 @@ beforeEach(() => {
   sessionEndpoints = [];
   helpMessages = [];
   answer = ok(assignmentOf());
-  lanAnswer = ok(assignmentOf());
   sessionAnswer = async () => ({
     ok: true as const,
     value: { sessionId: 'session-1', token: 'session-token' },
@@ -313,59 +310,6 @@ describe('the established room', () => {
     expect(sessionCalls).toBe(1);
     expect(assignmentCalls).toBe(2);
     expect(onStart).toHaveBeenCalledTimes(1);
-  });
-
-  test('repeated primary outages discover and start the next game over LAN, then heal to primary', async () => {
-    const lanRoom = {
-      ...pairedRoom,
-      lanBaseUrl: 'http://lan.local:8787',
-      lanRoomToken: 'lan-room-token',
-    };
-    answer = async () => ({ ok: false as const, error: 'Network unavailable' });
-    lanAnswer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
-    const startedWith: unknown[] = [];
-    const onStart = vi.fn((options: unknown) => {
-      startedWith.push(options);
-      return { ok: true as const };
-    });
-    renderRoom({ pairedRoom: lanRoom, onStart });
-    await settle();
-    await poll();
-
-    expect(assignmentEndpoints).toEqual([pairedRoom.baseUrl, pairedRoom.baseUrl, lanRoom.lanBaseUrl]);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Start scoring' }));
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(sessionEndpoints).toEqual([lanRoom.lanBaseUrl]);
-    expect(onStart).toHaveBeenCalledWith(
-      expect.objectContaining({
-        lanCredentials: { sessionId: 'session-1', token: 'session-token' },
-      }),
-    );
-    expect(startedWith[0]).not.toHaveProperty('credentials');
-
-    answer = ok(assignmentOf({ state: 'assigned', scheduledMatchId: 'match-5', definition }));
-    await act(async () => vi.advanceTimersByTimeAsync(PRIMARY_HEALTH_CHECK_INTERVAL_MS));
-    expect(assignmentEndpoints.at(-1)).toBe(pairedRoom.baseUrl);
-  });
-
-  test.each([
-    ['401 credential refusal', { ok: false as const, status: 401, error: 'Room not recognized' }],
-    ['403 forbidden refusal', { ok: false as const, status: 403, error: 'Forbidden' }],
-  ])('%s never earns LAN failover', async (_label, refusal) => {
-    answer = async () => refusal;
-    renderRoom({
-      pairedRoom: {
-        ...pairedRoom,
-        lanBaseUrl: 'http://lan.local:8787',
-        lanRoomToken: 'lan-room-token',
-      },
-    });
-    await settle();
-    await poll();
-    expect(assignmentEndpoints).not.toContain('http://lan.local:8787');
   });
 
   test('disables room navigation and abandons a stale Start transaction on unmount', async () => {

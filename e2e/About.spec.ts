@@ -31,9 +31,9 @@ test('the about page introduces QBSheet and links to the real product', async ({
   const primaryNavigation = page.getByRole('navigation', { name: 'Primary navigation' });
   await expect(primaryNavigation.getByRole('link')).toHaveCount(4);
   await expect(primaryNavigation.getByRole('link', { name: 'Scorer' })).toHaveAttribute('href', '../');
-  // Both product entries are pages on this site. Director is not deployed here at all, and QBLive
-  // is served from somebody else's origin, so the navigation offers the pages that explain them
-  // rather than jumping at an application this deployment does not contain.
+  // Both product entries are pages on this site. Director is not deployed here at
+  // all, and QBLive is served from somebody else's origin, so the navigation offers the pages that
+  // explain them rather than jumping at an application this deployment does not contain.
   await expect(primaryNavigation.getByRole('link', { name: 'Director' })).toHaveAttribute(
     'href',
     './director/',

@@ -88,10 +88,6 @@ export default tseslint.config(
     rules: { '@typescript-eslint/no-empty-object-type': 'off' },
   },
   {
-    files: ['apps/qbtcp-relay-backend-cloudflare/src/env.d.ts'],
-    rules: { '@typescript-eslint/no-empty-object-type': 'off' },
-  },
-  {
     // The generated service worker source is a template string, not a module this config can parse.
     files: ['src/pwa/**/*.ts'],
     languageOptions: { globals: { ...globals.serviceworker, ...globals.browser } },

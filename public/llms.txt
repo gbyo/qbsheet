@@ -8,7 +8,7 @@ QBJ is the file format used for quiz bowl game and tournament data. QBSheet read
 
 A scoresheet and tournament-control software do different jobs. QBSheet scores a single room: it owns the game in front of it, and it keeps working with no network and no server. Tournament-control software owns the tournament around that room — the schedule, room assignments, and collected results.
 
-QBSheet is one of three products. QBSheet Director is the desktop tournament-control application, installed on the computer running the event; it is not a web application and no URL on this website launches it. QBLive is the public, read-only view of a tournament Director has published, and it is served separately at https://live.qbsheet.com/. This website carries the scorer plus an informational page for each of the other two.
+QBSheet scores the games in the rooms. QBSheet Director is the desktop tournament-control application, installed on the computer running the event; it is not a web application and no URL on this website launches it. QBSheet Bridge is the desktop utility for tournaments that already run in YellowFruit: it carries each round out to QBSheet in the rooms and brings the completed games back for import. QBLive is the public, read-only view of a tournament that tournament control has published, and it is served separately at https://live.qbsheet.com/. This website carries the scorer plus an informational page for each of the others.
 
 ## Website
 
@@ -16,6 +16,7 @@ QBSheet is one of three products. QBSheet Director is the desktop tournament-con
 - [Scoring with QBSheet](https://qbsheet.com/about/scoring/): The per-question sequence, keyboard shortcuts, corrections and lineup changes, local recovery, and the guided practice game.
 - [QBSheet for tournaments](https://qbsheet.com/about/tournaments/): Pairing a room over QBTCP, receiving assignments as QBJ, behaviour when the connection fails, and returning results.
 - [QBSheet Director](https://qbsheet.com/about/director/): The desktop tournament-control application: what it sets up, runs, collects, and publishes, and why it is installed rather than opened in a browser.
+- [QBSheet Bridge](https://qbsheet.com/about/bridge/): Using QBSheet Scorer in the rooms while the tournament keeps running in YellowFruit: loading the tournament file, assigning rooms, publishing rounds, and importing completed games.
 - [QBLive](https://qbsheet.com/about/qblive/): The public, read-only view of a tournament that tournament control has published, served separately at live.qbsheet.com.
 - [Host QBSheet yourself](https://qbsheet.com/about/self-host/): Building QBSheet and serving it from any static host.
 - [Frequently asked questions](https://qbsheet.com/about/faq/): Supported devices and browsers, format and scoring configuration, files and local storage, and licensing.
@@ -29,16 +30,16 @@ These pages are a guide. The specifications in `docs/` are normative, and where 
 
 <!-- wiki:start pages -->
 - [Develop and contribute](https://qbsheet.com/about/wiki/develop-and-contribute/): This page summarises the contribution rules. The normative document is CONTRIBUTING.md. Read it before you open a pull request.
-- [During the game](https://qbsheet.com/about/wiki/during-the-game/): This page tells you how to score each question, how to correct a mistake, and how to use the game menu.
-- [Files and formats](https://qbsheet.com/about/wiki/files-and-formats/): Every public QBSheet file is QBJ. This page tells you which shapes QBSheet reads, which shape QBSheet writes, and what QBSheet does when a file leaves something
-- [Finish a game](https://qbsheet.com/about/wiki/finish-a-game/): This page tells you how to close a game and how to hand over the result.
+- [During the game](https://qbsheet.com/about/wiki/during-the-game/): This page tells you how to score each question, how to correct a mistake, and how to use the game menu. On a wide screen it is labelled Game; on a phone it is l
+- [Files and formats](https://qbsheet.com/about/wiki/files-and-formats/): QBJ is QBSheet's public interchange format. QBSheet also writes a QBSheet-specific .qbsheet recovery file when an unfinished game must move between devices. Thi
+- [Finish a game](https://qbsheet.com/about/wiki/finish-a-game/): This page tells you how to close a game and what QBSheet asks for after the last question.
 - [Glossary](https://qbsheet.com/about/wiki/glossary/): This wiki uses one word for one thing. This page gives the meaning of each term.
 - [QBSheet](https://qbsheet.com/about/wiki/home/): QBSheet is an electronic scoresheet for quiz bowl. It runs in a web browser. It works offline.
 - [Install and host](https://qbsheet.com/about/wiki/install-and-host/): QBSheet is a static web application. It needs no backend server. You can host it on any static host, and you can also open a build from a local directory.
 - [Move from QBG and api-v1](https://qbsheet.com/about/wiki/move-from-qbg-and-api-v1/): Two migrations happen together. The file that a room opens and the response that a room fetches become the same document.
 - [Prepare a device](https://qbsheet.com/about/wiki/prepare-a-device/): Do this before the tournament day. A browser problem is easy to fix on a quiet afternoon. It is hard to fix in a room with two teams and a moderator who waits.
 - [QBTCP for implementers](https://qbsheet.com/about/wiki/qbtcp-for-implementers/): QBTCP is the Quiz Bowl Tournament Control Protocol. It is an application-layer protocol over HTTP with JSON bodies. It connects an electronic scoresheet to tour
-- [Recovery and backups](https://qbsheet.com/about/wiki/recovery-and-backups/): QBSheet has three ways to bring a game back. They are not equal. This page tells you which one to use and why.
+- [Recovery and backups](https://qbsheet.com/about/wiki/recovery-and-backups/): QBSheet keeps several independent recovery copies. They have different jobs, and the first copy that accepted a scoring action remains the immediate authority: 
 - [Score a connected game](https://qbsheet.com/about/wiki/score-a-connected-game/): Use this workflow when tournament control software runs on the network. The scoresheet receives the assignment for your room. The scoresheet sends the result ba
 - [Score a game from a file](https://qbsheet.com/about/wiki/score-a-game-from-a-file/): Use this workflow when the tournament staff give you a file. This workflow needs no network connection and no server.
 - [Start here](https://qbsheet.com/about/wiki/start-here/): This page is for a scorekeeper. It tells you what to do the first time that you open QBSheet.

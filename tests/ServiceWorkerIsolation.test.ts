@@ -66,9 +66,10 @@ describe('the generated scorer service worker', () => {
     // Every marketing page, however deep. The rule is the `about/` prefix and not a list of files,
     // so a page added below it is outside the scorer's shell without anybody remembering to say so.
     expect(isScorerPrecacheAsset('about/self-host/index.html')).toBe(false);
-    // The two product pages are ordinary marketing pages and are covered by the same prefix. There
+    // The product pages are ordinary marketing pages and are covered by the same prefix. There
     // is no longer a Director entry beside the scorer for a second rule to exclude.
     expect(isScorerPrecacheAsset('about/director/index.html')).toBe(false);
+    expect(isScorerPrecacheAsset('about/bridge/index.html')).toBe(false);
     expect(isScorerPrecacheAsset('about/qblive/index.html')).toBe(false);
   });
 
@@ -91,6 +92,7 @@ describe('the generated scorer service worker', () => {
       'about/scoring/index.html',
       'about/tournaments/index.html',
       'about/director/index.html',
+      'about/bridge/index.html',
       'about/qblive/index.html',
       'about/self-host/index.html',
       'about/faq/index.html',
@@ -125,13 +127,15 @@ describe('the generated scorer service worker', () => {
    * `about/` with every other document on the site — so what is asserted here is that the pages
    * which replaced it are covered by the prefix rule rather than by anything Director-specific.
    */
-  test('leaves the Director and QBLive pages entirely to the network', () => {
+  test('leaves the Director, Bridge, and QBLive pages entirely to the network', () => {
     const harness = workerHarness({ scope: 'https://qbsheet.com/qbsheet/' });
 
     const director = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/director/');
+    const bridge = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/bridge/');
     const qblive = harness.dispatchFetch('https://qbsheet.com/qbsheet/about/qblive/');
 
     expect(director.respondWith).not.toHaveBeenCalled();
+    expect(bridge.respondWith).not.toHaveBeenCalled();
     expect(qblive.respondWith).not.toHaveBeenCalled();
     expect(harness.fetch).not.toHaveBeenCalled();
     expect(harness.caches.open).not.toHaveBeenCalled();
