@@ -73,7 +73,15 @@ Continue to score.
 
 1. End the game. Read [Finish a game](Finish-a-game).
 2. QBSheet sends the result to the server. The screen shows **Result sent**.
-3. Download the QBJ file as a backup.
+3. Select **Back to Room 3**. The room screen shows the next assignment, or it shows that the room
+   waits.
+
+The game is complete at step 2. QBSheet does not ask for a file and does not ask for a confirmation,
+because the server has the result. A QBJ backup stays in **Game details** for as long as the record
+does. Download one when you have a moment.
+
+QBSheet asks for the file only when the result did not arrive, or when the tournament attached a
+handoff instruction to the assignment.
 
 Send the result twice and the server records one game. The server matches the game on the
 identifiers and on a fingerprint of the statistics. A second copy is a duplicate, not an error.

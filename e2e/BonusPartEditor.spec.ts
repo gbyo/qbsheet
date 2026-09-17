@@ -26,7 +26,7 @@ async function openGameWithBouncebacks(page: Page): Promise<void> {
   });
 
   await chooseScoringLayout(page);
-  await expect(page.getByRole('heading', { name: 'Starting lineup' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Starting lineup', exact: true })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   for (const player of ['Sarah Mitchell', 'James Okafor']) {
     await prompt
