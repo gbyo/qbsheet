@@ -358,7 +358,7 @@ describe('the setup form', () => {
     await openApp();
     await press('Create game');
 
-    expect(screen.queryByText('Who is starting?')).toBeNull();
+    expect(screen.queryByText('Starting lineup')).toBeNull();
     expect(screen.queryByLabelText('Starting lineups')).toBeNull();
   });
 });
@@ -369,7 +369,7 @@ describe('starting the game', () => {
     await createGame();
 
     expect(await screen.findByText('Sarah')).toBeInTheDocument();
-    expect(screen.queryByText('Who is starting?')).toBeNull();
+    expect(screen.queryByText('Starting lineup')).toBeNull();
     expect(screen.getByText(/Tossup 1 of/)).toBeInTheDocument();
   });
 
@@ -377,7 +377,7 @@ describe('starting the game', () => {
     await openApp();
     await createGame({ leftPlayers: ['Sarah', 'James', 'Alex', 'Chris', 'Robin'] });
 
-    expect(await screen.findByText('Who is starting?')).toBeInTheDocument();
+    expect(await screen.findByText('Starting lineup')).toBeInTheDocument();
     // The existing prompt, unchanged: the side that has a choice to make is asked, and the side
     // that fits on the floor is shown as already settled rather than hidden.
     expect(screen.getByLabelText('Ninety Six starters')).toBeInTheDocument();
@@ -415,7 +415,7 @@ describe('starting the game', () => {
       rules: { 'Players playing at once': '2' },
     });
 
-    expect(await screen.findByText('Who is starting?')).toBeInTheDocument();
+    expect(await screen.findByText('Starting lineup')).toBeInTheDocument();
     const left = screen.getByLabelText('Ninety Six starters');
     await act(async () => {
       fireEvent.click(within(left).getByRole('button', { name: 'Start Sarah' }));
@@ -424,7 +424,7 @@ describe('starting the game', () => {
       fireEvent.click(within(left).getByRole('button', { name: 'Start James' }));
     });
     // The floor is two, so the third player cannot be added to it.
-    expect(within(left).getByRole('button', { name: 'Start Alex' })).toBeDisabled();
+    expect(within(left).getByRole('button', { name: 'Start Alex' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   test('the game is filed under the label it was given', async () => {

@@ -84,7 +84,7 @@ test.describe('QBSheet against the real YellowFruit QBTCP server', () => {
 
       await page.getByRole('button', { name: 'Start scoring' }).click();
       await chooseScoringLayout(page);
-      const lineup = page.getByRole('heading', { name: 'Who is starting?' });
+      const lineup = page.getByRole('heading', { name: 'Starting lineup' });
       if (await lineup.count()) {
         const prompt = page.getByLabel('Starting lineups');
         for (const player of rounds[4].left.players) {

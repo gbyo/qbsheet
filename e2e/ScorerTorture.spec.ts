@@ -43,7 +43,7 @@ async function openGeneratedGame(page: Page): Promise<void> {
   });
 
   await chooseScoringLayout(page);
-  await expect(page.getByRole('heading', { name: 'Who is starting?' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Starting lineup' })).toBeVisible();
   const prompt = page.getByLabel('Starting lineups');
   const left = prompt.getByLabel('Ninety Six A starters');
   const right = prompt.getByLabel('Greenwood starters');

@@ -54,7 +54,7 @@ async function startAssignedGame(page: Page, round: 4 | 5): Promise<void> {
   await page.getByRole('button', { name: /^(Start|Resume) scoring$/ }).click();
 
   await chooseScoringLayout(page);
-  const lineup = page.getByRole('heading', { name: 'Who is starting?' });
+  const lineup = page.getByRole('heading', { name: 'Starting lineup' });
   const scoresheet = page.getByText('Tossup 1 of 20', { exact: true });
 
   // Start is the one deliberate boundary: the room has already shown the assignment, and pressing
@@ -205,7 +205,7 @@ test.describe('a server that speaks only QBTCP', () => {
       buffer: Buffer.from(JSON.stringify(assignmentFor(4))),
     });
     await chooseScoringLayout(page);
-    const lineupHeading = page.getByRole('heading', { name: 'Who is starting?' });
+    const lineupHeading = page.getByRole('heading', { name: 'Starting lineup' });
     if (await lineupHeading.count()) {
       await expect(lineupHeading).toBeVisible();
       const startingLineups = page.getByLabel('Starting lineups');
