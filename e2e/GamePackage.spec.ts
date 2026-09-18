@@ -68,6 +68,7 @@ test('a scan is a modal review, cancel creates nothing, and Edit fills the norma
   await page.getByRole('button', { name: 'Scan QR' }).click();
   let review = page.getByRole('dialog', { name: 'Review game package' });
   await expect(review).toBeVisible();
+  await expect(review.getByRole('button', { name: 'Start game' })).toBeFocused();
   await expect(review).toContainText('Nothing has been created yet');
   await expect(review).toContainText('Bench player');
   await review.getByRole('button', { name: 'Cancel' }).click();
