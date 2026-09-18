@@ -66,7 +66,8 @@ export default function NativeDialog(props: {
     }
 
     const autofocus = dialog.querySelector<HTMLElement>('[data-dialog-autofocus]');
-    (autofocus ?? dialog.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]'))?.focus();
+    const body = dialog.querySelector<HTMLElement>('.scorer-dialog-body');
+    (autofocus ?? body?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]'))?.focus();
 
     return () => {
       document.removeEventListener('keydown', onKeyDown);
