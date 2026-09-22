@@ -76,9 +76,10 @@ export default function UpdateNotice({
       <section
         className="shell-section update-notice update-notice-quiet"
         data-update-presentation="quiet"
-        role="status"
       >
-        <span className="update-notice-quiet-copy">Update available</span>
+        <span className="update-notice-quiet-copy" role="status">
+          Update available
+        </span>
         <button
           type="button"
           className="shell-button shell-button-quiet"
@@ -100,9 +101,8 @@ export default function UpdateNotice({
     <section
       className={`shell-section update-notice${hero ? ' update-notice-hero' : ''}`}
       data-update-presentation={presentation}
-      role="status"
     >
-      <div>
+      <div role="status">
         <p className="update-notice-title">A new version of QBSheet is ready on this device.</p>
         <p className="update-notice-copy">
           Updating reloads the app. Saved games, the paired room, and anything in progress are kept.
