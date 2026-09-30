@@ -68,6 +68,7 @@ export default function CommandLauncher({
             id={`${id}-${command}`}
             role="option"
             aria-selected={index === selected}
+            onMouseEnter={() => setSelected(index)}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onCommand(command)}
           >
