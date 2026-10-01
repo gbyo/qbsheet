@@ -61,9 +61,7 @@ export default function CommandLauncher({
       />
       <div role="listbox" id={`${id}-options`} aria-label="Commands" className="secret-command-list">
         {matches.map((command, index) => (
-          <button
-            type="button"
-            tabIndex={-1}
+          <div
             key={command}
             id={`${id}-${command}`}
             role="option"
@@ -73,7 +71,7 @@ export default function CommandLauncher({
           >
             <strong>{command}</strong>
             <span>{descriptions[command]}</span>
-          </button>
+          </div>
         ))}
       </div>
       {matches.length === 0 && <p className="scorer-dialog-note">No matching commands.</p>}
