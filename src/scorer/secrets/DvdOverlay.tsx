@@ -99,7 +99,6 @@ export default function DvdOverlay({
         className={`dvd-logo${corner ? ' is-corner' : ''}`}
         aria-label="Exit DVD mode"
         title="Exit DVD mode (Escape)"
-        tabIndex={-1}
         onPointerDown={(event) => event.preventDefault()}
         onPointerEnter={() => {
           pointerOver.current = true;
