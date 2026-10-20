@@ -46,31 +46,29 @@ export default function DuplicateTabNotice(props: {
         </button>
       </div>
 
-      {showing && (
-        <section id={recoveryViewId} className="shell-section">
-          <h2 className="shell-heading">Recovery view</h2>
-          <p className="shell-hint">
-            What this device has saved for this game. Nothing here can be edited, and opening it changes
-            nothing in the tab that is scoring.
-          </p>
-          <dl className="recent-status">
-            <div>
-              <dt>Progress</dt>
-              <dd>{progressLabel(record)}</dd>
-            </div>
-            <div>
-              <dt>Events recorded</dt>
-              <dd>{record.events.length}</dd>
-            </div>
-            <div>
-              <dt>Last saved</dt>
-              <dd>
-                {new Date(record.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-              </dd>
-            </div>
-          </dl>
-        </section>
-      )}
+      <section id={recoveryViewId} className="shell-section" hidden={!showing}>
+        <h2 className="shell-heading">Recovery view</h2>
+        <p className="shell-hint">
+          What this device has saved for this game. Nothing here can be edited, and opening it changes
+          nothing in the tab that is scoring.
+        </p>
+        <dl className="recent-status">
+          <div>
+            <dt>Progress</dt>
+            <dd>{progressLabel(record)}</dd>
+          </div>
+          <div>
+            <dt>Events recorded</dt>
+            <dd>{record.events.length}</dd>
+          </div>
+          <div>
+            <dt>Last saved</dt>
+            <dd>
+              {new Date(record.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+            </dd>
+          </div>
+        </dl>
+      </section>
     </main>
   );
 }
