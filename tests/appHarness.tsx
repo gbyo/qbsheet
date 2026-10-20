@@ -147,7 +147,9 @@ export async function bonus(total: string): Promise<void> {
 
 /** Press a scoring button by its label on a given player's row. */
 export async function score(playerName: string, label: string): Promise<void> {
-  const button = buttonsFor(playerName).find((candidate) => candidate.textContent === label);
+  const button = buttonsFor(playerName).find(
+    (candidate) => candidate.dataset.scoreLabel === label || candidate.textContent === label,
+  );
   if (!button) {
     throw new Error(
       `No "${label}" button for ${playerName}; has ${buttonsFor(playerName)

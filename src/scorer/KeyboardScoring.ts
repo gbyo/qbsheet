@@ -1,7 +1,7 @@
 /**
  * The keyboard layer: numeric seats, two-key rulings, and the rules about when a key means nothing.
  *
- * Seats are global rather than team-local: 1–4 are the left team's seats and 5–8 are the right
+ * Seats are global rather than team-local: 1–4 are the left team's seats and 6–9 are the right
  * team's seats. A tossup ruling is then a short sequence — for example `1` then `P` for a power by
  * the first left player, or `5` then `C` for an ordinary correct answer by the first right player.
  * Keeping the action separate from the seat makes the layout easy to remember and leaves the number
@@ -22,7 +22,7 @@ export const keyboardSeatCount = 4;
 /** The global numbers printed in the keyboard map, parallel to each side's seat order. */
 export const keyboardSeatNumbers: Record<LeftOrRight, readonly number[]> = {
   left: [1, 2, 3, 4],
-  right: [5, 6, 7, 8],
+  right: [6, 7, 8, 9],
 };
 
 /** Shortcut labels shared by the live map, the keyboard drill, and guided-practice hints. */
@@ -68,17 +68,17 @@ export interface ISeatKey {
 /** Which seat a global number addresses, or null if it addresses none. */
 export function seatForNumber(value: string | number): ISeatKey | null {
   const number = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(number) || number < 1 || number > keyboardSeatCount * 2) return null;
+  if (!Number.isInteger(number) || number < 1 || number > 9 || number === 5) return null;
 
   if (number <= keyboardSeatCount) {
     return { side: 'left', seat: number - 1, number };
   }
-  return { side: 'right', seat: number - keyboardSeatCount - 1, number };
+  return { side: 'right', seat: number - 6, number };
 }
 
 /** Read a physical number-row or numpad key as a global seat number. */
 export function numberForCode(code: string): number | null {
-  const match = /^(?:Digit|Numpad)([1-8])$/.exec(code);
+  const match = /^(?:Digit|Numpad)([1-46-9])$/.exec(code);
   return match ? Number(match[1]) : null;
 }
 

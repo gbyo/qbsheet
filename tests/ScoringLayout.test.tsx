@@ -187,6 +187,8 @@ describe('the question a new game opens with', () => {
     expect(chooser()).toBeNull();
     expect(document.querySelector('.scorer-table-view')).toBeTruthy();
     expect(document.querySelector('.scorer-teams')).toBeNull();
+    expect(screen.getByLabelText('Recent activity')).toBeTruthy();
+    expect(screen.queryByLabelText('This game so far')).toBeNull();
   });
 
   test('choosing Scoresheet opens the scoresheet', () => {
@@ -197,6 +199,9 @@ describe('the question a new game opens with', () => {
     expect(chooser()).toBeNull();
     expect(document.querySelector('.scorer-teams')).toBeTruthy();
     expect(document.querySelector('.scorer-table-view')).toBeNull();
+    expect(document.querySelectorAll('.scorer-ruling-head')).toHaveLength(2);
+    expect(screen.getByLabelText('This game so far')).toBeTruthy();
+    expect(screen.queryByLabelText('Recent activity')).toBeNull();
   });
 
   test('the choice becomes this device’s next default', () => {

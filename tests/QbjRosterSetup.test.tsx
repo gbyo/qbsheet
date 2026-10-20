@@ -167,7 +167,7 @@ describe('a QBJ that lists both rosters', () => {
 
     await choose(fileOf(assignmentDocument(), 'R04.assignment.qbj'));
 
-    await waitFor(() => expect(screen.getByText(/Ninety Six/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Ninety Six/ })).toBeInTheDocument());
     expect(screen.queryByText('Rosters needed')).not.toBeInTheDocument();
     expect(screen.queryByText('Players needed')).not.toBeInTheDocument();
   });

@@ -122,7 +122,7 @@ async function openScoringScreen({ refuseRules = true }: { refuseRules?: boolean
       onConnectionLost={vi.fn()}
     />,
   );
-  await waitFor(() => expect(screen.getByText('Ninety Six A')).toBeInTheDocument());
+  await waitFor(() => expect(screen.getByRole('heading', { name: 'Ninety Six A' })).toBeInTheDocument());
   return { records, store, record, onRecordChanged };
 }
 

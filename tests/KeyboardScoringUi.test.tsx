@@ -76,10 +76,10 @@ async function pressSeatCode(
     KeyS: 2,
     KeyD: 3,
     KeyF: 4,
-    KeyJ: 5,
-    KeyK: 6,
-    KeyL: 7,
-    Semicolon: 8,
+    KeyJ: 6,
+    KeyK: 7,
+    KeyL: 8,
+    Semicolon: 9,
   };
   const number = numbers[code];
   if (number === undefined || options.ctrl || options.meta) {
@@ -144,18 +144,16 @@ describe('the eight numeric seat numbers', () => {
     [1, 'Sarah Mitchell'],
     [2, 'James Okafor'],
     [3, 'Alex Rivera'],
-    [5, 'Emma Chen'],
-    [6, 'Jordan Blake'],
-    [7, 'Morgan Ellis'],
+    [6, 'Emma Chen'],
+    [7, 'Jordan Blake'],
+    [8, 'Morgan Ellis'],
   ])('%s then C scores the player in that seat', async (number, player) => {
     await openScoringWithKeyboard();
 
     await pressSequence(number, 'c');
 
-    const rail = screen.getByLabelText('Recent activity');
-    // The rail keeps a wide and compact presentation in the DOM so CSS can switch between them;
-    // either presentation is the same recorded activity.
-    await waitFor(() => expect(within(rail).getAllByText(new RegExp(player)).length).toBeGreaterThan(0));
+    const ledger = screen.getByLabelText('This game so far');
+    await waitFor(() => expect(within(ledger).getAllByText(new RegExp(player)).length).toBeGreaterThan(0));
   });
 
   test('1 is the first left seat', async () => {
@@ -166,10 +164,10 @@ describe('the eight numeric seat numbers', () => {
     expect(rightScore()).toBe('0');
   });
 
-  test('5 is the first right seat', async () => {
+  test('6 is the first right seat', async () => {
     await openScoringWithKeyboard();
 
-    await pressSequence(5, 'c');
+    await pressSequence(6, 'c');
 
     await waitFor(() => expect(rightScore()).toContain('10'));
   });
@@ -266,7 +264,7 @@ describe('the action keys', () => {
     const map = screen.getByLabelText('Keyboard scoring');
     expect(within(map).queryByText('Ctrl + seat')).toBeNull();
     expect(within(map).getByText('seat → 0')).toBeInTheDocument();
-    expect(within(map).getByText('5')).toBeInTheDocument();
+    expect(within(map).getByText('6')).toBeInTheDocument();
   });
 
   test('N does nothing once the other team has already answered', async () => {
@@ -330,9 +328,8 @@ describe('a substitution moves the name, not the key', () => {
     // outgoing one's place, so the second seat is still the second seat and `S` still addresses it.
     await pressKey('KeyS');
 
-    const rail = screen.getByLabelText('Recent activity');
-    // The wide and compact rail presentations intentionally repeat the latest activity in the DOM.
-    await waitFor(() => expect(within(rail).getAllByText(/Priya Raman/).length).toBeGreaterThan(0));
+    const ledger = screen.getByLabelText('This game so far');
+    await waitFor(() => expect(within(ledger).getAllByText(/Priya Raman/).length).toBeGreaterThan(0));
   });
 });
 
@@ -474,7 +471,7 @@ describe('shortcuts stay silent while somebody is typing', () => {
     button.focus();
 
     await act(async () => {
-      fireEvent.keyDown(button, { code: 'Digit5', key: '5' });
+      fireEvent.keyDown(button, { code: 'Digit6', key: '6' });
       fireEvent.keyDown(button, { code: 'KeyC', key: 'c' });
     });
 
@@ -499,8 +496,8 @@ describe('a held key', () => {
     await pressKey('KeyA', { repeat: true });
     await pressKey('KeyA', { repeat: true });
 
-    const rail = screen.getByLabelText('Recent activity');
-    expect(within(rail).getAllByRole('listitem')).toHaveLength(1);
+    const ledger = screen.getByLabelText('This game so far');
+    expect(within(ledger).getAllByRole('button', { name: /Review question/ })).toHaveLength(1);
     await waitFor(() => expect(leftScore()).toContain('10'));
   });
 
@@ -854,7 +851,7 @@ describe('the readout at the bottom of the screen', () => {
   test('a neg is read back as a neg', async () => {
     await openScoringWithKeyboard();
 
-    await pressSequence(5, 'n');
+    await pressSequence(6, 'n');
 
     expect(region()).toHaveTextContent('Neg −5');
   });

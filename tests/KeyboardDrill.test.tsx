@@ -53,8 +53,8 @@ function digit(number: number): void {
 function pressWholeDrill(): void {
   digit(1);
   digit(4);
-  digit(7);
-  digit(5);
+  digit(8);
+  digit(6);
   press('KeyC');
   digit(1);
   press('KeyP');
@@ -88,7 +88,7 @@ describe('reading a keystroke', () => {
     // Nothing the layout uses, so the drill leaves them to the browser rather than marking them wrong.
     expect(read({ code: 'Tab', key: 'Tab' })).toBeNull();
     expect(read({ code: 'KeyQ', key: 'q' })).toBeNull();
-    expect(read({ code: 'Digit9', key: '9' })).toBeNull();
+    expect(read({ code: 'Digit5', key: '5' })).toBeNull();
     expect(read({ code: 'Escape', key: 'Escape' })).toBeNull();
     expect(read({ code: 'KeyC', key: 'C', shiftKey: true })).toBeNull();
   });
@@ -108,14 +108,14 @@ describe('applying a keystroke', () => {
 
   test('a wrong key clears a half-finished ruling and names both keys', () => {
     // Three seats, then Tucker's seat, leaving the ruling outstanding.
-    let progress = ['1', '4', '7', '5'].reduce(drillKeystroke, drillStart);
+    let progress = ['1', '4', '8', '6'].reduce(drillKeystroke, drillStart);
     expect(progress.pressed).toBe(1);
 
     progress = drillKeystroke(progress, 'N');
     expect(progress.pressed).toBe(0);
     expect(progress.mistake).toContain('You pressed N');
     expect(progress.mistake).toContain('This step wants C');
-    expect(progress.mistake).toContain('start again from 5');
+    expect(progress.mistake).toContain('start again from 6');
   });
 
   test('the last key finishes rather than running off the end of the list', () => {
@@ -133,8 +133,8 @@ describe('the drill itself', () => {
     expect(drillTasks.map((task) => task.keys)).toEqual([
       ['1'],
       ['4'],
-      ['7'],
-      ['5', 'C'],
+      ['8'],
+      ['6', 'C'],
       ['1', 'P'],
       ['2', 'N'],
       ['3', '0'],
@@ -162,10 +162,10 @@ describe('the drill itself', () => {
     render(<KeyboardDrill onBack={vi.fn()} onHome={vi.fn()} />);
     digit(1);
     digit(4);
-    digit(7);
+    digit(8);
 
-    // Tucker's ruling: seat 5, then C. The seat lands, then the wrong ruling key arrives.
-    digit(5);
+    // Tucker's ruling: seat 6, then C. The seat lands, then the wrong ruling key arrives.
+    digit(6);
     expect(screen.getByText('— waiting for the ruling')).toBeTruthy();
     press('KeyP');
 
@@ -179,7 +179,7 @@ describe('the drill itself', () => {
     expect(screen.getByText(`Step 4 of ${drillTasks.length} · Record the ruling`)).toBeTruthy();
 
     // Started again from the seat, the same two keys land the ruling.
-    digit(5);
+    digit(6);
     press('KeyC');
     expect(screen.getByRole('status').textContent).toContain('Correct +10 for Tucker, Greenwood.');
   });
@@ -258,6 +258,8 @@ describe('the way in', () => {
     for (const name of ['Tucker', 'Phillip', 'Efren', 'Valerie'])
       fireEvent.click(within(right).getByRole('button', { name: `Start ${name}` }));
     fireEvent.click(within(prompt).getByText('Start game'));
+    const collapsedGuide = screen.queryByRole('button', { name: /Practice 2\/23/ });
+    if (collapsedGuide) fireEvent.click(collapsedGuide);
     await vi.waitFor(() => expect(screen.getByText('Reader: “Power, Gibson on Ninety Six.”')).toBeTruthy());
 
     expect(screen.queryByText('Learn keyboard scoring')).toBeNull();

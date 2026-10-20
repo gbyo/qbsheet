@@ -234,7 +234,7 @@ function unexpectedMessage(step: IPracticeStep): string {
     return 'The correction should remove the last scoring action. Use Undo before recording the corrected ruling.';
   }
   if (step.expectation.kind === 'history') {
-    return 'That question still does not match the correction. Open it from Recent, update the player, and save.';
+    return 'That question still does not match the correction. Open it from the Scoresheet ledger (or Recent in Table), update the player, and save.';
   }
   return 'Review the situation or open Show me where, then try again.';
 }

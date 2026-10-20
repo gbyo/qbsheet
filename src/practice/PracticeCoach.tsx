@@ -21,7 +21,7 @@ const helpTopics = [
   {
     title: 'I found an older mistake',
     answer:
-      'Select that question in Recent, or open Game → Full scoresheet review. Edit the whole question and save; QBSheet recalculates the totals and player stats.',
+      'Select that question in the Scoresheet ledger (or Recent in Table), or open Game → Full scoresheet review. Edit the whole question and save; QBSheet recalculates the totals and player stats.',
   },
   {
     title: 'What is the question editor showing me?',
@@ -70,14 +70,9 @@ export default function PracticeCoach(props: IPracticeCoachProps) {
   // The real preference, not a practice-only copy: the guide teaches whatever the scoresheet is doing.
   const keyboardEnabled = useKeyboardEnabled();
   const keystroke = practiceKeystroke(step.id);
-  /*
-   * Open where the panel gets its full two-column width — the same 1050px the stylesheet gives up the
-   * second column below. Narrower than that it reads down the page like the old panel did, tall enough
-   * to reach the rulings a step is describing, so it waits behind Open guide instead.
-   */
-  const [open, setOpen] = useState(() =>
-    typeof window.matchMedia === 'function' ? window.matchMedia('(min-width: 1051px)').matches : true,
-  );
+  // Start as the amber strip above the footer, matching the live scoresheet reference. A scorer can
+  // still open the full lesson at any time without surrendering any of the ruled sheet by default.
+  const [open, setOpen] = useState(() => typeof window.matchMedia !== 'function');
   const [view, setView] = useState<'guide' | 'help'>('guide');
   const [confirming, setConfirming] = useState<'restart' | 'leave' | null>(null);
   const [controlBarBlockSize, setControlBarBlockSize] = useState<number | null>(null);

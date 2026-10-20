@@ -58,28 +58,28 @@ const oddFormat = formatWith([
 ]);
 
 describe('the numeric seat layout', () => {
-  test('numbers 1–4 address the left seats and 5–8 address the right seats', () => {
+  test('numbers 1–4 address the left seats and 6–9 address the right seats', () => {
     expect(seatForNumber(1)).toEqual({ side: 'left', seat: 0, number: 1 });
     expect(seatForNumber(4)).toEqual({ side: 'left', seat: 3, number: 4 });
-    expect(seatForNumber(5)).toEqual({ side: 'right', seat: 0, number: 5 });
-    expect(seatForNumber(8)).toEqual({ side: 'right', seat: 3, number: 8 });
+    expect(seatForNumber(6)).toEqual({ side: 'right', seat: 0, number: 6 });
+    expect(seatForNumber(9)).toEqual({ side: 'right', seat: 3, number: 9 });
   });
 
   test('number-row and numpad codes address the same seats', () => {
     expect(numberForCode('Digit1')).toBe(1);
-    expect(numberForCode('Numpad5')).toBe(5);
-    expect(seatForNumber(numberForCode('Digit5')!)).toEqual({ side: 'right', seat: 0, number: 5 });
+    expect(numberForCode('Numpad6')).toBe(6);
+    expect(seatForNumber(numberForCode('Digit6')!)).toEqual({ side: 'right', seat: 0, number: 6 });
   });
 
-  test('nothing outside 1–8 addresses a seat', () => {
-    for (const value of [0, 9, -1, 1.5, '0', '9', 'x']) expect(seatForNumber(value)).toBeNull();
-    for (const code of ['Digit0', 'Digit9', 'KeyA', 'Space', 'Numpad0'])
+  test('nothing outside the two four-seat ranges addresses a seat', () => {
+    for (const value of [0, 5, 10, -1, 1.5, '0', '5', 'x']) expect(seatForNumber(value)).toBeNull();
+    for (const code of ['Digit0', 'Digit5', 'KeyA', 'Space', 'Numpad0'])
       expect(numberForCode(code)).toBeNull();
   });
 
   test('the map exposes four global numbers per side', () => {
     expect(keyboardSeatCount).toBe(4);
-    expect(keyboardSeatNumbers).toEqual({ left: [1, 2, 3, 4], right: [5, 6, 7, 8] });
+    expect(keyboardSeatNumbers).toEqual({ left: [1, 2, 3, 4], right: [6, 7, 8, 9] });
   });
 });
 

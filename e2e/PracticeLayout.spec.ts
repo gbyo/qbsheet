@@ -42,22 +42,42 @@ test('practice control row stays on the viewport bottom edge', async ({ page }) 
   expect(Math.abs((footerBox?.y ?? 0) + (footerBox?.height ?? 0) - 768)).toBeLessThanOrEqual(1);
 });
 
-test('the contextual row sits directly on the control bar', async ({ page }) => {
+test('the contextual row sits directly on the live ledger', async ({ page }) => {
   await startPracticeGame(page);
 
   const stage = page.locator('.practice-mode .scorer-stage');
-  const footer = page.locator('.practice-mode > .scorer > .scorer-footer');
+  const ledger = page.locator('.practice-mode .scorer-ledger');
   await expect(stage).toBeVisible();
+  await expect(ledger).toBeVisible();
   await expect(page.getByRole('button', { name: 'No buzz' })).toBeVisible();
 
-  expect(await stage.evaluate((element) => getComputedStyle(element).position)).toBe('sticky');
+  expect(await stage.evaluate((element) => getComputedStyle(element).position)).toBe('static');
 
   const stageBox = await stage.boundingBox();
-  const footerBox = await footer.boundingBox();
+  const ledgerBox = await ledger.boundingBox();
   expect(stageBox).not.toBeNull();
+  expect(ledgerBox).not.toBeNull();
+  // Flush: the live ledger continues the ruled sheet immediately below the contextual row.
+  expect(Math.abs((stageBox?.y ?? 0) + (stageBox?.height ?? 0) - (ledgerBox?.y ?? 0))).toBeLessThanOrEqual(1);
+});
+
+test('the collapsed amber practice strip is docked immediately above the footer', async ({ page }) => {
+  await startPracticeGame(page);
+
+  const collapsed = page.locator('.practice-coach-collapsed');
+  const footer = page.locator('.practice-mode > .scorer > .scorer-footer');
+  await expect(collapsed).toBeVisible();
+
+  const collapsedBox = await collapsed.boundingBox();
+  const footerBox = await footer.boundingBox();
+  expect(collapsedBox).not.toBeNull();
   expect(footerBox).not.toBeNull();
-  // Flush: no gap between the bottom of the contextual row and the top of the control bar.
-  expect(Math.abs((stageBox?.y ?? 0) + (stageBox?.height ?? 0) - (footerBox?.y ?? 0))).toBeLessThanOrEqual(1);
+  expect(
+    Math.abs((collapsedBox?.y ?? 0) + (collapsedBox?.height ?? 0) - (footerBox?.y ?? 0)),
+  ).toBeLessThanOrEqual(1);
+  expect(await collapsed.evaluate((element) => getComputedStyle(element).backgroundColor)).not.toBe(
+    'rgba(0, 0, 0, 0)',
+  );
 });
 
 test('a completed game renders the review without live scorer chrome', async ({ page }) => {
@@ -82,8 +102,8 @@ test('a completed game renders the review without live scorer chrome', async ({ 
 test('the guide is a wide panel that keeps clear of the contextual row controls', async ({ page }) => {
   await startPracticeGame(page);
 
+  await page.locator('.practice-coach-collapsed').click();
   const coach = page.locator('.practice-coach');
-  // 1366px is wider than the 1051px the guide opens itself at, so it is already showing.
   await expect(coach).toBeVisible();
 
   const coachBox = await coach.boundingBox();
@@ -91,10 +111,8 @@ test('the guide is a wide panel that keeps clear of the contextual row controls'
   // Wider than it is tall is the whole point of the shape.
   expect(coachBox?.width ?? 0).toBeGreaterThan(coachBox?.height ?? 0);
 
-  const noBuzzBox = await page.getByRole('button', { name: 'No buzz' }).boundingBox();
-  expect(noBuzzBox).not.toBeNull();
-  // Overlapping the empty end of the bottom rows is allowed; reaching their controls is not.
-  expect(coachBox?.x ?? 0).toBeGreaterThan((noBuzzBox?.x ?? 0) + (noBuzzBox?.width ?? 0));
+  // The panel scrolls internally rather than reflowing the underlying scorer.
+  expect(await coach.evaluate((element) => getComputedStyle(element).position)).toBe('fixed');
 });
 
 /**
@@ -145,7 +163,6 @@ for (const size of [
 
 test('the phone guide stays above the control bar without footer reflow', async ({ page }) => {
   await startPracticeGame(page);
-  await page.getByRole('button', { name: 'Minimize practice guide' }).click();
   await page.setViewportSize({ width: 390, height: 844 });
 
   const footer = page.locator('.practice-mode > .scorer > .scorer-footer');

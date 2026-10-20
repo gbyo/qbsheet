@@ -50,9 +50,9 @@ describe('opening QBJ from the welcome screen', () => {
     await choose(fileOf(assignmentDocument(), 'R04.assignment.qbj'));
 
     await waitFor(() => {
-      expect(screen.getByText(/Ninety Six/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Ninety Six/ })).toBeInTheDocument();
     });
-    expect(screen.getByText(/Greenwood/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Greenwood/ })).toBeInTheDocument();
   });
 
   test('a whole-tournament QBJ asks which game rather than choosing one', async () => {
@@ -98,7 +98,7 @@ describe('opening QBJ from the welcome screen', () => {
       expect(screen.queryByText('Choose a game')).not.toBeInTheDocument();
     });
     await waitFor(() => {
-      expect(screen.getByText(/Emerald/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Emerald/ })).toBeInTheDocument();
     });
   });
 
@@ -152,8 +152,8 @@ describe('opening QBJ from the welcome screen', () => {
     await choose(fileOf(serializeQbsheetBackup(backup), 'recovery.qbsheet'));
 
     await waitFor(() => expect(screen.getByText('On this device')).toBeInTheDocument());
-    expect(screen.getByText('Ninety Six A')).toBeInTheDocument();
-    expect(screen.getByText('Greenwood')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Ninety Six A' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Greenwood' })).toBeInTheDocument();
   });
 
   test('a backup beside an active local copy is restored as a separate attempt', async () => {
@@ -418,7 +418,7 @@ describe('a QBJ with no scoring rules', () => {
     await waitFor(() => {
       expect(screen.queryByText('Scoring rules needed')).not.toBeInTheDocument();
     });
-    expect(screen.getByText(/Ninety Six/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Ninety Six/ })).toBeInTheDocument();
   });
 
   test('rules entered in the room are read by the same mapper a file goes through', async () => {
