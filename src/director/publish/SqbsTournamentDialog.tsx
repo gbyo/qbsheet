@@ -43,7 +43,7 @@ export function SqbsTournamentDialog({
     }
     setSaving(true);
     try {
-      await saveOrDownloadBytes(
+      const result = await saveOrDownloadBytes(
         new TextEncoder().encode(preview.text),
         fileName,
         'text/plain;charset=utf-8',
@@ -51,7 +51,9 @@ export function SqbsTournamentDialog({
         `SQBS tournament exported (${preview.scopeLabel})`,
         'SQBS tournament save cancelled.',
       );
-      for (const message of preview.warnings) onAnnounce(warningNotice(message));
+      if (result.status === 'saved') {
+        for (const message of preview.warnings) onAnnounce(warningNotice(message));
+      }
     } finally {
       setSaving(false);
     }
