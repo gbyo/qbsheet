@@ -95,7 +95,7 @@ export default function NativeDialog(props: {
         <button
           type="button"
           className="scorer-action scorer-dialog-close"
-          aria-label="Close dialog"
+          aria-label={`Close ${title} dialog`}
           disabled={!dismissible}
           onClick={() =>
             typeof panel.current?.close === 'function' ? panel.current.close() : onCloseRef.current()
