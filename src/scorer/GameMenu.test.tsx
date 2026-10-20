@@ -7,6 +7,27 @@ function item(label: string, options: Partial<IGameMenuItem> = {}): IGameMenuIte
 }
 
 describe('GameMenu', () => {
+  test('only references the menu while it is mounted', () => {
+    render(<GameMenu items={[item('Details')]} />);
+    const trigger = screen.getByRole('button', { name: 'Game' });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).not.toHaveAttribute('aria-controls');
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', 'scorer-game-menu-list');
+    expect(screen.getByRole('menu')).toHaveAttribute('id', 'scorer-game-menu-list');
+
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Details' }), { key: 'Escape' });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).not.toHaveAttribute('aria-controls');
+    expect(trigger).toHaveFocus();
+  });
+
   test('renders quiet group labels outside the menu item sequence', () => {
     const items = joinMenuGroups(
       [[item('Game details')], [item('Full scoresheet review')], [item('Export / backup…')]],

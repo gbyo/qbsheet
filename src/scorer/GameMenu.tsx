@@ -133,7 +133,7 @@ export default function GameMenu(props: { items: IGameMenuItem[]; label?: string
         type="button"
         className="scorer-action"
         aria-haspopup="menu"
-        aria-controls="scorer-game-menu-list"
+        aria-controls={open ? 'scorer-game-menu-list' : undefined}
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
         onKeyDown={(event) => {
