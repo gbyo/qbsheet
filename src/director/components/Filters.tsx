@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon } from './Icon';
 import { IconButton } from './Controls';
 import { normalizeSearchText } from './search';
@@ -38,10 +38,12 @@ export function SearchField({
   placeholder?: string;
   className?: string;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className={`director-search-field ${className}`.trim()}>
       <Icon name="search" size={15} />
       <input
+        ref={inputRef}
         type="search"
         value={value}
         aria-label={label}
@@ -61,7 +63,12 @@ export function SearchField({
             icon="x"
             size="sm"
             label={`Clear ${label.toLocaleLowerCase()}`}
-            onClick={() => onChange('')}
+            onClick={() => {
+              // The clear button disappears when the value becomes empty. Move focus first so
+              // keyboard users stay in the filter instead of falling back to the document body.
+              inputRef.current?.focus();
+              onChange('');
+            }}
           />
         </span>
       )}
